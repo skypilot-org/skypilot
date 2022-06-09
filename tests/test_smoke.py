@@ -591,6 +591,18 @@ class TestStorageWithCredentials:
                                              source=tmp_mount)
 
     @pytest.fixture
+    def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
+        # Creates a copy mount storage which reuses an existing storage object.
+        tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
+        storage_name = tmp_scratch_storage_obj.name
+
+        # Try to initialize another storage with the storage object created
+        # above, but now in COPY mode. This should succeed.
+        yield from self.yield_storage_object(name=storage_name,
+                                             mode=storage_lib.StorageMode.COPY)
+
+
+    @pytest.fixture
     def tmp_awscli_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
         subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
@@ -651,17 +663,11 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
-    def test_copy_mount_existing_storage(self, tmp_scratch_storage_obj):
+    def test_copy_mount_existing_storage(self, tmp_copy_mnt_existing_storage_obj):
         # Creates a bucket with no source in MOUNT mode (empty bucket), and
         # then tries to load the same storage in COPY mode.
-        tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
-        storage_name = tmp_scratch_storage_obj.name
-
-        # Try to initialize another storage with the storage object created above,
-        # but now in COPY mode. This should succeed.
-        copy_storage = storage_lib.Storage(name=storage_name,
-                                           mode=storage_lib.StorageMode.COPY)
-        copy_storage.add_store(storage_lib.StoreType.S3)
+        tmp_copy_mnt_existing_storage_obj.add_store(storage_lib.StoreType.S3)
+        storage_name = tmp_copy_mnt_existing_storage_obj.name
 
         # Check `sky storage ls` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
