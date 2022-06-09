@@ -1223,12 +1223,30 @@ def _process_cli_query(
     cloud: str, cluster: str, query_cmd: str, deliminiator: str,
     status_map: Dict[str, global_user_state.ClusterStatus]
 ) -> List[global_user_state.ClusterStatus]:
+    """Run the cloud CLI query and returns cluster status.
+
+    Args:
+        cloud: The cloud provider name.
+        cluster: The cluster name.
+        query_cmd: The cloud CLI query command.
+        deliminiator: The deliminiator separating the status in the output
+            of the query command.
+        status_map: A map from the CLI status string to the corresponding
+            global_user_state.ClusterStatus.
+    Returns:
+        A list of global_user_state.ClusterStatus of all existing nodes in the
+        cluster. The list can be empty if none of the nodes in the clusters are
+        found, i.e. the nodes are all terminated.
+    """
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       '/dev/null',
                                                       require_outputs=True,
                                                       shell=True)
     if (cloud == str(sky.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
+        # Azure CLI has a returncode 2 when the cluster is not found, as
+        # --ids <empty> is passed to the query command. In that case, the
+        # cluster should be considered as DOWN.
         return []
 
     if returncode != 0:
@@ -1247,8 +1265,9 @@ def _process_cli_query(
 
 
 def _query_status_aws(
-        cluster: str,
-        config: Dict[str, Any]) -> List[global_user_state.ClusterStatus]:
+    cluster: str,
+    ray_provider_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
         'running': global_user_state.ClusterStatus.UP,
@@ -1257,7 +1276,7 @@ def _query_status_aws(
         'shutting-down': None,
         'terminated': None,
     }
-    region = config['provider']['region']
+    region = ray_provider_config['region']
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
                  'Name=tag:ray-node-type,Values=head '
@@ -1268,18 +1287,21 @@ def _query_status_aws(
 
 
 def _query_status_gcp(
-        cluster: str,
-        config: Dict[str, Any]) -> List[global_user_state.ClusterStatus]:
-    del config  # unused
+    cluster: str,
+    ray_provider_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    del ray_provider_config  # unused
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
         'STARTING': global_user_state.ClusterStatus.INIT,
         'RUNNING': global_user_state.ClusterStatus.UP,
         'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+        # 'TERMINATED' in GCP means stopped, with disk preserved.
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATED': global_user_state.ClusterStatus.STOPPED,
+        # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
         'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
         'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
-        'STOPPING': None,
-        'TERMINATED': None,
     }
     query_cmd = (f'gcloud compute instances list '
                  f'--filter="labels.ray-cluster-name={cluster} AND '
@@ -1288,14 +1310,19 @@ def _query_status_gcp(
 
 
 def _query_status_azure(
-        cluster: str,
-        config: Dict[str, Any]) -> List[global_user_state.ClusterStatus]:
-    del config  # unused
+    cluster: str,
+    ray_provider_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    del ray_provider_config  # unused
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
+        # 'VM stopped' in Azure means Stopped (Alllocated), which still bills
+        # for the VM.
         'VM stopping': global_user_state.ClusterStatus.INIT,
         'VM stopped': global_user_state.ClusterStatus.INIT,
+        # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
+        # bill for the VM.
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
@@ -1319,21 +1346,22 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
-_QUERY_STATUS_IP_FN = {
+_QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
 }
 
 
-def _get_cluster_status_ip(
+def _get_cluster_status_via_cloud_cli(
     handle: 'backends.Backend.ResourceHandle'
 ) -> Optional[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    config = read_yaml(handle.cluster_yaml)
-    return _QUERY_STATUS_IP_FN[str(cloud)](handle.cluster_name, config)
+    ray_provider_config = read_yaml(handle.cluster_yaml)['provider']
+    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name,
+                                           ray_provider_config)
 
 
 def _ping_cluster_and_set_status(
@@ -1343,8 +1371,9 @@ def _ping_cluster_and_set_status(
     Setting it to STOPPED means (1) setting the clusters table, (2) removing it
     from the SSH config.
 
-    Setting it to TERMINATED means (1) removing it from the clusters table,
-    (2) removing it from the SSH config.
+    Setting it to TERMINATED (not a real status as the cluster will be removed)
+    means (1) removing it from the clusters table, (2) removing it from the SSH
+    config.
 
     Returns:
       If the cluster yaml is found to be concurrently removed, returns None.
@@ -1382,7 +1411,7 @@ def _ping_cluster_and_set_status(
         # removed. With high likelihood the cluster has been removed.
         config = None
 
-    cluster_statuses = _get_cluster_status_ip(handle)
+    cluster_statuses = _get_cluster_status_via_cloud_cli(handle)
     # If the cluster_statuses is empty, all the nodes are terminated. We can
     # safely set the cluster status to TERMINATED. This handles the edge case
     # where the cluster is terminated by the user manually through the UI.
@@ -1393,6 +1422,15 @@ def _ping_cluster_and_set_status(
     # which is out of our control.
     to_terminate = not cluster_statuses
 
+    all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
+    all_init = (all_nodes_exist and
+                all(status == global_user_state.ClusterStatus.INIT
+                    for status in cluster_statuses))
+    if all_init:
+        # All nodes are still initializing.
+        record['status'] = global_user_state.ClusterStatus.INIT
+        return record
+
     if handle.launched_resources.use_spot:
         # The preemption policy of GCP and Azure is stopping the cluster.
         # The preemption policy of AWS is terminating the cluster (the stopping
@@ -1401,8 +1439,9 @@ def _ping_cluster_and_set_status(
         # mentioned above.
         # Managed spot: We will soon relaunch the cluster by the strategy
         # on the same region or terminate the cluster.
-        all_stopped = all(s == global_user_state.ClusterStatus.STOPPED
-                          for s in cluster_statuses)
+        all_stopped = (all_nodes_exist and
+                       all(s == global_user_state.ClusterStatus.STOPPED
+                           for s in cluster_statuses))
         if all_stopped or to_terminate:
             # Only set the cluster to STOPPED if all the spot nodes are stopped or
             # terminated.
