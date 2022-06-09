@@ -1386,6 +1386,18 @@ def _ping_cluster_and_set_status(
 
     try:
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        if handle.launched_nodes == 1:
+            # Check the ray cluster status. We have to check it for single node
+            # case, since the get_node_ips() does not require ray cluster to be
+            # running.
+            ssh_user, ssh_key = ssh_credential_from_yaml(handle.cluster_yaml)
+            returncode = run_command_on_ip_via_ssh(ips[0],
+                                                   'ray status',
+                                                   ssh_user=ssh_user,
+                                                   ssh_private_key=ssh_key)
+            if returncode:
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
