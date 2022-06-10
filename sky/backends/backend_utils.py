@@ -1322,7 +1322,7 @@ def _query_status_azure(
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
-        # 'VM stopped' in Azure means Stopped (Alllocated), which still bills
+        # 'VM stopped' in Azure means Stopped (Allocated), which still bills
         # for the VM.
         'VM stopping': global_user_state.ClusterStatus.INIT,
         'VM stopped': global_user_state.ClusterStatus.INIT,
