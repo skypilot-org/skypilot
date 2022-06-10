@@ -28,9 +28,9 @@ available_node_types:
 {%- if tpuvm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{tf_version}}
-      schedulingConfig:
 {%- if use_spot %}
-        - preemptible: true
+      schedulingConfig:
+        preemptible: true
 {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
@@ -65,6 +65,14 @@ available_node_types:
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
+{%- if tpuvm %}
+      acceleratorType: {{tpu_type}}
+      runtimeVersion: {{tf_version}}
+{%- if use_spot %}
+      schedulingConfig:
+        preemptible: true
+{%- endif %}
+{%- else %}
       machineType: {{instance_type}}
       disks:
         - boot: true
@@ -91,6 +99,7 @@ available_node_types:
 {%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
+{%- endif %}
 
 head_node_type: ray_head_default
 
@@ -110,13 +119,14 @@ initialization_commands: []
 # List of shell commands to run to set up nodes.
 setup_commands:
   - which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/gcpuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base false)
+  - pip install --upgrade pip
   - (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`;
-  - pip install --upgrade pip
   - pip3 uninstall sky -y &> /dev/null;
     pip3 install "$(echo {{sky_remote_path}}/*.whl)";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-  - pip3 install google-auth numpy typing_extensions
+  # For multi-node TPU VM
+  - pip3 install --upgrade google-api-python-client
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
