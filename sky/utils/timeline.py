@@ -110,6 +110,7 @@ class FileLockEvent:
         def wrapper(*args, **kwargs):
             with self:
                 return f(*args, **kwargs)
+
         return wrapper
 
 
