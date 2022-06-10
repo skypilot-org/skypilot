@@ -1399,7 +1399,8 @@ def _ping_cluster_and_set_status(
                 returncode = run_command_on_ip_via_ssh(ips[0],
                                                        'ray status',
                                                        ssh_user=ssh_user,
-                                                       ssh_private_key=ssh_key)
+                                                       ssh_private_key=ssh_key,
+                                                       stream_logs=False)
                 if returncode:
                     raise exceptions.FetchIPError(
                         reason=exceptions.FetchIPError.Reason.HEAD)
