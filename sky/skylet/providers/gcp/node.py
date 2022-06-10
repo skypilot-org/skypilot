@@ -58,8 +58,10 @@ def _retry_on_exception(exception: Union[Exception, Tuple[Exception]],
     """Retry a function call n-times for as long as it throws an exception."""
 
     def dec(func):
+
         @wraps(func)
         def wrapper(*args, **kwargs):
+
             def try_catch_exc():
                 try:
                     value = func(*args, **kwargs)
@@ -175,8 +177,9 @@ class GCPComputeNode(GCPNode):
         return self.get("labels", {})
 
     def get_external_ip(self) -> str:
-        return self.get("networkInterfaces", [{}])[0].get(
-            "accessConfigs", [{}])[0].get("natIP", None)
+        return self.get("networkInterfaces",
+                        [{}])[0].get("accessConfigs",
+                                     [{}])[0].get("natIP", None)
 
     def get_internal_ip(self) -> str:
         return self.get("networkInterfaces", [{}])[0].get("networkIP")
@@ -195,8 +198,8 @@ class GCPTPUNode(GCPNode):
 
     def get_external_ip(self) -> str:
         return self.get("networkEndpoints",
-                        [{}])[0].get("accessConfig", {}).get(
-                            "externalIp", None)
+                        [{}])[0].get("accessConfig",
+                                     {}).get("externalIp", None)
 
     def get_internal_ip(self) -> str:
         return self.get("networkEndpoints", [{}])[0].get("ipAddress", None)
@@ -221,8 +224,8 @@ class GCPResource(metaclass=abc.ABCMeta):
         return None
 
     @abc.abstractmethod
-    def list_instances(
-            self, label_filters: Optional[dict] = None) -> List["GCPNode"]:
+    def list_instances(self,
+                       label_filters: Optional[dict] = None) -> List["GCPNode"]:
         """Returns a filtered list of all instances.
 
         The filter removes all terminated instances and, if ``label_filters``
@@ -268,8 +271,7 @@ class GCPResource(metaclass=abc.ABCMeta):
         Returns a list of tuples of (result, node_name).
         """
         operations = [
-            self.create_instance(
-                base_config, labels, wait_for_operation=False)
+            self.create_instance(base_config, labels, wait_for_operation=False)
             for i in range(count)
         ]
 
@@ -282,17 +284,20 @@ class GCPResource(metaclass=abc.ABCMeta):
         return results
 
     @abc.abstractmethod
-    def start_instance(self, node_id: str,
+    def start_instance(self,
+                       node_id: str,
                        wait_for_operation: bool = True) -> dict:
         """Start an instance and return result."""
 
     @abc.abstractmethod
-    def stop_instance(self, node_id: str,
+    def stop_instance(self,
+                      node_id: str,
                       wait_for_operation: bool = True) -> dict:
         """Stop an instance and return result."""
 
     @abc.abstractmethod
-    def delete_instance(self, node_id: str,
+    def delete_instance(self,
+                        node_id: str,
                         wait_for_operation: bool = True) -> dict:
         """Deletes an instance and returns result."""
         return
@@ -326,8 +331,10 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def list_instances(self, label_filters: Optional[dict] = None,
-                       ) -> List[GCPComputeNode]:
+    def list_instances(
+        self,
+        label_filters: Optional[dict] = None,
+    ) -> List[GCPComputeNode]:
         non_terminated_status = list(GCPComputeNode.NON_TERMINATED_STATUSES)
         return self._list_instances(label_filters, non_terminated_status)
 
@@ -349,9 +356,8 @@ class GCPCompute(GCPResource):
         ]) + ")"
 
         cluster_name_filter_expr = ("(labels.{key} = {value})"
-                                    "".format(
-                                        key=TAG_RAY_CLUSTER_NAME,
-                                        value=self.cluster_name))
+                                    "".format(key=TAG_RAY_CLUSTER_NAME,
+                                              value=self.cluster_name))
 
         not_empty_filters = [
             f for f in [
@@ -422,9 +428,8 @@ class GCPCompute(GCPResource):
         if not re.search(".*/machineTypes/.*", existing_machine_type):
             configuration_dict["machineType"] = (
                 "zones/{zone}/machineTypes/{machine_type}"
-                "".format(
-                    zone=self.availability_zone,
-                    machine_type=configuration_dict["machineType"]))
+                "".format(zone=self.availability_zone,
+                          machine_type=configuration_dict["machineType"]))
 
         for accelerator in configuration_dict.get("guestAccelerators", []):
             gpu_type = accelerator["acceleratorType"]
@@ -451,8 +456,7 @@ class GCPCompute(GCPResource):
         labels = dict(config.get("labels", {}), **labels)
 
         config.update({
-            "labels": dict(labels,
-                           **{TAG_RAY_CLUSTER_NAME: self.cluster_name}),
+            "labels": dict(labels, **{TAG_RAY_CLUSTER_NAME: self.cluster_name}),
             "name": name
         })
 
@@ -485,7 +489,8 @@ class GCPCompute(GCPResource):
 
         return result, name
 
-    def start_instance(self, node_id: str,
+    def start_instance(self,
+                       node_id: str,
                        wait_for_operation: bool = True) -> dict:
         operation = self.resource.instances().start(
             project=self.project_id,
@@ -500,7 +505,8 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def stop_instance(self, node_id: str,
+    def stop_instance(self,
+                      node_id: str,
                       wait_for_operation: bool = True) -> dict:
         operation = self.resource.instances().stop(
             project=self.project_id,
@@ -515,7 +521,8 @@ class GCPCompute(GCPResource):
 
         return result
 
-    def delete_instance(self, node_id: str,
+    def delete_instance(self,
+                        node_id: str,
                         wait_for_operation: bool = True) -> dict:
         operation = self.resource.instances().delete(
             project=self.project_id,
@@ -643,8 +650,7 @@ class GCPTPU(GCPResource):
         labels = dict(config.get("labels", {}), **labels)
 
         config.update({
-            "labels": dict(labels,
-                           **{TAG_RAY_CLUSTER_NAME: self.cluster_name}),
+            "labels": dict(labels, **{TAG_RAY_CLUSTER_NAME: self.cluster_name}),
         })
 
         if "networkConfig" not in config:
@@ -654,6 +660,7 @@ class GCPTPU(GCPResource):
             # https://cloud.google.com/tpu/docs/users-guide-tpu-vm#create-curl
             config["networkConfig"]["enableExternalIps"] = True
 
+        print(config)
         operation = self.resource.projects().locations().nodes().create(
             parent=self.path,
             body=config,
@@ -667,7 +674,8 @@ class GCPTPU(GCPResource):
 
         return result, name
 
-    def start_instance(self, node_id: str,
+    def start_instance(self,
+                       node_id: str,
                        wait_for_operation: bool = True) -> dict:
         operation = self.resource.projects().locations().nodes().start(
             name=node_id).execute()
@@ -680,7 +688,8 @@ class GCPTPU(GCPResource):
 
         return result
 
-    def stop_instance(self, node_id: str,
+    def stop_instance(self,
+                      node_id: str,
                       wait_for_operation: bool = True) -> dict:
         operation = self.resource.projects().locations().nodes().stop(
             name=node_id).execute()
@@ -693,7 +702,8 @@ class GCPTPU(GCPResource):
 
         return result
 
-    def delete_instance(self, node_id: str,
+    def delete_instance(self,
+                        node_id: str,
                         wait_for_operation: bool = True) -> dict:
         operation = self.resource.projects().locations().nodes().delete(
             name=node_id).execute()

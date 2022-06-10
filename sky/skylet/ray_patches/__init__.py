@@ -44,7 +44,8 @@ def patch() -> None:
     # the python module would persist in the memory.
     import ray
     if ray.__version__ != '1.10.0':
-        raise Exception(f'Cannot apply Ray patches to {ray.__version__} other than 1.10.0.')
+        raise Exception(
+            f'Cannot apply patches to Ray {ray.__version__} other than 1.10.0.')
 
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
