@@ -223,7 +223,7 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node' + plural + '.'
-                print('SKY INFO: Reserving task slots on ' + node_str,
+                print('SKY INFO: Pending for task resource slots on ' + node_str,
                       file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
