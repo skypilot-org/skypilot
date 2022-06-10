@@ -12,9 +12,6 @@ from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StoreType
 
-from sky.skylet.ray_patches import patch
-
-patch()  # patch the buggy ray file
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 # Aliases.

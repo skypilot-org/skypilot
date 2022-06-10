@@ -212,7 +212,6 @@ class GCP(clouds.Cloud):
 
             host_vm_type = instance_list[0]
             acc_dict = {acc: acc_count}
-            print(resources)
             if resources.accelerator_args is not None:
                 host_vm_type = 'TPU-VM' if resources.accelerator_args.get(
                     'tpuvm') else host_vm_type

@@ -17,6 +17,9 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
+{%- if tpuvm %}
+  _has_tpus: True
+{%- endif %}
 
 auth:
   ssh_user: gcpuser

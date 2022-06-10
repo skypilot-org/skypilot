@@ -660,7 +660,6 @@ class GCPTPU(GCPResource):
             # https://cloud.google.com/tpu/docs/users-guide-tpu-vm#create-curl
             config["networkConfig"]["enableExternalIps"] = True
 
-        print(config)
         operation = self.resource.projects().locations().nodes().create(
             parent=self.path,
             body=config,
