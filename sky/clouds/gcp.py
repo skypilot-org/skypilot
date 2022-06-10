@@ -215,6 +215,8 @@ class GCP(clouds.Cloud):
                 acc, acc_count, clouds='gcp')
             assert len(host_list) == 1, host_list
             host_vm_type = host_list[0]
+        if resources.accelerator_args['tpuvm']:
+            host_vm_type = 'TPU-VM'
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,

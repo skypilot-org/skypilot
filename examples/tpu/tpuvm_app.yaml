@@ -1,8 +1,5 @@
 name: tpuvm_app_3
 
-# The working directory contains all code and will be synced to remote.
-workdir: ./examples/tpu_app_code
-
 resources:
   accelerators: tpu-v3-8
   accelerator_args:
@@ -31,4 +28,4 @@ run: |
   python3 main.py --workdir=/tmp/mnist \
   --config=configs/default.py \
   --config.learning_rate=0.05 \
-  --config.num_epochs=5
+  --config.num_epochs=10

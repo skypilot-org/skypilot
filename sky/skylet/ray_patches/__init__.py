@@ -35,7 +35,7 @@ def _run_patch(target_file, patch_file):
     # It is ok to patch again from the original file.
     patch {orig_file} -i {patch_file} -o {target_file}
     """
-    subprocess.run(script, shell=True, check=True)
+    subprocess.run(script, shell=True, check=True, stdout=subprocess.DEVNULL)
 
 
 def patch() -> None:

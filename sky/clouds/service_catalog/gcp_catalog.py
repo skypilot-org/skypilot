@@ -91,6 +91,9 @@ _ON_DEMAND_PRICES = {
     'a2-highgpu-4g': 2.998986,
     'a2-highgpu-8g': 5.997986,
     'a2-megagpu-16g': 8.919152,
+
+    # Currently the host VM of TPU does not cost extra.
+    'TPU-VM': 0,
 }
 
 _SPOT_PRICES = {
