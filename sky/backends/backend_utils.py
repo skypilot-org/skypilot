@@ -90,7 +90,7 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
 # Filelocks for the cluster status change.
-LOCK_FILENAME = '~/.sky/.{}.lock'
+LOCK_FILENAME = os.path.expanduser('~/.sky/.{}.lock')
 FILELOCK_TIMEOUT_SECONDS = 10
 
 
