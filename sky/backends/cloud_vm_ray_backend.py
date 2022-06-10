@@ -60,9 +60,6 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 # Timeout for provision a cluster and wait for it to be ready in seconds.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
-_LOCK_FILENAME = '~/.sky/.{}.lock'
-_FILELOCK_TIMEOUT_SECONDS = 10
-
 _RSYNC_DISPLAY_OPTION = '-Pavz'
 _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
 _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
@@ -1312,7 +1309,8 @@ class CloudVmRayBackend(backends.Backend):
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
 
-        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        lock_path = os.path.expanduser(
+            backend_utils.LOCK_FILENAME.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
@@ -2232,13 +2230,15 @@ class CloudVmRayBackend(backends.Backend):
                  terminate: bool,
                  purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
-        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        lock_path = os.path.expanduser(
+            backend_utils.LOCK_FILENAME.format(cluster_name))
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
+            with filelock.FileLock(lock_path,
+                                   backend_utils.FILELOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)

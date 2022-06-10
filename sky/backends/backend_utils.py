@@ -89,6 +89,10 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
+# Filelocks for the cluster status change.
+LOCK_FILENAME = '~/.sky/.{}.lock'
+FILELOCK_TIMEOUT_SECONDS = 10
+
 
 def fill_template(template_name: str,
                   variables: Dict,
@@ -1156,6 +1160,7 @@ def get_node_ips(
             handle is not None and handle.head_ip is not None):
         return [handle.head_ip]
 
+    check_network_connection()
     try:
         proc = run(f'ray get-head-ip {yaml_handle}',
                    stdout=subprocess.PIPE,
@@ -1379,95 +1384,105 @@ def _ping_cluster_and_set_status(
       If the cluster yaml is found to be concurrently removed, returns None.
       Otherwise returns the input record with status and ip potentially updated.
     """
-    handle = record['handle']
-    cluster_name = handle.cluster_name
 
-    check_network_connection()
-
-    try:
-        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
-        if handle.launched_nodes == 1:
-            # Check the ray cluster status. We have to check it for single node
-            # case, since the get_node_ips() does not require ray cluster to be
-            # running.
-            ssh_user, ssh_key = ssh_credential_from_yaml(handle.cluster_yaml)
-            returncode = run_command_on_ip_via_ssh(ips[0],
-                                                   'ray status',
-                                                   ssh_user=ssh_user,
-                                                   ssh_private_key=ssh_key)
-            if returncode:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
-        # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `get_node_ips` function uses ray
-        # to fetch IPs and starting ray is the final step of sky launch.
-        record['status'] = global_user_state.ClusterStatus.UP
-        handle.head_ip = ips[0]
-        return record
-    except exceptions.FetchIPError:
-        logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, trying to fetch from provider.')
-    if record['status'] == global_user_state.ClusterStatus.INIT:
-        # Should not set the cluster to STOPPED if INIT, since it may be
-        # still launching.
-        return record
-
-    try:
-        config = read_yaml(handle.cluster_yaml)
-    except FileNotFoundError:
-        # This happens e.g., during smoke tests. A test calls `sky status
-        # --refresh`, processes another cluster (running this current func),
-        # while a concurrent test has torn down itself.
-        #
-        # We know we can't ping the IP and the cluster yaml has been
-        # removed. With high likelihood the cluster has been removed.
-        return None
-
-    # For all code below, two conditions hold:
-    #   - record['status'] == UP / STOPPED 
-    #   - we failed to use Ray to get all nodes' IPs
-    cluster_statuses = _get_cluster_status_via_cloud_cli(handle)
-    # If the cluster_statuses is empty, all the nodes are terminated. We can
-    # safely set the cluster status to TERMINATED. This handles the edge case
-    # where the cluster is terminated by the user manually through the UI.
-    to_terminate = not cluster_statuses
-
-    if handle.launched_resources.use_spot:
-        # The preemption policy of GCP and Azure is stopping the cluster.
-        # The preemption policy of AWS is terminating the cluster (the stopping
-        # preemption policy is only supported for persistent spot), we
-        # still need to set it to STOPPED for the correctness of the managed spot,
-        # as we will soon relaunch the cluster by the recovery strategy on the same
-        # region or terminate the cluster.
-        all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
-        all_stopped = (all_nodes_exist and
-                       all(s == global_user_state.ClusterStatus.STOPPED
-                           for s in cluster_statuses))
-        if all_stopped or to_terminate:
-            # Only set the cluster to STOPPED if all the spot nodes are stopped or
-            # terminated.
-            to_terminate = False
-        else:
-            # If the cluster is partially preempted, we should set the cluster to
-            # INIT to avoid resource leakage.
-            record['status'] = global_user_state.ClusterStatus.INIT
+    with timeline.FileLockEvent(LOCK_FILENAME.format(record['name'])):
+        handle = record['handle']
+        cluster_name = handle.cluster_name
+        try:
+            ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+            if handle.launched_nodes == 1:
+                # Check the ray cluster status. We have to check it for single node
+                # case, since the get_node_ips() does not require ray cluster to be
+                # running.
+                ssh_user, ssh_key = ssh_credential_from_yaml(
+                    handle.cluster_yaml)
+                returncode = run_command_on_ip_via_ssh(ips[0],
+                                                       'ray status',
+                                                       ssh_user=ssh_user,
+                                                       ssh_private_key=ssh_key)
+                if returncode:
+                    raise exceptions.FetchIPError(
+                        reason=exceptions.FetchIPError.Reason.HEAD)
+            # If we get node ips correctly, the cluster is UP. It is safe to
+            # set the status to UP, as the `get_node_ips` function uses ray
+            # to fetch IPs and starting ray is the final step of sky launch.
+            record['status'] = global_user_state.ClusterStatus.UP
+            handle.head_ip = ips[0]
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    ready=True)
+            return record
+        except exceptions.FetchIPError:
+            logger.debug('Refreshing status: Failed to get IPs from cluster '
+                         f'{cluster_name!r}, trying to fetch from provider.')
+        if record['status'] == global_user_state.ClusterStatus.INIT:
+            # Should not set the cluster to STOPPED if INIT, since it may be
+            # still launching.
             return record
 
-    has_alive = any(status != global_user_state.ClusterStatus.STOPPED
-                 for status in cluster_statuses)
-    if has_alive:
-        # If the user starts part of a STOPPED cluster, we still need a status to
-        # represent the abnormal status.
-        # TODO(zhwu): the definition of INIT should be audited/changed.
-        # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        record['status'] = global_user_state.ClusterStatus.INIT
-        return record
+        try:
+            config = read_yaml(handle.cluster_yaml)
+        except FileNotFoundError:
+            # This happens e.g., during smoke tests. A test calls `sky status
+            # --refresh`, processes another cluster (running this current func),
+            # while a concurrent test has torn down itself.
+            #
+            # We know we can't ping the IP and the cluster yaml has been
+            # removed. With high likelihood the cluster has been removed.
+            return None
 
-    global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
-    # Remove the cluster from the SSH config.
-    auth_config = config['auth']
-    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
-    return global_user_state.get_cluster_from_name(cluster_name)
+        # For all code below, two conditions hold:
+        #   - record['status'] == UP / STOPPED
+        #   - we failed to use Ray to get all nodes' IPs
+        cluster_statuses = _get_cluster_status_via_cloud_cli(handle)
+        # If the cluster_statuses is empty, all the nodes are terminated. We can
+        # safely set the cluster status to TERMINATED. This handles the edge case
+        # where the cluster is terminated by the user manually through the UI.
+        to_terminate = not cluster_statuses
+
+        if handle.launched_resources.use_spot:
+            # The preemption policy of GCP and Azure is stopping the cluster.
+            # The preemption policy of AWS is terminating the cluster (the stopping
+            # preemption policy is only supported for persistent spot), we
+            # still need to set it to STOPPED for the correctness of the managed spot,
+            # as we will soon relaunch the cluster by the recovery strategy on the same
+            # region or terminate the cluster.
+            all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
+            all_stopped = (all_nodes_exist and
+                           all(s == global_user_state.ClusterStatus.STOPPED
+                               for s in cluster_statuses))
+            if all_stopped or to_terminate:
+                # Only set the cluster to STOPPED if all the spot nodes are stopped or
+                # terminated.
+                to_terminate = False
+            else:
+                # If the cluster is partially preempted, we should set the cluster to
+                # INIT to avoid resource leakage.
+                record['status'] = global_user_state.ClusterStatus.INIT
+                global_user_state.add_or_update_cluster(cluster_name,
+                                                        handle,
+                                                        ready=False)
+                return record
+
+        has_alive = any(status != global_user_state.ClusterStatus.STOPPED
+                        for status in cluster_statuses)
+        if has_alive:
+            # If the user starts part of a STOPPED cluster, we still need a status to
+            # represent the abnormal status.
+            # TODO(zhwu): the definition of INIT should be audited/changed.
+            # Adding a new status UNHEALTHY for abnormal status can be a choice.
+            record['status'] = global_user_state.ClusterStatus.INIT
+            global_user_state.add_or_update_cluster(cluster_name,
+                                                    handle,
+                                                    ready=False)
+            return record
+
+        global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
+        # Remove the cluster from the SSH config.
+        auth_config = config['auth']
+        SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip,
+                                       auth_config)
+        return global_user_state.get_cluster_from_name(cluster_name)
 
 
 @timeline.event
