@@ -3,6 +3,7 @@
 The timeline follows the trace event format defined here:
 https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
 """  # pylint: disable=line-too-long
+import functools
 from typing import Optional, Union, Callable
 
 import atexit
@@ -102,6 +103,14 @@ class FileLockEvent:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
+
+    def __call__(self, f):
+        # Make this class callable as a decorator.
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            with self:
+                return f(*args, **kwargs)
+        return wrapper
 
 
 def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):

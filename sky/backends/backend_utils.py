@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
+import filelock
 import jinja2
 import psutil
 import rich.console as rich_console
@@ -203,6 +204,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
+    ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
     ssh_multinode_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
@@ -222,6 +224,7 @@ class SSHConfigHelper(object):
         return codegen
 
     @classmethod
+    @timeline.FileLockEvent(ssh_conf_lock_path)
     def add_cluster(
         cls,
         cluster_name: str,
@@ -422,6 +425,7 @@ class SSHConfigHelper(object):
                 f.write('\n')
 
     @classmethod
+    @timeline.FileLockEvent(ssh_conf_lock_path)
     def remove_cluster(
         cls,
         cluster_name: str,
