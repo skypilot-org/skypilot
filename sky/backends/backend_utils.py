@@ -1423,15 +1423,13 @@ def _ping_cluster_and_set_status(
         # removed. With high likelihood the cluster has been removed.
         return None
 
+    # For all code below, two conditions hold:
+    #   - record['status'] == UP / STOPPED 
+    #   - we failed to use Ray to get all nodes' IPs
     cluster_statuses = _get_cluster_status_via_cloud_cli(handle)
     # If the cluster_statuses is empty, all the nodes are terminated. We can
     # safely set the cluster status to TERMINATED. This handles the edge case
     # where the cluster is terminated by the user manually through the UI.
-    # NOTE: Set the cluster status to STOPPED. It is safe to do so, even
-    # if the cluster is still partially UP:
-    # 1. Autostop case: the whole cluster will be properly stopped soon.
-    # 2. The user has manually terminated part of the cluster through the UI,
-    # which is out of our control.
     to_terminate = not cluster_statuses
 
     if handle.launched_resources.use_spot:
@@ -1455,11 +1453,13 @@ def _ping_cluster_and_set_status(
             record['status'] = global_user_state.ClusterStatus.INIT
             return record
 
-    has_up = any(status != global_user_state.ClusterStatus.STOPPED
+    has_alive = any(status != global_user_state.ClusterStatus.STOPPED
                  for status in cluster_statuses)
-    if has_up:
+    if has_alive:
         # If the user starts part of a STOPPED cluster, we still need a status to
-        # represent the abnormal status (UNHEALTHY may be a better status).
+        # represent the abnormal status.
+        # TODO(zhwu): the definition of INIT should be audited/changed.
+        # Adding a new status UNHEALTHY for abnormal status can be a choice.
         record['status'] = global_user_state.ClusterStatus.INIT
         return record
 
