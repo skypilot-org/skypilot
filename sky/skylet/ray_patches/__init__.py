@@ -42,6 +42,10 @@ def patch() -> None:
     # Patch the buggy ray files. This should only be called
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
+    import ray
+    if ray.__version__ != '1.10.0':
+        raise Exception(f'Cannot apply Ray patches to {ray.__version__} other than 1.10.0.')
+
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
@@ -51,3 +55,6 @@ def patch() -> None:
 
     from ray.autoscaler._private import autoscaler
     _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
+
+    from ray.autoscaler._private import commands
+    _run_patch(commands.__file__, _to_absolute('commands.py.patch'))
