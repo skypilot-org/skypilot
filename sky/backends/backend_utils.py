@@ -1370,7 +1370,7 @@ def _get_cluster_status_via_cloud_cli(
                                            ray_provider_config)
 
 
-def _ping_cluster_and_set_status_no_lock(
+def _update_cluster_status_no_lock(
         cluster_name: str) -> Optional[Dict[str, Any]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
@@ -1437,7 +1437,7 @@ def _ping_cluster_and_set_status_no_lock(
         # The preemption policy of AWS is terminating the cluster (the stopping
         # preemption policy is only supported for persistent spot), we
         # still need to set it to STOPPED for the correctness of the managed spot,
-        # as we will soon relaunch the cluster by the recovery strategy on the same
+        # and the recovery strategy soon relaunch the cluster on the same
         # region or terminate the cluster.
         all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
         all_stopped = (all_nodes_exist and
@@ -1447,19 +1447,13 @@ def _ping_cluster_and_set_status_no_lock(
             # Only set the cluster to STOPPED if all the spot nodes are stopped or
             # terminated.
             to_terminate = False
-        else:
-            # If the cluster is partially preempted, we should set the cluster to
-            # INIT to avoid resource leakage.
-            record['status'] = global_user_state.ClusterStatus.INIT
-            global_user_state.set_cluster_status(
-                cluster_name, global_user_state.ClusterStatus.INIT)
-            return record
 
     has_alive = any(status != global_user_state.ClusterStatus.STOPPED
                     for status in cluster_statuses)
     if has_alive:
         # If the user starts part of a STOPPED cluster, we still need a status to
-        # represent the abnormal status.
+        # represent the abnormal status. For spot cluster, it can also represent
+        # that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         record['status'] = global_user_state.ClusterStatus.INIT
@@ -1474,18 +1468,15 @@ def _ping_cluster_and_set_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _ping_cluster_and_set_status(cluster_name: str) -> Optional[Dict[str, Any]]:
-    """Pings a cluster and potentially sets it to stopped or terminated.
+def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
+    """Update the cluster status by checking ray cluster and real status from cloud.
 
-    Setting it to STOPPED means (1) setting the clusters table, (2) removing it
-    from the SSH config.
-
-    Setting it to TERMINATED (not a real status as the cluster will be removed)
-    means (1) removing it from the clusters table, (2) removing it from the SSH
-    config.
+    The function will update the cached cluster status in the global state. For the
+    design of the cluster status and transition, please refer to the
+    sky/design_docs/cluster_states.md
 
     Returns:
-      If the cluster yaml is found to be concurrently removed, returns None.
+      If the cluster is terminated or not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
     """
 
@@ -1495,7 +1486,7 @@ def _ping_cluster_and_set_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(LOCK_FILENAME.format(cluster_name),
                                FILELOCK_TIMEOUT_SECONDS):
-            return _ping_cluster_and_set_status_no_lock(cluster_name)
+            return _update_cluster_status_no_lock(cluster_name)
     except filelock.Timeout:
         logger.debug(
             f'Refreshing status: Failed get the lock for cluster {cluster_name!r}.'
@@ -1518,7 +1509,7 @@ def refresh_cluster_status_handle(
         if force_refresh or record['autostop'] >= 0:
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
-            record = _ping_cluster_and_set_status(cluster_name)
+            record = _update_cluster_status(cluster_name)
             if record is None:
                 return None, None
     return record['status'], handle
@@ -1560,7 +1551,7 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         # cloud console. Our current refreshing may not be enough to get the
         # correct status (e.g., the cluster is terminated, but we set it to
         # STOPPED).
-        record = _ping_cluster_and_set_status(cluster_name)
+        record = _update_cluster_status(cluster_name)
         progress.update(task, advance=1)
         return record
 
