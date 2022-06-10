@@ -164,8 +164,9 @@ class GCPNodeProvider(NodeProvider):
 
             # Try to reuse previously stopped nodes with compatible configs
             if self.cache_stopped_nodes:
-                if not isinstance(resource, GCPCompute):
-                    raise NotImplementedError("Starting cached TPU nodes is not supported.")
+                # TO BE VERIFIED:
+                # if not isinstance(resource, GCPCompute):
+                #     raise NotImplementedError("Starting cached TPU nodes is not supported.")
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
                     TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]

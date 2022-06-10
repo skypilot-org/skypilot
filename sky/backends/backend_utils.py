@@ -577,7 +577,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
     assert cluster_name is not None
-
     credentials = sky_check.get_cloud_credential_file_mounts()
     yaml_path = fill_template(
         cluster_config_template,
@@ -617,7 +616,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
-    if resources_vars.get('tpu_type') is not None:
+    if resources_vars.get('tpu_type') is not None and resources_vars.get('tpuvm') is None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name

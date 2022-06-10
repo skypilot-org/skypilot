@@ -261,10 +261,6 @@ def bootstrap_gcp(config):
     if _has_tpus_in_node_configs(config):
         config["provider"][HAS_TPU_PROVIDER_FIELD] = True
 
-        # We can't run autoscaling through a serviceAccount on TPUs (atm)
-        if _is_head_node_a_tpu(config):
-            raise RuntimeError("TPUs are not supported as head nodes.")
-
     crm, iam, compute, tpu = \
         construct_clients_from_provider_config(config["provider"])
 
@@ -341,14 +337,24 @@ def _configure_iam_role(config, crm, iam):
 
     _add_iam_policy_binding(service_account, roles, crm)
 
-    config["head_node"]["serviceAccounts"] = [{
-        "email": service_account["email"],
-        # NOTE: The amount of access is determined by the scope + IAM
-        # role of the service account. Even if the cloud-platform scope
-        # gives (scope) access to the whole cloud-platform, the service
-        # account is limited by the IAM rights specified below.
-        "scopes": ["https://www.googleapis.com/auth/cloud-platform"]
-    }]
+    if _is_head_node_a_tpu(config):
+        config["head_node"]["serviceAccount"] = {
+            "email": service_account["email"],
+            # NOTE: The amount of access is determined by the scope + IAM
+            # role of the service account. Even if the cloud-platform scope
+            # gives (scope) access to the whole cloud-platform, the service
+            # account is limited by the IAM rights specified below.
+            "scope": ["https://www.googleapis.com/auth/cloud-platform"]
+        }
+    else:
+        config["head_node"]["serviceAccounts"] = [{
+            "email": service_account["email"],
+            # NOTE: The amount of access is determined by the scope + IAM
+            # role of the service account. Even if the cloud-platform scope
+            # gives (scope) access to the whole cloud-platform, the service
+            # account is limited by the IAM rights specified below.
+            "scope": ["https://www.googleapis.com/auth/cloud-platform"]
+        }]
 
     return config
 

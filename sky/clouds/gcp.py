@@ -155,6 +155,7 @@ class GCP(clouds.Cloud):
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
+            'tpuvm': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
             'image_name': 'common-cpu',
@@ -169,6 +170,8 @@ class GCP(clouds.Cloud):
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
+
+                resources_vars['tpuvm'] = r.accelerator_args.get('tpuvm')
                 resources_vars['tf_version'] = r.accelerator_args['tf_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:

@@ -1,0 +1,34 @@
+name: tpuvm_app_3
+
+# The working directory contains all code and will be synced to remote.
+workdir: ./examples/tpu_app_code
+
+resources:
+  accelerators: tpu-v3-8
+  accelerator_args:
+    tf_version: tpu-vm-base
+    tpuvm: True
+
+# The setup command.  Will be run under the working directory.
+setup: |
+  pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+  pip install --upgrade clu
+  git clone https://github.com/google/flax.git
+
+  conda activate flax
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    conda create -n flax python=3.8 -y
+    conda activate flax
+    pip install --user -e flax
+  fi
+
+
+# The command to run.  Will be run under the working directory.
+run: |
+  cd flax/examples/mnist
+  python3 main.py --workdir=/tmp/mnist \
+  --config=configs/default.py \
+  --config.learning_rate=0.05 \
+  --config.num_epochs=5

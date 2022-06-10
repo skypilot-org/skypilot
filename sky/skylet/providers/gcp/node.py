@@ -596,6 +596,10 @@ class GCPTPU(GCPResource):
 
         return instances
 
+    def _list_instances(self, label_filters: Optional[dict],
+                        status_filter: List[str]) -> List[GCPTPUNode]:
+        return []
+
     def get_instance(self, node_id: str) -> GCPTPUNode:
         instance = self.resource.projects().locations().nodes().get(
             name=node_id).execute()
