@@ -340,6 +340,8 @@ def _configure_iam_role(config, crm, iam):
     _add_iam_policy_binding(service_account, roles, crm)
 
     if _is_head_node_a_tpu(config):
+        # The API for TPU VM is slightly different from normal compute instances.
+        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
         config["head_node"]["serviceAccount"] = {
             "email": service_account["email"],
             # NOTE: The amount of access is determined by the scope + IAM
