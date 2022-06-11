@@ -1,5 +1,4 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
-import copy
 import time
 import typing
 from typing import Optional
@@ -161,7 +160,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         launched_region = handle.launched_resources.region
         new_resources = resources.copy(region=launched_region)
         task.set_resources({new_resources})
-        launched_time = self.launch(raiskyse_on_failure=False)
+        launched_time = self.launch(raise_on_failure=False)
         # Restore the original dag, i.e. reset the region constraint.
         task.set_resources({original_resources})
         if launched_time is not None:
