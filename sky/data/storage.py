@@ -1040,7 +1040,7 @@ class GcsStore(AbstractStore):
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to gcs://{self.name}/'):
+                f'[green]{self.source} to gs://{self.name}/'):
             with subprocess.Popen(sync_command.split(' '),
                                   stderr=subprocess.PIPE) as process:
                 while True:
@@ -1061,8 +1061,8 @@ class GcsStore(AbstractStore):
                 retcode = process.wait()
                 if retcode != 0:
                     raise exceptions.StorageUploadError(
-                        f'Upload to GCS failed for store {self.name} and source '
-                        f'{self.source}. Please check logs.')
+                        f'Upload to GCS failed for store {self.name} and '
+                        f'source {self.source}. Please check logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
@@ -1122,14 +1122,6 @@ class GcsStore(AbstractStore):
         """Returns the command to mount the bucket to the mount_path.
 
         Uses gcsfuse to mount the bucket.
-
-        Args:
-          mount_path: str; Path to mount the bucket to.
-        """
-
-        """Returns the command to mount the bucket to the mount_path.
-
-        Uses goofys to mount the bucket.
 
         Args:
           mount_path: str; Path to mount the bucket to.
