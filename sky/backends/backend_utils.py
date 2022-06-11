@@ -1426,9 +1426,10 @@ def _update_cluster_status_no_lock(
     #   - record['status'] == UP / STOPPED
     #   - we failed to use Ray to get all nodes' IPs
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
-    
+
     unhealthy = any(status != global_user_state.ClusterStatus.STOPPED
-                    for status in node_statuses) or len(node_statuses) != handle.launched_nodes
+                    for status in node_statuses
+                   ) or len(node_statuses) != handle.launched_nodes
     if unhealthy:
         # If the user starts part of a STOPPED cluster, we still need a status to
         # represent the abnormal status. For spot cluster, it can also represent

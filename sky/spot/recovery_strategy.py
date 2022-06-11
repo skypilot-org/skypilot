@@ -167,7 +167,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         self.dag = original_dag
         if launched_time is not None:
             return launched_time
-        
 
         # Step 2
         self.terminate_cluster()
