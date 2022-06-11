@@ -1530,12 +1530,6 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         total=len(records))
 
     def _refresh_cluster(cluster_name):
-        # TODO(zhwu): We need to decide whether to refresh the cluster status
-        # for clusters without autostop set. For those clusters, their status
-        # will only be changed, if the user manually modify the cluster on the
-        # cloud console. Our current refreshing may not be enough to get the
-        # correct status (e.g., the cluster is terminated, but we set it to
-        # STOPPED).
         record = _update_cluster_status(cluster_name)
         progress.update(task, advance=1)
         return record

@@ -155,16 +155,15 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                         'cluster is likely completely stopped. Recovering.')
 
         # Add region constraint to the task, to retry on the same region first.
-        original_dag = copy.deepcopy(self.dag)
         task = self.dag.tasks[0]
         resources = list(task.resources)[0]
+        original_resources = resources.copy()
         launched_region = handle.launched_resources.region
         new_resources = resources.copy(region=launched_region)
         task.set_resources({new_resources})
-        launched_time = self.launch(raise_on_failure=False)
-
+        launched_time = self.launch(raiskyse_on_failure=False)
         # Restore the original dag, i.e. reset the region constraint.
-        self.dag = original_dag
+        task.set_resources({original_resources})
         if launched_time is not None:
             return launched_time
 
