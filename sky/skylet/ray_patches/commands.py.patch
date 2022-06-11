@@ -1,7 +1,0 @@
-0a1,4
-> # From https://github.com/ray-project/ray/blob/releases/1.10.0/python/ray/autoscaler/_private/commands.py
-> # Sky patch changes:
-> #  - boostrap config to make TPU VM work
-> 
-1145a1146
->     config = _bootstrap_config(config)

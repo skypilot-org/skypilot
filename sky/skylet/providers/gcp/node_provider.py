@@ -165,7 +165,7 @@ class GCPNodeProvider(NodeProvider):
 
             # Try to reuse previously stopped nodes with compatible configs
             if self.cache_stopped_nodes:
-                # TO BE VERIFIED:
+                # TODO(wei-lin): support starting cached TPU VM
                 # if not isinstance(resource, GCPCompute):
                 #     raise NotImplementedError("Starting cached TPU nodes is not supported.")
                 filters = {

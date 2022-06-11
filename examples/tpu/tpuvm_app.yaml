@@ -1,10 +1,10 @@
-name: tpuvm_app_3
+name: tpuvm_mnist
 
 resources:
-  accelerators: tpu-v3-8
+  accelerators: tpu-v2-8
   accelerator_args:
-    tf_version: tpu-vm-base
-    tpuvm: True
+    runtime_version: tpu-vm-base
+    tpu_vm: True
 
 # The setup command.  Will be run under the working directory.
 setup: |

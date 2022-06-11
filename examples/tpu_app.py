@@ -23,7 +23,7 @@ with sky.Dag() as dag:
     train.set_resources({
         sky.Resources(accelerators='tpu-v3-8',
                       accelerator_args={
-                          'tf_version': '2.5.0',
+                          'runtime_version': '2.5.0',
                           'tpu_name': 'weilin-bert-test-big'
                       }),
     })

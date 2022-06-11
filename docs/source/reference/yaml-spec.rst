@@ -60,7 +60,7 @@ describe all fields available.
 
       # Additional accelerator metadata (optional); only used for TPUs.
       accelerator_args:
-        tf_version: 2.5.0
+        runtime_version: 2.5.0
         tpu_name: mytpu
 
     file_mounts:

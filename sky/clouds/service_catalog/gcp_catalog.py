@@ -93,7 +93,7 @@ _ON_DEMAND_PRICES = {
     'a2-megagpu-16g': 8.919152,
 
     # Currently the host VM of TPU does not cost extra.
-    'TPU-VM': 0,
+    'TPU-VM': 0.,
 }
 
 _SPOT_PRICES = {
@@ -141,6 +141,9 @@ _SPOT_PRICES = {
     'a2-highgpu-4g': 0.899694,
     'a2-highgpu-8g': 1.799388,
     'a2-megagpu-16g': 2.675750,
+
+    # Currently the host VM of TPU does not cost extra.
+    'TPU-VM': 0.,
 }
 
 # Number of CPU cores per GPU based on the AWS setting.

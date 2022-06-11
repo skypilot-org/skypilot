@@ -17,7 +17,7 @@ provider:
   cache_stopped_nodes: True
   # The GCP project ID.
   project_id: {{gcp_project_id}}
-{%- if tpuvm %}
+{%- if tpu_vm %}
   _has_tpus: True
 {%- endif %}
 
@@ -28,9 +28,9 @@ available_node_types:
   ray_head_default:
     resources: {}
     node_config:
-{%- if tpuvm %}
+{%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
-      runtimeVersion: {{tf_version}}
+      runtimeVersion: {{runtime_version}}
 {%- if use_spot %}
       schedulingConfig:
         preemptible: true
@@ -68,9 +68,9 @@ available_node_types:
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
-{%- if tpuvm %}
+{%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
-      runtimeVersion: {{tf_version}}
+      runtimeVersion: {{runtime_version}}
 {%- if use_spot %}
       schedulingConfig:
         preemptible: true
@@ -129,7 +129,7 @@ setup_commands:
     pip3 install "$(echo {{sky_remote_path}}/*.whl)";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
   # For multi-node TPU VM
-  - pip3 install --upgrade google-api-python-client
+  - {{ tpu_vm }} && pip3 install --upgrade google-api-python-client
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

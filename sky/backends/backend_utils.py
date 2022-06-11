@@ -616,8 +616,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    # For TPU nodes. TPU VMs do not need TPU_NAME.
     if resources_vars.get(
-            'tpu_type') is not None and resources_vars.get('tpuvm') is None:
+            'tpu_type') is not None and resources_vars.get('tpu_vm') is None:
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name

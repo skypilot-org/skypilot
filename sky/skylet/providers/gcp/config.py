@@ -339,26 +339,20 @@ def _configure_iam_role(config, crm, iam):
 
     _add_iam_policy_binding(service_account, roles, crm)
 
+    account_dict = {
+        "email": service_account["email"],
+        # NOTE: The amount of access is determined by the scope + IAM
+        # role of the service account. Even if the cloud-platform scope
+        # gives (scope) access to the whole cloud-platform, the service
+        # account is limited by the IAM rights specified below.
+        "scope": ["https://www.googleapis.com/auth/cloud-platform"]
+    }
     if _is_head_node_a_tpu(config):
-        # The API for TPU VM is slightly different from normal compute instances.
+        # SKY: The API for TPU VM is slightly different from normal compute instances.
         # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
-        config["head_node"]["serviceAccount"] = {
-            "email": service_account["email"],
-            # NOTE: The amount of access is determined by the scope + IAM
-            # role of the service account. Even if the cloud-platform scope
-            # gives (scope) access to the whole cloud-platform, the service
-            # account is limited by the IAM rights specified below.
-            "scope": ["https://www.googleapis.com/auth/cloud-platform"]
-        }
+        config["head_node"]["serviceAccount"] = account_dict
     else:
-        config["head_node"]["serviceAccounts"] = [{
-            "email": service_account["email"],
-            # NOTE: The amount of access is determined by the scope + IAM
-            # role of the service account. Even if the cloud-platform scope
-            # gives (scope) access to the whole cloud-platform, the service
-            # account is limited by the IAM rights specified below.
-            "scope": ["https://www.googleapis.com/auth/cloud-platform"]
-        }]
+        config["head_node"]["serviceAccounts"] = [account_dict]
 
     return config
 
