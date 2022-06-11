@@ -563,10 +563,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
     else:
         zones = [zones[0].name]
 
-    aws_default_ami = None
+    aws_ami = None
     if isinstance(cloud, clouds.AWS):
         instance_type = resources_vars['instance_type']
-        aws_default_ami = cloud.get_default_ami(region, instance_type)
+        if to_provision.customized_image_id is not None:
+            aws_ami = to_provision.customized_image_id
+        else:
+            aws_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
@@ -591,7 +594,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'region': region,
                 'zones': ','.join(zones),
                 # AWS only.
-                'aws_default_ami': aws_default_ami,
+                'aws_ami': aws_ami,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/sky-proj/sky/pull/742.
                 # Generate the name of the security group we're looking for.

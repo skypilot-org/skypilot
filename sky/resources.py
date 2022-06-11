@@ -41,12 +41,12 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 3
+    _VERSION = 4
 
     # Update the key list when a new field is added.
     _YAML_KEYS = [
         'cloud', 'instance_type', 'accelerators', 'accelerator_args',
-        'use_spot', 'spot_recovery', 'disk_size', 'region'
+        'use_spot', 'spot_recovery', 'disk_size', 'region', 'image_id'
     ]
 
     def __init__(
@@ -59,6 +59,7 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        customized_image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -85,11 +86,14 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
+        self._customized_image_id = customized_image_id
+
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_instance_type()
         self._try_validate_accelerators()
         self._try_validate_spot()
+        self._try_validate_image_id()
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -150,6 +154,10 @@ class Resources:
     @property
     def disk_size(self) -> int:
         return self._disk_size
+
+    @property
+    def customized_image_id(self) -> Optional[str]:
+        return self._customized_image_id
 
     def _set_accelerators(
         self,
@@ -303,6 +311,18 @@ class Resources:
                              'is not supported. The strategy should be among '
                              f'{list(spot.SPOT_STRATEGIES.keys())}')
 
+    def _try_validate_image_id(self) -> None:
+        if self._customized_image_id is None:
+            return
+
+        if not self._cloud.is_same_cloud(clouds.AWS()):
+            raise ValueError('image_id is only supported for AWS, please '
+                             'explicitly specify the cloud and region.')
+
+        if self._region is None:
+            raise ValueError('image_id is only supported for AWS in a specific '
+                             'region, please explicitly specify the region.')
+
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -437,6 +457,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            customized_image_id=override.pop('customized_image_id', self.customized_image_id),
         )
         assert len(override) == 0
         return resources
@@ -467,6 +488,10 @@ class Resources:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
+        if config.get('image_id') is not None:
+            logger.warning('image_id in resources is experimental. It only '
+                       'supports AWS cloud with specified region.')
+            resources_fields['customized_image_id'] = config.pop('image_id')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -489,6 +514,7 @@ class Resources:
         config['spot_recovery'] = self.spot_recovery
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
+        add_if_not_none('image_id', self.image_id)
         return config
 
     def __setstate__(self, state):
@@ -522,4 +548,7 @@ class Resources:
 
         if version < 3:
             self._spot_recovery = None
+
+        if version < 4:
+            self._customized_image_id = None
         self.__dict__.update(state)
