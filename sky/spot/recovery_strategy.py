@@ -1,4 +1,5 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
+import copy
 import time
 import typing
 from typing import Optional
@@ -142,7 +143,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         #    original user specification.
 
         # Step 1
-
         # Cluster should be in STOPPED status.
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
@@ -154,9 +154,20 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             logger.info('Ignoring the job cancellation failure; the spot '
                         'cluster is likely completely stopped. Recovering.')
 
+        # Add region constraint to the task, to retry on the same region first.
+        original_dag = copy.deepcopy(self.dag)
+        task = self.dag.tasks[0]
+        resources = list(task.resources)[0]
+        launched_region = handle.launched_resources.region
+        new_resources = resources.copy(region=launched_region)
+        task.set_resources({new_resources})
         launched_time = self.launch(raise_on_failure=False)
+
+        # Restore the original dag, i.e. reset the region constraint.
+        self.dag = original_dag
         if launched_time is not None:
             return launched_time
+        
 
         # Step 2
         self.terminate_cluster()

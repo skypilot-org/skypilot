@@ -1161,6 +1161,9 @@ def get_node_ips(
             handle is not None and handle.head_ip is not None):
         return [handle.head_ip]
 
+    # Check the network connection first to avoid long hanging time for
+    # ray get-head-ip below, if a long-lasting network connection failure
+    # happens.
     check_network_connection()
     try:
         proc = run(f'ray get-head-ip {yaml_handle}',
@@ -1407,10 +1410,6 @@ def _update_cluster_status_no_lock(
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
-    if record['status'] == global_user_state.ClusterStatus.INIT:
-        # Should not set the cluster to STOPPED if INIT, since it may be
-        # still launching.
-        return record
 
     try:
         config = read_yaml(handle.cluster_yaml)
@@ -1426,31 +1425,11 @@ def _update_cluster_status_no_lock(
     # For all code below, two conditions hold:
     #   - record['status'] == UP / STOPPED
     #   - we failed to use Ray to get all nodes' IPs
-    cluster_statuses = _get_cluster_status_via_cloud_cli(handle)
-    # If the cluster_statuses is empty, all the nodes are terminated. We can
-    # safely set the cluster status to TERMINATED. This handles the edge case
-    # where the cluster is terminated by the user manually through the UI.
-    to_terminate = not cluster_statuses
-
-    if handle.launched_resources.use_spot:
-        # The preemption policy of GCP and Azure is stopping the cluster.
-        # The preemption policy of AWS is terminating the cluster (the stopping
-        # preemption policy is only supported for persistent spot), we
-        # still need to set it to STOPPED for the correctness of the managed spot,
-        # and the recovery strategy soon relaunch the cluster on the same
-        # region or terminate the cluster.
-        all_nodes_exist = len(cluster_statuses) == handle.launched_nodes
-        all_stopped = (all_nodes_exist and
-                       all(s == global_user_state.ClusterStatus.STOPPED
-                           for s in cluster_statuses))
-        if all_stopped or to_terminate:
-            # Only set the cluster to STOPPED if all the spot nodes are stopped or
-            # terminated.
-            to_terminate = False
-
-    has_alive = any(status != global_user_state.ClusterStatus.STOPPED
-                    for status in cluster_statuses)
-    if has_alive:
+    node_statuses = _get_cluster_status_via_cloud_cli(handle)
+    
+    unhealthy = any(status != global_user_state.ClusterStatus.STOPPED
+                    for status in node_statuses) or len(node_statuses) != handle.launched_nodes
+    if unhealthy:
         # If the user starts part of a STOPPED cluster, we still need a status to
         # represent the abnormal status. For spot cluster, it can also represent
         # that the cluster is partially preempted.
@@ -1460,7 +1439,12 @@ def _update_cluster_status_no_lock(
         global_user_state.set_cluster_status(
             cluster_name, global_user_state.ClusterStatus.INIT)
         return record
+    # If the cluster_statuses is empty, all the nodes are terminated. We can
+    # safely set the cluster status to TERMINATED. This handles the edge case
+    # where the cluster is terminated by the user manually through the UI.
+    to_terminate = not node_statuses
 
+    # Now has_alive is False: either node_statuses is empty or all nodes are STOPPED.
     global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
     # Remove the cluster from the SSH config.
     auth_config = config['auth']
@@ -1476,7 +1460,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     sky/design_docs/cluster_states.md
 
     Returns:
-      If the cluster is terminated or not exist, return None.
+      If the cluster is terminated or does not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
     """
 
@@ -1490,7 +1474,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
     except filelock.Timeout:
         logger.debug(
             f'Refreshing status: Failed get the lock for cluster {cluster_name!r}.'
-            'Use the cached status.')
+            ' Using the cached status.')
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
