@@ -447,14 +447,20 @@ class Storage(object):
         if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
-                # TODO(romilb): What about when a Storage object without source
-                #  already exists in global_user_state (e.g. used for scratch)
-                #  and now the user wants to mount it in COPY mode? We should
-                #  perhaps check for existence in global_user_state here.
-                raise exceptions.StorageSourceError(
-                    'Storage source must be specified when using COPY mode.')
+                # Check if a Storage object already exists in global_user_state
+                # (e.g. used as scratch previously). Such storage objects can be
+                # mounted in copy mode even though they have no source in the
+                # yaml spec (the name is the source).
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
+                if handle is not None:
+                    return
+                else:
+                    raise exceptions.StorageSourceError(
+                        'New storage object: source must be specified when '
+                        'using COPY mode.')
             else:
-                # If source is not specified in mount mode, the intent is to
+                # If source is not specified in COPY mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
                 if not self.name:
