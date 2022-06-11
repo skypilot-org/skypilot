@@ -91,8 +91,8 @@ DEFAULT_TASK_CPU_DEMAND = 0.5
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
 # Filelocks for the cluster status change.
-LOCK_FILENAME = os.path.expanduser('~/.sky/.{}.lock')
-FILELOCK_TIMEOUT_SECONDS = 10
+CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
+CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
 
 
 def fill_template(template_name: str,
@@ -1469,8 +1469,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         # TODO(mraheja): remove pylint disabling when filelock
         # version updated
         # pylint: disable=abstract-class-instantiated
-        with filelock.FileLock(LOCK_FILENAME.format(cluster_name),
-                               FILELOCK_TIMEOUT_SECONDS):
+        with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
+                               CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
             return _update_cluster_status_no_lock(cluster_name)
     except filelock.Timeout:
         logger.debug(

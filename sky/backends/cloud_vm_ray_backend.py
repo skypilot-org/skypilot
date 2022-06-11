@@ -1310,7 +1310,7 @@ class CloudVmRayBackend(backends.Backend):
         # each other.
 
         lock_path = os.path.expanduser(
-            backend_utils.LOCK_FILENAME.format(cluster_name))
+            backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
@@ -2231,14 +2231,14 @@ class CloudVmRayBackend(backends.Backend):
                  purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(
-            backend_utils.LOCK_FILENAME.format(cluster_name))
+            backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(lock_path,
-                                   backend_utils.FILELOCK_TIMEOUT_SECONDS):
+                                   backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
