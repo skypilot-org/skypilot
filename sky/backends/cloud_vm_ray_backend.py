@@ -620,7 +620,7 @@ class RetryingVmProvisioner(object):
                     elif cloud.is_same_cloud(sky.Azure()):
                         region = config['provider']['location']
                         zones = None
-                    elif cloud.is_same_cloud(sky.Local(cluster_name)):
+                    elif cloud.is_same_cloud(sky.Local()):
                         # Only 1 region per local cloud ('Local region').
                         # No zones per local cloud.
                         region = clouds.Local.LOCAL_REGION.name
@@ -1333,7 +1333,7 @@ class CloudVmRayBackend(backends.Backend):
             elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
                     sky.AWS()):
                 region = provider['region']
-            elif cloud.is_same_cloud(sky.Local(self.cluster_name)):
+            elif cloud.is_same_cloud(sky.Local()):
                 # There is only 1 region for Local cluster, 'Local'.
                 region = clouds.Local.LOCAL_REGION.name
 

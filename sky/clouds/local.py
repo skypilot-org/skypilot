@@ -35,15 +35,7 @@ class Local(clouds.Cloud):
     """
 
     LOCAL_REGION = clouds.Region('Local')
-    DEFAULT_LOCAL_NAME = 'Local'
     _regions: List[clouds.Region] = [LOCAL_REGION]
-
-    def __init__(self, cluster_name: str = None):
-        if cluster_name is not None:
-            self.local_cluster_name = cluster_name
-        else:
-            # Default local name is set for task.set_resources method.
-            self.local_cluster_name = Local.DEFAULT_LOCAL_NAME
 
     @classmethod
     def regions(cls):
@@ -78,14 +70,12 @@ class Local(clouds.Cloud):
         return 0.0
 
     def __repr__(self):
-        return self.local_cluster_name
+        return 'Local'
 
     def is_same_cloud(self, other: clouds.Cloud):
         # Returns true if the two clouds are the same cloud type
         # and has the matching cluster name.
-        return isinstance(
-            other,
-            Local) and self.local_cluster_name == other.local_cluster_name
+        return isinstance(other, Local)
 
     @classmethod
     def get_default_instance_type(cls) -> str:

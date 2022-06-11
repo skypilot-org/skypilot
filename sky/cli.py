@@ -103,7 +103,7 @@ def _get_cloud(cloud: Optional[str],
 
     if cloud is not None and cloud_obj is None:
         if cloud.lower() == 'local':
-            local_cloud = clouds.Local.get(cluster_name)
+            local_cloud = clouds.Local()
             if local_cloud is not None:
                 return local_cloud
             if cluster_name is None:

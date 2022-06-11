@@ -92,10 +92,7 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        if (isinstance(self._cloud, clouds.Local) and
-                str(self._cloud) != clouds.Local.DEFAULT_LOCAL_NAME):
-            self._try_validate_local()
-
+        self._try_validate_local()
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_instance_type()
@@ -326,12 +323,13 @@ class Resources:
                              f'{list(spot.SPOT_STRATEGIES.keys())}')
 
     def _try_validate_local(self) -> None:
-        if self._instance_type is not None:
-            raise ValueError('Local/On-prem mode does not support instance '
-                             f'type {self._instance_type}')
-        if self._use_spot:
-            raise ValueError('Local/On-prem mode does not support spot '
-                             'instances.')
+        if isinstance(self._cloud, clouds.Local):
+            if self._instance_type is not None:
+                raise ValueError('Local/On-prem mode does not support instance '
+                                 f'type {self._instance_type}')
+            if self._use_spot:
+                raise ValueError('Local/On-prem mode does not support spot '
+                                 'instances.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

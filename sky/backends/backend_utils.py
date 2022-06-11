@@ -1012,7 +1012,7 @@ def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
         config = auth.setup_gcp_authentication(config)
     elif cloud_type == 'Azure':
         config = auth.setup_azure_authentication(config)
-    elif cloud_type == config['cluster_name']:
+    elif cloud_type == 'Local':
         # Local cluster case, authentication is already filled by the user
         # in the local cluster config (in ~/.sky/local/...). There is no need
         # for Sky to generate authentication.
