@@ -1014,13 +1014,15 @@ class GcsStore(AbstractStore):
             StorageUploadError: if upload fails.
         """
         try:
-            if self.source.startswith('gs://'):
-                pass
-            elif self.source.startswith('s3://'):
-                self._transfer_to_gcs()
-            else:
-                logger.info('Syncing Local to GCS')
-                self.sync_local_dir()
+            if self.source is not None:
+                if self.source.startswith('gs://'):
+                    pass
+                elif self.source.startswith('s3://'):
+                    self._transfer_to_gcs()
+                else:
+                    self.sync_local_dir()
+        except exceptions.StorageUploadError:
+            raise
         except Exception as e:
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
@@ -1036,30 +1038,31 @@ class GcsStore(AbstractStore):
         """Syncs a local directory to a GCS bucket."""
         source = os.path.abspath(os.path.expanduser(self.source))
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
-        logger.info(f'Executing: {sync_command}')
-        with subprocess.Popen(sync_command.split(' '),
-                              stderr=subprocess.PIPE) as process:
-            while True:
-                line = process.stderr.readline()
-                if not line:
-                    break
-                str_line = line.decode('utf-8')
-                logger.info(str_line)
-                if 'AccessDeniedException' in str_line:
-                    process.kill()
-                    logger.error('Sky Storage failed to upload files to '
-                                 'GCS. The bucket does not have '
-                                 'write permissions. It is possible that '
-                                 'the bucket is public.')
-                    e = PermissionError('Can\'t write to bucket!')
-                    logger.error(e)
-                    raise e
-            retcode = process.wait()
-            if retcode != 0:
-                raise exceptions.StorageUploadError(
-                    f'Upload to S3 failed for store {self.name} and source '
-                    f'{self.source}. Please check logs.')
-            logger.info('Done Syncing Local to GCS')
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Syncing '
+                f'[green]{self.source} to gcs://{self.name}/'):
+            with subprocess.Popen(sync_command.split(' '),
+                                  stderr=subprocess.PIPE) as process:
+                while True:
+                    line = process.stderr.readline()
+                    if not line:
+                        break
+                    str_line = line.decode('utf-8')
+                    logger.info(str_line)
+                    if 'AccessDeniedException' in str_line:
+                        process.kill()
+                        logger.error('Sky Storage failed to upload files to '
+                                     'GCS. The bucket does not have '
+                                     'write permissions. It is possible that '
+                                     'the bucket is public.')
+                        e = PermissionError('Can\'t write to bucket!')
+                        logger.error(e)
+                        raise e
+                retcode = process.wait()
+                if retcode != 0:
+                    raise exceptions.StorageUploadError(
+                        f'Upload to GCS failed for store {self.name} and source '
+                        f'{self.source}. Please check logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
@@ -1081,7 +1084,7 @@ class GcsStore(AbstractStore):
             bucket = self.client.get_bucket(self.name)
             return bucket, False
         except gcp.not_found_exception() as e:
-            if self.source.startswith('gs://'):
+            if self.source is not None and self.source.startswith('gs://'):
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
                     f'{self.source}') from e
