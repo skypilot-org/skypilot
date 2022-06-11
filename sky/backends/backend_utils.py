@@ -590,7 +590,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
-    ip_list = to_provision.local_ips
+    ip_list = None
+    if isinstance(cloud, clouds.Local):
+        ip_list = get_local_ips(cluster_name)
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -665,30 +667,36 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def fetch_local_resources(resources: 'resources_lib.Resources',
-                          auth_config: dict) -> Optional[List[dict]]:
-    """Fetches local custom resources, either cached or non-cached.
+def get_local_ips(cluster_name: str) -> List[str]:
+    """Returns IP addresses of the local cluster."""
+    local_cluster_path = os.path.expanduser(
+        SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
+    try:
+        with open(local_cluster_path, 'r') as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(
+            f'Could not open/read file: {local_cluster_path}') from e
 
-    Attempts to fetch local accelerator resources from global state.
-    If not, fetches the local accelerator resources by querying the
-    local cluster nodes.
-    """
-    cluster_name = resources.cloud.local_cluster_name
-    custom_resources = None
-    if auth_config is None:
-        # Attempt to fetch from global state, elsewise do nothing
-        records = global_user_state.get_clusters(include_cloud_clusters=False,
-                                                 include_local_clusters=True)
-        for record in records:
-            resources = record['handle'].launched_resources
-            record_name = str(resources.cloud)
-            if cluster_name == record_name:
-                custom_resources = resources.local_resources
-                break
-    else:
-        custom_resources = get_local_custom_resources(resources.local_ips,
-                                                      auth_config)
-    return custom_resources
+    ips = config['cluster']['ips']
+    if isinstance(ips, str):
+        ips = [ips]
+    return ips
+
+
+def get_local_cluster_config(cluster_name: str) -> Tuple[bool, dict]:
+    """Gets the local cluster config in ~/.sky/local/."""
+    local_file = os.path.expanduser(
+        SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
+
+    if os.path.isfile(local_file):
+        try:
+            with open(local_file, 'r') as f:
+                yaml_config = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise ValueError(f'Could not open/read file: {local_file}') from e
+        return True, yaml_config
+    return False, None
 
 
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):

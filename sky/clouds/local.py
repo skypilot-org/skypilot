@@ -1,12 +1,8 @@
 """Local/On-premise."""
-import os
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-import yaml
-
-from sky.backends import backend_utils
 from sky import clouds
 
 if typing.TYPE_CHECKING:
@@ -142,20 +138,3 @@ class Local(clouds.Cloud):
     def get(cluster: str) -> Optional['Local']:
         """Gets the local cluster object."""
         return clouds.Local(cluster)
-
-    def get_local_ips(self) -> List[str]:
-        """Returns IP addresses of the local cluster."""
-        cluster = self.local_cluster_name
-        local_cluster_path = os.path.expanduser(
-            backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster))
-        try:
-            with open(local_cluster_path, 'r') as f:
-                config = yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            raise ValueError(
-                f'Could not open/read file: {local_cluster_path}') from e
-
-        ips = config['cluster']['ips']
-        if isinstance(ips, str):
-            ips = [ips]
-        return ips

@@ -408,25 +408,6 @@ class Task:
         """
         if isinstance(resources, sky.Resources):
             resources = {resources}
-
-        # Automatically fill out custom resources
-        for resource in resources:
-            # Checks if the resource is from a local cluster and
-            # if the local cluster resources has not been populated
-            if (isinstance(resource.cloud, clouds.Local) and
-                    not resource.local_resources and
-                    str(resource.cloud) != clouds.Local.DEFAULT_LOCAL_NAME):
-                # Limitation of Sky Launch and Task.from_yaml method.
-                # Resources object can not be fully constructed without the
-                # local cluster name, which cannot be passed into
-                # Task.from_yaml. Hence, the initial construction of the
-                # Resources object does not have the actual local cluster
-                # name and will instead default to a default local cloud
-                # name (clouds.Local.DEFAULT_LOCAL_NAME).
-                custom_resources = backend_utils.fetch_local_resources(
-                    resource, self.auth_config)
-                resource.set_local_resources(custom_resources)
-
         self.resources = resources
         return self
 

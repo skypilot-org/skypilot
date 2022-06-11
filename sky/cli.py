@@ -2268,7 +2268,6 @@ def local_status():
     # Handling for initialized clusters.
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
-        resources = handle.launched_resources
         config_path = handle.cluster_yaml
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -2277,14 +2276,14 @@ def local_status():
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
-                local_resources = resources.local_resources
-                for idx, resource in enumerate(local_resources):
+                local_clus_resources = handle.local_config['cluster_resources']
+                for idx, resource in enumerate(local_clus_resources):
                     if not bool(resource):
-                        local_resources[idx] = None
-                resources_str = (f'{local_resources}')
+                        local_clus_resources[idx] = None
+                resources_str = (f'{local_clus_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-        cluster_name = str(resources.cloud)
+        cluster_name = handle.cluster_name
         row = [
             # NAME
             cluster_name,

@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -92,13 +92,8 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self.local_ips = None
-        self.local_resources = None
-        if (self._cloud is not None and
-                isinstance(self._cloud, clouds.Local) and
+        if (isinstance(self._cloud, clouds.Local) and
                 str(self._cloud) != clouds.Local.DEFAULT_LOCAL_NAME):
-            self.local_ips = self._cloud.get_local_ips()
-            self.set_local_resources()
             self._try_validate_local()
 
         self._set_accelerators(accelerators, accelerator_args)
@@ -108,8 +103,6 @@ class Resources:
         self._try_validate_spot()
 
     def __repr__(self) -> str:
-        if isinstance(self.cloud, clouds.Local):
-            return f'Local({self.cloud}, {self.local_resources})'
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -119,6 +112,8 @@ class Resources:
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
+        if isinstance(self.cloud, clouds.Local):
+            return f'Local({self.cloud}{accelerators}{accelerator_args})'
         return (f'{self.cloud}({self._instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args})')
 
@@ -172,7 +167,7 @@ class Resources:
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, int]],
-        accelerator_args: Optional[Dict[str, str]],
+        accelerator_args: Optional[Dict[str, str]] = None,
     ) -> None:
         """Sets accelerators.
 
@@ -212,6 +207,15 @@ class Resources:
                                 ' default (2.5.0)')
                     accelerator_args['tf_version'] = '2.5.0'
 
+        self._accelerators = accelerators
+        self._accelerator_args = accelerator_args
+
+    def override_accelerators(
+        self,
+        accelerators: Union[None, str, Dict[str, int]],
+        accelerator_args: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Override the accelerators of the current Resources class."""
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
 
@@ -328,9 +332,6 @@ class Resources:
         if self._use_spot:
             raise ValueError('Local/On-prem mode does not support spot '
                              'instances.')
-        if not self.local_ips:
-            raise ValueError('Local/On-prem mode needs IPs specified. '
-                             'Please check the yaml in ~/.sky/local.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -343,11 +344,6 @@ class Resources:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
                 self.accelerators, self.use_spot)
         return hourly_cost * hours
-
-    def set_local_resources(self, local_resources: List[dict] = None) -> None:
-        """Sets local resources for the local cluster."""
-        assert isinstance(self.cloud, clouds.Local), 'Must be local cloud.'
-        self.local_resources = local_resources
 
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
@@ -409,31 +405,7 @@ class Resources:
         # For case insensitive comparison.
         # TODO(wei-lin): This is a hack. We may need to use our catalog to
         # handle this.
-        if isinstance(other.cloud, clouds.Local):
-            # Public cloud accelerators definition:
-            #   - First time `sky launch` is called: self.accelerators means
-            #     both cluster resources and task resources.
-            #   - Subsequent times `sky launch/exec` is called:
-            #     self.accelerators means only task resources.
-            #
-            # On-prem/local cloud accelerators definition:
-            #   - First and subsequent times `sky launch/exec` is called:
-            #     self.accelerators means only task resources.
-            #   - self.local_resources means only cluster resources.
-            #
-            # Hence for the on-prem case, we want to determine if the current
-            # task's resources (self.accelerators) is less than the cluster's
-            # resources (other.local_resources).
-            list_resources = other.local_resources
-            other_accelerators = {}
-            # other.local_resources is a list of each node's accelerators. We
-            # want to aggregate all node's resources into `other_accelerators`,
-            # which represents the total cluster's resources.
-            for d in list_resources:
-                for k in d:
-                    other_accelerators[k] = other_accelerators.get(k, 0) + d[k]
-        else:
-            other_accelerators = other.accelerators
+        other_accelerators = other.accelerators
         if other_accelerators is not None:
             other_accelerators = {
                 acc.upper(): num_acc
@@ -500,9 +472,6 @@ class Resources:
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
         )
-        # This field is dynamically generated.
-        # To save time, the field is directly passed in.
-        resources.local_resources = self.local_resources
         assert len(override) == 0
         return resources
 

@@ -1182,7 +1182,7 @@ class RetryingVmProvisioner(object):
         # is not what the task specifies, but refers to the size of the
         # local cluster.
         if isinstance(resources.cloud, clouds.Local):
-            num_nodes = len(resources.local_ips)
+            num_nodes = len(backend_utils.get_local_ips(cluster_name))
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
@@ -1292,6 +1292,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
+            self._set_local_config()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1306,6 +1307,19 @@ class CloudVmRayBackend(backends.Backend):
 
         def get_cluster_name(self):
             return self.cluster_name
+
+        def _set_local_config(self):
+            self.local_config = {}
+            is_yaml, config = backend_utils.get_local_cluster_config(
+                self.cluster_name)
+            if is_yaml:
+                clus_config = config['cluster']
+                auth_config = config['auth']
+                ips = clus_config['ips']
+                self.local_config['ips'] = ips
+                self.local_config['cluster_resources'] = \
+                    backend_utils.get_local_custom_resources(
+                        ips, auth_config)
 
         def _update_cluster_region(self):
             if self.launched_resources.region is not None:
@@ -1362,6 +1376,19 @@ class CloudVmRayBackend(backends.Backend):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
+        # Special handling for local cloud case.
+        # Resources.less_demanding_than takes in the Resources object of first
+        # task that was ran on the cluster. In the local cloud case,
+        # resources.accelerators means the task resources. We do a hack where we
+        # replace resources.accelerators with the local cluster's resources.
+        if handle.local_config is not None:
+            cluster_resources = handle.local_config['cluster_resources']
+            merged_resources = {}
+            for d in cluster_resources:
+                for k in d:
+                    merged_resources[k] = merged_resources.get(k, 0) + d[k]
+            launched_resources.override_accelerators(merged_resources)
+
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
@@ -1375,7 +1402,7 @@ class CloudVmRayBackend(backends.Backend):
                 'Requested resources do not match the existing cluster.\n'
                 f'  Requested:\t{task.num_nodes}x {task_resources} \n'
                 f'  Existing:\t{handle.launched_nodes}x '
-                f'{handle.launched_resources}\n'
+                f'{launched_resources}\n'
                 f'To fix: specify a new cluster name, or down the '
                 f'existing cluster first: sky down {cluster_name}')
 
