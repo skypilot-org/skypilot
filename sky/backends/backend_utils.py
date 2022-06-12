@@ -1424,15 +1424,13 @@ def _update_cluster_status_no_lock(
         # removed. With high likelihood the cluster has been removed.
         return None
 
-    # For all code below, two conditions hold:
-    #   - record['status'] == UP / STOPPED
-    #   - we failed to use Ray to get all nodes' IPs
+    # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
-    unhealthy = any(status != global_user_state.ClusterStatus.STOPPED
+    is_abnormal = any(status != global_user_state.ClusterStatus.STOPPED
                     for status in node_statuses
                    ) or len(node_statuses) != handle.launched_nodes
-    if unhealthy:
+    if is_abnormal:
         # If the user starts part of a STOPPED cluster, we still need a status to
         # represent the abnormal status. For spot cluster, it can also represent
         # that the cluster is partially preempted.
@@ -1442,12 +1440,12 @@ def _update_cluster_status_no_lock(
         global_user_state.set_cluster_status(
             cluster_name, global_user_state.ClusterStatus.INIT)
         return record
-    # If the cluster_statuses is empty, all the nodes are terminated. We can
+    # If the node_statuses is empty, all the nodes are terminated. We can
     # safely set the cluster status to TERMINATED. This handles the edge case
     # where the cluster is terminated by the user manually through the UI.
     to_terminate = not node_statuses
 
-    # Now has_alive is False: either node_statuses is empty or all nodes are STOPPED.
+    # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
     # Remove the cluster from the SSH config.
     auth_config = config['auth']
