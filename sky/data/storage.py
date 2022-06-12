@@ -12,6 +12,7 @@ from sky.adaptors import gcp
 from sky.backends import backend_utils
 from sky.data import data_transfer
 from sky.data import data_utils
+from sky.data import mounting_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -50,6 +51,10 @@ class AbstractStore:
     Storage objects are backed by AbstractStores, each representing a store
     present in a cloud.
     """
+
+    _STAT_CACHE_TTL = '5s'
+    _STAT_CACHE_CAPACITY = 4096
+    _TYPE_CACHE_TTL = '5s'
 
     class StoreMetadata:
         """A pickle-able representation of Store
@@ -667,9 +672,6 @@ class S3Store(AbstractStore):
     for S3 buckets.
     """
 
-    _STAT_CACHE_TTL = '5s'
-    _TYPE_CACHE_TTL = '5s'
-
     def __init__(self,
                  name: str,
                  source: str,
@@ -844,69 +846,9 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        # TODO(romilb): Move the inline script to a separate file
-        script = textwrap.dedent(f"""
-            #!/usr/bin/env bash
-            set -e
-
-            S3_SOURCE={self.bucket.name}
-            MOUNT_PATH={mount_path}
-            STAT_CACHE_TTL={self._STAT_CACHE_TTL}
-            TYPE_CACHE_TTL={self._TYPE_CACHE_TTL}
-
-            # Check if path is already mounted
-            if ! [ "$(grep -q $MOUNT_PATH /proc/mounts)" ] ; then
-                echo "Path already mounted - unmounting..."
-                fusermount -u "$MOUNT_PATH"
-                echo "Successfully unmounted $MOUNT_PATH."
-            fi
-
-            # Install goofys if not already installed
-            if ! [ -x "$(command -v goofys)" ]; then
-              echo "Installing goofys..."
-              sudo wget -nc https://github.com/romilbhardwaj/goofys/releases/download/0.24.0-romilb-upstream/goofys -O /usr/local/bin/goofys
-              sudo chmod +x /usr/local/bin/goofys
-            else
-              echo "Goofys already installed. Proceeding..."
-            fi
-
-            # Check if mount path exists
-            if [ ! -d "$MOUNT_PATH" ]; then
-              echo "Mount path $MOUNT_PATH does not exist. Creating..."
-              sudo mkdir -p $MOUNT_PATH
-              sudo chmod 777 $MOUNT_PATH
-            else
-              # Check if mount path contains files
-              if [ "$(ls -A $MOUNT_PATH)" ]; then
-                echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
-                exit 1
-              fi
-            fi
-            echo "Mounting $S3_SOURCE to $MOUNT_PATH with goofys..."
-            goofys -o allow_other --stat-cache-ttl $STAT_CACHE_TTL --type-cache-ttl $TYPE_CACHE_TTL $S3_SOURCE $MOUNT_PATH
-            echo "Mounting done."
-        """)
-
-        # TODO(romilb): Get direct bash script to work like so:
-        # command = f'bash <<-\EOL' \
-        #           f'{script}' \
-        #           'EOL'
-
-        # TODO(romilb): This heredoc should have EOF after script, but it
-        #  fails with sky's ssh pipeline. Instead, we don't use EOF and use )
-        #  as the end of heredoc. This raises a warning (here-document delimited
-        #  by end-of-file) that can be safely ignored.
-
-        # While these commands are run sequentially for each storage object,
-        # we add random int to be on the safer side and avoid collisions.
-        script_path = f'~/.sky/mount_{random.randint(0,1000000)}.sh'
-        first_line = r'(cat <<-\EOF > {}'.format(script_path)
-        command = (f'{first_line}'
-                   f'{script}'
-                   f') && chmod +x {script_path}'
-                   f' && bash {script_path}'
-                   f' && rm {script_path}')
-        return command
+        install_cmd = 'sudo wget -nc https://github.com/romilbhardwaj/goofys/releases/download/0.24.0-romilb-upstream/goofys -O /usr/local/bin/goofys && sudo chmod +x /usr/local/bin/goofys'
+        mount_cmd = f'goofys -o allow_other --stat-cache-ttl {self._STAT_CACHE_TTL} --type-cache-ttl {self._TYPE_CACHE_TTL} {self.bucket.name} {mount_path}'
+        return mounting_utils.get_mounting_command(mount_path, install_cmd, mount_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -956,10 +898,6 @@ class GcsStore(AbstractStore):
     """GcsStore inherits from Storage Object and represents the backend
     for GCS buckets.
     """
-
-    _STAT_CACHE_TTL = '5s'
-    _STAT_CACHE_CAPACITY = 4096
-    _TYPE_CACHE_TTL = '5s'
 
     def __init__(self,
                  name: str,
@@ -1126,60 +1064,9 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        script = textwrap.dedent(f"""
-            #!/usr/bin/env bash
-            set -e
-            
-            GCS_SOURCE={self.bucket.name}
-            MOUNT_PATH={mount_path}
-            STAT_CACHE_TTL={self._STAT_CACHE_TTL}
-            STAT_CACHE_CAPACITY={self._STAT_CACHE_CAPACITY}
-            TYPE_CACHE_TTL={self._TYPE_CACHE_TTL}
-            
-            # Check if path is already mounted
-            
-            if grep -q $MOUNT_PATH /proc/mounts ; then
-                echo "Path already mounted - unmounting..."
-                fusermount -u "$MOUNT_PATH"
-                echo "Successfully unmounted $MOUNT_PATH."
-            fi
-            
-            # Install gcsfuse if not already installed
-            if ! [ -x "$(command -v gcsfuse)" ]; then
-              echo "Installing gcsfuse..."
-              wget -nc https://github.com/GoogleCloudPlatform/gcsfuse/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb -O /tmp/gcsfuse.deb
-              sudo dpkg --install /tmp/gcsfuse.deb
-            else
-              echo "gcsfuse already installed. Proceeding..."
-            fi
-            
-            # Check if mount path exists
-            if [ ! -d "$MOUNT_PATH" ]; then
-              echo "Mount path $MOUNT_PATH does not exist. Creating..."
-              sudo mkdir -p $MOUNT_PATH
-              sudo chmod 777 $MOUNT_PATH
-            else
-              # Check if mount path contains files
-              if [ "$(ls -A $MOUNT_PATH)" ]; then
-                echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
-                exit 1
-              fi
-            fi
-            echo "Mounting $GCS_SOURCE to $MOUNT_PATH with gcsfuse..."
-            gcsfuse -o allow_other --stat-cache-capacity $STAT_CACHE_CAPACITY --stat-cache-ttl $STAT_CACHE_TTL --type-cache-ttl $TYPE_CACHE_TTL $GCS_SOURCE $MOUNT_PATH
-            echo "Mounting done."
-        """)
-
-        # While these commands are run sequentially for each storage object,
-        # we add random int to be on the safer side and avoid collisions.
-        script_path = f'~/.sky/mount_{random.randint(0,1000000)}.sh'
-        first_line = r'(cat <<-\EOF > {}'.format(script_path)
-        command = (f'{first_line}'
-                   f'{script}'
-                   f') && chmod +x {script_path}'
-                   f' && bash {script_path}'
-                   f' && rm {script_path}')
-        return command
+        install_cmd = 'wget -nc https://github.com/GoogleCloudPlatform/gcsfuse/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb -O /tmp/gcsfuse.deb && sudo dpkg --install /tmp/gcsfuse.deb'
+        mount_cmd = f'gcsfuse -o allow_other --stat-cache-capacity {self._STAT_CACHE_CAPACITY} --stat-cache-ttl {self._STAT_CACHE_TTL} --type-cache-ttl {self._TYPE_CACHE_TTL} {self.bucket.name} {mount_path}'
+        return mounting_utils.get_mounting_command(mount_path, install_cmd, mount_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
