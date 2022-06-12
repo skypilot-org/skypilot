@@ -129,7 +129,7 @@ setup_commands:
     pip3 install "$(echo {{sky_remote_path}}/*.whl)";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
   # For multi-node TPU VM
-  - {{ tpu_vm }} && pip3 install --upgrade google-api-python-client
+  - {{ tpu_vm is none }} || pip3 install --upgrade google-api-python-client
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
