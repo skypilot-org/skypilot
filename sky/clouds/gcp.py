@@ -172,7 +172,8 @@ class GCP(clouds.Cloud):
                 assert r.accelerator_args is not None, r
 
                 resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
-                resources_vars['runtime_version'] = r.accelerator_args['runtime_version']
+                resources_vars['runtime_version'] = r.accelerator_args[
+                    'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
