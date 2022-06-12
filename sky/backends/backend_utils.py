@@ -4,7 +4,6 @@ import datetime
 import difflib
 import enum
 import hashlib
-import http.client as httplib
 import getpass
 from multiprocessing import pool
 import os
@@ -25,6 +24,9 @@ import uuid
 import colorama
 import jinja2
 import psutil
+import requests
+from requests import adapters
+from requests.packages.urllib3.util import retry as retry_lib
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -75,7 +77,7 @@ WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = '8.8.8.8'
+_TEST_IP = 'https://8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
 # characters. Through testing, 37 chars is the maximum length for the Sky
@@ -1210,11 +1212,14 @@ def get_head_ip(
 
 
 def check_network_connection():
-    # A timeout of 1s seems to infrequently encounter 'socket.timeout'.
-    conn = httplib.HTTPSConnection(_TEST_IP, timeout=3)
+    # Tolerate 3 retries as it is observed that connections can fail.
+    adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
+    http = requests.Session()
+    http.mount('https://', adapter)
+    http.mount('http://', adapter)
     try:
-        conn.request('HEAD', '/')
-    except OSError as e:
+        http.head(_TEST_IP, timeout=3)
+    except requests.Timeout as e:
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
