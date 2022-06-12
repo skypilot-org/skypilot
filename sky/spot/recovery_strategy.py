@@ -156,7 +156,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # Add region constraint to the task, to retry on the same region first.
         task = self.dag.tasks[0]
         resources = list(task.resources)[0]
-        original_resources = resources.copy()
+        original_resources = resources
+
         launched_region = handle.launched_resources.region
         new_resources = resources.copy(region=launched_region)
         task.set_resources({new_resources})
@@ -167,9 +168,11 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             return launched_time
 
         # Step 2
+        logger.debug('Terminating unhealthy spot cluster.')
         self.terminate_cluster()
 
         # Step 3
+        logger.debug('Launch the cluster with no cloud/region constraint.')
         launched_time = self.launch(
             max_retry=self._MAX_RETRY_CNT,
             retry_init_gap_seconds=self._RETRY_INIT_GAP_SECONDS,
