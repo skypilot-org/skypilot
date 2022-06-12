@@ -1384,6 +1384,8 @@ def _update_cluster_status_no_lock(
 
     cluster_name = handle.cluster_name
     try:
+        # TODO(zhwu): This function cannot distinguish transient network error
+        # in ray's get IPs vs. ray runtime failing.
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         if handle.launched_nodes == 1:
             # Check the ray cluster status. We have to check it for single node
