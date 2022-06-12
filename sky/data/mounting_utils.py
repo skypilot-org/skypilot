@@ -3,10 +3,11 @@ import random
 import textwrap
 
 
-def get_mounting_command(mount_path: str,
-                         install_cmd: str,
-                         mount_cmd: str,
-                         ) -> str:
+def get_mounting_command(
+    mount_path: str,
+    install_cmd: str,
+    mount_cmd: str,
+) -> str:
     """
     Generates the mounting command for a given bucket. Generated script first
     unmounts any existing mount at the mount path, checks and installs the

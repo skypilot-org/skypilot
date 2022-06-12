@@ -1,9 +1,7 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
-import random
 import subprocess
-import textwrap
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
@@ -846,9 +844,16 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = 'sudo wget -nc https://github.com/romilbhardwaj/goofys/releases/download/0.24.0-romilb-upstream/goofys -O /usr/local/bin/goofys && sudo chmod +x /usr/local/bin/goofys'
-        mount_cmd = f'goofys -o allow_other --stat-cache-ttl {self._STAT_CACHE_TTL} --type-cache-ttl {self._TYPE_CACHE_TTL} {self.bucket.name} {mount_path}'
-        return mounting_utils.get_mounting_command(mount_path, install_cmd, mount_cmd)
+        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
+                       'releases/download/0.24.0-romilb-upstream/goofys '
+                       '-O /usr/local/bin/goofys && '
+                       'sudo chmod +x /usr/local/bin/goofys')
+        mount_cmd = ('goofys -o allow_other '
+                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
+                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+                     f'{self.bucket.name} {mount_path}')
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -1064,9 +1069,17 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = 'wget -nc https://github.com/GoogleCloudPlatform/gcsfuse/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb -O /tmp/gcsfuse.deb && sudo dpkg --install /tmp/gcsfuse.deb'
-        mount_cmd = f'gcsfuse -o allow_other --stat-cache-capacity {self._STAT_CACHE_CAPACITY} --stat-cache-ttl {self._STAT_CACHE_TTL} --type-cache-ttl {self._TYPE_CACHE_TTL} {self.bucket.name} {mount_path}'
-        return mounting_utils.get_mounting_command(mount_path, install_cmd, mount_cmd)
+        install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
+                       '/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb '
+                       '-O /tmp/gcsfuse.deb && '
+                       'sudo dpkg --install /tmp/gcsfuse.deb')
+        mount_cmd = ('gcsfuse -o allow_other '
+                     f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
+                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
+                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+                     f'{self.bucket.name} {mount_path}')
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
