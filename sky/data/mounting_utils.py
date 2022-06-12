@@ -40,7 +40,7 @@ def get_mounting_command(mount_path: str,
         # Install MOUNT_BINARY if not already installed
         if ! [ -x "$(command -v $MOUNT_BINARY)" ]; then
           echo "Installing $MOUNT_BINARY..."
-          {installation_cmd}
+          {install_cmd}
         else
           echo "$MOUNT_BINARY already installed. Proceeding..."
         fi
