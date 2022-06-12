@@ -596,7 +596,7 @@ class RetryingVmProvisioner(object):
         # because we may have an existing cluster there.
         # Get the *previous* cluster status and handle.
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster_name)
+            cluster_name, has_lock=True)
         if handle is not None:
             try:
                 config = backend_utils.read_yaml(handle.cluster_yaml)
@@ -788,7 +788,7 @@ class RetryingVmProvisioner(object):
 
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
-            cluster_name)[0]
+            cluster_name, has_lock=True)[0]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -1319,7 +1319,7 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
-                    backend_utils.refresh_cluster_status_handle(cluster_name))
+                    backend_utils.refresh_cluster_status_handle(cluster_name, has_lock=True))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly
@@ -2259,7 +2259,7 @@ class CloudVmRayBackend(backends.Backend):
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
-            handle.cluster_name)
+            handle.cluster_name, has_lock=True)
         cluster_name = handle.cluster_name
         tpu_rc = 0
         if terminate and isinstance(cloud, clouds.Azure):

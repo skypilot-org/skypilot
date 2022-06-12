@@ -1453,7 +1453,7 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
+def _update_cluster_status(cluster_name: str, has_lock: bool) -> Optional[Dict[str, Any]]:
     """Update the cluster status by checking ray cluster and real status from cloud.
 
     The function will update the cached cluster status in the global state. For the
@@ -1464,6 +1464,8 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
       If the cluster is terminated or does not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
     """
+    if has_lock:
+        return _update_cluster_status_no_lock(cluster_name)
 
     try:
         # TODO(mraheja): remove pylint disabling when filelock
@@ -1482,7 +1484,9 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
 @timeline.event
 def refresh_cluster_status_handle(
     cluster_name: str,
-    force_refresh: bool = False
+    *,
+    force_refresh: bool = False,
+    has_lock: bool = False,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
@@ -1494,7 +1498,7 @@ def refresh_cluster_status_handle(
         if force_refresh or record['autostop'] >= 0:
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
-            record = _update_cluster_status(cluster_name)
+            record = _update_cluster_status(cluster_name, has_lock=has_lock)
             if record is None:
                 return None, None
     return record['status'], handle
