@@ -92,13 +92,12 @@ def _get_cluster_config_template(cloud):
 
 def _path_size_megabytes(path: str) -> int:
     """Returns the size of 'path' (directory or file) in megabytes."""
-    path = pathlib.Path(path).expanduser().resolve()
+    resolved_path = pathlib.Path(path).expanduser().resolve()
     git_exclude_filter = ''
-    if (path / _GIT_EXCLUDE).exists():
+    if (resolved_path / _GIT_EXCLUDE).exists():
         # Ensure file exists; otherwise, rsync will error out.
         git_exclude_filter = _RSYNC_EXCLUDE_OPTION.format(
-            str(path / _GIT_EXCLUDE))
-    path = str(path)
+            str(resolved_path / _GIT_EXCLUDE))
     rsync_output = str(
         subprocess.check_output(
             f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
@@ -1495,6 +1494,7 @@ class CloudVmRayBackend(backends.Backend):
         else:
             assert os.path.isdir(
                 full_workdir), f'{full_workdir} should be a directory.'
+            # FIXME(zongheng): audit; why not give users control to add '/'?
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
@@ -1544,8 +1544,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_storage_mounts(self, handle: ResourceHandle,
                                 storage_mounts: Dict[Path,
                                                      storage_lib.Storage]):
-        """Executes storage mounts - installing mounting tools and mounting"""
-
+        """Executes storage mounts: installing mounting tools and mounting."""
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
         # in the '_execute_file_mounts' method.
@@ -1624,6 +1623,7 @@ class CloudVmRayBackend(backends.Backend):
             # (otherwise we have '<abs path to cwd>/gs://.../object/').
             full_src = os.path.abspath(os.path.expanduser(src))
             if not os.path.islink(full_src) and not os.path.isfile(full_src):
+                # FIXME(zongheng): audit; why not give users control to add '/'?
                 src = os.path.join(src, '')  # Adds trailing / if needed.
 
         def _sync_node(ip):
@@ -2444,12 +2444,12 @@ class CloudVmRayBackend(backends.Backend):
         rsync_command.append(_RSYNC_FILTER_OPTION)
 
         # --exclude-from
-        source = pathlib.Path(source).expanduser().resolve()
-        if (source / _GIT_EXCLUDE).exists():
+        resolved_source = pathlib.Path(source).expanduser().resolve()
+        if (resolved_source / _GIT_EXCLUDE).exists():
             # Ensure file exists; otherwise, rsync will error out.
             rsync_command.append(
-                _RSYNC_EXCLUDE_OPTION.format(str(source / _GIT_EXCLUDE)))
-        source = str(source)
+                _RSYNC_EXCLUDE_OPTION.format(str(resolved_source /
+                                                 _GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,
