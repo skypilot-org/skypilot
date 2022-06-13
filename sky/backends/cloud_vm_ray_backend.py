@@ -2378,7 +2378,7 @@ class CloudVmRayBackend(backends.Backend):
         if returncode != 0:
             if purge:
                 logger.warning(
-                    _TEARDOWN_PURGE_WARNING.format(reason='cloud provider'))
+                    _TEARDOWN_PURGE_WARNING.format(reason='stopping/terminating cluster nodes'))
             else:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
@@ -2394,7 +2394,7 @@ class CloudVmRayBackend(backends.Backend):
                               handle: ResourceHandle,
                               terminate: bool,
                               purge: bool = False) -> bool:
-        """Cleanup local configs/chaches and delete TPUs after teardown.
+        """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
         * Deleting the TPUs;
@@ -2420,7 +2420,7 @@ class CloudVmRayBackend(backends.Backend):
                     logger.info(f'TPU {handle.tpu_name} not found. '
                                 'It should have been deleted already.')
                 elif purge:
-                    logger.warning(_TEARDOWN_PURGE_WARNING.format(reason='TPU'))
+                    logger.warning(_TEARDOWN_PURGE_WARNING.format(reason='stopping/terminating TPU'))
                 else:
                     logger.error(
                         _TEARDOWN_FAILURE_MESSAGE.format(

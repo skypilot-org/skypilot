@@ -1435,13 +1435,18 @@ def _update_cluster_status_no_lock(
     # where the cluster is terminated by the user manually through the UI.
     to_terminate = not node_statuses
 
-    # A cluster is considered "abnormal" if
-    #   * the number of existing nodes are not as required; or
-    #   * >=1 nodes are in non-STOPPED/TERMINATED status.
+    # A cluster is considered "abnormal", if not all nodes are TERMINATED or not all
+    # nodes are STOPPED. We check that with the following logic:
+    #   * not all nodes are terminated and there's at least one node terminated; or
+    #   * any of the non-TERMINATED nodes is in a non-STOPPED status.
     #
     # This includes these special cases:
-    # All stopped are considered healthy, because all the nodes have the same valid status.
-    # All UP should be considered unhealthy, because the ray cluster is probably down.
+    # All stopped are considered normal and will be cleaned up at the end of the function.
+    # Some of the nodes UP should be considered abnormal, because the ray cluster is
+    # probably down.
+    # The cluster is partially terminated or stopped should be considered normal.
+    #
+    # An abnormal cluster will transition to INIT and have any autostop setting reset.
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
@@ -1462,11 +1467,9 @@ def _update_cluster_status_no_lock(
         # that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        record['status'] = global_user_state.ClusterStatus.INIT
         global_user_state.set_cluster_status(
             cluster_name, global_user_state.ClusterStatus.INIT)
-        record['autostop'] = -1
-        return record
+        return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
     # TODO(zhwu): adding output for the cluster removed by status refresh.
