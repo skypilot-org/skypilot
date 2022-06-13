@@ -60,7 +60,6 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 # Timeout for provision a cluster and wait for it to be ready in seconds.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
-
 # The git exclude file to support.
 _GIT_EXCLUDE = '.git/info/exclude'
 
@@ -2292,7 +2291,7 @@ class CloudVmRayBackend(backends.Backend):
                          terminate: bool,
                          purge: bool = False) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
-        
+
         NOTE: This method should not be called without holding the cluster
         status lock already.
         """
@@ -2378,7 +2377,8 @@ class CloudVmRayBackend(backends.Backend):
                         stdin=subprocess.DEVNULL)
         if returncode != 0:
             if purge:
-                logger.warning(_TEARDOWN_PURGE_WARNING.format(reason='cloud provider'))
+                logger.warning(
+                    _TEARDOWN_PURGE_WARNING.format(reason='cloud provider'))
             else:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
@@ -2395,7 +2395,7 @@ class CloudVmRayBackend(backends.Backend):
                               terminate: bool,
                               purge: bool = False) -> bool:
         """Cleanup local configs/chaches and delete TPUs after teardown.
-        
+
         This method will handle the following cleanup steps:
         * Deleting the TPUs;
         * Removing ssh configs for the cluster;
