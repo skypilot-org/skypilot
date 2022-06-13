@@ -1342,10 +1342,6 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                       show_default=True)
 
     for benchmark in to_delete:
-        clusters = global_user_state.get_clusters_from_benchmark(
-            benchmark['name'])
-        for cluster in clusters:
-            global_user_state.set_cluster_benchmark_name(cluster['name'], None)
         benchmark_state.delete_benchmark(benchmark['name'])
         BenchmarkController.remove_logs(benchmark['name'])
     click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
