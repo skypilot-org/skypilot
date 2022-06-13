@@ -103,3 +103,8 @@ class FetchIPError(Exception):
 class NetworkError(Exception):
     """Raised when network fails."""
     pass
+
+
+class ClusterStatusFetchingError(Exception):
+    """Raised when fetching the cluster status fails."""
+    pass
