@@ -1,5 +1,6 @@
 import colorama
 import copy
+import getpass
 import json
 import os
 import prettytable
@@ -92,13 +93,19 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
     logger.info(f'{candidate_table}\n')
 
 
-def _create_benchmark_bucket(bucket_name: str, bucket_type: data.StoreType = data.StoreType.S3) -> None:
+def _get_benchmark_bucket_name() -> str:
+    pass
+
+
+def _create_benchmark_bucket(bucket_type: data.StoreType) -> str:
+    bucket_name = _get_benchmark_bucket_name()
     handle = global_user_state.get_handle_from_storage_name(bucket_name)
     if handle is None:
         logger.info(f'Creating a bucket {bucket_name} '
                     'to save the benchmark logs.')
         storage = data.Storage(bucket_name, source=None, persistent=True)
         storage.add_store(bucket_type)
+    return bucket_name
 
 
 def _launch_with_log(cluster: str, cmd: List[str]) -> None:
@@ -118,7 +125,7 @@ def _launch_with_log(cluster: str, cmd: List[str]) -> None:
 class BenchmarkController:
 
     @staticmethod
-    def generate_configs(benchmark: str, config: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Tuple[List[str], List[Dict[str, Any]]]:
+    def generate_configs(benchmark: str, config: Dict[str, Any], candidates: List[Dict[str, Any]], benchmark_bucket_type: data.StoreType = data.StoreType.S3) -> Tuple[List[str], List[Dict[str, Any]]]:
         # Generate a config for each cluster.
         clusters = _generate_cluster_names(benchmark, len(candidates))
         candidate_configs = []
@@ -135,8 +142,9 @@ class BenchmarkController:
             if 'file_mounts' not in candidate_config:
                 candidate_config['file_mounts'] = {}
             candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
-                'name': _SKY_BENCHMARK_BUCKET,
+                'name': '', # The bucket name is decided at launch time.
                 'mode': 'MOUNT',
+                'store': benchmark_bucket_type.value,
             }
 
             # Create a sym link to a directory in the benchmark bucket.
@@ -155,7 +163,10 @@ class BenchmarkController:
     @staticmethod
     def launch(benchmark: str, clusters: List[str], candidate_configs: List[Dict[str, Any]], commandline_args: List[Dict[str, Any]]) -> None:
         # Create a Sky storage to save the benchmark logs.
-        _create_benchmark_bucket(_SKY_BENCHMARK_BUCKET)
+        bucket_type = candidate_configs[0]['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]['store']
+        bucket_name = _create_benchmark_bucket(bucket_type=bucket_type)
+        for candidate_config in candidate_configs:
+            candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]['name'] = bucket_name
 
         # Generate a temporary yaml file for each cluster.
         yaml_fds = []
