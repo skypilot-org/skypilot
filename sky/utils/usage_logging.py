@@ -1,15 +1,17 @@
 """Loki logging"""
-import requests
+
+import datetime
 import json
 import os
-import datetime
-import pytz
-from sky.utils import base_utils
 import re
 import traceback
 
-LOG_URL = 'https://178762:eyJrIjoiNzhlODNmOGQ1ZjUwOGJmYjE4NDI3YTMzNzFmMWMxZDc0YzA3ZmVlZiIsIm4iOiJhZHNmZHNhIiwiaWQiOjYxNTA0Nn0=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
+import pytz
+import requests
 
+from sky.utils import base_utils
+
+LOG_URL = 'https://178762:eyJrIjoiNzhlODNmOGQ1ZjUwOGJmYjE4NDI3YTMzNzFmMWMxZDc0YzA3ZmVlZiIsIm4iOiJhZHNmZHNhIiwiaWQiOjYxNTA0Nn0=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
 
 def _make_labels_str(d):
     dict_str = '{'
@@ -20,12 +22,13 @@ def _make_labels_str(d):
 
 
 def _send_message(labels, msg):
-    if os.environ.get('SKY_USAGE_COLLECTION') == '1':
+    if os.environ.get('SKY_DISABLE_USAGE_COLLECTION') == '1':
         return
     curr_datetime = datetime.datetime.now(pytz.timezone('US/Eastern'))
     curr_datetime = curr_datetime.isoformat('T')
 
     labels['host'] = base_utils.get_user()
+    labels['transaction_id'] = base_utils.transaction_id
     labels_str = _make_labels_str(labels)
 
     headers = {'Content-type': 'application/json'}
@@ -64,10 +67,10 @@ def _clean_yaml(yaml_info):
     for line in yaml_info:
         if len(line) > 1 and line[0].strip() == line[0]:
             redact = False
-        if line[0:5] == 'setup':
+        if line[0:5] == 'setup:':
             redact = True
             redact_type = 'SETUP'
-        if line[0:3] == 'run':
+        if line[0:3] == 'run:':
             redact = True
             redact_type = 'RUN'
 

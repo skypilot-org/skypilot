@@ -1,8 +1,11 @@
 """Utils shared between all of sky"""
 
 import sys
+import time
 import os
 import uuid
+
+transaction_id = time.time()
 
 
 def get_pretty_entry_point() -> str:

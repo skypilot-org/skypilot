@@ -1,14 +1,15 @@
 """Prometheus Metric Collection Module"""
-from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 import time
 import os
 import functools
-from sky import cloud_logging
+
+import prometheus_client
+
 from sky.utils import base_utils
+from sky.utils import usage_logging
 
 PROM_PUSHGATEWAY_URL = '3.216.190.117:9091'
-CURRENT_CLUSTER_NAME = 'NONE'
-
+current_cluster_name = 'NONE'
 
 class Label:
     """
@@ -25,7 +26,7 @@ class Label:
 
 class Metric:
     """
-    Single prometheus Gauge metric
+    Single prometheus prometheus_client.Gauge metric
     """
 
     def __init__(self, name, desc):
@@ -33,10 +34,9 @@ class Metric:
         self.desc = desc
         self.val = 0
 
-    def make_prom(self, label_names):
-        self.prom_metric = Gauge(self.name, self.desc, label_names)
-
-    def register(self, registry):
+    def make_prom(self, label_names, registry):
+        self.prom_metric = prometheus_client.Gauge(
+            self.name, self.desc, label_names)
         registry.register(self.prom_metric)
 
     def set_value(self, val):
@@ -71,6 +71,7 @@ class MetricLogger:
         self.with_runtime = with_runtime
 
         self.labels.append(Label('user'))
+        self.labels.append(Label('transaction_id'))
 
         if with_cluster_name:
             self.labels.append(Label('cluster_name'))
@@ -89,18 +90,19 @@ class MetricLogger:
         self.label_dict = {e.name: e for e in self.labels}
         self.metric_dict = {e.name: e for e in self.metrics}
 
-        self.registry = CollectorRegistry()
+        self.registry = prometheus_client.CollectorRegistry()
 
         labels_list = [e.name for e in labels]
         for metric in self.metrics:
-            metric.make_prom(labels_list)
-            metric.register(self.registry)
+            metric.make_prom(labels_list, self.registry)
 
         def decorator(func):
 
             @functools.wraps(func)
             def wrapper_logging(*args, **kwargs):
-                self.set_labels({'user': base_utils.get_user()})
+                self.set_labels({
+                    'user': base_utils.get_user(),
+                    'transaction_id': base_utils.transaction_id})
                 saved_ex = None
                 try:
                     start = time.time()
@@ -109,18 +111,18 @@ class MetricLogger:
                         self.set_metrics(
                             {self.runtime_metric: time.time() - start})
                     if self.with_cluster_name:
-                        self.set_labels({'cluster_name': CURRENT_CLUSTER_NAME})
+                        self.set_labels({'cluster_name': current_cluster_name})
                 except Exception as ex:  # pylint: disable=broad-except
                     if with_return_code:
                         self.set_return_code(-1)
-                    cloud_logging.send_trace()
+                    usage_logging.send_trace()
                     saved_ex = ex
                 labels = [e.val for e in self.labels]
                 for metric in metrics:
                     metric.update_prom_metric(labels)
-                if os.environ.get('SKY_USAGE_COLLECTION') == '1':
+                if os.environ.get('SKY_DISABLE_USAGE_COLLECTION') == '1':
                     return
-                push_to_gateway(PROM_PUSHGATEWAY_URL,
+                prometheus_client.push_to_gateway(PROM_PUSHGATEWAY_URL,
                                 job=f'{base_utils.get_user()} {self.func_name}',
                                 registry=self.registry)
                 if saved_ex:

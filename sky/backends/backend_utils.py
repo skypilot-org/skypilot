@@ -34,7 +34,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import exceptions
 from sky import sky_logging
-from sky import cloud_logging
+from sky.utils import usage_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
 
@@ -610,7 +610,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
             }))
-    cloud_logging.send_yaml(yaml_path, determined=True)
+    usage_logging.send_yaml(yaml_path, determined=True)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:

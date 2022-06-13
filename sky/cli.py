@@ -48,8 +48,8 @@ from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
-from sky import cloud_logging
-from sky import metrics
+from sky.utils import usage_logging
+from sky.utils import metrics
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
@@ -67,7 +67,7 @@ if not os.path.exists(PRIVACY_POLICY_PATH):
         'User-input setup and run commands are omit from '
         'usage to ensure privacy. '
         'Usage logging can also be disabled by setting '
-        'environment variable SKY_USAGE_COLLECTION=1.',
+        'environment variable SKY_DISABLE_USAGE_COLLECTION=1.',
         fg='yellow')
 
 if typing.TYPE_CHECKING:
@@ -96,7 +96,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
 }
 
-cloud_logging.send_cli_cmd()
+usage_logging.send_cli_cmd()
 
 
 def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
@@ -652,7 +652,7 @@ def launch(
         if is_yaml:
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
-            cloud_logging.send_yaml(entrypoint)
+            usage_logging.send_yaml(entrypoint)
         else:
             # Treat entrypoint as a bash command.
             click.secho('Task from command: ', fg='yellow', nl=False)
