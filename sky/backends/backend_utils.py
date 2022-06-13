@@ -1322,7 +1322,7 @@ def _query_status_gcp(
     }
     # TODO(zhwu): The status of the TPU attached to the cluster should also be
     # checked, since TPUs are not part of the VMs.
-    query_cmd = (f'gcloud compute instances list '
+    query_cmd = ('gcloud compute instances list '
                  f'--filter="labels.ray-cluster-name={cluster}" '
                  '--format="value(status)"')
     return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
