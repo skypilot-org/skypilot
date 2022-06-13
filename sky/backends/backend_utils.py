@@ -1444,7 +1444,7 @@ def _update_cluster_status_no_lock(
     # All stopped are considered normal and will be cleaned up at the end of the function.
     # Some of the nodes UP should be considered abnormal, because the ray cluster is
     # probably down.
-    # The cluster is partially terminated or stopped should be considered normal.
+    # The cluster is partially terminated or stopped should be considered abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting reset.
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
