@@ -86,32 +86,43 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
     logger.info(f'{candidate_table}\n')
 
 
-def _get_benchmark_bucket(bucket_type: str) -> str:
+def _get_benchmark_bucket() -> Tuple[str, str]:
     if os.path.exists(_BENCHMARK_BUCKET_CONFIG):
         with open(_BENCHMARK_BUCKET_CONFIG, 'r') as f:
             config = json.load(f)
+        bucket_name = config['name']
+        bucket_type = config['store']
+        handle = global_user_state.get_handle_from_storage_name(bucket_name)
+        if handle is not None:
+            return bucket_name, bucket_type
+
+    # Generate a bucket name.
+    # TODO(woosuk): Ensure the global uniqueness of the bucket name.
+    bucket_name = f'sky-benchmark-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+
+    # Select the bucket type.
+    enabled_clouds = global_user_state.get_enabled_clouds()
+    if sky.AWS() in enabled_clouds:
+        bucket_type = data.StoreType.S3
+    elif sky.GCP() in enabled_clouds:
+        bucket_type = data.StoreType.GCS
+    elif sky.Azure() in enabled_clouds:
+        bucket_type = data.StoreType.AZURE
     else:
-        config = {}
+        raise ValueError('No cloud is enabled. '
+                         'Please enable at least one cloud.')
 
-    bucket_name = config.get(bucket_type, None)
-    if bucket_name is None:
-        # TODO(woosuk): Ensure the global uniqueness of the bucket name.
-        username = getpass.getuser()
-        bucket_name = f'sky-benchmark-{uuid.uuid4().hex[:4]}-{username}'
+    # Create a benchmark bucket.
+    logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')
+    storage = data.Storage(bucket_name, source=None, persistent=True)
+    storage.add_store(bucket_type)
 
-    # Create a bucket if it doesn't exist.
-    handle = global_user_state.get_handle_from_storage_name(bucket_name)
-    if handle is None:
-        logger.info(f'Creating a bucket {bucket_name} '
-                    'to save the benchmark logs.')
-        storage = data.Storage(bucket_name, source=None, persistent=True)
-        storage.add_store(bucket_type)
-
-    # Save the bucket name to the config file.
-    config[bucket_type] = bucket_name
+    # Save the bucket name and type to the config file.
+    config['name'] = bucket_name
+    config['store'] = bucket_type.value
     with open(_BENCHMARK_BUCKET_CONFIG, 'w') as f:
         json.dump(config, f)
-    return bucket_name
+    return bucket_name, bucket_type.value
 
 
 def _launch_with_log(cluster: str, cmd: List[str]) -> None:
@@ -131,7 +142,7 @@ def _launch_with_log(cluster: str, cmd: List[str]) -> None:
 class BenchmarkController:
 
     @staticmethod
-    def generate_configs(benchmark: str, config: Dict[str, Any], candidates: List[Dict[str, Any]], benchmark_bucket_type: data.StoreType = data.StoreType.S3) -> Tuple[List[str], List[Dict[str, Any]]]:
+    def generate_configs(benchmark: str, config: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Tuple[List[str], List[Dict[str, Any]]]:
         # Generate a config for each cluster.
         clusters = _generate_cluster_names(benchmark, len(candidates))
         candidate_configs = []
@@ -147,11 +158,9 @@ class BenchmarkController:
             # Mount the benchmark bucket to SKY_BENCHMARK_DIR.
             if 'file_mounts' not in candidate_config:
                 candidate_config['file_mounts'] = {}
+            # The bucket name and type are specified at launch time.
             candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
-                'name': '', # The bucket name will be filled at launch time.
-                'mode': 'MOUNT',
-                'store': benchmark_bucket_type.value,
-            }
+                'name': '', 'mode': 'MOUNT', 'store': ''}
 
             # Create a sym link to a directory in the benchmark bucket.
             benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark, cluster)
@@ -174,10 +183,11 @@ class BenchmarkController:
     @staticmethod
     def launch(benchmark: str, clusters: List[str], candidate_configs: List[Dict[str, Any]], commandline_args: List[Dict[str, Any]]) -> None:
         # Use a Sky storage to save the benchmark logs.
-        bucket_type = candidate_configs[0]['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]['store']
-        bucket_name = _get_benchmark_bucket(bucket_type=bucket_type)
+        bucket_name, bucket_type = _get_benchmark_bucket()
         for candidate_config in candidate_configs:
-            candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]['name'] = bucket_name
+            bucket_config = candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]
+            bucket_config['name'] = bucket_name
+            bucket_config['store'] = bucket_type
 
         # Generate a temporary yaml file for each cluster.
         yaml_fds = []
