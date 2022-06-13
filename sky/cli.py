@@ -1150,8 +1150,7 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
     if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download):
-        clusters = global_user_state.get_clusters_from_benchmark(benchmark)
-        clusters = [cluster['name'] for cluster in clusters]
+        clusters = benchmark_state.get_benchmark_clusters(benchmark)
         BenchmarkController.download_logs(benchmark, clusters)
         BenchmarkController.parse_logs(benchmark, clusters)
 
@@ -1232,12 +1231,15 @@ def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
-    clusters = global_user_state.get_clusters_from_benchmark(benchmark)
-    to_stop = [
-        cluster['name']
-        for cluster in clusters
-        if cluster['name'] not in clusters_to_exclude
-    ]
+    clusters = benchmark_state.get_benchmark_clusters(benchmark)
+    to_stop = []
+    for cluster in clusters:
+        if cluster in clusters_to_exclude:
+            continue
+        if global_user_state.get_cluster_from_name(cluster) is None:
+            continue
+        to_stop.append(cluster)
+
     _terminate_or_stop_clusters(to_stop,
                                 apply_to_all=False,
                                 terminate=terminate,

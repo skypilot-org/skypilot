@@ -30,13 +30,14 @@ _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
 
 
 def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
-    names = []
-    for i in range(num_clusters):
-        name = f'{benchmark}-{i}'
+    if num_clusters == 1:
+        names = [f'benchmark-{benchmark}']
+    else:
+        names = [f'benchmark-{benchmark}-{i}' for i in range(num_clusters)]
+    for name in names:
         if global_user_state.get_cluster_from_name(name) is not None:
             raise ValueError(f'Cluster name {name} is taken. '
                              'Try using a different benchmark name.')
-        names.append(name)
     return names
 
 
@@ -229,7 +230,6 @@ class BenchmarkController:
                     task_name = candidate_configs[0].get('name', None)
                     benchmark_state.add_benchmark(benchmark, task_name, bucket_name)
                     benchmark_created = True
-                global_user_state.set_cluster_benchmark_name(cluster, benchmark)
                 benchmark_state.add_benchmark_result(benchmark, record['handle'])
 
     @staticmethod

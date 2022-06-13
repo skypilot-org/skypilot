@@ -164,6 +164,14 @@ def get_benchmarks() -> List[Dict[str, Any]]:
     return records
 
 
+def get_benchmark_clusters(benchmark_name: str) -> List[str]:
+    """Get all clusters for a benchmark."""
+    rows = _BENCHMARK_DB.cursor.execute(
+        'SELECT cluster FROM benchmark_results WHERE benchmark=(?)',
+        (benchmark_name,))
+    return [row[0] for row in rows]
+
+
 def get_benchmark_results(benchmark_name: str) -> List[Dict[str, Any]]:
     rows = _BENCHMARK_DB.cursor.execute(
         'select * from benchmark_results where benchmark=(?)',
