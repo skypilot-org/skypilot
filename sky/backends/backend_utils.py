@@ -1436,6 +1436,9 @@ def _update_cluster_status_no_lock(
                      ) or len(node_statuses) != handle.launched_nodes
     if is_abnormal:
         # Reset the autostop to avoid false information with best effort.
+        # Side effect: if the status is refreshed during autostopping, the
+        # autostop field in the local cache will be reset, even though the
+        # cluster will still be correctly stopped.
         try:
             backend = backends.CloudVmRayBackend()
             backend.set_autostop(handle, -1)
