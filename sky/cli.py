@@ -1022,6 +1022,8 @@ def benchmark_launch(
         config = backend_utils.read_yaml(os.path.expanduser(entrypoint))
     if config is None:
         config = {}
+    if 'resources' not in config:
+        config['resources'] = {}
 
     # Override the yaml config with the command line arguments.
     if name is not None:
