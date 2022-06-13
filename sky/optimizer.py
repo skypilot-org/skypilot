@@ -645,9 +645,9 @@ class Optimizer:
             elif isinstance(accelerators, dict) and len(accelerators) == 1:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
-
+            spot = '[Spot]' if resources.use_spot else ''
             return [
-                str(resources.cloud), resources.instance_type,
+                str(resources.cloud), resources.instance_type + spot,
                 str(accelerators)
             ]
 
