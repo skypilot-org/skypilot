@@ -1297,7 +1297,6 @@ def _query_status_aws(
     region = ray_provider_config['region']
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
-                 'Name=tag:ray-node-type,Values=head '
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1324,8 +1323,8 @@ def _query_status_gcp(
     # TODO(zhwu): The status of the TPU attached to the cluster should also be
     # checked, since TPUs are not part of the VMs.
     query_cmd = (f'gcloud compute instances list '
-                 f'--filter="labels.ray-cluster-name={cluster} AND '
-                 f'labels.ray-node-type=head" --format="value(status)"')
+                 f'--filter="labels.ray-cluster-name={cluster}" '
+                 '--format="value(status)"')
     return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
 
 
@@ -1350,9 +1349,8 @@ def _query_status_azure(
     query_cmd = textwrap.dedent(f"""\
             az vm show -d --ids \
             $(az vm list --query \
-            "[?tags.\"ray-cluster-name\" == '{cluster}' \
-            && tags.\"ray-node-type\" == 'head'].id" -o tsv) \
-            --query "powerState" -o tsv
+            "[?tags.\"ray-cluster-name\" == '{cluster}'].id" \
+            -o tsv) --query "powerState" -o tsv
         """)
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
