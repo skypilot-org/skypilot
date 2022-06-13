@@ -154,6 +154,11 @@ class BenchmarkController:
             candidate_config['setup'] = (f'mkdir -p {benchmark_dir}; '
                 + f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; '
                 + candidate_config['setup'])
+
+            # Copy the sky callback wheel to the home directory.
+            candidate_config['setup'] = ('mkdir -p ~/sky_utils; '
+                + f'cp "$(echo {backend_utils.SKY_REMOTE_PATH}/sky_callback-*.whl)" ~/sky_utils; '
+                + candidate_config['setup'])
             candidate_configs.append(candidate_config)
 
         candidate_resources = _get_optimized_resources(candidate_configs)

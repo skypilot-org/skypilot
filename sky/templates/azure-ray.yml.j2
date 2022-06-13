@@ -95,7 +95,6 @@ setup_commands:
   - pip3 uninstall sky -y &> /dev/null;
     pip3 install "$(echo {{sky_remote_path}}/sky-*.whl)[azure]";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
-  - mkdir -p ~/sky_utils && cp "$(echo {{sky_remote_path}}/sky_callback-*.whl)" ~/sky_utils;
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
