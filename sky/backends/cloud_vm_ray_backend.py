@@ -70,7 +70,7 @@ _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
-    '{cluster_name}. '
+    '{cluster_name}. {extra_reason}'
     'If you want to ignore this error and remove the cluster '
     'from from Sky\'s status table, use `sky down --purge`.'
     f'{colorama.Style.RESET_ALL}\n'
@@ -81,7 +81,7 @@ _TEARDOWN_FAILURE_MESSAGE = (
 
 _TEARDOWN_PURGE_WARNING = (
     f'{colorama.Fore.YELLOW}'
-    'WARNING: Received non-zero exit code from cloud provider. '
+    'WARNING: Received non-zero exit code from {reason}. '
     'Make sure resources are manually deleted.'
     f'{colorama.Style.RESET_ALL}')
 
@@ -615,7 +615,7 @@ class RetryingVmProvisioner(object):
         # because we may have an existing cluster there.
         # Get the *previous* cluster status and handle.
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster_name, has_lock=True)
+            cluster_name, acquire_per_cluster_status_lock=False)
         if handle is not None:
             try:
                 config = backend_utils.read_yaml(handle.cluster_yaml)
@@ -807,7 +807,7 @@ class RetryingVmProvisioner(object):
 
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
-            cluster_name, has_lock=True)[0]
+            cluster_name, acquire_per_cluster_status_lock=False)[0]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -1338,8 +1338,8 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
-                    backend_utils.refresh_cluster_status_handle(cluster_name,
-                                                                has_lock=True))
+                    backend_utils.refresh_cluster_status_handle(
+                        cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly
@@ -1464,18 +1464,22 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
                 return handle
 
-    def set_autostop(self, handle: ResourceHandle,
-                     idle_minutes_to_autostop: Optional[int]) -> None:
+    def set_autostop(self,
+                     handle: ResourceHandle,
+                     idle_minutes_to_autostop: Optional[int],
+                     stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME)
             returncode, _, stderr = self.run_on_head(handle,
                                                      code,
-                                                     require_outputs=True)
+                                                     require_outputs=True,
+                                                     stream_logs=stream_logs)
             backend_utils.handle_returncode(returncode,
                                             code,
                                             'Failed to set autostop',
-                                            stderr=stderr)
+                                            stderr=stderr,
+                                            stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
@@ -2273,13 +2277,18 @@ class CloudVmRayBackend(backends.Backend):
                          handle: ResourceHandle,
                          terminate: bool,
                          purge: bool = False) -> bool:
+        """Teardown the cluster without acquiring the cluster status lock.
+        
+        NOTE: This method should not be called without holding the cluster
+        status lock already.
+        """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
-            handle.cluster_name, has_lock=True)
+            handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
@@ -2355,10 +2364,11 @@ class CloudVmRayBackend(backends.Backend):
                         stdin=subprocess.DEVNULL)
         if returncode != 0:
             if purge:
-                logger.warning(_TEARDOWN_PURGE_WARNING)
+                logger.warning(_TEARDOWN_PURGE_WARNING.format(reason='cloud provider'))
             else:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
+                        extra_reason='',
                         cluster_name=handle.cluster_name,
                         stdout=stdout,
                         stderr=stderr))
@@ -2370,6 +2380,14 @@ class CloudVmRayBackend(backends.Backend):
                               handle: ResourceHandle,
                               terminate: bool,
                               purge: bool = False) -> bool:
+        """Cleanup local configs/chaches and delete TPUs after teardown.
+        
+        This method will handle the following cleanup steps:
+        * Deleting the TPUs;
+        * Removing ssh configs for the cluster;
+        * Updating the local state of the cluster;
+        * Removing the terminated cluster's scripts and ray yaml files.
+        """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
@@ -2387,12 +2405,12 @@ class CloudVmRayBackend(backends.Backend):
                 if _TPU_NOT_FOUND_ERROR in tpu_stderr:
                     logger.info(f'TPU {handle.tpu_name} not found. '
                                 'It should have been deleted already.')
-                    tpu_rc = 0
                 elif purge:
-                    logger.warning(_TEARDOWN_PURGE_WARNING)
+                    logger.warning(_TEARDOWN_PURGE_WARNING.format(reason='TPU'))
                 else:
                     logger.error(
                         _TEARDOWN_FAILURE_MESSAGE.format(
+                            extra_reason='It is caused by TPU failure.',
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))

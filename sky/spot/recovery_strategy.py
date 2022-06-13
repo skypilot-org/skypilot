@@ -172,7 +172,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         self.terminate_cluster()
 
         # Step 3
-        logger.debug('Launch the cluster with no cloud/region constraint.')
+        logger.debug('Relaunch the cluster  without constraining to prior '
+                     'cloud/region.')
         launched_time = self.launch(
             max_retry=self._MAX_RETRY_CNT,
             retry_init_gap_seconds=self._RETRY_INIT_GAP_SECONDS,

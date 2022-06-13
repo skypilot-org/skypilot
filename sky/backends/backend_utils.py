@@ -1009,7 +1009,8 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
                       stderr: Optional[str] = None,
-                      raise_error: bool = False) -> None:
+                      raise_error: bool = False,
+                      stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -1019,15 +1020,16 @@ def handle_returncode(returncode: int,
         stderr: The stderr of the command.
         raise_error: Whether to raise an error instead of sys.exit.
     """
+    echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
         if stderr is not None:
-            logger.error(stderr)
+            echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         if raise_error:
             raise exceptions.CommandError(returncode, command, format_err_msg)
-        logger.error(f'Command failed with code {returncode}: {command}')
-        logger.error(format_err_msg)
+        echo(f'Command failed with code {returncode}: {command}')
+        echo(format_err_msg)
         sys.exit(returncode)
 
 
@@ -1425,10 +1427,16 @@ def _update_cluster_status_no_lock(
     # where the cluster is terminated by the user manually through the UI.
     to_terminate = not node_statuses
 
-    is_abnormal = any(
-        status != global_user_state.ClusterStatus.STOPPED
-        for status in node_statuses) or (
-            not to_terminate and len(node_statuses) != handle.launched_nodes)
+    # A cluster is considered "abnormal" if
+    #   * the number of existing nodes are not as required; or
+    #   * >=1 nodes are in non-STOPPED/TERMINATED status.
+    #
+    # This includes these special cases:
+    # All stopped are considered healthy, because all the nodes have the same valid status.
+    # All UP should be considered unhealthy, because the ray cluster is probably down.
+    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
+                   any(status != global_user_state.ClusterStatus.STOPPED
+                       for status in node_statuses))
     if is_abnormal:
         # Reset the autostop to avoid false information with best effort.
         # Side effect: if the status is refreshed during autostopping, the
@@ -1436,7 +1444,7 @@ def _update_cluster_status_no_lock(
         # cluster will still be correctly stopped.
         try:
             backend = backends.CloudVmRayBackend()
-            backend.set_autostop(handle, -1)
+            backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit):  # pylint: disable=broad-except
             logger.debug('Failed to reset autostop.')
         global_user_state.set_cluster_autostop_value(handle.cluster_name, -1)
@@ -1457,8 +1465,9 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(cluster_name: str,
-                           has_lock: bool) -> Optional[Dict[str, Any]]:
+def _update_cluster_status(
+        cluster_name: str,
+        acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
     """Update the cluster status by checking ray cluster and real status from cloud.
 
     The function will update the cached cluster status in the global state. For the
@@ -1469,7 +1478,7 @@ def _update_cluster_status(cluster_name: str,
       If the cluster is terminated or does not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
     """
-    if has_lock:
+    if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
 
     try:
@@ -1491,7 +1500,7 @@ def refresh_cluster_status_handle(
     cluster_name: str,
     *,
     force_refresh: bool = False,
-    has_lock: bool = False,
+    acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
@@ -1503,7 +1512,9 @@ def refresh_cluster_status_handle(
         if force_refresh or record['autostop'] >= 0:
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
-            record = _update_cluster_status(cluster_name, has_lock=has_lock)
+            record = _update_cluster_status(
+                cluster_name,
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
             if record is None:
                 return None, None
     return record['status'], handle
@@ -1539,7 +1550,8 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         total=len(records))
 
     def _refresh_cluster(cluster_name):
-        record = _update_cluster_status(cluster_name, has_lock=False)
+        record = _update_cluster_status(cluster_name,
+                                        acquire_per_cluster_status_lock=True)
         progress.update(task, advance=1)
         return record
 

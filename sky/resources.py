@@ -101,12 +101,9 @@ class Resources:
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
-        region = ''
-        if self._region is not None:
-            region = f' [{self._region}]'
 
         return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args}){region}')
+                f'{accelerators}{accelerator_args})')
 
     @property
     def cloud(self):
