@@ -44,12 +44,17 @@ install_requires = [
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
     'grpcio<=1.43.0',
+    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the fix.
+    # https://github.com/ray-project/ray/pull/25211
+    'protobuf<4.0.0',
     'psutil',
     'pulp',
 ]
 
 extras_require = {
     'aws': ['awscli', 'boto3'],
+    # TODO(zongheng): azure-cli is huge and takes a long time to install.
+    # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     'azure': ['azure-cli==2.30.0'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
