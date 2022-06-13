@@ -1319,7 +1319,8 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
-                    backend_utils.refresh_cluster_status_handle(cluster_name, has_lock=True))
+                    backend_utils.refresh_cluster_status_handle(cluster_name,
+                                                                has_lock=True))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly

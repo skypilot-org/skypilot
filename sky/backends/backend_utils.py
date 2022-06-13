@@ -1432,9 +1432,17 @@ def _update_cluster_status_no_lock(
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
     is_abnormal = any(status != global_user_state.ClusterStatus.STOPPED
-                    for status in node_statuses
-                   ) or len(node_statuses) != handle.launched_nodes
+                      for status in node_statuses
+                     ) or len(node_statuses) != handle.launched_nodes
     if is_abnormal:
+        # Reset the autostop to avoid false information with best effort.
+        try:
+            backend = backends.CloudVmRayBackend()
+            backend.set_autostop(handle, -1)
+        except (Exception, SystemExit):  # pylint: disable=broad-except
+            logger.debug('Failed to reset autostop.')
+        global_user_state.set_cluster_autostop_value(handle.cluster_name, -1)
+
         # If the user starts part of a STOPPED cluster, we still need a status to
         # represent the abnormal status. For spot cluster, it can also represent
         # that the cluster is partially preempted.
@@ -1457,7 +1465,8 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(cluster_name: str, has_lock: bool) -> Optional[Dict[str, Any]]:
+def _update_cluster_status(cluster_name: str,
+                           has_lock: bool) -> Optional[Dict[str, Any]]:
     """Update the cluster status by checking ray cluster and real status from cloud.
 
     The function will update the cached cluster status in the global state. For the
@@ -1538,7 +1547,7 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         total=len(records))
 
     def _refresh_cluster(cluster_name):
-        record = _update_cluster_status(cluster_name)
+        record = _update_cluster_status(cluster_name, has_lock=False)
         progress.update(task, advance=1)
         return record
 
