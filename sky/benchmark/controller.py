@@ -45,7 +45,7 @@ def _get_optimized_resources(candidate_configs: List[Dict[str, Any]]) -> List['r
     optimized_resources = []
     for config in candidate_configs:
         with sky.Dag() as dag:
-            resources = config.pop('resources', None)
+            resources = config.get('resources', None)
             resources = sky.Resources.from_yaml_config(resources)
             task = sky.Task()
             task.set_resources({resources})
