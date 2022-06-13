@@ -1458,9 +1458,9 @@ def _update_cluster_status_no_lock(
         global_user_state.set_cluster_status(
             cluster_name, global_user_state.ClusterStatus.INIT)
         return record
-
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
+    # TODO(zhwu): adding output for the cluster removed by status refresh.
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
