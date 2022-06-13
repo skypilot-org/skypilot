@@ -1417,23 +1417,18 @@ def _update_cluster_status_no_lock(
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
 
-    try:
-        config = read_yaml(handle.cluster_yaml)
-    except FileNotFoundError:
-        # This happens e.g., during smoke tests. A test calls `sky status
-        # --refresh`, processes another cluster (running this current func),
-        # while a concurrent test has torn down itself.
-        #
-        # We know we can't ping the IP and the cluster yaml has been
-        # removed. With high likelihood the cluster has been removed.
-        return None
-
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
-    is_abnormal = any(status != global_user_state.ClusterStatus.STOPPED
-                      for status in node_statuses
-                     ) or len(node_statuses) != handle.launched_nodes
+    # If the node_statuses is empty, all the nodes are terminated. We can
+    # safely set the cluster status to TERMINATED. This handles the edge case
+    # where the cluster is terminated by the user manually through the UI.
+    to_terminate = not node_statuses
+
+    is_abnormal = any(
+        status != global_user_state.ClusterStatus.STOPPED
+        for status in node_statuses) or (
+            not to_terminate and len(node_statuses) != handle.launched_nodes)
     if is_abnormal:
         # Reset the autostop to avoid false information with best effort.
         # Side effect: if the status is refreshed during autostopping, the
@@ -1455,16 +1450,10 @@ def _update_cluster_status_no_lock(
         global_user_state.set_cluster_status(
             cluster_name, global_user_state.ClusterStatus.INIT)
         return record
-    # If the node_statuses is empty, all the nodes are terminated. We can
-    # safely set the cluster status to TERMINATED. This handles the edge case
-    # where the cluster is terminated by the user manually through the UI.
-    to_terminate = not node_statuses
 
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
-    global_user_state.remove_cluster(cluster_name, terminate=to_terminate)
-    # Remove the cluster from the SSH config.
-    auth_config = config['auth']
-    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
+    backend = backends.CloudVmRayBackend()
+    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
 

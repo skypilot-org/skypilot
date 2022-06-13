@@ -68,6 +68,25 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
+_TEARDOWN_FAILURE_MESSAGE = (
+    f'{colorama.Fore.RED}Failed to terminate '
+    '{cluster_name}. '
+    'If you want to ignore this error and remove the cluster '
+    'from from Sky\'s status table, use `sky down --purge`.'
+    f'{colorama.Style.RESET_ALL}\n'
+    '**** STDOUT ****\n'
+    '{stdout}\n'
+    '**** STDERR ****\n'
+    '{stderr}')
+
+_TEARDOWN_PURGE_WARNING = (
+    f'{colorama.Fore.YELLOW}'
+    'WARNING: Received non-zero exit code from cloud provider. '
+    'Make sure resources are manually deleted.'
+    f'{colorama.Style.RESET_ALL}')
+
+_TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -2262,7 +2281,6 @@ class CloudVmRayBackend(backends.Backend):
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name, has_lock=True)
         cluster_name = handle.cluster_name
-        tpu_rc = 0
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2335,59 +2353,72 @@ class CloudVmRayBackend(backends.Backend):
                         # multiprocessing are used.
                         # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
                         stdin=subprocess.DEVNULL)
-
-            if handle.tpu_delete_script is not None:
-                with backend_utils.safe_console_status(
-                        '[bold cyan]Terminating TPU...'):
-                    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                        ['bash', handle.tpu_delete_script],
-                        log_abs_path,
-                        stream_logs=False,
-                        require_outputs=True)
-                if tpu_rc != 0:
-                    logger.error(f'{colorama.Fore.RED}Failed to delete TPU.\n'
-                                 f'**** STDOUT ****\n'
-                                 f'{tpu_stdout}\n'
-                                 f'**** STDERR ****\n'
-                                 f'{tpu_stderr}{colorama.Style.RESET_ALL}')
-
-        if returncode != 0 or tpu_rc != 0:
+        if returncode != 0:
             if purge:
-                logger.warning(
-                    f'{colorama.Fore.YELLOW}'
-                    'WARNING: Received non-zero exit code from cloud provider. '
-                    'Make sure resources are manually deleted.'
-                    f'{colorama.Style.RESET_ALL}')
+                logger.warning(_TEARDOWN_PURGE_WARNING)
             else:
                 logger.error(
-                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
-                    f'If you want to ignore this error and remove the cluster '
-                    f'from from Sky\'s status table, use `sky down --purge`.'
-                    f'{colorama.Style.RESET_ALL}\n'
-                    f'**** STDOUT ****\n'
-                    f'{stdout}\n'
-                    f'**** STDERR ****\n'
-                    f'{stderr}')
+                    _TEARDOWN_FAILURE_MESSAGE.format(
+                        cluster_name=handle.cluster_name,
+                        stdout=stdout,
+                        stderr=stderr))
                 return False
 
-        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
+        return self.post_teardown_cleanup(handle, terminate, purge)
+
+    def post_teardown_cleanup(self,
+                              handle: ResourceHandle,
+                              terminate: bool,
+                              purge: bool = False) -> bool:
+        log_path = os.path.join(os.path.expanduser(self.log_dir),
+                                'teardown.log')
+        log_abs_path = os.path.abspath(log_path)
+
+        if (handle.tpu_delete_script is not None and
+                os.path.exists(handle.tpu_delete_script)):
+            with backend_utils.safe_console_status(
+                    '[bold cyan]Terminating TPU...'):
+                tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
+                    ['bash', handle.tpu_delete_script],
+                    log_abs_path,
+                    stream_logs=False,
+                    require_outputs=True)
+            if tpu_rc != 0:
+                if _TPU_NOT_FOUND_ERROR in tpu_stderr:
+                    logger.info(f'TPU {handle.tpu_name} not found. '
+                                'It should have been deleted already.')
+                    tpu_rc = 0
+                elif purge:
+                    logger.warning(_TEARDOWN_PURGE_WARNING)
+                else:
+                    logger.error(
+                        _TEARDOWN_FAILURE_MESSAGE.format(
+                            cluster_name=handle.cluster_name,
+                            stdout=tpu_stdout,
+                            stderr=tpu_stderr))
+                    return False
+
+        # The cluster file must exist because the cluster_yaml will only
+        # be removed after the cluster entry in the database is removed.
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        auth_config = config['auth']
+        backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
 
         if terminate:
-            # Clean up generated config
-            # No try-except is needed since Ray will fail to teardown the
-            # cluster if the cluster_yaml is missing.
-            os.remove(handle.cluster_yaml)
-
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None
                 os.remove(handle.tpu_create_script)
                 os.remove(handle.tpu_delete_script)
+
+            # Clean up generated config
+            # No try-except is needed since Ray will fail to teardown the
+            # cluster if the cluster_yaml is missing.
+            os.remove(handle.cluster_yaml)
         return True
 
     def _rsync_up(
