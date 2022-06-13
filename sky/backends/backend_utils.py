@@ -1300,7 +1300,7 @@ def _query_status_aws(
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
-    return _process_cli_query('AWS', cluster, query_cmd, ' ', status_map)
+    return _process_cli_query('AWS', cluster, query_cmd, '\t', status_map)
 
 
 def _query_status_gcp(
