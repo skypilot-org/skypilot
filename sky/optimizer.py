@@ -683,9 +683,9 @@ class Optimizer:
             rows = []
             for resources, cost in v.items():
                 if minimize_cost:
-                    cost = round(cost, 2)
+                    cost = f'{cost:.2f}'
                 else:
-                    cost = round(cost / 3600, 2)
+                    cost = f'{cost / 3600:.2f}'
 
                 row = [*_get_resources_element_list(resources), cost, '']
                 if resources == best_plan[task]:

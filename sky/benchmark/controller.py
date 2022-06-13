@@ -58,7 +58,6 @@ def _get_optimized_resources(candidate_configs: List[Dict[str, Any]]) -> List['r
 
 
 def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], candidate_resources: List['resources_lib.Resources']) -> None:
-    # FIXME: refactor this as it shares the code with the printing methods of Optimizer.
     task_str = config.get('name', 'a task')
     num_nodes = config.get('num_nodes', 1)
     plural = 's' if num_nodes > 1 else ''
@@ -75,23 +74,14 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
     }
     candidate_table = log_utils.create_table(columns, **table_kwargs)
 
-    def _get_resources_element_list(
-            resources: 'resources_lib.Resources') -> List[str]:
-        accelerators = resources.accelerators
-        if accelerators is None:
-            accelerators = '-'
-        elif isinstance(accelerators, dict) and len(accelerators) == 1:
-            accelerators, count = list(accelerators.items())[0]
-            accelerators = f'{accelerators}:{count}'
-
-        return [
-            str(resources.cloud), resources.instance_type,
-            str(accelerators)
-        ]
-
     for cluster, resources in zip(clusters, candidate_resources):
+        if resources.accelerators is None:
+            accelerators = '-'
+        else:
+            accelerator, count = list(resources.accelerators.items())[0]
+            accelerators = f'{accelerator}:{count}'
         cost = num_nodes * resources.get_cost(3600)
-        row = [cluster, *_get_resources_element_list(resources), round(cost, 2)]
+        row = [cluster, resources.cloud, resources.instance_type, accelerators, f'{cost:.2f}']
         candidate_table.add_row(row)
     logger.info(f'{candidate_table}\n')
 
