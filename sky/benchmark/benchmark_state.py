@@ -37,6 +37,7 @@ class _BenchmarkSQLiteConn(threading.local):
             CREATE TABLE IF NOT EXISTS benchmark (
             name TEXT PRIMARY KEY,
             task TEXT,
+            bucket TEXT,
             launched_at INTEGER,
             status TEXT)""")
         # Table for Benchmark Results
@@ -74,20 +75,20 @@ class BenchmarkRecord(NamedTuple):
     last_ts: int
 
 
-def add_benchmark(benchmark_name: str, task_name: Optional[str] = None) -> None:
+def add_benchmark(benchmark_name: str, task_name: Optional[str], bucket_name: str) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
     if task_name is None:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
-            '(name, task, launched_at, status) '
-            'VALUES (?, NULL, ?, ?)',
-            (benchmark_name, launched_at, BenchmarkStatus.RUNNING.value))
+            '(name, task, bucket, launched_at, status) '
+            'VALUES (?, NULL, ?, ?, ?)',
+            (benchmark_name, bucket_name, launched_at, BenchmarkStatus.RUNNING.value))
     else:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
-            '(name, task, launched_at, status) '
-            'VALUES (?, ?, ?, ?)', (benchmark_name, task_name, launched_at,
+            '(name, task, bucket, launched_at, status) '
+            'VALUES (?, ?, ?, ?, ?)', (benchmark_name, task_name, bucket_name, launched_at,
                                     BenchmarkStatus.RUNNING.value))
     _BENCHMARK_DB.conn.commit()
 
@@ -136,10 +137,11 @@ def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
     """Get a benchmark from its name."""
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT * FROM benchmark WHERE name=(?)', (benchmark_name,))
-    for name, task, launched_at, status in rows:
+    for name, task, bucket, launched_at, status in rows:
         record = {
             'name': name,
             'task': task,
+            'bucket': bucket,
             'launched_at': launched_at,
             'status': BenchmarkStatus[status],
         }
@@ -150,10 +152,11 @@ def get_benchmarks() -> List[Dict[str, Any]]:
     """Get all benchmarks."""
     rows = _BENCHMARK_DB.cursor.execute('select * from benchmark')
     records = []
-    for name, task, launched_at, status in rows:
+    for name, task, bucket, launched_at, status in rows:
         record = {
             'name': name,
             'task': task,
+            'bucket': bucket,
             'launched_at': launched_at,
             'status': BenchmarkStatus[status],
         }

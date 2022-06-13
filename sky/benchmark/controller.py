@@ -6,6 +6,7 @@ import os
 import prettytable
 import subprocess
 import tempfile
+import uuid
 from rich import progress as rich_progress
 from typing import Any, Dict, List, Tuple
 
@@ -23,9 +24,9 @@ from sky.skylet.utils import log_utils
 logger = sky_logging.init_logger(__name__)
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
+_BENCHMARK_BUCKET_CONFIG = os.path.expanduser('~/.sky/benchmark_bucket_config.txt')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
-_SKY_BENCHMARK_BUCKET = 'sky-benchmark'
 
 
 def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
@@ -93,18 +94,31 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
     logger.info(f'{candidate_table}\n')
 
 
-def _get_benchmark_bucket_name() -> str:
-    pass
+def _get_benchmark_bucket(bucket_type: str) -> str:
+    if os.path.exists(_BENCHMARK_BUCKET_CONFIG):
+        with open(_BENCHMARK_BUCKET_CONFIG, 'r') as f:
+            config = json.load(f)
+    else:
+        config = {}
 
+    bucket_name = config.get(bucket_type, None)
+    if bucket_name is None:
+        # TODO(woosuk): Ensure the global uniqueness of the bucket name.
+        username = getpass.getuser()
+        bucket_name = f'sky-benchmark-{uuid.uuid4().hex[:4]}-{username}'
 
-def _create_benchmark_bucket(bucket_type: data.StoreType) -> str:
-    bucket_name = _get_benchmark_bucket_name()
+    # Create a bucket if it doesn't exist.
     handle = global_user_state.get_handle_from_storage_name(bucket_name)
     if handle is None:
         logger.info(f'Creating a bucket {bucket_name} '
                     'to save the benchmark logs.')
         storage = data.Storage(bucket_name, source=None, persistent=True)
         storage.add_store(bucket_type)
+
+    # Save the bucket name to the config file.
+    config[bucket_type] = bucket_name
+    with open(_BENCHMARK_BUCKET_CONFIG, 'w') as f:
+        json.dump(config, f)
     return bucket_name
 
 
@@ -142,7 +156,7 @@ class BenchmarkController:
             if 'file_mounts' not in candidate_config:
                 candidate_config['file_mounts'] = {}
             candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
-                'name': '', # The bucket name is decided at launch time.
+                'name': '', # The bucket name will be filled at launch time.
                 'mode': 'MOUNT',
                 'store': benchmark_bucket_type.value,
             }
@@ -167,9 +181,9 @@ class BenchmarkController:
 
     @staticmethod
     def launch(benchmark: str, clusters: List[str], candidate_configs: List[Dict[str, Any]], commandline_args: List[Dict[str, Any]]) -> None:
-        # Create a Sky storage to save the benchmark logs.
+        # Use a Sky storage to save the benchmark logs.
         bucket_type = candidate_configs[0]['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]['store']
-        bucket_name = _create_benchmark_bucket(bucket_type=bucket_type)
+        bucket_name = _get_benchmark_bucket(bucket_type=bucket_type)
         for candidate_config in candidate_configs:
             candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR]['name'] = bucket_name
 
@@ -213,7 +227,7 @@ class BenchmarkController:
             if record is not None:
                 if not benchmark_created:
                     task_name = candidate_configs[0].get('name', None)
-                    benchmark_state.add_benchmark(benchmark, task_name)
+                    benchmark_state.add_benchmark(benchmark, task_name, bucket_name)
                     benchmark_created = True
                 global_user_state.set_cluster_benchmark_name(cluster, benchmark)
                 benchmark_state.add_benchmark_result(benchmark, record['handle'])
@@ -228,7 +242,8 @@ class BenchmarkController:
             f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
             total=len(clusters))
 
-        storage = data.Storage(_SKY_BENCHMARK_BUCKET, source=None, persistent=True)
+        bucket_name = benchmark_state.get_benchmark_from_name(benchmark)['bucket']
+        storage = data.Storage(bucket_name, source=None, persistent=True)
         bucket = list(storage.stores.values())[0]
 
         def _download_log(cluster: str):
