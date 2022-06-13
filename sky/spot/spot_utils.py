@@ -271,13 +271,14 @@ def show_jobs(show_all: bool) -> str:
                                                             job['job_duration'],
                                                             absolute=True)
         ago_suffix = ' ago' if show_all else ''
+        submitted = log_utils.readable_time_duration(job['submitted_at'],
+                                                     absolute=show_all)
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            log_utils.readable_time_duration(job['submitted_at'],
-                                             absolute=show_all) + ago_suffix,
+            submitted + ago_suffix if submitted != '-' else submitted,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
