@@ -1280,6 +1280,8 @@ def _query_status_aws(
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
         'running': global_user_state.ClusterStatus.UP,
+        # TODO(zhwu): stopping and shutting-down could occasionally fail
+        # due to internal errors of AWS. We should cover that case.
         'stopping': global_user_state.ClusterStatus.STOPPED,
         'stopped': global_user_state.ClusterStatus.STOPPED,
         'shutting-down': None,
@@ -1312,6 +1314,8 @@ def _query_status_gcp(
         'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
         'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
     }
+    # TODO(zhwu): The status of the TPU attached to the cluster should also be
+    # checked, since TPUs are not part of the VMs.
     query_cmd = (f'gcloud compute instances list '
                  f'--filter="labels.ray-cluster-name={cluster} AND '
                  f'labels.ray-node-type=head" --format="value(status)"')
