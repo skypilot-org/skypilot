@@ -1258,6 +1258,11 @@ def _process_cli_query(
                                                       '/dev/null',
                                                       require_outputs=True,
                                                       shell=True)
+    logger.debug(f'{query_cmd} returned {returncode}.\n'
+                 '**** STDOUT ****\n'
+                 f'{stdout}\n'
+                 '**** STDERR ****\n'
+                 f'{stderr}')
     if (cloud == str(sky.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
         # Azure CLI has a returncode 2 when the cluster is not found, as
@@ -1349,7 +1354,7 @@ def _query_status_azure(
     query_cmd = textwrap.dedent(f"""\
             az vm show -d --ids \
             $(az vm list --query \
-            "[?tags.\"ray-cluster-name\" == '{cluster}'].id" \
+            "[?tags.\\"ray-cluster-name\\" == '{cluster}'].id" \
             -o tsv) --query "powerState" -o tsv
         """)
     # NOTE: Azure cli should be handled carefully. The query command above
