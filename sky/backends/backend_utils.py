@@ -1,5 +1,5 @@
 """Util constants/functions for the backends."""
-import colorama
+import contextlib
 import datetime
 import difflib
 import enum
@@ -9,7 +9,6 @@ import getpass
 from multiprocessing import pool
 import os
 import pathlib
-import psutil
 import random
 import re
 import shlex
@@ -22,11 +21,13 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
-import yaml
 
+import colorama
 import jinja2
+import psutil
 import rich.console as rich_console
 import rich.progress as rich_progress
+import yaml
 
 import sky
 from sky import authentication as auth
@@ -1025,15 +1026,18 @@ def handle_returncode(returncode: int,
         sys.exit(returncode)
 
 
-def run_in_parallel(func: Callable, args: List[Any]):
+def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
     The function should raise a CommandError if the command fails.
+    Returns a list of the return values of the function func, in the same order
+    as the arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
         try:
-            list(p.imap_unordered(func, args))
+            # Run the function in parallel on the arguments, keeping the order.
+            return list(p.imap(func, args))
         except exceptions.CommandError as e:
             # Print the error message here, to avoid the other processes'
             # error messages mixed with the current one.
@@ -1288,18 +1292,54 @@ def refresh_cluster_status_handle(
     return record['status'], handle
 
 
-def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
+def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
+    """Returns a list of cached cluster records.
+
+    Args:
+        include_reserved: Whether to include sky-reserved clusters, e.g. spot
+            controller.
+        refresh: Whether to refresh the status of the clusters. (Refreshing will
+            set the status to STOPPED if the cluster cannot be pinged.)
+
+    Returns:
+        A list of cluster records.
+    """
     records = global_user_state.get_clusters()
+    if not include_reserved:
+        records = [
+            record for record in records
+            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+        ]
     if not refresh:
         return records
     updated_records = []
-    for record in rich_progress.track(records,
-                                      description='Refreshing cluster status'):
+
+    plural = 's' if len(records) > 1 else ''
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
+        total=len(records))
+
+    def _refresh_cluster(record):
         handle = record['handle']
+        # TODO(zhwu): We need to decide whether to refresh the cluster status
+        # for clusters without autostop set. For those clusters, their status
+        # will only be changed, if the user manually modify the cluster on the
+        # cloud console. Our current refreshing may not be enough to get the
+        # correct status (e.g., the cluster is terminated, but we set it to
+        # STOPPED).
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             record = _ping_cluster_and_set_status(record)
-        if record is not None:
-            updated_records.append(record)
+        progress.update(task, advance=1)
+        return record
+
+    with progress:
+        updated_records = run_in_parallel(_refresh_cluster, records)
+    updated_records = [
+        record for record in updated_records if record is not None
+    ]
     return updated_records
 
 
@@ -1497,4 +1537,23 @@ def check_fields(provided_fields, known_fields):
                 key_invalid += f' Did you mean one of {similar_keys}?'
             key_invalid += '\n'
             invalid_keys += key_invalid
-        raise ValueError(invalid_keys)
+        with print_exception_no_traceback():
+            raise ValueError(invalid_keys)
+
+
+@contextlib.contextmanager
+def print_exception_no_traceback():
+    """A context manager that prints out an exception without traceback.
+
+    Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
+    tracebacks.
+
+    Example usage:
+
+        with print_exception_no_traceback():
+            if error():
+                raise ValueError('...')
+    """
+    sys.tracebacklimit = 0
+    yield
+    sys.tracebacklimit = 1000
