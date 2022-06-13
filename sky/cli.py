@@ -893,7 +893,7 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, Any]]]:
+def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
         Benchmark candidates are configured in the YAML file as a list of
