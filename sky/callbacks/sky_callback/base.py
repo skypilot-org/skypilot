@@ -52,9 +52,8 @@ class SkyCallback:
             'start_ts': self.start_ts,
             'total_steps': self.total_train_steps,
         }
-        config_str = json.dumps(config)
         with open(os.path.join(self.log_dir, CONFIG), 'w') as f:
-            f.write(config_str)
+            json.dump(config, f)
 
     def _save_timestamp(self, timestamp):
         # TODO: For generality, use protobuf to write the timestamp log.
