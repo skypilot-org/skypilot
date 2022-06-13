@@ -70,7 +70,8 @@ class S3CloudStorage(CloudStorage):
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
         download_via_awscli = f'mkdir -p {destination} && \
-                                aws s3 sync {source} {destination}'
+                                aws s3 sync --no-follow-symlinks ' \
+                              f'{source} {destination}'
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -78,8 +79,8 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = f'mkdir -p {destination} && \
-                                aws s3 cp {source} {destination}'
+        download_via_awscli = (f'mkdir -p {destination} &&'
+                               f'aws s3 cp {source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)

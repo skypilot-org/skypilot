@@ -1,14 +1,14 @@
 """Util constants/functions for the backends."""
-import colorama
+import contextlib
 import datetime
+import difflib
 import enum
 import hashlib
-import http.client as httplib
 import getpass
 from multiprocessing import pool
 import os
 import pathlib
-import psutil
+import random
 import re
 import shlex
 import socket
@@ -20,11 +20,16 @@ import time
 import typing
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
-import yaml
 
+import colorama
 import jinja2
+import psutil
+import requests
+from requests import adapters
+from requests.packages.urllib3.util import retry as retry_lib
 import rich.console as rich_console
 import rich.progress as rich_progress
+import yaml
 
 import sky
 from sky import authentication as auth
@@ -37,6 +42,7 @@ from sky import sky_logging
 from sky.utils import usage_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
+from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -72,7 +78,7 @@ WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = '1.1.1.1'
+_TEST_IP = 'https://8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
 # characters. Through testing, 37 chars is the maximum length for the Sky
@@ -519,6 +525,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
+@timeline.event
 def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
@@ -575,7 +582,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
-    credential_file_mounts, credential_excludes = credentials
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -604,8 +610,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Ray version.
                 'ray_version': SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
-                'credentials': credential_file_mounts,
-                'credential_excludes': credential_excludes,
+                'credentials': credentials,
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
@@ -690,6 +695,7 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
+@timeline.event
 def wait_until_ray_cluster_ready(
         cluster_config_file: str,
         num_nodes: int,
@@ -1024,15 +1030,18 @@ def handle_returncode(returncode: int,
         sys.exit(returncode)
 
 
-def run_in_parallel(func: Callable, args: List[Any]):
+def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
     The function should raise a CommandError if the command fails.
+    Returns a list of the return values of the function func, in the same order
+    as the arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
         try:
-            list(p.imap_unordered(func, args))
+            # Run the function in parallel on the arguments, keeping the order.
+            return list(p.imap(func, args))
         except exceptions.CommandError as e:
             # Print the error message here, to avoid the other processes'
             # error messages mixed with the current one.
@@ -1048,6 +1057,7 @@ def run_in_parallel(func: Callable, args: List[Any]):
             sys.exit(1)
 
 
+@timeline.event
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
     # keep running in the background after the current program is killed. To get
@@ -1130,6 +1140,7 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
+@timeline.event
 def get_node_ips(
         cluster_yaml: str,
         expected_num_nodes: int,
@@ -1180,6 +1191,7 @@ def get_node_ips(
     return head_ip + worker_ips
 
 
+@timeline.event
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
@@ -1202,11 +1214,14 @@ def get_head_ip(
 
 
 def check_network_connection():
-    # A timeout of 1s seems to infrequently encounter 'socket.timeout'.
-    conn = httplib.HTTPSConnection(_TEST_IP, timeout=3)
+    # Tolerate 3 retries as it is observed that connections can fail.
+    adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
+    http = requests.Session()
+    http.mount('https://', adapter)
+    http.mount('http://', adapter)
     try:
-        conn.request('HEAD', '/')
-    except OSError as e:
+        http.head(_TEST_IP, timeout=3)
+    except requests.Timeout as e:
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
@@ -1263,6 +1278,7 @@ def _ping_cluster_and_set_status(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
+@timeline.event
 def refresh_cluster_status_handle(
     cluster_name: str,
     force_refresh: bool = False
@@ -1283,16 +1299,54 @@ def refresh_cluster_status_handle(
     return record['status'], handle
 
 
-def get_clusters(refresh: bool) -> List[Dict[str, Any]]:
+def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
+    """Returns a list of cached cluster records.
+
+    Args:
+        include_reserved: Whether to include sky-reserved clusters, e.g. spot
+            controller.
+        refresh: Whether to refresh the status of the clusters. (Refreshing will
+            set the status to STOPPED if the cluster cannot be pinged.)
+
+    Returns:
+        A list of cluster records.
+    """
     records = global_user_state.get_clusters()
+    if not include_reserved:
+        records = [
+            record for record in records
+            if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+        ]
     if not refresh:
         return records
     updated_records = []
-    for record in rich_progress.track(records,
-                                      description='Refreshing cluster status'):
-        record = _ping_cluster_and_set_status(record)
-        if record is not None:
-            updated_records.append(record)
+
+    plural = 's' if len(records) > 1 else ''
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
+        total=len(records))
+
+    def _refresh_cluster(record):
+        handle = record['handle']
+        # TODO(zhwu): We need to decide whether to refresh the cluster status
+        # for clusters without autostop set. For those clusters, their status
+        # will only be changed, if the user manually modify the cluster on the
+        # cloud console. Our current refreshing may not be enough to get the
+        # correct status (e.g., the cluster is terminated, but we set it to
+        # STOPPED).
+        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+            record = _ping_cluster_and_set_status(record)
+        progress.update(task, advance=1)
+        return record
+
+    with progress:
+        updated_records = run_in_parallel(_refresh_cluster, records)
+    updated_records = [
+        record for record in updated_records if record is not None
+    ]
     return updated_records
 
 
@@ -1443,3 +1497,70 @@ def stop_handler(signum, frame):
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     sys.exit(exceptions.SIGTSTP_CODE)
+
+
+class Backoff:
+    """Exponential backoff with jittering."""
+    MULTIPLIER = 1.6
+    JITTER = 0.4
+
+    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
+        self._initial = True
+        self._backoff = None
+        self._inital_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._inital_backoff
+
+    # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
+    # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
+
+    def current_backoff(self) -> float:
+        """Backs off once and returns the current backoff in seconds."""
+        if self._initial:
+            self._initial = False
+            self._backoff = min(self._inital_backoff, self._max_backoff)
+        else:
+            self._backoff = min(self._backoff * self.MULTIPLIER,
+                                self._max_backoff)
+        self._backoff += random.uniform(-self.JITTER * self._backoff,
+                                        self.JITTER * self._backoff)
+        return self._backoff
+
+
+def check_fields(provided_fields, known_fields):
+    known_fields = set(known_fields)
+    unknown_fields = []
+    for field in provided_fields:
+        if field not in known_fields:
+            unknown_fields.append(field)
+
+    if len(unknown_fields) > 0:
+        invalid_keys = 'The following fields are invalid:\n'
+        for unknown_key in unknown_fields:
+            similar_keys = difflib.get_close_matches(unknown_key, known_fields)
+            key_invalid = f'    Unknown field \'{unknown_key}\'.'
+            if len(similar_keys) == 1:
+                key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
+            if len(similar_keys) > 1:
+                key_invalid += f' Did you mean one of {similar_keys}?'
+            key_invalid += '\n'
+            invalid_keys += key_invalid
+        with print_exception_no_traceback():
+            raise ValueError(invalid_keys)
+
+
+@contextlib.contextmanager
+def print_exception_no_traceback():
+    """A context manager that prints out an exception without traceback.
+
+    Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
+    tracebacks.
+
+    Example usage:
+
+        with print_exception_no_traceback():
+            if error():
+                raise ValueError('...')
+    """
+    sys.tracebacklimit = 0
+    yield
+    sys.tracebacklimit = 1000
