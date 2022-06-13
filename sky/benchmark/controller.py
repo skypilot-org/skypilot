@@ -23,7 +23,7 @@ from sky.skylet.utils import log_utils
 logger = sky_logging.init_logger(__name__)
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
-_SKY_REMOTE_BENCHMARK_DIR = '~/.sky_benchmark_dir'
+_SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
 _SKY_BENCHMARK_BUCKET = 'sky-benchmark'
 
