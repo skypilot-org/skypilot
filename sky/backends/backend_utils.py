@@ -713,6 +713,7 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     """
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
+    get_python_cmd = 'python3 --version | awk \'{{print $2}}\''
 
     def run_command_and_handle_ssh_failure(ip: str, command: str,
                                            failure_message: str):
@@ -731,8 +732,31 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
 
     for ip in ips:
         # Checks for python3 installation.
-        run_command_and_handle_ssh_failure(ip, 'python3 --version',
+        run_command_and_handle_ssh_failure(ip, 'sudo python3 --version',
                                            f'Python3 is not installed on {ip}')
+
+        # Checks if base python and the root user (sudo) base python are the
+        # same version.
+        _, base_python, _ = run_command_on_ip_via_ssh(ip,
+                                                      get_python_cmd,
+                                                      ssh_user=ssh_user,
+                                                      ssh_private_key=ssh_key,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+        base_python = base_python.strip()
+
+        _, sudo_python, _ = run_command_on_ip_via_ssh(ip,
+                                                      f'sudo {get_python_cmd}',
+                                                      ssh_user=ssh_user,
+                                                      ssh_private_key=ssh_key,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+        sudo_python = sudo_python.strip()
+
+        if base_python != sudo_python:
+            raise ValueError(
+                f'User\'s base python version {base_python} differs '
+                f'from that of the root user\'s python version {sudo_python}.')
 
         # Checks for Ray installation.
         run_command_and_handle_ssh_failure(ip, 'sudo ray --version',

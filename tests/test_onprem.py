@@ -64,7 +64,9 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
-    msg = (f'{outcome}.' f'{reason}' f'\nLog: less {log_file.name}\n')
+    msg = (f'{outcome}.'
+           f'{reason}'
+           f'\nLog: less {log_file.name}\n')
     test.echo(msg)
     log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
@@ -255,7 +257,8 @@ class TestOnprem:
     def test_onprem_resource_mismatch(self, local_cluster_name, admin_setup,
                                       cluster_config_setup):
         # Tests on-prem cases when users specify resources that are not on
-        # the cluster. This test should error out! (correct result, 1 xfailed)
+        # the cluster. This test should error out with
+        # ResourcesMismatchError.
         name = local_cluster_name
         cli_runner = cli_testing.CliRunner()
         # Setup the cluster handle and get cluster resources for `sky status`

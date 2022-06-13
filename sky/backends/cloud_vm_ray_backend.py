@@ -1388,7 +1388,6 @@ class CloudVmRayBackend(backends.Backend):
                 for k in d:
                     merged_resources[k] = merged_resources.get(k, 0) + d[k]
             launched_resources.override_accelerators(merged_resources)
-
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(launched_resources)):
