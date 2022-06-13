@@ -236,21 +236,6 @@ _TASK_OPTIONS = [
         help=('The region to use. If specified, overrides the '
               '"resources.region" config. Passing "none" resets the config.')),
     click.option(
-        '--gpus',
-        required=False,
-        type=str,
-        help=
-        ('Type and number of GPUs to use. Example values: '
-         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-         '(fractional counts are supported by the scheduling framework). '
-         'If a new cluster is being launched by this command, this is the '
-         'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
-         'resources and is used for scheduling the task. '
-         'Overrides the "accelerators" '
-         'config in the YAML if both are supplied. '
-         'Passing "none" resets the config.')),
-    click.option(
         '--num-nodes',
         required=False,
         type=int,
@@ -284,6 +269,21 @@ _TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     )
 ]
+_GPUS_OPTION = click.option(
+    '--gpus',
+    required=False,
+    type=str,
+    help=
+    ('Type and number of GPUs to use. Example values: '
+    '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+    '(fractional counts are supported by the scheduling framework). '
+    'If a new cluster is being launched by this command, this is the '
+    'resources to provision. If an existing cluster is being reused, this'
+    ' is seen as the task demand, which must fit the cluster\'s total '
+    'resources and is used for scheduling the task. '
+    'Overrides the "accelerators" '
+    'config in the YAML if both are supplied. '
+    'Passing "none" resets the config.'))
 
 
 def _add_click_options(options: List[click.Option]):
@@ -611,7 +611,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + [_GPUS_OPTION])
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -656,10 +656,10 @@ def launch(
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
-    gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     env: List[Dict[str, str]],
+    gpus: Optional[str],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
     retry_until_up: bool,
@@ -762,7 +762,7 @@ def launch(
               is_flag=True,
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + [_GPUS_OPTION])
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -772,10 +772,10 @@ def exec(
     cloud: Optional[str],
     region: Optional[str],
     workdir: Optional[str],
-    gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     env: List[Dict[str, str]],
+    gpus: Optional[str],
 ):
     """Execute a task or a command on a cluster (skip setup).
 
@@ -938,6 +938,11 @@ def bench():
               type=str,
               help='Benchmark name.')
 @_add_click_options(_TASK_OPTIONS)
+@click.option('--gpus',
+              required=False,
+              type=str,
+              help=('Comma-separated list of GPUs to run benchmark on. '
+                    'Example values: "T4:4,V100:8" (without blank spaces).'))
 @click.option('--disk-size',
               default=None,
               type=int,
