@@ -42,6 +42,7 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
 
 
 def _get_optimized_resources(candidate_configs: List[Dict[str, Any]]) -> List['resources_lib.Resources']:
+    candidate_configs = copy.deepcopy(candidate_configs)
     optimized_resources = []
     for config in candidate_configs:
         with sky.Dag() as dag:
