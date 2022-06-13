@@ -440,6 +440,10 @@ class RetryingVmProvisioner(object):
         zone = zones[0]
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
+        httperror_str = [
+            s for s in splits
+            if s.startswith('googleapiclient.errors.HttpError: ')
+        ]
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
@@ -475,6 +479,10 @@ class RetryingVmProvisioner(object):
                     self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
+        elif len(httperror_str) > 1:
+            # Parse HttpError for unauthorized regions.
+            logger.info(f'Got {httperror_str[0]}')
+            self._blocked_regions.add(region.name)
         else:
             # No such structured error response found.
             assert not exception_str, stderr

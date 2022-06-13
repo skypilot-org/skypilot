@@ -193,6 +193,9 @@ class GCPTPUNode(GCPNode):
     RUNNING_STATUSES = {"READY"}
     STATUS_FIELD = "state"
 
+    def get_status(self) -> str:
+        return self.get(self.STATUS_FIELD)
+
     def get_labels(self) -> dict:
         return self.get("labels", {})
 
@@ -572,8 +575,17 @@ class GCPTPU(GCPResource):
 
     def list_instances(
             self, label_filters: Optional[dict] = None) -> List[GCPTPUNode]:
-        response = self.resource.projects().locations().nodes().list(
-            parent=self.path).execute()
+        non_terminated_status = list(GCPTPUNode.NON_TERMINATED_STATUSES)
+        return self._list_instances(label_filters, non_terminated_status)
+
+    def _list_instances(self, label_filters: Optional[dict],
+                        status_filter: Optional[List[str]]) -> List[GCPTPUNode]:
+        try:
+            response = self.resource.projects().locations().nodes().list(
+                parent=self.path).execute()
+        except HttpError as e:
+            logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
+            return []
 
         instances = response.get("nodes", [])
         instances = [GCPTPUNode(i, self) for i in instances]
@@ -586,9 +598,6 @@ class GCPTPU(GCPResource):
         label_filters[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
         def filter_instance(instance: GCPTPUNode) -> bool:
-            if instance.is_terminated():
-                return False
-
             labels = instance.get_labels()
             if label_filters:
                 for key, value in label_filters.items():
@@ -597,15 +606,14 @@ class GCPTPU(GCPResource):
                     if value != labels[key]:
                         return False
 
+            if status_filter:
+                if instance.get_status() not in status_filter:
+                    return False
             return True
 
         instances = list(filter(filter_instance, instances))
 
         return instances
-
-    def _list_instances(self, label_filters: Optional[dict],
-                        status_filter: List[str]) -> List[GCPTPUNode]:
-        return []
 
     def get_instance(self, node_id: str) -> GCPTPUNode:
         instance = self.resource.projects().locations().nodes().get(
@@ -660,11 +668,15 @@ class GCPTPU(GCPResource):
             # https://cloud.google.com/tpu/docs/users-guide-tpu-vm#create-curl
             config["networkConfig"]["enableExternalIps"] = True
 
-        operation = self.resource.projects().locations().nodes().create(
-            parent=self.path,
-            body=config,
-            nodeId=name,
-        ).execute()
+        try:
+            operation = self.resource.projects().locations().nodes().create(
+                parent=self.path,
+                body=config,
+                nodeId=name,
+            ).execute()
+        except HttpError as e:
+            logger.error(f'googleapiclient.errors.HttpError: {e.reason}')
+            raise (e)
 
         if wait_for_operation:
             result = self.wait_for_operation(operation)

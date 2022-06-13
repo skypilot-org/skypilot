@@ -176,8 +176,10 @@ class GCPNodeProvider(NodeProvider):
                 if TAG_RAY_USER_NODE_TYPE in labels:
                     filters[TAG_RAY_USER_NODE_TYPE] = labels[
                         TAG_RAY_USER_NODE_TYPE]
-                reuse_nodes = resource._list_instances(filters,
-                                                       ["TERMINATED"])[:count]
+                # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
+                reuse_nodes = resource._list_instances(
+                    filters, ["TERMINATED", "STOPPED"])[:count]
+
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.

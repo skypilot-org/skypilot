@@ -191,9 +191,10 @@ class Resources:
                     accelerator_args = {}
                 use_tpu_vm = 'tpu_vm' in accelerator_args
                 if self.instance_type is not None and use_tpu_vm:
-                    assert self.instance_type == 'TPU-VM', (
-                        'Cannot specify instance type'
-                        f' (got "{self.instance_type}") for TPU VM.')
+                    if self.instance_type != 'TPU-VM':
+                        raise ValueError(
+                            'Cannot specify instance type'
+                            f' (got "{self.instance_type}") for TPU VM.')
                 if 'runtime_version' not in accelerator_args:
                     if use_tpu_vm:
                         accelerator_args['runtime_version'] = '2.5.0'
