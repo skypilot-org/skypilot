@@ -29,6 +29,7 @@ _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
 
 _BENCHMARK_SUMMARY = 'benchmark_summary.json'
 
+_Config = Dict[str, Any]
 
 def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
     if num_clusters == 1:
@@ -43,7 +44,7 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
 
 
 def _get_optimized_resources(
-    candidate_configs: List[Dict[str, Any]]) -> List['resources_lib.Resources']:
+        candidate_configs: List[_Config]) -> List['resources_lib.Resources']:
     candidate_configs = copy.deepcopy(candidate_configs)
     optimized_resources = []
     for config in candidate_configs:
@@ -60,7 +61,7 @@ def _get_optimized_resources(
 
 
 def _print_candidate_resources(
-        clusters: List[str], config: Dict[str, Any],
+        clusters: List[str], config: _Config,
         candidate_resources: List['resources_lib.Resources']) -> None:
     task_str = config.get('name', 'a task')
     num_nodes = config.get('num_nodes', 1)
@@ -147,9 +148,9 @@ class BenchmarkController:
     @staticmethod
     def generate_configs(
         benchmark: str,
-        config: Dict[str, Any],
-        candidates: List[Dict[str, Any]],
-    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        config: _Config,
+        candidates: List[Dict[str, str]],
+    ) -> Tuple[List[str], List[_Config]]:
         # Generate a config for each cluster.
         clusters = _generate_cluster_names(benchmark, len(candidates))
         candidate_configs = []
@@ -195,7 +196,7 @@ class BenchmarkController:
 
     @staticmethod
     def launch(benchmark: str, clusters: List[str],
-               candidate_configs: List[Dict[str, Any]],
+               candidate_configs: List[_Config],
                commandline_args: List[Dict[str, Any]]) -> None:
         # Use a Sky storage to save the benchmark logs.
         bucket_name, bucket_type = _get_benchmark_bucket()
