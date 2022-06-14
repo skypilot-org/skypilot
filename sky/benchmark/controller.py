@@ -97,7 +97,8 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
             return bucket_name, bucket_type
 
     # Generate a bucket name.
-    # TODO(woosuk): Ensure the global uniqueness of the bucket name.
+    # TODO(woosuk): Use a more pleasant naming scheme.
+    # TODO(woosuk): Ensure that the bucket name is globally unique.
     bucket_name = f'sky-benchmark-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
