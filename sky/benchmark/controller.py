@@ -277,7 +277,7 @@ class BenchmarkController:
                                      cluster)
             os.makedirs(local_dir, exist_ok=True)
             try:
-                bucket._download_file(
+                bucket.download_file(
                     f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
                     f'{local_dir}/{_BENCHMARK_SUMMARY}',
                 )
