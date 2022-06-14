@@ -245,10 +245,10 @@ def test_tpu():
     test = Test(
         'tpu_app',
         [
-            f'sky launch -y -c {name} examples/tpu_app.yaml',
+            f'sky launch -y -c {name} examples/tpu/tpu_app.yaml',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -y -c {name} examples/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
+            f'sky launch -y -c {name} examples/tpu/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take >20 mins

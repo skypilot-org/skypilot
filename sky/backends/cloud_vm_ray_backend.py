@@ -479,8 +479,10 @@ class RetryingVmProvisioner(object):
                     self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
-        elif len(httperror_str) > 1:
-            # Parse HttpError for unauthorized regions.
+        elif len(httperror_str) >= 1:
+            # Parse HttpError for unauthorized regions. Example:
+            # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
+            # Details: "Location us-east1-d is not found or access is unauthorized.">
             logger.info(f'Got {httperror_str[0]}')
             self._blocked_regions.add(region.name)
         else:
