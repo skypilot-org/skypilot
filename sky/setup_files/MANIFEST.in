@@ -1,3 +1,5 @@
+include sky/callbacks/setup.py
+include sky/callbacks/sky_callback/*
 include sky/clouds/service_catalog/data/*
 include sky/skylet/*.sh
 include sky/skylet/providers/aws/*
