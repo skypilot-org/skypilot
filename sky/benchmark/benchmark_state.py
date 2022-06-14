@@ -7,9 +7,12 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
+
+_BENCHMARK_BUCKET_NAME_KEY = 'bucket_name'
+_BENCHMARK_BUCKET_TYPE_KEY = 'bucket_type'
 
 _BENCHMARK_DB_PATH = os.path.expanduser('~/.sky/benchmark.db')
 os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
@@ -40,6 +43,10 @@ class _BenchmarkSQLiteConn(threading.local):
             bucket TEXT,
             launched_at INTEGER,
             status TEXT)""")
+        # Table for Benchmark Config (e.g., benchmark bucket)
+        self.cursor.execute("""\
+            CREATE TABLE IF NOT EXISTS benchmark_config (
+            key TEXT PRIMARY KEY, value TEXT)""")
         # Table for Benchmark Results
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS benchmark_results (
@@ -162,6 +169,37 @@ def get_benchmarks() -> List[Dict[str, Any]]:
         }
         records.append(record)
     return records
+
+
+def set_benchmark_bucket(bucket_name: str, bucket_type: str) -> None:
+    """Save the benchmark bucket name and type."""
+    _BENCHMARK_DB.cursor.execute(
+        'REPLACE INTO benchmark_config (key, value) VALUES (?, ?)',
+        (_BENCHMARK_BUCKET_NAME_KEY, bucket_name))
+    _BENCHMARK_DB.cursor.execute(
+        'REPLACE INTO benchmark_config (key, value) VALUES (?, ?)',
+        (_BENCHMARK_BUCKET_TYPE_KEY, bucket_type))
+    _BENCHMARK_DB.conn.commit()
+
+
+def get_benchmark_bucket() -> Tuple[Optional[str], Optional[str]]:
+    """Get the benchmark bucket name and type."""
+    rows = _BENCHMARK_DB.cursor.execute(
+        'SELECT value FROM benchmark_config WHERE key=(?)',
+        (_BENCHMARK_BUCKET_NAME_KEY,))
+    bucket_name = None
+    for (value,) in rows:
+        bucket_name = value
+        break
+
+    rows = _BENCHMARK_DB.cursor.execute(
+        'SELECT value FROM benchmark_config WHERE key=(?)',
+        (_BENCHMARK_BUCKET_TYPE_KEY,))
+    bucket_type = None
+    for (value,) in rows:
+        bucket_type = value
+        break
+    return bucket_name, bucket_type
 
 
 def get_benchmark_clusters(benchmark_name: str) -> List[str]:

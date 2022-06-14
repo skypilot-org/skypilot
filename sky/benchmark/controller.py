@@ -24,7 +24,6 @@ from sky.skylet.utils import log_utils
 logger = sky_logging.init_logger(__name__)
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
-_BENCHMARK_BUCKET_CONFIG = os.path.expanduser('~/.sky/benchmark_bucket_config.txt')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
 
@@ -87,13 +86,11 @@ def _print_candidate_resources(clusters: List[str], config: Dict[str, Any], cand
 
 
 def _get_benchmark_bucket() -> Tuple[str, str]:
-    if os.path.exists(_BENCHMARK_BUCKET_CONFIG):
-        with open(_BENCHMARK_BUCKET_CONFIG, 'r') as f:
-            config = json.load(f)
-        bucket_name = config['name']
-        bucket_type = config['store']
+    bucket_name, bucket_type = benchmark_state.get_benchmark_bucket()
+    if bucket_name is not None:
         handle = global_user_state.get_handle_from_storage_name(bucket_name)
         if handle is not None:
+            assert bucket_type is not None
             return bucket_name, bucket_type
 
     # Generate a bucket name.
@@ -105,11 +102,11 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
     enabled_clouds = global_user_state.get_enabled_clouds()
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
     if 'AWS' in enabled_clouds:
-        bucket_type = data.StoreType.S3
+        bucket_type = data.StoreType.S3.value
     elif 'GCP' in enabled_clouds:
-        bucket_type = data.StoreType.GCS
+        bucket_type = data.StoreType.GCS.value
     elif 'AZURE' in enabled_clouds:
-        bucket_type = data.StoreType.AZURE
+        bucket_type = data.StoreType.AZURE.value
     else:
         raise ValueError('No cloud is enabled. '
                          'Please enable at least one cloud.')
@@ -119,11 +116,9 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
     storage = data.Storage(bucket_name, source=None, persistent=True)
     storage.add_store(bucket_type)
 
-    # Save the bucket name and type to the config file.
-    config = {'name': bucket_name, 'store': bucket_type.value}
-    with open(_BENCHMARK_BUCKET_CONFIG, 'w') as f:
-        json.dump(config, f)
-    return bucket_name, bucket_type.value
+    # Save the bucket name and type to the config.
+    benchmark_state.set_benchmark_bucket(bucket_name, bucket_type)
+    return bucket_name, bucket_type
 
 
 def _launch_with_log(cluster: str, cmd: List[str]) -> None:
