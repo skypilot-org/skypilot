@@ -2309,13 +2309,23 @@ class CloudVmRayBackend(backends.Backend):
                         require_outputs=True)
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
-                query_cmd = (
-                    f'gcloud compute instances list '
-                    f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
-                    f'--zones={zone} --format=value\\(name\\)')
-                terminate_cmd = (
-                    f'gcloud compute instances delete --zone={zone} --quiet '
-                    f'$({query_cmd})')
+                # TODO(wei-lin): refactor by calling functions of node provider
+                if config['provider'].get('_has_tpus', False):
+                    query_cmd = (
+                        f'gcloud compute tpus tpu-vm list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zone={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
+                else:
+                    query_cmd = (
+                        f'gcloud compute instances list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zones={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute instances delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
                 with backend_utils.safe_console_status(
                         f'[bold cyan]Terminating '
                         f'[green]{cluster_name}'):
