@@ -1,3 +1,5 @@
+"""Benchmark Controller: Manages the benchmarking process."""
+
 import colorama
 import copy
 import getpass
@@ -148,6 +150,7 @@ def _launch_with_log(cluster: str, cmd: List[str]) -> None:
 
 
 class BenchmarkController:
+    """A class that controls the benchmarking process."""
 
     @staticmethod
     def generate_configs(
@@ -214,6 +217,7 @@ class BenchmarkController:
         # Generate a temporary yaml file for each cluster.
         yaml_fds = []
         for cluster, candidate_config in zip(clusters, candidate_configs):
+            # pylint: disable=consider-using-with
             f = tempfile.NamedTemporaryFile('w',
                                             prefix=f'{cluster}-',
                                             suffix='.yaml')
@@ -315,4 +319,4 @@ class BenchmarkController:
     def remove_logs(benchmark: str):
         log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
         subprocess.run(['rm', '-rf', log_dir], check=False)
-        # TODO: remove the logs in the bucket.
+        # TODO(woosuk): remove the logs in the bucket.
