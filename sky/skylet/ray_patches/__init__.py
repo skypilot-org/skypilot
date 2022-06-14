@@ -35,18 +35,13 @@ def _run_patch(target_file, patch_file):
     # It is ok to patch again from the original file.
     patch {orig_file} -i {patch_file} -o {target_file}
     """
-    subprocess.run(script, shell=True, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(script, shell=True, check=True)
 
 
 def patch() -> None:
     # Patch the buggy ray files. This should only be called
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
-    import ray
-    if ray.__version__ != '1.10.0':
-        raise Exception(
-            f'Cannot apply patches to Ray {ray.__version__} other than 1.10.0.')
-
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 

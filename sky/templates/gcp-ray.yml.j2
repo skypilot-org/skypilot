@@ -31,10 +31,10 @@ available_node_types:
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
-{%- if use_spot %}
+  {%- if use_spot %}
       schedulingConfig:
         preemptible: true
-{%- endif %}
+  {%- endif %}
 {%- else %}
       machineType: {{instance_type}}
       disks:
@@ -44,9 +44,9 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
-{%- if gpu is none %}
+  {%- if gpu is none %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
-{%- else %}
+  {%- else %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
@@ -55,11 +55,11 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
-{%- endif %}
+  {%- endif %}
       scheduling:
-{%- if use_spot %}
+  {%- if use_spot %}
         - preemptible: true
-{%- endif %}
+  {%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 {% if num_nodes > 1 %}
@@ -68,14 +68,14 @@ available_node_types:
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
-{%- if tpu_vm %}
+  {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
-{%- if use_spot %}
+    {%- if use_spot %}
       schedulingConfig:
         preemptible: true
-{%- endif %}
-{%- else %}
+    {%- endif %}
+  {%- else %}
       machineType: {{instance_type}}
       disks:
         - boot: true
@@ -84,9 +84,9 @@ available_node_types:
           initializeParams:
             diskSizeGb: {{disk_size}}
             # See https://cloud.google.com/deep-learning-vm/docs/images
-{%- if gpu is none %}
+    {%- if gpu is none %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
-{%- else %}
+    {%- else %}
             sourceImage: projects/deeplearning-platform-release/global/images/family/{{image_name}}
       guestAccelerators:
         - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
@@ -95,13 +95,13 @@ available_node_types:
         items:
           - key: install-nvidia-driver
             value: "True"
-{%- endif %}
+    {%- endif %}
       scheduling:
-{%- if use_spot %}
+    {%- if use_spot %}
         - preemptible: true
-{%- endif %}
+    {%- endif %}
         - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-{%- endif %}
+  {%- endif %}
 {%- endif %}
 
 head_node_type: ray_head_default
