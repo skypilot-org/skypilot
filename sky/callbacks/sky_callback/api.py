@@ -7,8 +7,8 @@ from sky_callback import SkyCallback
 _sky_callback = None
 
 
-def init(global_rank: int = 0) -> None:
-    if global_rank == 0:
+def init(global_rank: int = 0, enable: bool = True) -> None:
+    if global_rank == 0 and enable:
         global _sky_callback
         _sky_callback = SkyCallback()
 
