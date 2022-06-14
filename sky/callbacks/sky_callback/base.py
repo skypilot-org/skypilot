@@ -120,8 +120,9 @@ class _AsyncSummaryWriter(threading.Thread):
             if summary.total_steps is not None:
                 # NOTE: total_time does not include the time
                 # between booting and the process creation.
-                total_time = (summary.warmup_end_time - summary.create_time +
-                    step_time * (summary.total_steps - summary.warmup_steps))
+                time_until_warmup = summary.warmup_end_time - summary.create_time
+                steps_after_warmup = summary.total_steps - summary.warmup_steps
+                total_time = time_until_warmup + step_time * steps_after_warmup
                 summary.estimated_total_time = total_time
 
     def _write_summary(self):
