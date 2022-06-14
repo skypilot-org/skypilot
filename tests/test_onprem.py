@@ -2,7 +2,6 @@ import os
 import subprocess
 import sys
 import tempfile
-import time
 from typing import List, Optional, Tuple, NamedTuple
 
 import colorama
@@ -11,7 +10,6 @@ import pytest
 import yaml
 
 from sky import cli
-from sky import exceptions
 from sky.backends import backend_utils
 
 

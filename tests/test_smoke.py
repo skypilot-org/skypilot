@@ -1,17 +1,13 @@
 import inspect
-import json
-import os
 import pathlib
 import subprocess
 import sys
 import tempfile
-import textwrap
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import colorama
 import pytest
-import yaml
 
 import sky
 from sky import global_user_state

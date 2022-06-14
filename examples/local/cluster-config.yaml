@@ -10,7 +10,7 @@
 #   >> sky admin deploy cluster-config.yaml
 
 cluster:
-  ips: [3.142.141.133, 3.144.206.91]
+  ips: [0.0.0.0, 0.0.0.1]
   name: my-local-cluster 
 
 # Authentication into local cluster nodes.
