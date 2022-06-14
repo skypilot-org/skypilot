@@ -27,6 +27,8 @@ _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
 
+_BENCHMARK_SUMMARY = 'benchmark_summary.json'
+
 
 def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
     if num_clusters == 1:
@@ -230,7 +232,7 @@ class BenchmarkController:
                 benchmark_state.add_benchmark_result(benchmark, record['handle'])
 
     @staticmethod
-    def download_logs(benchmark: str, clusters: List[str]):
+    def update(benchmark: str, clusters: List[str]):
         plural = 's' if len(clusters) > 1 else ''
         progress = rich_progress.Progress(transient=True,
                                         redirect_stdout=False,
@@ -243,16 +245,15 @@ class BenchmarkController:
         storage = data.Storage(bucket_name, source=None, persistent=True)
         bucket = list(storage.stores.values())[0]
 
+        # TODO(woosuk): Replace this function with bucket.download_remote_dir.
         def _download_log(cluster: str):
             local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
             os.makedirs(local_dir, exist_ok=True)
             try:
-                # FIXME: Use download_remote_dir method instead.
-                for file in ['config.json', 'timestamps.log']:
-                    bucket._download_file(
-                        f'{benchmark}/{cluster}/{file}',
-                        f'{local_dir}/{file}',
-                    )
+                bucket._download_file(
+                    f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
+                    f'{local_dir}/{_BENCHMARK_SUMMARY}',
+                )
                 progress.update(task, advance=1)
             except exceptions.CommandError as e:
                 logger.error(
@@ -264,44 +265,21 @@ class BenchmarkController:
             progress.live.transient = False
             progress.refresh()
 
-    @staticmethod
-    def parse_logs(benchmark: str, clusters: List[str]):
         for cluster in clusters:
             local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
-            config_file = os.path.join(local_dir, 'config.json')
-            with open(config_file, 'r') as f:
-                config = json.load(f)
-            start_ts = config['start_ts']
-            total_steps = config.get('total_steps', None)
+            summary = os.path.join(local_dir, _BENCHMARK_SUMMARY)
+            with open(summary, 'r') as f:
+                summary = json.load(f)
 
-            # FIXME
-            timestamp_log = os.path.join(local_dir, 'timestamps.log')
-            timestamps = []
-            with open(timestamp_log, 'rb') as f:
-                while True:
-                    b = f.read(4)
-                    ts = int.from_bytes(b, 'big')
-                    if ts == 0:
-                        # EOF
-                        break
-                    else:
-                        timestamps.append(ts)
-
-            num_steps = int(len(timestamps) / 2)
-            sec_per_step = 0
-            for i in range(num_steps):
-                start = timestamps[2 * i]
-                end = timestamps[2 * i + 1]
-                sec_per_step += end - start
-            sec_per_step /= num_steps
-
+            prep_time = summary['train_start_time'] - summary['create_time']
+            run_time = summary['last_time'] - summary['train_start_time']
             record = benchmark_state.BenchmarkRecord(
-                num_steps,
-                sec_per_step,
-                total_steps,
-                start_ts,
-                timestamps[0],
-                timestamps[-1],
+                prep_time=prep_time,
+                run_time=run_time,
+                num_steps=summary['num_steps'],
+                step_time=summary['step_time'],
+                total_steps=summary['total_steps'],
+                estimated_total_time=summary['estimated_total_time'],
             )
             benchmark_state.update_benchmark_result(benchmark, cluster, record)
 

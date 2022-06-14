@@ -73,13 +73,12 @@ class BenchmarkStatus(enum.Enum):
 
 
 class BenchmarkRecord(NamedTuple):
-
+    prep_time: float
+    run_time: float
     num_steps: int
-    sec_per_step: float
-    total_steps: Optional[int]
-    start_ts: int
-    first_ts: int
-    last_ts: int
+    step_time: float
+    total_steps: Optional[int] = None
+    estimated_total_time: Optional[float] = None
 
 
 def add_benchmark(benchmark_name: str, task_name: Optional[str], bucket_name: str) -> None:

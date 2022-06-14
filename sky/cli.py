@@ -1152,14 +1152,7 @@ def benchmark_ls() -> None:
               is_flag=True,
               required=False,
               help='Force downloading benchmark logs in the running clusters.')
-@click.option('--all',
-              '-a',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Show all information in full.')
-# pylint: disable=redefined-builtin
-def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
+def benchmark_show(benchmark: str, force_download: bool) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
@@ -1167,8 +1160,7 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
 
     if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download):
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
-        BenchmarkController.download_logs(benchmark, clusters)
-        BenchmarkController.parse_logs(benchmark, clusters)
+        BenchmarkController.update(benchmark, clusters)
 
     # Generate a report.
     columns = [
@@ -1182,12 +1174,6 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
         'TOTAL_TIME (hr)',
         'TOTAL_COST ($)',
     ]
-    if all:
-        columns += [
-            'START_TIMESTAMP',
-            'FIRST_TIMESTAMP',
-            'LAST_TIMESTAMP',
-        ]
 
     cluster_table = log_utils.create_table(columns)
     benchmark_results = benchmark_state.get_benchmark_results(benchmark)
@@ -1196,14 +1182,12 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
         resources = result['resources']
 
         record = result['record']
-        prep_time = record.first_ts - record.start_ts
-        run_time = record.last_ts - record.first_ts
-        cost_per_step = num_nodes * resources.get_cost(record.sec_per_step)
-
-        total_time_str = '-'
-        total_cost_str = '-'
-        if record.total_steps is not None:    
-            total_time = prep_time + record.sec_per_step * record.total_steps
+        cost_per_step = num_nodes * resources.get_cost(record.step_time)
+        total_time = record.estimated_total_time
+        if total_time is None:
+            total_time_str = '-'
+            total_cost_str = '-'
+        else:
             total_cost = num_nodes * resources.get_cost(total_time)
             total_time_str = f'{total_time / 3600:.2f}'
             total_cost_str = f'{total_cost:.2f}'
@@ -1214,13 +1198,13 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
             # RESOURCES
             f'{num_nodes}x {resources}',
             # PREP_TIME (min)
-            f'{prep_time / 60:.2f}',
+            f'{record.prep_time / 60:.2f}',
             # RUN_TIME (min)
-            f'{run_time / 60:.2f}',
+            f'{record.run_time / 60:.2f}',
             # STEPS
             record.num_steps,
             # SEC/ITER
-            f'{record.sec_per_step:.2f}',
+            f'{record.step_time:.2f}',
             # $/ITER
             f'{cost_per_step:.6f}',
             # TOTAL_TIME (hr)
@@ -1228,16 +1212,6 @@ def benchmark_show(benchmark: str, force_download: bool, all: bool) -> None:
             # TOTAL_COST ($)
             total_cost_str,
         ]
-
-        if all:
-            row += [
-                # START_TIMESTAMP
-                datetime.fromtimestamp(record.start_ts),
-                # FIRST_TIMESTAMP
-                datetime.fromtimestamp(record.first_ts),
-                # LAST_TIMESTAMP
-                datetime.fromtimestamp(record.last_ts),
-            ]
         cluster_table.add_row(row)
     click.echo(cluster_table)
 
