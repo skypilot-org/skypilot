@@ -48,6 +48,7 @@ columns = [
 
 class SpotStatus(enum.Enum):
     """Spot job status, designed to be in serverless style"""
+    PENDING = 'PENDING'
     SUBMITTED = 'SUBMITTED'
     STARTING = 'STARTING'
     RUNNING = 'RUNNING'
@@ -59,24 +60,46 @@ class SpotStatus(enum.Enum):
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self) -> bool:
-        return self in self.terminal_status()
+        return self in self.terminal_statuses()
+
+    def is_failed(self) -> bool:
+        return self in self.failure_statuses()
 
     @classmethod
-    def terminal_status(cls) -> List['SpotStatus']:
+    def terminal_statuses(cls) -> List['SpotStatus']:
         return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
                 cls.FAILED_CONTROLLER, cls.CANCELLED)
 
+    @classmethod
+    def failure_statuses(cls) -> List['SpotStatus']:
+        return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
+
 
 # === Status transition functions ===
-def init(job_id: int, name: str, run_timestamp: str, resources_str: str):
-    """Insert a new spot job, returns the success."""
+def set_pending(job_id: int, name: str, resources_str: str):
+    """Set the job to pending state."""
     _CURSOR.execute(
         """\
         INSERT INTO spot
-        (job_id, job_name, resources, submitted_at, status, run_timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)""",
-        (job_id, name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
-         run_timestamp))
+        (job_id, job_name, resources, status) VALUES (?, ?, ?, ?)""",
+        (job_id, name, resources_str, SpotStatus.PENDING.value))
+    _CONN.commit()
+
+
+def set_submitted(job_id: int, name: str, run_timestamp: str,
+                  resources_str: str):
+    """Set the job to submitted."""
+    _CURSOR.execute(
+        """\
+        UPDATE spot SET
+        job_name=(?),
+        resources=(?),
+        submitted_at=(?),
+        status=(?),
+        run_timestamp=(?)
+        WHERE job_id=(?)""",
+        (name, resources_str, time.time(), SpotStatus.SUBMITTED.value,
+         run_timestamp, job_id))
     _CONN.commit()
 
 
@@ -133,10 +156,7 @@ def set_succeeded(job_id: int, end_time: float):
 def set_failed(job_id: int,
                failure_type: SpotStatus,
                end_time: Optional[float] = None):
-    assert (failure_type in [
-        SpotStatus.FAILED, SpotStatus.FAILED_NO_RESOURCE,
-        SpotStatus.FAILED_CONTROLLER
-    ]), failure_type
+    assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
     fields_to_set = {
         'end_at': end_time,
@@ -186,10 +206,10 @@ def set_cancelled(job_id: int):
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
     name_filter = 'AND job_name=(?)' if name is not None else ''
-    field_values = [status.value for status in SpotStatus.terminal_status()]
+    field_values = [status.value for status in SpotStatus.terminal_statuses()]
     if name is not None:
         field_values.append(name)
-    statuses = ', '.join(['?'] * len(SpotStatus.terminal_status()))
+    statuses = ', '.join(['?'] * len(SpotStatus.terminal_statuses()))
     rows = _CURSOR.execute(
         f"""\
         SELECT job_id FROM spot
@@ -213,7 +233,7 @@ def get_status(job_id: int) -> Optional[SpotStatus]:
 def get_spot_jobs() -> List[Dict[str, Any]]:
     """Get spot clusters' status."""
     rows = _CURSOR.execute("""\
-        SELECT * FROM spot ORDER BY submitted_at DESC""")
+        SELECT * FROM spot ORDER BY job_id DESC""")
     jobs = []
     for row in rows:
         job_dict = dict(zip(columns, row))

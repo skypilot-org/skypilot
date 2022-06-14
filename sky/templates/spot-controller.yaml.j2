@@ -11,7 +11,7 @@ resources:
 #  instance_type: t3.xlarge
 
 file_mounts:
-  ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml: {{user_yaml_path}}
+  {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
 
 setup: |
   # Install cli dependencies
@@ -32,5 +32,5 @@ setup: |
 
 run: |
   python -u -m sky.spot.controller \
-    ~/.sky/sky_spot_tasks/{{cluster_name}}.yaml \
+    {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID

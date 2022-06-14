@@ -186,10 +186,7 @@ def stream_logs_by_id(job_id: int) -> str:
 
     if job_status.is_terminal():
         job_msg = ''
-        if job_status in [
-                spot_state.SpotStatus.FAILED,
-                spot_state.SpotStatus.FAILED_NO_RESOURCE
-        ]:
+        if job_status.is_failed():
             job_msg = ('\nFor detailed error message, please check: '
                        f'{colorama.Style.BRIGHT}sky logs '
                        f'{constants.SPOT_CONTROLLER_NAME} {job_id}'
@@ -274,13 +271,14 @@ def show_jobs(show_all: bool) -> str:
                                                             job['job_duration'],
                                                             absolute=True)
         ago_suffix = ' ago' if show_all else ''
+        submitted = log_utils.readable_time_duration(job['submitted_at'],
+                                                     absolute=show_all)
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            log_utils.readable_time_duration(job['submitted_at'],
-                                             absolute=show_all) + ago_suffix,
+            submitted + ago_suffix if submitted != '-' else submitted,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],

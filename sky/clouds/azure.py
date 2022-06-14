@@ -10,7 +10,6 @@ from sky.clouds import service_catalog
 
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
-    'accessTokens.json',
     'azureProfile.json',
     'clouds.config',
     'config',

@@ -108,11 +108,11 @@ increases before proceeding.
 
 .. _docker-image:
 
-Docker image
-------------
+Quick alternative: trying in Docker
+------------------------------------------------------
 
-If you are looking to try out Sky, we also provide a Docker image with sky and
-its dependencies installed. You can simply run:
+As a **quick alternative to installing Sky on your laptop**, we also provide a Docker image with Sky and
+its dependencies installed for users to quickly try out Sky. You can simply run:
 
 .. code-block:: console
 

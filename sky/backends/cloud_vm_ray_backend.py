@@ -64,9 +64,18 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 _LOCK_FILENAME = '~/.sky/.{}.lock'
 _FILELOCK_TIMEOUT_SECONDS = 10
 
+# The git exclude file to support.
+_GIT_EXCLUDE = '.git/info/exclude'
+
 _RSYNC_DISPLAY_OPTION = '-Pavz'
+# Legend
+#   dir-merge: ignore file can appear in any subdir, applies to that
+#     subdir downwards
+# Note that "-" is mandatory for rsync and means all patterns in the ignore
+# files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
+# do_not_exclude" doesn't work, even though git allows it.
 _RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
-_RSYNC_EXCLUDE_OPTION = '--exclude-from=.git/info/exclude'
+_RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -85,13 +94,16 @@ def _get_cluster_config_template(cloud):
 
 def _path_size_megabytes(path: str) -> int:
     """Returns the size of 'path' (directory or file) in megabytes."""
+    resolved_path = pathlib.Path(path).expanduser().resolve()
     git_exclude_filter = ''
-    if (pathlib.Path(path) / '.git/info/exclude').exists():
-        git_exclude_filter = f' {_RSYNC_EXCLUDE_OPTION}'
+    if (resolved_path / _GIT_EXCLUDE).exists():
+        # Ensure file exists; otherwise, rsync will error out.
+        git_exclude_filter = _RSYNC_EXCLUDE_OPTION.format(
+            str(resolved_path / _GIT_EXCLUDE))
     rsync_output = str(
         subprocess.check_output(
             f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
-            f'{git_exclude_filter} --dry-run {path}',
+            f' {git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
@@ -135,7 +147,9 @@ class RayCodeGen:
         #   job_id = get_output(run_on_cluster(code))
         self.job_id = None
 
-    def add_prologue(self, job_id: int) -> None:
+    def add_prologue(self,
+                     job_id: int,
+                     spot_task: Optional['task_lib.Task'] = None) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -179,6 +193,14 @@ class RayCodeGen:
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
+        if spot_task is not None:
+            # Add the spot job to spot status table.
+            resources_str = backend_utils.get_task_resources_str(spot_task)
+            self._code += [
+                'from sky.spot import spot_state',
+                f'spot_state.set_pending('
+                f'{job_id}, {spot_task.name!r}, {resources_str!r})',
+            ]
 
     def add_gang_scheduling_placement_group(
         self,
@@ -648,8 +670,7 @@ class RetryingVmProvisioner(object):
                     f'Cluster {cluster_name!r} (status: {cluster_status.value})'
                     f' was previously launched in {cloud} '
                     f'({region.name}). Relaunching in that region.')
-            # This should be handled in the
-            # _check_task_resources_smaller_than_cluster function.
+            # This should be handled in the check_resources_match function.
             assert (to_provision.region is None or
                     region.name == to_provision.region), (
                         f'Cluster {cluster_name!r} was previously launched in '
@@ -1359,13 +1380,18 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = None
 
     def register_info(self, **kwargs) -> None:
-        self._dag = kwargs['dag']
-        self._optimize_target = kwargs.pop('optimize_target',
-                                           OptimizeTarget.COST)
+        self._dag = kwargs.pop('dag', self._dag)
+        self._optimize_target = kwargs.pop(
+            'optimize_target', self._optimize_target) or OptimizeTarget.COST
+        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
-    def _check_task_resources_smaller_than_cluster(self, handle: ResourceHandle,
-                                                   task: task_lib.Task):
-        """Check if resources requested by the task are available."""
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: task_lib.Task):
+        """Check if resources requested by the task fit the cluster.
+
+        The resources requested by the task should be smaller than the existing
+        cluster.
+        """
         assert len(task.resources) == 1, task.resources
 
         launched_resources = handle.launched_resources
@@ -1375,7 +1401,6 @@ class CloudVmRayBackend(backends.Backend):
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
-
         # Special handling for local cloud case.
         # Resources.less_demanding_than takes in the Resources object of first
         # task that was ran on the cluster. In the local cloud case,
@@ -1389,21 +1414,23 @@ class CloudVmRayBackend(backends.Backend):
                     merged_resources[k] = merged_resources.get(k, 0) + d[k]
             launched_resources.override_accelerators(merged_resources)
         # requested_resources <= actual_resources.
-        if not (task.num_nodes <= handle.launched_nodes and
-                task_resources.less_demanding_than(launched_resources)):
-            if (task_resources.region is not None and
-                    task_resources.region != launched_resources.region):
+        with backend_utils.print_exception_no_traceback():
+            # requested_resources <= actual_resources.
+            if not (task.num_nodes <= handle.launched_nodes and
+                    task_resources.less_demanding_than(launched_resources)):
+                if (task_resources.region is not None and
+                        task_resources.region != launched_resources.region):
+                    raise exceptions.ResourcesMismatchError(
+                        'Task requested the resources in region '
+                        f'{task_resources.region!r}, but the existed cluster '
+                        f'is in region {launched_resources.region!r}.')
                 raise exceptions.ResourcesMismatchError(
-                    'Task requested the resources in region '
-                    f'{task_resources.region!r}, but the existed cluster is in '
-                    f'region {launched_resources.region!r}.')
-            raise exceptions.ResourcesMismatchError(
-                'Requested resources do not match the existing cluster.\n'
-                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
-                f'  Existing:\t{handle.launched_nodes}x '
-                f'{launched_resources}\n'
-                f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: sky down {cluster_name}')
+                    'Requested resources do not match the existing cluster.\n'
+                    f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'{handle.launched_resources}\n'
+                    f'To fix: specify a new cluster name, or down the '
+                    f'existing cluster first: sky down {cluster_name}')
 
     @timeline.event
     def _check_existing_cluster(
@@ -1412,7 +1439,7 @@ class CloudVmRayBackend(backends.Backend):
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
             # Cluster already exists.
-            self._check_task_resources_smaller_than_cluster(handle, task)
+            self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
@@ -1651,6 +1678,7 @@ class CloudVmRayBackend(backends.Backend):
         else:
             assert os.path.isdir(
                 full_workdir), f'{full_workdir} should be a directory.'
+            # FIXME(zongheng): audit; why not give users control to add '/'?
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
@@ -1700,8 +1728,7 @@ class CloudVmRayBackend(backends.Backend):
     def _execute_storage_mounts(self, handle: ResourceHandle,
                                 storage_mounts: Dict[Path,
                                                      storage_lib.Storage]):
-        """Executes storage mounts - installing mounting tools and mounting"""
-
+        """Executes storage mounts: installing mounting tools and mounting."""
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
         # in the '_execute_file_mounts' method.
@@ -1780,6 +1807,7 @@ class CloudVmRayBackend(backends.Backend):
             # (otherwise we have '<abs path to cwd>/gs://.../object/').
             full_src = os.path.abspath(os.path.expanduser(src))
             if not os.path.islink(full_src) and not os.path.isfile(full_src):
+                # FIXME(zongheng): audit; why not give users control to add '/'?
                 src = os.path.join(src, '')  # Adds trailing / if needed.
 
         def _sync_node(ip):
@@ -2328,7 +2356,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> None:
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
-        self._check_task_resources_smaller_than_cluster(handle, task)
+        self.check_resources_fit_cluster(handle, task)
 
         # Otherwise, handle a basic Task.
         if task.run is None:
@@ -2356,7 +2384,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, spot_task=task.spot_task)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2391,7 +2419,7 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id)
+        codegen.add_prologue(job_id, spot_task=task.spot_task)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 
@@ -2665,18 +2693,17 @@ class CloudVmRayBackend(backends.Backend):
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
         rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
-        # Legend
-        #   dir-merge: ignore file can appear in any subdir, applies to that
-        #     subdir downwards
-        # Note that "-" is mandatory for rsync and means all patterns in the
-        # ignore files are treated as *exclude* patterns.  Non-exclude
-        # patterns, e.g., "!  do_not_exclude" doesn't work, even though git
-        # allows it.
+
+        # --filter
         rsync_command.append(_RSYNC_FILTER_OPTION)
-        git_exclude = '.git/info/exclude'
-        if (pathlib.Path(source) / git_exclude).exists():
+
+        # --exclude-from
+        resolved_source = pathlib.Path(source).expanduser().resolve()
+        if (resolved_source / _GIT_EXCLUDE).exists():
             # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append(_RSYNC_EXCLUDE_OPTION)
+            rsync_command.append(
+                _RSYNC_EXCLUDE_OPTION.format(str(resolved_source /
+                                                 _GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
             backend_utils.ssh_options_list(ssh_key,

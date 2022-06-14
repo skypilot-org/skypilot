@@ -137,6 +137,11 @@ class Task:
         self.resources = {sky.Resources()}
         self.time_estimator_func = None
         self.file_mounts = None
+
+        # Only set when 'self' is a spot controller task: 'self.spot_task' is
+        # the underlying managed spot task (Task object).
+        self.spot_task = None
+
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
         self.auth_config = None
@@ -480,7 +485,8 @@ class Task:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
                     # TODO: allow for Storage mounting of different clouds
-                    if storage.source.startswith('s3://'):
+                    if storage.source is not None and storage.source.startswith(
+                            's3://'):
                         blob_path = storage.source
                     else:
                         blob_path = 's3://' + storage.name
