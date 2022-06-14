@@ -58,10 +58,11 @@ describe all fields available.
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
 
-      # Additional accelerator metadata (optional); only used for TPUs.
+      # Additional accelerator metadata (optional); only used for TPU node and TPU VM.
       accelerator_args:
-        runtime_version: 2.5.0
+        runtime_version: 2.5.0 # Default for TPU node is "2.5.0". Default for TPU VM is "tpu-vm-base".
         tpu_name: mytpu
+        tpu_vm: False # True to use TPU VM, False to use TPU node.
 
     file_mounts:
       # Uses rsync to copy local files to all nodes of the cluster.
