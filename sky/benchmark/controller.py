@@ -102,11 +102,12 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
 
     # Select the bucket type.
     enabled_clouds = global_user_state.get_enabled_clouds()
-    if sky.AWS() in enabled_clouds:
+    enabled_clouds = [str(cloud) for cloud in enabled_clouds]
+    if 'AWS' in enabled_clouds:
         bucket_type = data.StoreType.S3
-    elif sky.GCP() in enabled_clouds:
+    elif 'GCP' in enabled_clouds:
         bucket_type = data.StoreType.GCS
-    elif sky.Azure() in enabled_clouds:
+    elif 'AZURE' in enabled_clouds:
         bucket_type = data.StoreType.AZURE
     else:
         raise ValueError('No cloud is enabled. '
@@ -118,8 +119,7 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
     storage.add_store(bucket_type)
 
     # Save the bucket name and type to the config file.
-    config['name'] = bucket_name
-    config['store'] = bucket_type.value
+    config = {'name': bucket_name, 'store': bucket_type.value}
     with open(_BENCHMARK_BUCKET_CONFIG, 'w') as f:
         json.dump(config, f)
     return bucket_name, bucket_type.value
