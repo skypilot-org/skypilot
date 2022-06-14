@@ -27,6 +27,7 @@ def train_step():
         _sky_callback.on_train_step_end()
 
 
+# FIXME: Needs better name.
 class step:
 
     def __init__(self, iterable):
