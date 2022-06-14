@@ -252,7 +252,7 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node' + plural + '.'
                 print('SKY INFO: Waiting for task resources on ' + node_str + 
-                      ' This will block if the cluster is full.\n'
+                      ' This will block if the cluster is full.\\n'
                       'SKY INFO: Use Ctrl-C to exit log streaming (task will not be killed).',
                       file=sys.stderr,
                       flush=True)
