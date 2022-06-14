@@ -3,7 +3,6 @@ from typing import Optional
 
 from sky_callback import SkyCallback
 
-
 _sky_callback = None
 
 

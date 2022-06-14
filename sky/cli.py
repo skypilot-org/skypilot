@@ -35,7 +35,7 @@ import shlex
 import sys
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 import yaml
 
 import click
@@ -273,17 +273,16 @@ _GPUS_OPTION = click.option(
     '--gpus',
     required=False,
     type=str,
-    help=
-    ('Type and number of GPUs to use. Example values: '
-    '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-    '(fractional counts are supported by the scheduling framework). '
-    'If a new cluster is being launched by this command, this is the '
-    'resources to provision. If an existing cluster is being reused, this'
-    ' is seen as the task demand, which must fit the cluster\'s total '
-    'resources and is used for scheduling the task. '
-    'Overrides the "accelerators" '
-    'config in the YAML if both are supplied. '
-    'Passing "none" resets the config.'))
+    help=('Type and number of GPUs to use. Example values: '
+          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+          '(fractional counts are supported by the scheduling framework). '
+          'If a new cluster is being launched by this command, this is the '
+          'resources to provision. If an existing cluster is being reused, this'
+          ' is seen as the task demand, which must fit the cluster\'s total '
+          'resources and is used for scheduling the task. '
+          'Overrides the "accelerators" '
+          'config in the YAML if both are supplied. '
+          'Passing "none" resets the config.'))
 
 
 def _add_click_options(options: List[click.Option]):
@@ -1067,12 +1066,14 @@ def benchmark_launch(
     if len(env) > 0:
         commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
 
-    clusters, candidate_configs = BenchmarkController.generate_configs(benchmark, config, candidates)
+    clusters, candidate_configs = BenchmarkController.generate_configs(
+        benchmark, config, candidates)
     if not yes:
         plural = 's' if len(candidates) > 1 else ''
         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
-    BenchmarkController.launch(benchmark, clusters, candidate_configs, commandline_args)
+    BenchmarkController.launch(benchmark, clusters, candidate_configs,
+                               commandline_args)
 
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
                 f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
@@ -1158,7 +1159,8 @@ def benchmark_show(benchmark: str, force_download: bool) -> None:
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
 
-    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or force_download):
+    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
+            force_download):
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
         BenchmarkController.update(benchmark, clusters)
 
@@ -1216,7 +1218,8 @@ def benchmark_show(benchmark: str, force_download: bool) -> None:
     click.echo(cluster_table)
 
 
-def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str], terminate: bool, yes: bool):
+def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
+                                 terminate: bool, yes: bool):
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')

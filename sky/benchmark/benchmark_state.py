@@ -81,7 +81,8 @@ class BenchmarkRecord(NamedTuple):
     estimated_total_time: Optional[float] = None
 
 
-def add_benchmark(benchmark_name: str, task_name: Optional[str], bucket_name: str) -> None:
+def add_benchmark(benchmark_name: str, task_name: Optional[str],
+                  bucket_name: str) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
     if task_name is None:
@@ -89,13 +90,15 @@ def add_benchmark(benchmark_name: str, task_name: Optional[str], bucket_name: st
             'INSERT INTO benchmark'
             '(name, task, bucket, launched_at, status) '
             'VALUES (?, NULL, ?, ?, ?)',
-            (benchmark_name, bucket_name, launched_at, BenchmarkStatus.RUNNING.value))
+            (benchmark_name, bucket_name, launched_at,
+             BenchmarkStatus.RUNNING.value))
     else:
         _BENCHMARK_DB.cursor.execute(
             'INSERT INTO benchmark'
             '(name, task, bucket, launched_at, status) '
-            'VALUES (?, ?, ?, ?, ?)', (benchmark_name, task_name, bucket_name, launched_at,
-                                    BenchmarkStatus.RUNNING.value))
+            'VALUES (?, ?, ?, ?, ?)',
+            (benchmark_name, task_name, bucket_name, launched_at,
+             BenchmarkStatus.RUNNING.value))
     _BENCHMARK_DB.conn.commit()
 
 

@@ -774,9 +774,9 @@ class Optimizer:
                                                        best_plan)
 
         if print_plan:
-            Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
-                                           total_cost, node_to_cost_map,
-                                           minimize_cost)
+            Optimizer.print_optimized_plan(graph, topo_order, best_plan,
+                                           total_time, total_cost,
+                                           node_to_cost_map, minimize_cost)
             if not sky_logging.MINIMIZE_LOGGING:
                 Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
