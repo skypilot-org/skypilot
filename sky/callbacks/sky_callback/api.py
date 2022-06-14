@@ -25,3 +25,21 @@ def train_step():
     yield
     if _sky_callback is not None:
         _sky_callback.on_train_step_end()
+
+
+class step:
+
+    def __init__(self, iterable):
+        self.iterable = iterable
+
+    def __iter__(self):
+        # Inlining for speed optimization.
+        iterable = self.iterable
+        if _sky_callback is None:
+            for obj in iterable:
+                yield obj
+        else:
+            for obj in iterable:
+                _sky_callback.on_train_step_begin()
+                yield obj
+                _sky_callback.on_train_step_end()
