@@ -1318,7 +1318,6 @@ def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
         launch_hashes.append(current_hash)
-    print(f'Launch hashes: {launch_hashes}')
     return launch_hashes
 
 
@@ -1379,7 +1378,6 @@ def _query_status_azure(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_config  # unused
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
@@ -1392,13 +1390,13 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-
-    query_cmd = textwrap.dedent(f"""\
-            az vm show -d --ids \
-            $(az vm list --query \
-            "[?tags.\\"ray-cluster-name\\" == '{cluster}'].id" \
-            -o tsv) --query "powerState" -o tsv
-        """)
+    launch_hashes = _ray_launch_hash(ray_config)
+    hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
+    query_cmd = (
+        'az vm show -d --ids $(az vm list --query '
+        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\' && '
+        f'contains(\'[{hash_filter_str}]\', tags.\\"ray-launch-config\\")].id" '
+        '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
     # An alternative is the following command, but it will take more than
