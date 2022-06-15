@@ -44,7 +44,7 @@ def show_status_table(show_all: bool, refresh: bool):
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=35 if not show_all else 0),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False)
     ]
 
     columns = []
