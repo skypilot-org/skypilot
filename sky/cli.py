@@ -27,7 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-from datetime import datetime
+import datetime
 import functools
 import getpass
 import os
@@ -1126,7 +1126,7 @@ def benchmark_ls() -> None:
             # TASK
             task,
             # LAUNCHED
-            datetime.fromtimestamp(benchmark['launched_at']),
+            datetime.datetime.fromtimestamp(benchmark['launched_at']),
             # STATUS
             benchmark['status'].value,
         ]
