@@ -1601,16 +1601,24 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
+    terminated_clusters = []
+
     def _refresh_cluster(cluster_name):
         record = _update_cluster_status(cluster_name,
                                         acquire_per_cluster_status_lock=True)
+        if record is None:
+            terminated_clusters.append(cluster_name)
         progress.update(task, advance=1)
         return record
 
     cluster_names = [record['name'] for record in records]
     with progress:
         updated_records = run_in_parallel(_refresh_cluster, cluster_names)
-        # updated_records = [_refresh_cluster(name) for name in cluster_names]
+    if terminated_clusters:
+        plural = 's were' if len(terminated_clusters) > 1 else ' was'
+        cluster_str = ', '.join(repr(name) for name in terminated_clusters)
+        logger.warning(f'The following cluster{plural} terminated and removed '
+                       f'from the cluster table:\n{cluster_str}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
