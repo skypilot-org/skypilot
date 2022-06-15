@@ -131,24 +131,28 @@ def _get_pretty_entry_point() -> str:
 
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
-                          ready: bool):
+                          ready: bool,
+                          update_last_use: bool = True):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
-    last_use = _get_pretty_entry_point()
+    last_use = _get_pretty_entry_point() if update_last_use else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         '(name, launched_at, handle, last_use, status, autostop) '
-        'VALUES (?, ?, ?, ?, ?, '
+        'VALUES (?, ?, ?, '
+        'COALESCE('
+        '?, (SELECT last_use FROM clusters WHERE name=?)),'
+        '?, '
         # Keep the old autostop value if it exists, otherwise set it to
         # default -1.
         'COALESCE('
         '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
         ')',  # VALUES
-        (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name, ClusterStatus.STOPPED.value))
+        (cluster_name, cluster_launched_at, handle, last_use, cluster_name,
+         status.value, cluster_name, ClusterStatus.STOPPED.value))
     _DB.conn.commit()
 
 

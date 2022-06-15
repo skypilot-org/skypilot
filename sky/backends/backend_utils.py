@@ -1424,7 +1424,8 @@ def _update_cluster_status_no_lock(
         handle.head_ip = ips[0]
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
-                                                ready=True)
+                                                ready=True,
+                                                update_last_use=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
