@@ -1293,7 +1293,11 @@ def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
     # pylint: disable=import-outside-toplevel, protected-access
     from ray.autoscaler._private import commands
     from ray.autoscaler._private import util
-    ray_config = commands._bootstrap_config(ray_config)
+    # Disable the output of bootstrapping config.
+    with open('/dev/null',
+                'a') as f, contextlib.redirect_stdout(
+                    f), contextlib.redirect_stderr(f):
+        ray_config = commands._bootstrap_config(ray_config)
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = []
