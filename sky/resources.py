@@ -101,6 +101,7 @@ class Resources:
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
+
         return (f'{self.cloud}({self._instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args})')
 
