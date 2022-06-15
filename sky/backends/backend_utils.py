@@ -1288,9 +1288,31 @@ def _process_cli_query(
     ]
 
 
+def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
+    """Returns the hash of the cluster_yaml."""
+    # pylint: disable=import-outside-toplevel, protected-access
+    from ray.autoscaler._private import commands
+    from ray.autoscaler._private import util
+    ray_config = commands._bootstrap_config(ray_config)
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
+    launch_hashes = []
+    head_node_type = ray_config['head_node_type']
+    for node_type, node_config in ray_config['available_node_types'].items():
+        if node_type == head_node_type:
+            launch_config = ray_config.get('head_node', {})
+        else:
+            launch_config = ray_config.get('worker_nodes', {})
+
+        launch_config.update(node_config['node_config'])
+        launch_hashes.append(
+            util.hash_launch_conf(launch_config, ray_config['auth']))
+    return launch_hashes
+
+
 def _query_status_aws(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
@@ -1302,7 +1324,7 @@ def _query_status_aws(
         'shutting-down': None,
         'terminated': None,
     }
-    region = ray_provider_config['region']
+    region = ray_config['provider']['region']
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
                  f'--region {region} '
@@ -1313,9 +1335,8 @@ def _query_status_aws(
 
 def _query_status_gcp(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
         'STARTING': global_user_state.ClusterStatus.INIT,
@@ -1328,19 +1349,22 @@ def _query_status_gcp(
         'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
         'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
     }
+    launch_hashes = _ray_launch_hash(ray_config)
+    hash_filter_str = ' '.join(launch_hashes)
     # TODO(zhwu): The status of the TPU attached to the cluster should also be
     # checked, since TPUs are not part of the VMs.
     query_cmd = ('gcloud compute instances list '
-                 f'--filter="labels.ray-cluster-name={cluster}" '
+                 f'--filter="(labels.ray-cluster-name={cluster} AND '
+                 f'labels.ray-launch-config=({hash_filter_str}))" '
                  '--format="value(status)"')
     return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
 
 
 def _query_status_azure(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
+    del ray_config  # unused
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
@@ -1385,9 +1409,8 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_provider_config = read_yaml(handle.cluster_yaml)['provider']
-    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name,
-                                           ray_provider_config)
+    ray_config = read_yaml(handle.cluster_yaml)
+    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
 def _update_cluster_status_no_lock(
