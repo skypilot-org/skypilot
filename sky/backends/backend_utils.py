@@ -5,6 +5,7 @@ import difflib
 import enum
 import hashlib
 import getpass
+import logging
 from multiprocessing import pool
 import os
 import pathlib
@@ -28,6 +29,9 @@ import psutil
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
+# pylint: disable=import-outside-toplevel, protected-access
+from ray.autoscaler._private import commands as ray_commands
+from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -1288,15 +1292,19 @@ def _process_cli_query(
     ]
 
 
+@contextlib.contextmanager
+def subpress_output():
+    """Suppress stdout and stderr."""
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
+                devnull):
+            yield
+
+
 def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
     """Returns the hash of the cluster_yaml."""
-    # pylint: disable=import-outside-toplevel, protected-access
-    from ray.autoscaler._private import commands
-    from ray.autoscaler._private import util
-    # Disable the output of bootstrapping config.
-    with open('/dev/null', 'a') as f, contextlib.redirect_stdout(
-            f), contextlib.redirect_stderr(f):
-        ray_config = commands._bootstrap_config(ray_config)
+    with subpress_output():
+        ray_config = ray_commands._bootstrap_config(ray_config)
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = []
@@ -1308,8 +1316,10 @@ def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
             launch_config = ray_config.get('worker_nodes', {})
 
         launch_config.update(node_config['node_config'])
-        launch_hashes.append(
-            util.hash_launch_conf(launch_config, ray_config['auth']))
+        with subpress_output():
+            current_hash = ray_util.hash_launch_conf(launch_config,
+                                                 ray_config['auth'])
+        launch_hashes.append(current_hash)
     return launch_hashes
 
 
@@ -1451,7 +1461,7 @@ def _update_cluster_status_no_lock(
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
-                                                new_last_use=False)
+                                                newly_launched=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
@@ -1600,6 +1610,7 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
     cluster_names = [record['name'] for record in records]
     with progress:
         updated_records = run_in_parallel(_refresh_cluster, cluster_names)
+        # updated_records = [_refresh_cluster(name) for name in cluster_names]
     updated_records = [
         record for record in updated_records if record is not None
     ]
