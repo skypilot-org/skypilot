@@ -5,7 +5,6 @@ import difflib
 import enum
 import hashlib
 import getpass
-import logging
 from multiprocessing import pool
 import os
 import pathlib
@@ -29,7 +28,6 @@ import psutil
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
-# pylint: disable=import-outside-toplevel, protected-access
 from ray.autoscaler._private import commands as ray_commands
 from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
@@ -1304,7 +1302,7 @@ def subpress_output():
 def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
     """Returns the hash of the cluster_yaml."""
     with subpress_output():
-        ray_config = ray_commands._bootstrap_config(ray_config)
+        ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = []
@@ -1318,8 +1316,9 @@ def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
         launch_config.update(node_config['node_config'])
         with subpress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
-                                                 ray_config['auth'])
+                                                     ray_config['auth'])
         launch_hashes.append(current_hash)
+    print(f'Launch hashes: {launch_hashes}')
     return launch_hashes
 
 
@@ -1338,8 +1337,11 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
+    launch_hashes = _ray_launch_hash(ray_config)
+    hash_filter_str = ','.join(launch_hashes)
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
+                 f'Name=tag:ray-launch-config,Values={hash_filter_str} '
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
