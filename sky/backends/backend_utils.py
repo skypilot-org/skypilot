@@ -1294,9 +1294,8 @@ def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
     from ray.autoscaler._private import commands
     from ray.autoscaler._private import util
     # Disable the output of bootstrapping config.
-    with open('/dev/null',
-                'a') as f, contextlib.redirect_stdout(
-                    f), contextlib.redirect_stderr(f):
+    with open('/dev/null', 'a') as f, contextlib.redirect_stdout(
+            f), contextlib.redirect_stderr(f):
         ray_config = commands._bootstrap_config(ray_config)
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
@@ -1452,7 +1451,7 @@ def _update_cluster_status_no_lock(
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
-                                                update_last_use=False)
+                                                new_last_use=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
