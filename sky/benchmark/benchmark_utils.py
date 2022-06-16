@@ -201,7 +201,7 @@ def generate_benchmark_configs(
 
 def launch_benchmark_clusters(benchmark: str, clusters: List[str],
                               candidate_configs: List[_Config],
-                              commandline_args: List[Dict[str, Any]]) -> None:
+                              commandline_args: List[Dict[str, Any]]) -> bool:
     # Use a Sky storage to save the benchmark logs.
     bucket_name, bucket_type = _get_benchmark_bucket()
     for candidate_config in candidate_configs:
@@ -253,6 +253,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
                 benchmark_state.add_benchmark(benchmark, task_name, bucket_name)
                 benchmark_created = True
             benchmark_state.add_benchmark_result(benchmark, record['handle'])
+    return benchmark_created
 
 
 def update_benchmark_state(benchmark: str, clusters: List[str]):

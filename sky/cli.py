@@ -2595,21 +2595,22 @@ def benchmark_launch(
         plural = 's' if len(candidates) > 1 else ''
         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
-    benchmark_utils.launch_benchmark_clusters(benchmark, clusters,
-                                              candidate_configs,
-                                              commandline_args)
+    benchmark_created = benchmark_utils.launch_benchmark_clusters(
+        benchmark, clusters, candidate_configs, commandline_args)
 
-    logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
-                f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-                '\nTo see the benchmark results: '
-                f'{backend_utils.BOLD}sky bench show '
-                f'{benchmark}{backend_utils.RESET_BOLD}'
-                '\nTo stop the clusters: '
-                f'{backend_utils.BOLD}sky bench stop '
-                f'{benchmark}{backend_utils.RESET_BOLD}'
-                '\nTo teardown the clusters: '
-                f'{backend_utils.BOLD}sky bench down '
-                f'{benchmark}{backend_utils.RESET_BOLD}')
+    if benchmark_created:
+        logger.info(
+            f'\n{colorama.Fore.CYAN}Benchmark name: '
+            f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
+            '\nTo see the benchmark results: '
+            f'{backend_utils.BOLD}sky bench show '
+            f'{benchmark}{backend_utils.RESET_BOLD}'
+            '\nTo stop the clusters: '
+            f'{backend_utils.BOLD}sky bench stop '
+            f'{benchmark}{backend_utils.RESET_BOLD}'
+            '\nTo teardown the clusters: '
+            f'{backend_utils.BOLD}sky bench down '
+            f'{benchmark}{backend_utils.RESET_BOLD}')
     backend_utils.run('sky status')
 
 
