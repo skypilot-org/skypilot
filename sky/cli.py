@@ -2760,7 +2760,10 @@ def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
               required=False,
               type=str,
               multiple=True,
-              help='Cluster names to exclude from stopping.')
+              help='Cluster name(s) to exclude from termination. '
+              'Typically, you might want to see the benchmark results in '
+              '`sky bench show` and exclude a "winner" cluster from termination '
+              'to finish the running task.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2787,7 +2790,10 @@ def benchmark_stop(
               required=False,
               type=str,
               multiple=True,
-              help='Cluster names to exclude from termination.')
+              help='Cluster name(s) to exclude from termination. '
+              'Typically, you might want to see the benchmark results in '
+              '`sky bench show` and exclude a "winner" cluster from termination '
+              'to finish the running task.')
 @click.option('--yes',
               '-y',
               is_flag=True,
