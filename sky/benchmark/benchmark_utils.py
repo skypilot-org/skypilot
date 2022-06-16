@@ -1,4 +1,4 @@
-"""Benchmark Controller: Manages the benchmarking process."""
+"""Benchmark utils: Utility functions to manage benchmarking process."""
 
 import colorama
 import copy
@@ -149,174 +149,170 @@ def _launch_with_log(cluster: str, cmd: List[str]) -> None:
     )
 
 
-class BenchmarkController:
-    """A class that controls the benchmarking process."""
+def generate_benchmark_configs(
+    benchmark: str,
+    config: _Config,
+    candidates: List[Dict[str, str]],
+) -> Tuple[List[str], List[_Config]]:
+    # Generate a config for each cluster.
+    clusters = _generate_cluster_names(benchmark, len(candidates))
+    candidate_configs = []
+    for cluster, candidate in zip(clusters, candidates):
+        # Re-override the config with each candidate config.
+        candidate_config = copy.deepcopy(config)
+        if 'resources' not in candidate_config:
+            candidate_config['resources'] = {}
+        if 'candidates' in candidate_config['resources']:
+            del candidate_config['resources']['candidates']
+        candidate_config['resources'].update(candidate)
 
-    @staticmethod
-    def generate_configs(
-        benchmark: str,
-        config: _Config,
-        candidates: List[Dict[str, str]],
-    ) -> Tuple[List[str], List[_Config]]:
-        # Generate a config for each cluster.
-        clusters = _generate_cluster_names(benchmark, len(candidates))
-        candidate_configs = []
-        for cluster, candidate in zip(clusters, candidates):
-            # Re-override the config with each candidate config.
-            candidate_config = copy.deepcopy(config)
-            if 'resources' not in candidate_config:
-                candidate_config['resources'] = {}
-            if 'candidates' in candidate_config['resources']:
-                del candidate_config['resources']['candidates']
-            candidate_config['resources'].update(candidate)
+        # Mount the benchmark bucket to SKY_BENCHMARK_DIR.
+        if 'file_mounts' not in candidate_config:
+            candidate_config['file_mounts'] = {}
+        # The bucket name and type are specified at launch time.
+        candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
+            'name': '',
+            'mode': 'MOUNT',
+            'store': ''
+        }
 
-            # Mount the benchmark bucket to SKY_BENCHMARK_DIR.
-            if 'file_mounts' not in candidate_config:
-                candidate_config['file_mounts'] = {}
-            # The bucket name and type are specified at launch time.
-            candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
-                'name': '',
-                'mode': 'MOUNT',
-                'store': ''
-            }
+        # Create a sym link to a directory in the benchmark bucket.
+        benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark,
+                                        cluster)
+        if 'setup' not in candidate_config:
+            candidate_config['setup'] = ''
+        candidate_config['setup'] = (
+            f'mkdir -p {benchmark_dir}; ' +
+            f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; ' +
+            candidate_config['setup'])
 
-            # Create a sym link to a directory in the benchmark bucket.
-            benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark,
-                                         cluster)
-            if 'setup' not in candidate_config:
-                candidate_config['setup'] = ''
-            candidate_config['setup'] = (
-                f'mkdir -p {benchmark_dir}; ' +
-                f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; ' +
-                candidate_config['setup'])
+        # Copy the sky callback wheel to ~/sky_utils.
+        wheel_dir = backend_utils.SKY_REMOTE_PATH
+        candidate_config['setup'] = (
+            'mkdir -p ~/sky_utils; ' +
+            f'cp "$(echo {wheel_dir}/sky_callback-*.whl)" ~/sky_utils; ' +
+            candidate_config['setup'])
+        candidate_configs.append(candidate_config)
 
-            # Copy the sky callback wheel to ~/sky_utils.
-            wheel_dir = backend_utils.SKY_REMOTE_PATH
-            candidate_config['setup'] = (
-                'mkdir -p ~/sky_utils; ' +
-                f'cp "$(echo {wheel_dir}/sky_callback-*.whl)" ~/sky_utils; ' +
-                candidate_config['setup'])
-            candidate_configs.append(candidate_config)
+    candidate_resources = _get_optimized_resources(candidate_configs)
+    _print_candidate_resources(clusters, config, candidate_resources)
+    return clusters, candidate_configs
 
-        candidate_resources = _get_optimized_resources(candidate_configs)
-        _print_candidate_resources(clusters, config, candidate_resources)
-        return clusters, candidate_configs
 
-    @staticmethod
-    def launch(benchmark: str, clusters: List[str],
-               candidate_configs: List[_Config],
-               commandline_args: List[Dict[str, Any]]) -> None:
-        # Use a Sky storage to save the benchmark logs.
-        bucket_name, bucket_type = _get_benchmark_bucket()
-        for candidate_config in candidate_configs:
-            bucket_config = candidate_config['file_mounts'][
-                _SKY_REMOTE_BENCHMARK_DIR]
-            bucket_config['name'] = bucket_name
-            bucket_config['store'] = bucket_type
+def launch_benchmark_clusters(benchmark: str, clusters: List[str],
+            candidate_configs: List[_Config],
+            commandline_args: List[Dict[str, Any]]) -> None:
+    # Use a Sky storage to save the benchmark logs.
+    bucket_name, bucket_type = _get_benchmark_bucket()
+    for candidate_config in candidate_configs:
+        bucket_config = candidate_config['file_mounts'][
+            _SKY_REMOTE_BENCHMARK_DIR]
+        bucket_config['name'] = bucket_name
+        bucket_config['store'] = bucket_type
 
-        # Generate a temporary yaml file for each cluster.
-        yaml_fds = []
-        for cluster, candidate_config in zip(clusters, candidate_configs):
-            # pylint: disable=consider-using-with
-            f = tempfile.NamedTemporaryFile('w',
-                                            prefix=f'{cluster}-',
-                                            suffix='.yaml')
-            backend_utils.dump_yaml(f.name, candidate_config)
-            yaml_fds.append(f)
+    # Generate a temporary yaml file for each cluster.
+    yaml_fds = []
+    for cluster, candidate_config in zip(clusters, candidate_configs):
+        # pylint: disable=consider-using-with
+        f = tempfile.NamedTemporaryFile('w',
+                                        prefix=f'{cluster}-',
+                                        suffix='.yaml')
+        backend_utils.dump_yaml(f.name, candidate_config)
+        yaml_fds.append(f)
 
-        # Generate a common launch command.
-        cmd = ['-d', '-y']
-        for arg_name, arg in commandline_args.items():
-            if isinstance(arg, list):
-                # 'env' arguments.
-                for v in arg:
-                    cmd += [f'--{arg_name}', str(v)]
-            else:
-                cmd += [f'--{arg_name}', str(arg)]
+    # Generate a common launch command.
+    cmd = ['-d', '-y']
+    for arg_name, arg in commandline_args.items():
+        if isinstance(arg, list):
+            # 'env' arguments.
+            for v in arg:
+                cmd += [f'--{arg_name}', str(v)]
+        else:
+            cmd += [f'--{arg_name}', str(arg)]
 
-        # Generate a launch command for each cluster.
-        launch_cmds = [['sky', 'launch', yaml_fd.name, '-c', cluster] + cmd
-                       for yaml_fd, cluster in zip(yaml_fds, clusters)]
+    # Generate a launch command for each cluster.
+    launch_cmds = [['sky', 'launch', yaml_fd.name, '-c', cluster] + cmd
+                    for yaml_fd, cluster in zip(yaml_fds, clusters)]
 
-        # Launch clusters in parallel.
-        backend_utils.run_in_parallel(lambda arg: _launch_with_log(*arg),
-                                      list(zip(clusters, launch_cmds)))
+    # Launch clusters in parallel.
+    backend_utils.run_in_parallel(lambda arg: _launch_with_log(*arg),
+                                    list(zip(clusters, launch_cmds)))
 
-        # Delete the temporary yaml files.
-        for f in yaml_fds:
-            f.close()
+    # Delete the temporary yaml files.
+    for f in yaml_fds:
+        f.close()
 
-        # If at least one cluster has been launched successfully,
-        # add the benchmark to the state.
-        benchmark_created = False
-        for cluster in clusters:
-            record = global_user_state.get_cluster_from_name(cluster)
-            if record is not None:
-                if not benchmark_created:
-                    task_name = candidate_configs[0].get('name', None)
-                    benchmark_state.add_benchmark(benchmark, task_name,
-                                                  bucket_name)
-                    benchmark_created = True
-                benchmark_state.add_benchmark_result(benchmark,
-                                                     record['handle'])
+    # If at least one cluster has been launched successfully,
+    # add the benchmark to the state.
+    benchmark_created = False
+    for cluster in clusters:
+        record = global_user_state.get_cluster_from_name(cluster)
+        if record is not None:
+            if not benchmark_created:
+                task_name = candidate_configs[0].get('name', None)
+                benchmark_state.add_benchmark(benchmark, task_name,
+                                                bucket_name)
+                benchmark_created = True
+            benchmark_state.add_benchmark_result(benchmark,
+                                                    record['handle'])
 
-    @staticmethod
-    def update(benchmark: str, clusters: List[str]):
-        plural = 's' if len(clusters) > 1 else ''
-        progress = rich_progress.Progress(transient=True,
-                                          redirect_stdout=False,
-                                          redirect_stderr=False)
-        task = progress.add_task(
-            f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
-            total=len(clusters))
+@staticmethod
+def update_benchmark_state(benchmark: str, clusters: List[str]):
+    plural = 's' if len(clusters) > 1 else ''
+    progress = rich_progress.Progress(transient=True,
+                                        redirect_stdout=False,
+                                        redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
+        total=len(clusters))
 
-        bucket_name = benchmark_state.get_benchmark_from_name(
-            benchmark)['bucket']
-        storage = data.Storage(bucket_name, source=None, persistent=True)
-        bucket = list(storage.stores.values())[0]
+    bucket_name = benchmark_state.get_benchmark_from_name(
+        benchmark)['bucket']
+    storage = data.Storage(bucket_name, source=None, persistent=True)
+    bucket = list(storage.stores.values())[0]
 
-        # TODO(woosuk): Replace this function with bucket.download_remote_dir.
-        def _download_log(cluster: str):
-            local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark,
-                                     cluster)
-            os.makedirs(local_dir, exist_ok=True)
-            try:
-                bucket.download_file(
-                    f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
-                    f'{local_dir}/{_BENCHMARK_SUMMARY}',
-                )
-                progress.update(task, advance=1)
-            except exceptions.CommandError as e:
-                logger.error(
-                    f'Command failed with code {e.returncode}: {e.command}')
-                logger.error(e.error_msg)
-
-        with progress:
-            backend_utils.run_in_parallel(_download_log, clusters)
-            progress.live.transient = False
-            progress.refresh()
-
-        for cluster in clusters:
-            local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark,
-                                     cluster)
-            summary = os.path.join(local_dir, _BENCHMARK_SUMMARY)
-            with open(summary, 'r') as f:
-                summary = json.load(f)
-
-            prep_time = summary['train_start_time'] - summary['create_time']
-            run_time = summary['last_time'] - summary['train_start_time']
-            record = benchmark_state.BenchmarkRecord(
-                prep_time=prep_time,
-                run_time=run_time,
-                num_steps=summary['num_steps'],
-                step_time=summary['step_time'],
-                total_steps=summary['total_steps'],
-                estimated_total_time=summary['estimated_total_time'],
+    # TODO(woosuk): Replace this function with bucket.download_remote_dir.
+    def _download_log(cluster: str):
+        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark,
+                                    cluster)
+        os.makedirs(local_dir, exist_ok=True)
+        try:
+            bucket.download_file(
+                f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
+                f'{local_dir}/{_BENCHMARK_SUMMARY}',
             )
-            benchmark_state.update_benchmark_result(benchmark, cluster, record)
+            progress.update(task, advance=1)
+        except exceptions.CommandError as e:
+            logger.error(
+                f'Command failed with code {e.returncode}: {e.command}')
+            logger.error(e.error_msg)
 
-    @staticmethod
-    def remove_logs(benchmark: str):
-        log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
-        subprocess.run(['rm', '-rf', log_dir], check=False)
-        # TODO(woosuk): remove the logs in the bucket.
+    with progress:
+        backend_utils.run_in_parallel(_download_log, clusters)
+        progress.live.transient = False
+        progress.refresh()
+
+    for cluster in clusters:
+        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark,
+                                    cluster)
+        summary = os.path.join(local_dir, _BENCHMARK_SUMMARY)
+        with open(summary, 'r') as f:
+            summary = json.load(f)
+
+        prep_time = summary['train_start_time'] - summary['create_time']
+        run_time = summary['last_time'] - summary['train_start_time']
+        record = benchmark_state.BenchmarkRecord(
+            prep_time=prep_time,
+            run_time=run_time,
+            num_steps=summary['num_steps'],
+            step_time=summary['step_time'],
+            total_steps=summary['total_steps'],
+            estimated_total_time=summary['estimated_total_time'],
+        )
+        benchmark_state.update_benchmark_result(benchmark, cluster, record)
+
+@staticmethod
+def remove_benchmark_logs(benchmark: str):
+    log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
+    subprocess.run(['rm', '-rf', log_dir], check=False)
+    # TODO(woosuk): remove the logs in the bucket.

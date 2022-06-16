@@ -52,7 +52,7 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
-from sky.benchmark.controller import BenchmarkController
+from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
@@ -2589,13 +2589,13 @@ def benchmark_launch(
     if len(env) > 0:
         commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
 
-    clusters, candidate_configs = BenchmarkController.generate_configs(
+    clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
         benchmark, config, candidates)
     if not yes:
         plural = 's' if len(candidates) > 1 else ''
         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
-    BenchmarkController.launch(benchmark, clusters, candidate_configs,
+    benchmark_utils.launch_benchmark_clusters(benchmark, clusters, candidate_configs,
                                commandline_args)
 
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
@@ -2685,7 +2685,7 @@ def benchmark_show(benchmark: str, force_download: bool) -> None:
     if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
             force_download):
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
-        BenchmarkController.update(benchmark, clusters)
+        benchmark_utils.update_benchmark_state(benchmark, clusters)
 
     # Generate a report.
     columns = [
@@ -2857,7 +2857,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
 
     for benchmark in to_delete:
         benchmark_state.delete_benchmark(benchmark['name'])
-        BenchmarkController.remove_logs(benchmark['name'])
+        benchmark_utils.remove_benchmark_logs(benchmark['name'])
     click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
 
 
