@@ -9,7 +9,7 @@ import yaml
 import sky
 from sky import clouds
 from sky.backends import backend_utils
-from sky.backends import schema
+from sky.backends import schemas
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
@@ -215,8 +215,8 @@ class Task:
         if config is None:
             config = {}
 
-        backend_utils.validate_schema(config, schema.TASK_SCHEMA,
-                                      "Invalid task configuration: ")
+        backend_utils.validate_schema(config, schemas.TASK_SCHEMA,
+                                      'Invalid task configuration: ')
 
         task = Task(
             config.pop('name', None),
