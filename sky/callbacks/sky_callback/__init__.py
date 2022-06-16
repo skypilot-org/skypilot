@@ -1,6 +1,6 @@
 from .base import SkyCallback
 from .api import (
-    init, 
+    init,
     config,
     on_step_begin,
     on_step_end,
