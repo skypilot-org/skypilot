@@ -1763,16 +1763,13 @@ def validate_schema(obj, schema, err_msg_prefix=''):
     except jsonschema.ValidationError as e:
         err_msg = err_msg_prefix + e.message
         if e.validator == 'additionalProperties':
-            additional_fields = []
             known_fields = set(e.schema.get('properties', {}).keys())
             for field in e.instance:
                 if field not in known_fields:
-                    additional_fields.append(field)
-            for field in additional_fields:
-                most_similar_field = difflib.get_close_matches(
-                    field, known_fields, 1)
-                if most_similar_field:
-                    err_msg += f'\nInstead of {field}, did you mean {most_similar_field[0]}?'
+                    most_similar_field = difflib.get_close_matches(
+                        field, known_fields, 1)
+                    if most_similar_field:
+                        err_msg += f'\nInstead of {field}, did you mean {most_similar_field[0]}?'
 
     if err_msg:
         raise ValueError(err_msg)
