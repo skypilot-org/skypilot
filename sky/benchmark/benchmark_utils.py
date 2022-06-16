@@ -256,7 +256,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
             benchmark_state.add_benchmark_result(benchmark,
                                                     record['handle'])
 
-@staticmethod
+
 def update_benchmark_state(benchmark: str, clusters: List[str]):
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -311,7 +311,7 @@ def update_benchmark_state(benchmark: str, clusters: List[str]):
         )
         benchmark_state.update_benchmark_result(benchmark, cluster, record)
 
-@staticmethod
+
 def remove_benchmark_logs(benchmark: str):
     log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
     subprocess.run(['rm', '-rf', log_dir], check=False)
