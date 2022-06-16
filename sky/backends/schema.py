@@ -32,7 +32,7 @@ _RESOURCES_DEF = {
         },
         "accelerator_args": {
             "type": "object",
-            "required": ["tf_version", "tpu_name"],
+            "required": [],
             "additionalProperties": False,
             "properties": {
                 "tf_version": {
