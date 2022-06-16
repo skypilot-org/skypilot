@@ -22,8 +22,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
+import difflib
 import filelock
 import jinja2
+import jsonschema
 import psutil
 import requests
 from requests import adapters
@@ -1753,6 +1755,26 @@ class Backoff:
         self._backoff += random.uniform(-self.JITTER * self._backoff,
                                         self.JITTER * self._backoff)
         return self._backoff
+
+
+def validate_schema(obj, schema, err_msg_prefix=""):
+    err_msg = None
+    try:
+        jsonschema.validate(obj, schema)
+    except jsonschema.ValidationError as e:
+        err_msg = err_msg_prefix + e.message
+        if e.validator == "additionalProperties":
+            additional_properties = list(
+                jsonschema._validators.find_additional_properties(
+                    e.instance, e.schema))
+            known_fields = e.schema.get("properties", {}).keys()
+            most_similar_field = difflib.get_close_matches(
+                additional_properties[0], known_fields, 1)
+            if most_similar_field:
+                err_msg += f"\nDid you mean {most_similar_field[0]}?"
+
+    if err_msg:
+        raise ValueError(err_msg)
 
 
 @contextlib.contextmanager

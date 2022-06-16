@@ -6,10 +6,9 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
-import jsonschema
-
 import sky
 from sky import clouds
+from sky.backends import backend_utils
 from sky.backends import schema
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
@@ -216,7 +215,8 @@ class Task:
         if config is None:
             config = {}
 
-        jsonschema.validate(config, schema.TASK_SCHEMA)
+        backend_utils.validate_schema(config, schema.TASK_SCHEMA,
+                                      "Invalid task configuration: ")
 
         task = Task(
             config.pop('name', None),
