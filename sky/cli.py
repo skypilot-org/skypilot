@@ -2834,8 +2834,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         for benchmark in benchmarks:
             record = benchmark_state.get_benchmark_from_name(benchmark)
             if record is None:
-                raise click.BadParameter(f'Benchmark {benchmark} not found.')
-            to_delete.append(record)
+                print(f'Benchmark {benchmark} not found.')
+            else:
+                to_delete.append(record)
     if all:
         to_delete = benchmark_state.get_benchmarks()
         if len(benchmarks) > 0:
