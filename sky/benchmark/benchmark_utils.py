@@ -242,8 +242,9 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
     for f in yaml_fds:
         f.close()
 
-    # If at least one cluster has been launched successfully,
-    # add the benchmark to the state.
+    # If at least one cluster has been provisioned (in whatever state),
+    # add the benchmark to the state so that `sky bench down` can
+    # terminate the launched clusters.
     benchmark_created = False
     for cluster in clusters:
         record = global_user_state.get_cluster_from_name(cluster)
