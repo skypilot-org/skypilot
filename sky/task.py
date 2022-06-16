@@ -67,12 +67,6 @@ def _is_valid_env_var(name: str) -> bool:
 class Task:
     """Task: a coarse-grained stage in an application."""
 
-    # Update the key list when a new field is added.
-    _YAML_KEYS = [
-        'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs', 'file_mounts',
-        'inputs', 'outputs', 'resources'
-    ]
-
     def __init__(
         self,
         name: Optional[str] = None,
