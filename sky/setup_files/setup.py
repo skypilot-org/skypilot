@@ -27,6 +27,7 @@ install_requires = [
     'Click',
     'colorama',
     'cryptography',
+    'jsonschema',
     'jinja2',
     'networkx',
     'oauth2client',
