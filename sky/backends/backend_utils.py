@@ -1768,10 +1768,10 @@ def validate_schema(obj, schema, err_msg_prefix=""):
                 jsonschema._validators.find_additional_properties(
                     e.instance, e.schema))
             known_fields = e.schema.get("properties", {}).keys()
-            most_similar_field = difflib.get_close_matches(
+            similar_fields = difflib.get_close_matches(
                 additional_properties[0], known_fields, 1)
-            if most_similar_field:
-                err_msg += f"\nDid you mean {most_similar_field[0]}?"
+            if similar_fields:
+                err_msg += f"\nDid you mean {similar_fields[0]}?"
 
     if err_msg:
         raise ValueError(err_msg)
