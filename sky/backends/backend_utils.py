@@ -1628,9 +1628,8 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
     if terminated_clusters:
         plural = 's were' if len(terminated_clusters) > 1 else ' was'
         cluster_str = ', '.join(repr(name) for name in terminated_clusters)
-        logger.warning(
-            f'The following cluster{plural} terminated on the cluster '
-            f'and removed from Sky\'s cluster table:\n{cluster_str}')
+        logger.warning(f'The following cluster{plural} terminated on the cloud '
+                       f'and removed from Sky\'s cluster table:\n{cluster_str}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
