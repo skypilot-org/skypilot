@@ -1,7 +1,6 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
 import click
-import contextlib
 import enum
 import getpass
 import hashlib
@@ -1967,9 +1966,7 @@ class CloudVmRayBackend(backends.Backend):
             for i, ip in enumerate(ips):
                 try:
                     # Disable the output of rsync.
-                    with open('/dev/null',
-                              'a') as f, contextlib.redirect_stdout(
-                                  f), contextlib.redirect_stderr(f):
+                    with backend_utils.subpress_output():
                         rsync_down(ip, local_log_dir, remote_log_dir)
                     logger.info(
                         f'{fore.CYAN}Job {job_id} logs: downloaded from '
