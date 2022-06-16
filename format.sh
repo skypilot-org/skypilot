@@ -44,9 +44,7 @@ YAPF_FLAGS=(
 )
 
 YAPF_EXCLUDES=(
-    '--exclude'
-    'sky/skylet/providers/**'
-    'sky/skylet/ray_patches/**'
+    '--exclude' 'sky/skylet/providers/**'
 )
 
 # Format specified files
