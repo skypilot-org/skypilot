@@ -8,7 +8,6 @@ import yaml
 
 import sky
 from sky import clouds
-from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
@@ -213,8 +212,6 @@ class Task:
 
         if config is None:
             config = {}
-
-        backend_utils.check_fields(config.keys(), Task._YAML_KEYS)
 
         task = Task(
             config.pop('name', None),

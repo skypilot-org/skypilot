@@ -1755,28 +1755,6 @@ class Backoff:
         return self._backoff
 
 
-def check_fields(provided_fields, known_fields):
-    known_fields = set(known_fields)
-    unknown_fields = []
-    for field in provided_fields:
-        if field not in known_fields:
-            unknown_fields.append(field)
-
-    if len(unknown_fields) > 0:
-        invalid_keys = 'The following fields are invalid:\n'
-        for unknown_key in unknown_fields:
-            similar_keys = difflib.get_close_matches(unknown_key, known_fields)
-            key_invalid = f'    Unknown field \'{unknown_key}\'.'
-            if len(similar_keys) == 1:
-                key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
-            if len(similar_keys) > 1:
-                key_invalid += f' Did you mean one of {similar_keys}?'
-            key_invalid += '\n'
-            invalid_keys += key_invalid
-        with print_exception_no_traceback():
-            raise ValueError(invalid_keys)
-
-
 @contextlib.contextmanager
 def print_exception_no_traceback():
     """A context manager that prints out an exception without traceback.
