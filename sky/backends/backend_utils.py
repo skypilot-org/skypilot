@@ -1316,24 +1316,44 @@ def _query_status_gcp(
     cluster: str,
     ray_provider_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
-    status_map = {
-        'PROVISIONING': global_user_state.ClusterStatus.INIT,
-        'STARTING': global_user_state.ClusterStatus.INIT,
-        'RUNNING': global_user_state.ClusterStatus.UP,
-        'REPAIRING': global_user_state.ClusterStatus.STOPPED,
-        # 'TERMINATED' in GCP means stopped, with disk preserved.
-        'STOPPING': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATED': global_user_state.ClusterStatus.STOPPED,
-        # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
-        'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
-        'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
-    }
-    # TODO(zhwu): The status of the TPU attached to the cluster should also be
-    # checked, since TPUs are not part of the VMs.
-    query_cmd = ('gcloud compute instances list '
-                 f'--filter="labels.ray-cluster-name={cluster}" '
-                 '--format="value(status)"')
+    # del ray_provider_config  # unused
+    use_tpu_vm = ray_provider_config.get('_has_tpus', False)
+    zone = ray_provider_config.get('availability_zone', '')
+    if use_tpu_vm:
+        # TPU VM's state definition is different from compute VM
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
+        status_map = {
+            'CREATING': global_user_state.ClusterStatus.INIT,
+            'STARTING': global_user_state.ClusterStatus.INIT,
+            'READY': global_user_state.ClusterStatus.UP,
+            'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+            # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
+            'STOPPING': global_user_state.ClusterStatus.STOPPED,
+            'STOPPED': global_user_state.ClusterStatus.STOPPED,
+        }
+        query_cmd = ('gcloud compute tpus tpu-vm list '
+                     f'--zone {zone} '
+                     f'--filter="labels.ray-cluster-name={cluster}" '
+                     '--format="value(state)"')
+        print(query_cmd)
+    else:
+        status_map = {
+            'PROVISIONING': global_user_state.ClusterStatus.INIT,
+            'STARTING': global_user_state.ClusterStatus.INIT,
+            'RUNNING': global_user_state.ClusterStatus.UP,
+            'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+            # 'TERMINATED' in GCP means stopped, with disk preserved.
+            'STOPPING': global_user_state.ClusterStatus.STOPPED,
+            'TERMINATED': global_user_state.ClusterStatus.STOPPED,
+            # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
+            'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
+            'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
+        }
+        # TODO(zhwu): The status of the TPU attached to the cluster should also be
+        # checked, since TPUs are not part of the VMs.
+        query_cmd = ('gcloud compute instances list '
+                     f'--filter="labels.ray-cluster-name={cluster}" '
+                     '--format="value(status)"')
     return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
 
 
@@ -1430,7 +1450,6 @@ def _update_cluster_status_no_lock(
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
-
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
