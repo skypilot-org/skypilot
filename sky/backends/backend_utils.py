@@ -1335,7 +1335,6 @@ def _query_status_gcp(
                      f'--zone {zone} '
                      f'--filter="labels.ray-cluster-name={cluster}" '
                      '--format="value(state)"')
-        print(query_cmd)
     else:
         status_map = {
             'PROVISIONING': global_user_state.ClusterStatus.INIT,
