@@ -17,16 +17,24 @@ def config(total_train_steps: Optional[int] = None) -> None:
         _sky_callback.config(total_train_steps=total_train_steps)
 
 
-@contextlib.contextmanager
-def train_step():
+def on_step_begin():
     if _sky_callback is not None:
         _sky_callback.on_train_step_begin()
-    yield
+
+
+def on_step_end():
     if _sky_callback is not None:
         _sky_callback.on_train_step_end()
 
 
-# FIXME: Needs better name.
+@contextlib.contextmanager
+def train_step():
+    on_step_begin()
+    yield
+    on_step_end()
+
+
+# FIXME: Needs a better name.
 class step:
 
     def __init__(self, iterable):
