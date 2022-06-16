@@ -296,6 +296,30 @@ def _add_click_options(options: List[click.Option]):
     return _add_options
 
 
+def _parse_resources_params(cloud: Optional[str] = None, region: Optional[str] = None, gpus: Optional[str] = None, use_spot: Optional[int] = None, disk_size: Optional[int] = None):
+    params = {}
+    if cloud is not None:
+        if cloud.lower() == 'none':
+            params['cloud'] = None
+        else:
+            params['cloud'] = _get_cloud(cloud)
+    if region is not None:
+        if region.lower() == 'none':
+            params['region'] = None
+        else:
+            params['region'] = region
+    if gpus is not None:
+        if gpus.lower() == 'none':
+            params['accelerators'] = None
+        else:
+            params['accelerators'] = gpus
+    if use_spot is not None:
+        params['use_spot'] = use_spot
+    if disk_size is not None:
+        params['disk_size'] = disk_size
+    return params
+
+
 def _default_interactive_node_name(node_type: str):
     """Returns a deterministic name to refer to the same node."""
     # FIXME: this technically can collide in Azure/GCP with another
@@ -700,28 +724,7 @@ def launch(
         # Override.
         if workdir is not None:
             task.workdir = workdir
-
-        override_params = {}
-        if cloud is not None:
-            if cloud.lower() == 'none':
-                override_params['cloud'] = None
-            else:
-                override_params['cloud'] = _get_cloud(cloud)
-        if region is not None:
-            if region.lower() == 'none':
-                override_params['region'] = None
-            else:
-                override_params['region'] = region
-        if gpus is not None:
-            if gpus.lower() == 'none':
-                override_params['accelerators'] = None
-            else:
-                override_params['accelerators'] = gpus
-        if use_spot is not None:
-            override_params['use_spot'] = use_spot
-        if disk_size is not None:
-            override_params['disk_size'] = disk_size
-
+        override_params = _parse_resources_params(cloud=cloud, region=region, gpus=gpus, use_spot=use_spot, disk_size=disk_size)
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
@@ -857,26 +860,7 @@ def exec(
         # Override.
         if workdir is not None:
             task.workdir = workdir
-
-        override_params = {}
-        if cloud is not None:
-            if cloud.lower() == 'none':
-                override_params['cloud'] = None
-            else:
-                override_params['cloud'] = _get_cloud(cloud)
-        if region is not None:
-            if region.lower() == 'none':
-                override_params['region'] = None
-            else:
-                override_params['region'] = region
-        if gpus is not None:
-            if gpus.lower() == 'none':
-                override_params['accelerators'] = None
-            else:
-                override_params['accelerators'] = gpus
-        if use_spot is not None:
-            override_params['use_spot'] = use_spot
-
+        override_params = _parse_resources_params(cloud=cloud, region=region, gpus=gpus, use_spot=use_spot)
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
@@ -2568,19 +2552,7 @@ def benchmark_launch(
         config['workdir'] = workdir
     if num_nodes is not None:
         config['num_nodes'] = num_nodes
-    if cloud is not None:
-        config['resources']['cloud'] = cloud
-    if region is not None:
-        config['resources']['region'] = region
-    if gpus is not None:
-        if gpus.lower() == 'none':
-            config['resources']['accelerators'] = None
-        else:
-            config['resources']['accelerators'] = gpus
-    if use_spot is not None:
-        config['resources']['use_spot'] = use_spot
-    if disk_size is not None:
-        config['resources']['disk_size'] = disk_size
+    config['resources'] = _parse_resources_params(cloud=cloud, region=region, gpus=gpus, use_spot=use_spot, disk_size=disk_size)
 
     # Configs that are only accepted by the CLI.
     commandline_args = {}
