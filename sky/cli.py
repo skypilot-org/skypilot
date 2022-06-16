@@ -914,11 +914,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     Each cluster can have one of the following statuses:
 
     \b
-    - INIT: The cluster may be live or down. It can happens in following cases:
+    - INIT: The cluster may be live or down. It can happen in following cases:
       (1) undergoing provisioning or runtime setup. (In other words, a
-      ``sky launch`` has started but has not completed.) Or,
-      (2) in an abnormal state, e.g. the sky runtime has crashed, or the
-      cluster is partially down.
+      ``sky launch`` has started but has not completed.)
+      (2) Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+      down, or the sky runtime has crashed.
     - UP: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
     - STOPPED: The cluster is stopped and the storage is persisted. Use
