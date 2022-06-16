@@ -1366,7 +1366,7 @@ def _query_status_gcp(
 ) -> List[global_user_state.ClusterStatus]:
     launch_hashes = _ray_launch_hash(cluster, ray_config)
     hash_filter_str = ' '.join(launch_hashes)
-    
+
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     zone = ray_config['provider'].get('availability_zone', '')
     if use_tpu_vm:
