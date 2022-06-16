@@ -296,7 +296,11 @@ def _add_click_options(options: List[click.Option]):
     return _add_options
 
 
-def _parse_resources_params(cloud: Optional[str] = None, region: Optional[str] = None, gpus: Optional[str] = None, use_spot: Optional[int] = None, disk_size: Optional[int] = None):
+def _parse_resources_params(cloud: Optional[str] = None,
+                            region: Optional[str] = None,
+                            gpus: Optional[str] = None,
+                            use_spot: Optional[int] = None,
+                            disk_size: Optional[int] = None):
     params = {}
     if cloud is not None:
         if cloud.lower() == 'none':
@@ -724,7 +728,11 @@ def launch(
         # Override.
         if workdir is not None:
             task.workdir = workdir
-        override_params = _parse_resources_params(cloud=cloud, region=region, gpus=gpus, use_spot=use_spot, disk_size=disk_size)
+        override_params = _parse_resources_params(cloud=cloud,
+                                                  region=region,
+                                                  gpus=gpus,
+                                                  use_spot=use_spot,
+                                                  disk_size=disk_size)
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
@@ -860,7 +868,10 @@ def exec(
         # Override.
         if workdir is not None:
             task.workdir = workdir
-        override_params = _parse_resources_params(cloud=cloud, region=region, gpus=gpus, use_spot=use_spot)
+        override_params = _parse_resources_params(cloud=cloud,
+                                                  region=region,
+                                                  gpus=gpus,
+                                                  use_spot=use_spot)
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
@@ -2552,7 +2563,11 @@ def benchmark_launch(
         config['workdir'] = workdir
     if num_nodes is not None:
         config['num_nodes'] = num_nodes
-    config['resources'] = _parse_resources_params(cloud=cloud, region=region, gpus=gpus, use_spot=use_spot, disk_size=disk_size)
+    config['resources'] = _parse_resources_params(cloud=cloud,
+                                                  region=region,
+                                                  gpus=gpus,
+                                                  use_spot=use_spot,
+                                                  disk_size=disk_size)
 
     # Configs that are only accepted by the CLI.
     commandline_args = {}
