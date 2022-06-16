@@ -1,5 +1,6 @@
 """Util constants/functions for the backends."""
 import contextlib
+import copy
 import datetime
 import difflib
 import enum
@@ -18,7 +19,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -1299,25 +1300,35 @@ def subpress_output():
             yield
 
 
-def _ray_launch_hash(ray_config: Dict[str, Any]) -> List[str]:
-    """Returns the hash of the cluster_yaml."""
+def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
+    """Returns a set of Ray launch config hashes, one per node type."""
+    # Use the cached Ray launch hashes if they exist.
+    metadata = global_user_state.get_cluster_metadata(cluster_name)
+    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
+    if ray_launch_hashes is not None:
+        logger.debug('Using cached launch_caches')
+        return set(ray_launch_hashes)
     with subpress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
-    launch_hashes = []
+    launch_hashes = set()
     head_node_type = ray_config['head_node_type']
     for node_type, node_config in ray_config['available_node_types'].items():
         if node_type == head_node_type:
             launch_config = ray_config.get('head_node', {})
         else:
             launch_config = ray_config.get('worker_nodes', {})
+        launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
         with subpress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
-        launch_hashes.append(current_hash)
+        launch_hashes.add(current_hash)
+    # Cache the launch hashes for the cluster.
+    metadata['ray_launch_hashes'] = list(launch_hashes)
+    global_user_state.set_cluster_metadata(cluster_name, metadata)
     return launch_hashes
 
 
@@ -1336,7 +1347,7 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
-    launch_hashes = _ray_launch_hash(ray_config)
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
     hash_filter_str = ','.join(launch_hashes)
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
@@ -1363,7 +1374,7 @@ def _query_status_gcp(
         'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
         'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
     }
-    launch_hashes = _ray_launch_hash(ray_config)
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
     hash_filter_str = ' '.join(launch_hashes)
     # TODO(zhwu): The status of the TPU attached to the cluster should also be
     # checked, since TPUs are not part of the VMs.
@@ -1390,7 +1401,7 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-    launch_hashes = _ray_launch_hash(ray_config)
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
     hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
@@ -1461,7 +1472,7 @@ def _update_cluster_status_no_lock(
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
-                                                newly_launched=False)
+                                                is_launch=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
