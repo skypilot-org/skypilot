@@ -190,6 +190,7 @@ class GCPTPUNode(GCPNode):
     RUNNING_STATUSES = {"READY"}
     STATUS_FIELD = "state"
 
+    # SKY: get status of TPU VM for status filtering
     def get_status(self) -> str:
         return self.get(self.STATUS_FIELD)
 
@@ -577,6 +578,9 @@ class GCPTPU(GCPResource):
             response = self.resource.projects().locations().nodes().list(
                 parent=self.path).execute()
         except HttpError as e:
+            # SKY: Catch HttpError when accessing unauthorized region.
+            # Return empty list instead of raising exception to not break
+            # ray down.
             logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
             return []
 
@@ -669,8 +673,9 @@ class GCPTPU(GCPResource):
                 nodeId=name,
             ).execute()
         except HttpError as e:
+            # SKY: Catch HttpError when accessing unauthorized region.
             logger.error(f'googleapiclient.errors.HttpError: {e.reason}')
-            raise (e)
+            raise e
 
         if wait_for_operation:
             result = self.wait_for_operation(operation)

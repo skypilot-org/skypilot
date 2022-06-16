@@ -514,7 +514,7 @@ class RetryingVmProvisioner(object):
             # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
             # Details: "Location us-east1-d is not found or access is unauthorized.">
             logger.info(f'Got {httperror_str[0]}')
-            self._blocked_regions.add(region.name)
+            self._blocked_regions.add(zone.name)
         else:
             # No such structured error response found.
             assert not exception_str, stderr
@@ -2373,7 +2373,7 @@ class CloudVmRayBackend(backends.Backend):
                         ' "gcloud version"')
                     assert sdk_ver >= '382.0.0', (
                         'Google Cloud SDK version must be >= 382.0.0 to use'
-                        f' TPU VM APIs, check "gcloud version".')
+                        ' TPU VM APIs, check "gcloud version".')
 
                     query_cmd = (
                         f'gcloud compute tpus tpu-vm list --filter='
