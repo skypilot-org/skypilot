@@ -253,12 +253,12 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_cluster_metadata(cluster_name: str) -> Dict[str, Any]:
+def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (metadata,) in rows:
         if metadata is None:
-            raise ValueError(f'Cluster {cluster_name} not found.')
+            return None
         return json.loads(metadata)
 
 

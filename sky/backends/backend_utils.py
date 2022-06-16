@@ -1304,6 +1304,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     """Returns a set of Ray launch config hashes, one per node type."""
     # Use the cached Ray launch hashes if they exist.
     metadata = global_user_state.get_cluster_metadata(cluster_name)
+    assert metadata is not None, cluster_name
     ray_launch_hashes = metadata.get('ray_launch_hashes', None)
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_caches')
