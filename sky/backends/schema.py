@@ -1,4 +1,4 @@
-"""This module contains schemas used to validate the YAML configuration file.
+"""This module contains schemas used to validate objects.
 
 Schemas conform to the JSON Schema specification as defined at https://json-schema.org/
 """
