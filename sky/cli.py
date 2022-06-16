@@ -2595,8 +2595,9 @@ def benchmark_launch(
         plural = 's' if len(candidates) > 1 else ''
         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
-    benchmark_utils.launch_benchmark_clusters(benchmark, clusters, candidate_configs,
-                               commandline_args)
+    benchmark_utils.launch_benchmark_clusters(benchmark, clusters,
+                                              candidate_configs,
+                                              commandline_args)
 
     logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
                 f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'

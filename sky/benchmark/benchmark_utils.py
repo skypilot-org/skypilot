@@ -178,7 +178,7 @@ def generate_benchmark_configs(
 
         # Create a sym link to a directory in the benchmark bucket.
         benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark,
-                                        cluster)
+                                     cluster)
         if 'setup' not in candidate_config:
             candidate_config['setup'] = ''
         candidate_config['setup'] = (
@@ -200,8 +200,8 @@ def generate_benchmark_configs(
 
 
 def launch_benchmark_clusters(benchmark: str, clusters: List[str],
-            candidate_configs: List[_Config],
-            commandline_args: List[Dict[str, Any]]) -> None:
+                              candidate_configs: List[_Config],
+                              commandline_args: List[Dict[str, Any]]) -> None:
     # Use a Sky storage to save the benchmark logs.
     bucket_name, bucket_type = _get_benchmark_bucket()
     for candidate_config in candidate_configs:
@@ -232,11 +232,11 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 
     # Generate a launch command for each cluster.
     launch_cmds = [['sky', 'launch', yaml_fd.name, '-c', cluster] + cmd
-                    for yaml_fd, cluster in zip(yaml_fds, clusters)]
+                   for yaml_fd, cluster in zip(yaml_fds, clusters)]
 
     # Launch clusters in parallel.
     backend_utils.run_in_parallel(lambda arg: _launch_with_log(*arg),
-                                    list(zip(clusters, launch_cmds)))
+                                  list(zip(clusters, launch_cmds)))
 
     # Delete the temporary yaml files.
     for f in yaml_fds:
@@ -250,31 +250,27 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
         if record is not None:
             if not benchmark_created:
                 task_name = candidate_configs[0].get('name', None)
-                benchmark_state.add_benchmark(benchmark, task_name,
-                                                bucket_name)
+                benchmark_state.add_benchmark(benchmark, task_name, bucket_name)
                 benchmark_created = True
-            benchmark_state.add_benchmark_result(benchmark,
-                                                    record['handle'])
+            benchmark_state.add_benchmark_result(benchmark, record['handle'])
 
 
 def update_benchmark_state(benchmark: str, clusters: List[str]):
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
-                                        redirect_stdout=False,
-                                        redirect_stderr=False)
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
     task = progress.add_task(
         f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
         total=len(clusters))
 
-    bucket_name = benchmark_state.get_benchmark_from_name(
-        benchmark)['bucket']
+    bucket_name = benchmark_state.get_benchmark_from_name(benchmark)['bucket']
     storage = data.Storage(bucket_name, source=None, persistent=True)
     bucket = list(storage.stores.values())[0]
 
     # TODO(woosuk): Replace this function with bucket.download_remote_dir.
     def _download_log(cluster: str):
-        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark,
-                                    cluster)
+        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(local_dir, exist_ok=True)
         try:
             bucket.download_file(
@@ -293,8 +289,7 @@ def update_benchmark_state(benchmark: str, clusters: List[str]):
         progress.refresh()
 
     for cluster in clusters:
-        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark,
-                                    cluster)
+        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         summary = os.path.join(local_dir, _BENCHMARK_SUMMARY)
         with open(summary, 'r') as f:
             summary = json.load(f)
