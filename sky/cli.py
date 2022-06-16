@@ -892,452 +892,6 @@ def exec(
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
-def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
-    """Gets benchmark candidate configs from a YAML file.
-
-        Benchmark candidates are configured in the YAML file as a list of
-        dictionaries. Each dictionary defines a candidate config
-        by overriding resources. For example:
-
-        resources:
-            cloud: aws
-            candidates:
-                - {accelerators: K80}
-                - {instance_type: g4dn.2xlarge}
-                - {cloud: gcp, accelerators: V100} # overrides cloud
-    """
-    config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
-    assert isinstance(config, dict)
-    if config.get('resources') is None:
-        return None
-
-    resources = config['resources']
-    assert isinstance(resources, dict)
-    if resources.get('candidates') is None:
-        return None
-
-    candidates = resources['candidates']
-    assert isinstance(candidates, list)
-    for candidate in candidates:
-        assert isinstance(candidate, dict)
-    return candidates
-
-
-@cli.group(cls=_NaturalOrderGroup)
-def bench():
-    """Sky Benchmark related commands."""
-    pass
-
-
-@bench.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
-@click.option('--benchmark',
-              '-b',
-              required=True,
-              type=str,
-              help='Benchmark name.')
-@_add_click_options(_TASK_OPTIONS)
-@click.option('--gpus',
-              required=False,
-              type=str,
-              help=('Comma-separated list of GPUs to run benchmark on. '
-                    'Example values: "T4:4,V100:8" (without blank spaces).'))
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--idle-minutes-to-autostop',
-    '-i',
-    default=None,
-    type=int,
-    required=False,
-    help=('Automatically stop the cluster after this many minutes '
-          'of idleness after setup/file_mounts. This is equivalent to '
-          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
-          'If not set, the cluster will not be auto-stopped.'))
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-def benchmark_launch(
-    entrypoint: str,
-    benchmark: str,
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    gpus: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    env: List[Dict[str, str]],
-    disk_size: Optional[int],
-    idle_minutes_to_autostop: Optional[int],
-    yes: bool,
-) -> None:
-    """Benchmark a task on different resources."""
-    record = benchmark_state.get_benchmark_from_name(benchmark)
-    if record is not None:
-        raise click.BadParameter(f'Benchmark {benchmark} already exists. '
-                                 'To delete the previous benchmark result, '
-                                 f'run `sky bench delete {benchmark}`.')
-
-    entrypoint = ' '.join(entrypoint)
-    if entrypoint:
-        is_yaml = _check_yaml(entrypoint)
-        if is_yaml:
-            # Treat entrypoint as a yaml.
-            click.secho('Benchmarking a task from YAML spec: ',
-                        fg='yellow',
-                        nl=False)
-        else:
-            # Treat entrypoint as a bash command.
-            click.secho('Benchmarking a task from command: ',
-                        fg='yellow',
-                        nl=False)
-        click.secho(entrypoint, bold=True)
-    else:
-        entrypoint = None
-        is_yaml = False
-
-    candidates = None
-    if is_yaml:
-        candidates = _get_candidate_configs(entrypoint)
-
-    # The user can specify the benchmark candidates in either of the two ways:
-    # 1. By specifying resources.candidates in the YAML.
-    # 2. By specifying gpu types as a command line argument (--gpus).
-    if gpus is not None:
-        gpus = gpus.split(',')
-        gpus = [gpu.strip() for gpu in gpus]
-        if '' in gpus:
-            raise click.BadParameter('Remove blanks in --gpus.')
-
-        if len(gpus) == 1:
-            gpus = gpus[0]
-        else:
-            # If len(gpus) > 1, gpus is intrepreted
-            # as a list of benchmark candidates.
-            if candidates is None:
-                candidates = [{'accelerators': gpu} for gpu in gpus]
-                gpus = None
-            else:
-                raise ValueError('Provide benchmark candidates in either '
-                                 '--gpus or resources.candidates in the YAML.')
-    if candidates is None:
-        candidates = [{}]
-
-    config = None
-    if is_yaml:
-        config = backend_utils.read_yaml(os.path.expanduser(entrypoint))
-    if config is None:
-        config = {}
-    if 'resources' not in config:
-        config['resources'] = {}
-
-    # Override the yaml config with the command line arguments.
-    if name is not None:
-        config['name'] = name
-    if workdir is not None:
-        config['workdir'] = workdir
-    if num_nodes is not None:
-        config['num_nodes'] = num_nodes
-    if cloud is not None:
-        config['resources']['cloud'] = cloud
-    if region is not None:
-        config['resources']['region'] = region
-    if gpus is not None:
-        if gpus.lower() == 'none':
-            config['resources']['accelerators'] = None
-        else:
-            config['resources']['accelerators'] = gpus
-    if use_spot is not None:
-        config['resources']['use_spot'] = use_spot
-    if disk_size is not None:
-        config['resources']['disk_size'] = disk_size
-
-    # Configs that are only accepted by the CLI.
-    commandline_args = {}
-    if idle_minutes_to_autostop is not None:
-        commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
-    if len(env) > 0:
-        commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
-
-    clusters, candidate_configs = BenchmarkController.generate_configs(
-        benchmark, config, candidates)
-    if not yes:
-        plural = 's' if len(candidates) > 1 else ''
-        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
-        click.confirm(prompt, default=True, abort=True, show_default=True)
-    BenchmarkController.launch(benchmark, clusters, candidate_configs,
-                               commandline_args)
-
-    logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
-                f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
-                '\nTo see the benchmark results: '
-                f'{backend_utils.BOLD}sky bench show '
-                f'{benchmark}{backend_utils.RESET_BOLD}'
-                '\nTo stop the clusters: '
-                f'{backend_utils.BOLD}sky bench stop '
-                f'{benchmark}{backend_utils.RESET_BOLD}'
-                '\nTo teardown the clusters: '
-                f'{backend_utils.BOLD}sky bench down '
-                f'{benchmark}{backend_utils.RESET_BOLD}')
-    backend_utils.run('sky status')
-
-
-@bench.command('ls', cls=_DocumentedCodeCommand)
-def benchmark_ls() -> None:
-    """List the benchmark history."""
-    benchmarks = benchmark_state.get_benchmarks()
-    columns = [
-        'BENCHMARK',
-        'TASK',
-        'LAUNCHED',
-        'STATUS',
-        '#NODES',
-    ]
-
-    max_num_candidates = 1
-    for benchmark in benchmarks:
-        benchmark_results = benchmark_state.get_benchmark_results(
-            benchmark['name'])
-        num_candidates = len(benchmark_results)
-        if num_candidates > max_num_candidates:
-            max_num_candidates = num_candidates
-
-    if max_num_candidates == 1:
-        columns += ['RESOURCES']
-    else:
-        columns += [f'RESOURCES {i}' for i in range(1, max_num_candidates + 1)]
-    benchmark_table = log_utils.create_table(columns)
-
-    for benchmark in benchmarks:
-        if benchmark['task'] is not None:
-            task = benchmark['task']
-        else:
-            task = '-'
-        row = [
-            # BENCHMARK
-            benchmark['name'],
-            # TASK
-            task,
-            # LAUNCHED
-            datetime.datetime.fromtimestamp(benchmark['launched_at']),
-            # STATUS
-            benchmark['status'].value,
-        ]
-
-        benchmark_results = benchmark_state.get_benchmark_results(
-            benchmark['name'])
-        # NODES
-        row.append(benchmark_results[0]['num_nodes'])
-        # RESOURCES
-        for b in benchmark_results:
-            row.append(str(b['resources']))
-        row += [''] * (max_num_candidates - len(benchmark_results))
-        benchmark_table.add_row(row)
-    if benchmarks:
-        click.echo(benchmark_table)
-    else:
-        click.echo('No benchmark history found.')
-
-
-@bench.command('show', cls=_DocumentedCodeCommand)
-@click.argument('benchmark', required=True, type=str)
-@click.option('--force-download',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Force downloading benchmark logs in the running clusters.')
-def benchmark_show(benchmark: str, force_download: bool) -> None:
-    """Show a benchmark report."""
-    record = benchmark_state.get_benchmark_from_name(benchmark)
-    if record is None:
-        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
-
-    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
-            force_download):
-        clusters = benchmark_state.get_benchmark_clusters(benchmark)
-        BenchmarkController.update(benchmark, clusters)
-
-    # Generate a report.
-    columns = [
-        'NAME',
-        'RESOURCES',
-        'PREP_TIME (min)',
-        'RUN_TIME (min)',
-        '#STEPS',
-        'SEC/STEP',
-        '$/STEP',
-        'TOTAL_TIME (hr)',
-        'TOTAL_COST ($)',
-    ]
-
-    cluster_table = log_utils.create_table(columns)
-    benchmark_results = benchmark_state.get_benchmark_results(benchmark)
-    for result in benchmark_results:
-        num_nodes = result['num_nodes']
-        resources = result['resources']
-
-        record = result['record']
-        cost_per_step = num_nodes * resources.get_cost(record.step_time)
-        total_time = record.estimated_total_time
-        if total_time is None:
-            total_time_str = '-'
-            total_cost_str = '-'
-        else:
-            total_cost = num_nodes * resources.get_cost(total_time)
-            total_time_str = f'{total_time / 3600:.2f}'
-            total_cost_str = f'{total_cost:.2f}'
-
-        row = [
-            # NAME
-            result['cluster'],
-            # RESOURCES
-            f'{num_nodes}x {resources}',
-            # PREP_TIME (min)
-            f'{record.prep_time / 60:.2f}',
-            # RUN_TIME (min)
-            f'{record.run_time / 60:.2f}',
-            # STEPS
-            record.num_steps,
-            # SEC/ITER
-            f'{record.step_time:.2f}',
-            # $/ITER
-            f'{cost_per_step:.6f}',
-            # TOTAL_TIME (hr)
-            total_time_str,
-            # TOTAL_COST ($)
-            total_cost_str,
-        ]
-        cluster_table.add_row(row)
-    click.echo(cluster_table)
-
-
-def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
-                                 terminate: bool, yes: bool):
-    record = benchmark_state.get_benchmark_from_name(benchmark)
-    if record is None:
-        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
-
-    clusters = benchmark_state.get_benchmark_clusters(benchmark)
-    to_stop = []
-    for cluster in clusters:
-        if cluster in clusters_to_exclude:
-            continue
-        if global_user_state.get_cluster_from_name(cluster) is None:
-            continue
-        to_stop.append(cluster)
-
-    _terminate_or_stop_clusters(to_stop,
-                                apply_to_all=False,
-                                terminate=terminate,
-                                no_confirm=yes)
-    benchmark_state.finish_benchmark(benchmark)
-
-
-@bench.command('stop', cls=_DocumentedCodeCommand)
-@click.argument('benchmark', required=True, type=str)
-@click.option('--exclude',
-              '-e',
-              'clusters_to_exclude',
-              required=False,
-              type=str,
-              multiple=True,
-              help='Cluster names to exclude from stopping.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-def benchmark_stop(
-    benchmark: str,
-    clusters_to_exclude: List[str],
-    yes: bool,
-) -> None:
-    """Stop the benchmarking clusters."""
-    _terminate_or_stop_benchmark(benchmark,
-                                 clusters_to_exclude,
-                                 terminate=False,
-                                 yes=yes)
-
-
-@bench.command('down', cls=_DocumentedCodeCommand)
-@click.argument('benchmark', required=True, type=str)
-@click.option('--exclude',
-              '-e',
-              'clusters_to_exclude',
-              required=False,
-              type=str,
-              multiple=True,
-              help='Cluster names to exclude from termination.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-def benchmark_down(
-    benchmark: str,
-    clusters_to_exclude: List[str],
-    yes: bool,
-) -> None:
-    """Terminate the benchmarking clusters."""
-    _terminate_or_stop_benchmark(benchmark,
-                                 clusters_to_exclude,
-                                 terminate=True,
-                                 yes=yes)
-
-
-@bench.command('delete', cls=_DocumentedCodeCommand)
-@click.argument('benchmarks', required=False, type=str, nargs=-1)
-@click.option('--all',
-              '-a',
-              default=None,
-              is_flag=True,
-              help='Tear down all existing clusters.')
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-# pylint: disable=redefined-builtin
-def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
-                     yes: bool) -> None:
-    """Delete benchmarks from the history."""
-    to_delete = []
-    if len(benchmarks) > 0:
-        for benchmark in benchmarks:
-            record = benchmark_state.get_benchmark_from_name(benchmark)
-            if record is None:
-                raise click.BadParameter(f'Benchmark {benchmark} not found.')
-            to_delete.append(record)
-    if all:
-        to_delete = benchmark_state.get_benchmarks()
-        if len(benchmarks) > 0:
-            print('Both --all and benchmark(s) specified '
-                  'for sky bench delete. Letting --all take effect.')
-
-    benchmark_list = ', '.join([r['name'] for r in to_delete])
-    plural = 's' if len(to_delete) > 1 else ''
-    if not yes:
-        click.confirm(f'Deleting benchmark{plural}: {benchmark_list}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
-
-    for benchmark in to_delete:
-        benchmark_state.delete_benchmark(benchmark['name'])
-        BenchmarkController.remove_logs(benchmark['name'])
-    click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
-
-
 @cli.command()
 @click.option('--all',
               '-a',
@@ -2856,6 +2410,455 @@ def spot_logs(name: Optional[str], job_id: Optional[int]):
     backend = backend_utils.get_backend_from_handle(handle)
     # Stream the realtime logs
     backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+
+
+# Sky Benchmark CLIs
+
+
+def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
+    """Gets benchmark candidate configs from a YAML file.
+
+        Benchmark candidates are configured in the YAML file as a list of
+        dictionaries. Each dictionary defines a candidate config
+        by overriding resources. For example:
+
+        resources:
+            cloud: aws
+            candidates:
+                - {accelerators: K80}
+                - {instance_type: g4dn.2xlarge}
+                - {cloud: gcp, accelerators: V100} # overrides cloud
+    """
+    config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
+    assert isinstance(config, dict)
+    if config.get('resources') is None:
+        return None
+
+    resources = config['resources']
+    assert isinstance(resources, dict)
+    if resources.get('candidates') is None:
+        return None
+
+    candidates = resources['candidates']
+    assert isinstance(candidates, list)
+    for candidate in candidates:
+        assert isinstance(candidate, dict)
+    return candidates
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def bench():
+    """Sky Benchmark related commands."""
+    pass
+
+
+@bench.command('launch', cls=_DocumentedCodeCommand)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.option('--benchmark',
+              '-b',
+              required=True,
+              type=str,
+              help='Benchmark name.')
+@_add_click_options(_TASK_OPTIONS)
+@click.option('--gpus',
+              required=False,
+              type=str,
+              help=('Comma-separated list of GPUs to run benchmark on. '
+                    'Example values: "T4:4,V100:8" (without blank spaces).'))
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
+@click.option(
+    '--idle-minutes-to-autostop',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness after setup/file_mounts. This is equivalent to '
+          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
+          'If not set, the cluster will not be auto-stopped.'))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark_launch(
+    entrypoint: str,
+    benchmark: str,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    env: List[Dict[str, str]],
+    disk_size: Optional[int],
+    idle_minutes_to_autostop: Optional[int],
+    yes: bool,
+) -> None:
+    """Benchmark a task on different resources."""
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is not None:
+        raise click.BadParameter(f'Benchmark {benchmark} already exists. '
+                                 'To delete the previous benchmark result, '
+                                 f'run `sky bench delete {benchmark}`.')
+
+    entrypoint = ' '.join(entrypoint)
+    if entrypoint:
+        is_yaml = _check_yaml(entrypoint)
+        if is_yaml:
+            # Treat entrypoint as a yaml.
+            click.secho('Benchmarking a task from YAML spec: ',
+                        fg='yellow',
+                        nl=False)
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Benchmarking a task from command: ',
+                        fg='yellow',
+                        nl=False)
+        click.secho(entrypoint, bold=True)
+    else:
+        entrypoint = None
+        is_yaml = False
+
+    candidates = None
+    if is_yaml:
+        candidates = _get_candidate_configs(entrypoint)
+
+    # The user can specify the benchmark candidates in either of the two ways:
+    # 1. By specifying resources.candidates in the YAML.
+    # 2. By specifying gpu types as a command line argument (--gpus).
+    if gpus is not None:
+        gpus = gpus.split(',')
+        gpus = [gpu.strip() for gpu in gpus]
+        if '' in gpus:
+            raise click.BadParameter('Remove blanks in --gpus.')
+
+        if len(gpus) == 1:
+            gpus = gpus[0]
+        else:
+            # If len(gpus) > 1, gpus is intrepreted
+            # as a list of benchmark candidates.
+            if candidates is None:
+                candidates = [{'accelerators': gpu} for gpu in gpus]
+                gpus = None
+            else:
+                raise ValueError('Provide benchmark candidates in either '
+                                 '--gpus or resources.candidates in the YAML.')
+    if candidates is None:
+        candidates = [{}]
+
+    config = None
+    if is_yaml:
+        config = backend_utils.read_yaml(os.path.expanduser(entrypoint))
+    if config is None:
+        config = {}
+    if 'resources' not in config:
+        config['resources'] = {}
+
+    # Override the yaml config with the command line arguments.
+    if name is not None:
+        config['name'] = name
+    if workdir is not None:
+        config['workdir'] = workdir
+    if num_nodes is not None:
+        config['num_nodes'] = num_nodes
+    if cloud is not None:
+        config['resources']['cloud'] = cloud
+    if region is not None:
+        config['resources']['region'] = region
+    if gpus is not None:
+        if gpus.lower() == 'none':
+            config['resources']['accelerators'] = None
+        else:
+            config['resources']['accelerators'] = gpus
+    if use_spot is not None:
+        config['resources']['use_spot'] = use_spot
+    if disk_size is not None:
+        config['resources']['disk_size'] = disk_size
+
+    # Configs that are only accepted by the CLI.
+    commandline_args = {}
+    if idle_minutes_to_autostop is not None:
+        commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
+    if len(env) > 0:
+        commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
+
+    clusters, candidate_configs = BenchmarkController.generate_configs(
+        benchmark, config, candidates)
+    if not yes:
+        plural = 's' if len(candidates) > 1 else ''
+        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
+        click.confirm(prompt, default=True, abort=True, show_default=True)
+    BenchmarkController.launch(benchmark, clusters, candidate_configs,
+                               commandline_args)
+
+    logger.info(f'\n{colorama.Fore.CYAN}Benchmark name: '
+                f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
+                '\nTo see the benchmark results: '
+                f'{backend_utils.BOLD}sky bench show '
+                f'{benchmark}{backend_utils.RESET_BOLD}'
+                '\nTo stop the clusters: '
+                f'{backend_utils.BOLD}sky bench stop '
+                f'{benchmark}{backend_utils.RESET_BOLD}'
+                '\nTo teardown the clusters: '
+                f'{backend_utils.BOLD}sky bench down '
+                f'{benchmark}{backend_utils.RESET_BOLD}')
+    backend_utils.run('sky status')
+
+
+@bench.command('ls', cls=_DocumentedCodeCommand)
+def benchmark_ls() -> None:
+    """List the benchmark history."""
+    benchmarks = benchmark_state.get_benchmarks()
+    columns = [
+        'BENCHMARK',
+        'TASK',
+        'LAUNCHED',
+        'STATUS',
+        '#NODES',
+    ]
+
+    max_num_candidates = 1
+    for benchmark in benchmarks:
+        benchmark_results = benchmark_state.get_benchmark_results(
+            benchmark['name'])
+        num_candidates = len(benchmark_results)
+        if num_candidates > max_num_candidates:
+            max_num_candidates = num_candidates
+
+    if max_num_candidates == 1:
+        columns += ['RESOURCES']
+    else:
+        columns += [f'RESOURCES {i}' for i in range(1, max_num_candidates + 1)]
+    benchmark_table = log_utils.create_table(columns)
+
+    for benchmark in benchmarks:
+        if benchmark['task'] is not None:
+            task = benchmark['task']
+        else:
+            task = '-'
+        row = [
+            # BENCHMARK
+            benchmark['name'],
+            # TASK
+            task,
+            # LAUNCHED
+            datetime.datetime.fromtimestamp(benchmark['launched_at']),
+            # STATUS
+            benchmark['status'].value,
+        ]
+
+        benchmark_results = benchmark_state.get_benchmark_results(
+            benchmark['name'])
+        # NODES
+        row.append(benchmark_results[0]['num_nodes'])
+        # RESOURCES
+        for b in benchmark_results:
+            row.append(str(b['resources']))
+        row += [''] * (max_num_candidates - len(benchmark_results))
+        benchmark_table.add_row(row)
+    if benchmarks:
+        click.echo(benchmark_table)
+    else:
+        click.echo('No benchmark history found.')
+
+
+@bench.command('show', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option('--force-download',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Force downloading benchmark logs in the running clusters.')
+def benchmark_show(benchmark: str, force_download: bool) -> None:
+    """Show a benchmark report."""
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+
+    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
+            force_download):
+        clusters = benchmark_state.get_benchmark_clusters(benchmark)
+        BenchmarkController.update(benchmark, clusters)
+
+    # Generate a report.
+    columns = [
+        'NAME',
+        'RESOURCES',
+        'PREP_TIME (min)',
+        'RUN_TIME (min)',
+        '#STEPS',
+        'SEC/STEP',
+        '$/STEP',
+        'TOTAL_TIME (hr)',
+        'TOTAL_COST ($)',
+    ]
+
+    cluster_table = log_utils.create_table(columns)
+    benchmark_results = benchmark_state.get_benchmark_results(benchmark)
+    for result in benchmark_results:
+        num_nodes = result['num_nodes']
+        resources = result['resources']
+
+        record = result['record']
+        cost_per_step = num_nodes * resources.get_cost(record.step_time)
+        total_time = record.estimated_total_time
+        if total_time is None:
+            total_time_str = '-'
+            total_cost_str = '-'
+        else:
+            total_cost = num_nodes * resources.get_cost(total_time)
+            total_time_str = f'{total_time / 3600:.2f}'
+            total_cost_str = f'{total_cost:.2f}'
+
+        row = [
+            # NAME
+            result['cluster'],
+            # RESOURCES
+            f'{num_nodes}x {resources}',
+            # PREP_TIME (min)
+            f'{record.prep_time / 60:.2f}',
+            # RUN_TIME (min)
+            f'{record.run_time / 60:.2f}',
+            # STEPS
+            record.num_steps,
+            # SEC/ITER
+            f'{record.step_time:.2f}',
+            # $/ITER
+            f'{cost_per_step:.6f}',
+            # TOTAL_TIME (hr)
+            total_time_str,
+            # TOTAL_COST ($)
+            total_cost_str,
+        ]
+        cluster_table.add_row(row)
+    click.echo(cluster_table)
+
+
+def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
+                                 terminate: bool, yes: bool):
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+
+    clusters = benchmark_state.get_benchmark_clusters(benchmark)
+    to_stop = []
+    for cluster in clusters:
+        if cluster in clusters_to_exclude:
+            continue
+        if global_user_state.get_cluster_from_name(cluster) is None:
+            continue
+        to_stop.append(cluster)
+
+    _terminate_or_stop_clusters(to_stop,
+                                apply_to_all=False,
+                                terminate=terminate,
+                                no_confirm=yes)
+    benchmark_state.finish_benchmark(benchmark)
+
+
+@bench.command('stop', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option('--exclude',
+              '-e',
+              'clusters_to_exclude',
+              required=False,
+              type=str,
+              multiple=True,
+              help='Cluster names to exclude from stopping.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark_stop(
+    benchmark: str,
+    clusters_to_exclude: List[str],
+    yes: bool,
+) -> None:
+    """Stop the benchmarking clusters."""
+    _terminate_or_stop_benchmark(benchmark,
+                                 clusters_to_exclude,
+                                 terminate=False,
+                                 yes=yes)
+
+
+@bench.command('down', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option('--exclude',
+              '-e',
+              'clusters_to_exclude',
+              required=False,
+              type=str,
+              multiple=True,
+              help='Cluster names to exclude from termination.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+def benchmark_down(
+    benchmark: str,
+    clusters_to_exclude: List[str],
+    yes: bool,
+) -> None:
+    """Terminate the benchmarking clusters."""
+    _terminate_or_stop_benchmark(benchmark,
+                                 clusters_to_exclude,
+                                 terminate=True,
+                                 yes=yes)
+
+
+@bench.command('delete', cls=_DocumentedCodeCommand)
+@click.argument('benchmarks', required=False, type=str, nargs=-1)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+# pylint: disable=redefined-builtin
+def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
+                     yes: bool) -> None:
+    """Delete benchmarks from the history."""
+    to_delete = []
+    if len(benchmarks) > 0:
+        for benchmark in benchmarks:
+            record = benchmark_state.get_benchmark_from_name(benchmark)
+            if record is None:
+                raise click.BadParameter(f'Benchmark {benchmark} not found.')
+            to_delete.append(record)
+    if all:
+        to_delete = benchmark_state.get_benchmarks()
+        if len(benchmarks) > 0:
+            print('Both --all and benchmark(s) specified '
+                  'for sky bench delete. Letting --all take effect.')
+
+    benchmark_list = ', '.join([r['name'] for r in to_delete])
+    plural = 's' if len(to_delete) > 1 else ''
+    if not yes:
+        click.confirm(f'Deleting benchmark{plural}: {benchmark_list}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
+    for benchmark in to_delete:
+        benchmark_state.delete_benchmark(benchmark['name'])
+        BenchmarkController.remove_logs(benchmark['name'])
+    click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
 
 
 def main():
