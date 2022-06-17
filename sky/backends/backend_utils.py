@@ -1151,24 +1151,34 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-@timeline.event
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        return_private_ips: bool = False,
-        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
-    """Returns the IPs of all nodes in the cluster."""
-    yaml_handle = cluster_yaml
-    if return_private_ips:
-        config = read_yaml(yaml_handle)
-        # Add this field to a temp file to get private ips.
-        config['provider']['use_internal_ips'] = True
-        yaml_handle = cluster_yaml + '.tmp'
-        dump_yaml(yaml_handle, config)
+def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
+    """Returns the ip of the head node from yaml file."""
+    for i in range(retry_count):
+        try:
+            out = run(f'ray get-head-ip {cluster_yaml}',
+                      stdout=subprocess.PIPE).stdout.decode().strip()
+            head_ip = re.findall(IP_ADDR_REGEX, out)
+            assert 1 == len(head_ip), out
+            head_ip = head_ip[0]
+            break
+        except subprocess.CalledProcessError as e:
+            if i == retry_count - 1:
+                raise RuntimeError('Failed to get head ip') from e
+            # Retry if the cluster is not up yet.
+            logger.debug('Retrying to get head ip.')
+            time.sleep(5)
+    return head_ip
 
+
+@timeline.event
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 head_ip_retry_count: int = 1) -> List[str]:
+    """Returns the IPs of all nodes in the cluster."""
     # Try optimize for the common case where we have 1 node.
-    if (not return_private_ips and expected_num_nodes == 1 and
-            handle is not None and handle.head_ip is not None):
+    if (expected_num_nodes == 1 and handle is not None and
+            handle.head_ip is not None):
         return [handle.head_ip]
 
     # Check the network connection first to avoid long hanging time for
@@ -1176,20 +1186,16 @@ def get_node_ips(
     # happens.
     check_network_connection()
     try:
-        proc = run(f'ray get-head-ip {yaml_handle}',
-                   stdout=subprocess.PIPE,
-                   stderr=subprocess.PIPE)
-        out = proc.stdout.decode().strip()
-        head_ip = re.findall(IP_ADDR_REGEX, out)
-    except subprocess.CalledProcessError as e:
+        head_ip = query_head_ip_with_retries(cluster_yaml,
+                                             retry_count=head_ip_retry_count)
+    except RuntimeError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
-    if len(head_ip) != 1:
-        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    head_ip = [head_ip]
 
     if expected_num_nodes > 1:
         try:
-            proc = run(f'ray get-worker-ips {yaml_handle}',
+            proc = run(f'ray get-worker-ips {cluster_yaml}',
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
             out = proc.stdout.decode()
@@ -1201,8 +1207,6 @@ def get_node_ips(
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
-    if return_private_ips:
-        os.remove(yaml_handle)
     return head_ip + worker_ips
 
 
@@ -1635,25 +1639,6 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         record for record in updated_records if record is not None
     ]
     return updated_records
-
-
-def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
-    """Returns the ip of the head node from yaml file."""
-    for i in range(retry_count):
-        try:
-            out = run(f'ray get-head-ip {cluster_yaml}',
-                      stdout=subprocess.PIPE).stdout.decode().strip()
-            head_ip = re.findall(IP_ADDR_REGEX, out)
-            assert 1 == len(head_ip), out
-            head_ip = head_ip[0]
-            break
-        except subprocess.CalledProcessError as e:
-            if i == retry_count - 1:
-                raise RuntimeError('Failed to get head ip') from e
-            # Retry if the cluster is not up yet.
-            logger.debug('Retrying to get head ip.')
-            time.sleep(5)
-    return head_ip
 
 
 def get_backend_from_handle(
