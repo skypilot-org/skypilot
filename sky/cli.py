@@ -2664,7 +2664,7 @@ def benchmark_ls() -> None:
               default=False,
               is_flag=True,
               required=False,
-              help='Force downloading benchmark logs in the running clusters.')
+              help='Force downloading benchmark logs in the benchmark bucket.')
 def benchmark_show(benchmark: str, force_download: bool) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
