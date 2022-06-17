@@ -630,8 +630,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
-    if resources_vars.get(
-            'tpu_type') is not None and resources_vars.get('tpu_vm') is None:
+    if (resources_vars.get('tpu_type') is not None and
+            resources_vars.get('tpu_vm') is None):
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name
@@ -1375,6 +1375,7 @@ def _query_status_gcp(
         status_map = {
             'CREATING': global_user_state.ClusterStatus.INIT,
             'STARTING': global_user_state.ClusterStatus.INIT,
+            'RESTARTING': global_user_state.ClusterStatus.INIT,
             'READY': global_user_state.ClusterStatus.UP,
             'REPAIRING': global_user_state.ClusterStatus.STOPPED,
             # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
@@ -1402,6 +1403,7 @@ def _query_status_gcp(
         # TODO(zhwu): The status of the TPU attached to the cluster should also be
         # checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
+                     f'--zones {zone} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
                      '--format="value(status)"')
