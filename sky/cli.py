@@ -2582,9 +2582,12 @@ def benchmark_launch(
         plural = 's' if len(candidates) > 1 else ''
         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
         click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    # Launch the benchmarking clusters in detach mode in parallel.
     benchmark_created = benchmark_utils.launch_benchmark_clusters(
         benchmark, clusters, candidate_configs, commandline_args)
 
+    # If at least one cluster is created, print the following messages.
     if benchmark_created:
         logger.info(
             f'\n{colorama.Fore.CYAN}Benchmark name: '
