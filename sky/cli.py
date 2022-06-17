@@ -1993,7 +1993,9 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'storage delete\'.')
 
 
+# ==============================
 # Managed Spot CLIs
+# ==============================
 
 
 def _is_spot_controller_up(
@@ -2407,7 +2409,9 @@ def spot_logs(name: Optional[str], job_id: Optional[int]):
     backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
 
 
+# ==============================
 # Sky Benchmark CLIs
+# ==============================
 
 
 def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
