@@ -2500,7 +2500,16 @@ def benchmark_launch(
     idle_minutes_to_autostop: Optional[int],
     yes: bool,
 ) -> None:
-    """Benchmark a task on different resources."""
+    """Benchmark a task on different resources.
+
+    NOTE: Modify your program (as in doc) before using this API. Your program
+    is assumed to periodically call sky_callback APIs to log its progress.
+
+    Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
+    will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
+    Alternatively, specify the benchmarking resources in your YAML (see doc)
+    and skip `--gpus`.
+    """
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
         raise click.BadParameter(f'Benchmark {benchmark} already exists. '
