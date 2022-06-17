@@ -15,10 +15,8 @@ import colorama
 import prettytable
 from rich import progress as rich_progress
 
-
 import sky
 from sky import data
-from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -139,18 +137,25 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
 
 
 def _launch_in_parallel(clusters: List[str], cmds: List[List[str]]) -> None:
+    """Launches clusters in parallel."""
+
+    def _format_err_msg(msg: str):
+        return f'{colorama.Fore.RED}{msg}{colorama.Style.RESET_ALL}'
+
     def _launch_with_log(cluster: str, cmd: List[str]) -> None:
         """Executes `sky launch` in a subprocess and returns normally.
 
         This function does not propagate any error so that failures in a
         launch thread do not disrupt the other parallel launch threads.
         """
+        prefix_color = colorama.Fore.MAGENTA
+        prefix = f'{prefix_color}({cluster}){colorama.Style.RESET_ALL} '
         try:
             returncode, _, stderr = log_lib.run_with_log(
                 cmd,
                 log_path='/dev/null',
                 stream_logs=True,
-                prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ',
+                prefix=prefix,
                 skip_lines=[
                     'optimizer.py',
                     'Tip: ',
@@ -160,22 +165,24 @@ def _launch_in_parallel(clusters: List[str], cmds: List[List[str]]) -> None:
             )
             # Report any error from the `sky launch` subprocess.
             if returncode != 0:
-                logger.error(f'Launching {cluster} failed with code {returncode}')
-                logger.error(f'{colorama.Fore.RED}{stderr}{colorama.Style.RESET_ALL}')
-        except Exception as e:
+                logger.error(
+                    f'Launching {cluster} failed with code {returncode}')
+                logger.error(_format_err_msg(stderr))
+        except Exception as e:  # pylint: disable=broad-except
+            # FIXME(woosuk): Avoid using general Exception.
             # Report any error in executing and processing the outputs of
             # the `sky launch` subprocess.
             logger.error(f'Launching {cluster} failed.')
-            logger.error(f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
+            logger.error(_format_err_msg(e))
 
     with pool.ThreadPool(processes=len(clusters)) as p:
         try:
-            list(p.imap(lambda args: _launch_with_log(*args), list(zip(clusters, cmds))))
+            list(
+                p.imap(lambda args: _launch_with_log(*args),
+                       list(zip(clusters, cmds))))
         except KeyboardInterrupt:
             print()
-            logger.error(
-                f'{colorama.Fore.RED}Interrupted by user.{colorama.Style.RESET_ALL}'
-            )
+            logger.error(_format_err_msg('Interrupted by user.'))
             sys.exit(1)
 
 
