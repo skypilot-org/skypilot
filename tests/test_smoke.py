@@ -256,6 +256,28 @@ def test_tpu():
     run_one_test(test)
 
 
+# ---------- TPU. ----------
+def test_tpu_vm():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_vm_app',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky stop -y {name}',
+            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
+            f'sky start -y {name}',
+            f'sky exec {name} examples/tpu/tpuvm_mnist.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky stop -y {name}',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
 # ---------- Simple apps. ----------
 def test_multi_hostname():
     name = _get_cluster_name()
