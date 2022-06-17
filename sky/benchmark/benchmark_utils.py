@@ -1,17 +1,20 @@
 """Benchmark utils: Utility functions to manage benchmarking process."""
-
-import colorama
 import copy
 import getpass
 import json
+from multiprocessing import pool
 import os
-import prettytable
 import subprocess
+import sys
 import tempfile
 import typing
 import uuid
-from rich import progress as rich_progress
 from typing import Any, Dict, List, Tuple
+
+import colorama
+import prettytable
+from rich import progress as rich_progress
+
 
 import sky
 from sky import data
@@ -135,18 +138,45 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
     return bucket_name, bucket_type
 
 
-def _launch_with_log(cluster: str, cmd: List[str]) -> None:
-    log_lib.run_with_log(
-        cmd,
-        log_path='/dev/null',
-        stream_logs=True,
-        prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ',
-        skip_lines=[
-            'optimizer.py',
-            'Tip: ',
-        ],  # FIXME: Use regex
-        end_streaming_at='Job submitted with Job ID:',
-    )
+def _launch_in_parallel(clusters: List[str], cmds: List[List[str]]) -> None:
+    def _launch_with_log(cluster: str, cmd: List[str]) -> None:
+        """Executes `sky launch` in a subprocess and returns normally.
+
+        This function does not propagate any error so that failures in a
+        launch thread do not disrupt the other parallel launch threads.
+        """
+        try:
+            returncode, _, stderr = log_lib.run_with_log(
+                cmd,
+                log_path='/dev/null',
+                stream_logs=True,
+                prefix=f'{colorama.Fore.MAGENTA}({cluster}){colorama.Style.RESET_ALL} ',
+                skip_lines=[
+                    'optimizer.py',
+                    'Tip: ',
+                ],  # FIXME: Use regex
+                end_streaming_at='Job submitted with Job ID:',
+                require_outputs=True,
+            )
+            # Report any error from the `sky launch` subprocess.
+            if returncode != 0:
+                logger.error(f'Launching {cluster} failed with code {returncode}')
+                logger.error(f'{colorama.Fore.RED}{stderr}{colorama.Style.RESET_ALL}')
+        except Exception as e:
+            # Report any error in executing and processing the outputs of
+            # the `sky launch` subprocess.
+            logger.error(f'Launching {cluster} failed.')
+            logger.error(f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
+
+    with pool.ThreadPool(processes=len(clusters)) as p:
+        try:
+            list(p.imap(lambda args: _launch_with_log(*args), list(zip(clusters, cmds))))
+        except KeyboardInterrupt:
+            print()
+            logger.error(
+                f'{colorama.Fore.RED}Interrupted by user.{colorama.Style.RESET_ALL}'
+            )
+            sys.exit(1)
 
 
 def generate_benchmark_configs(
@@ -234,9 +264,8 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
     launch_cmds = [['sky', 'launch', yaml_fd.name, '-c', cluster] + cmd
                    for yaml_fd, cluster in zip(yaml_fds, clusters)]
 
-    # Launch clusters in parallel.
-    backend_utils.run_in_parallel(lambda arg: _launch_with_log(*arg),
-                                  list(zip(clusters, launch_cmds)))
+    # Launch the benchmarking clusters in parallel.
+    _launch_in_parallel(clusters, launch_cmds)
 
     # Delete the temporary yaml files.
     for f in yaml_fds:
@@ -274,16 +303,12 @@ def update_benchmark_state(benchmark: str, clusters: List[str]):
     def _download_log(cluster: str):
         local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(local_dir, exist_ok=True)
-        try:
-            bucket.download_file(
-                f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
-                f'{local_dir}/{_BENCHMARK_SUMMARY}',
-            )
-            progress.update(task, advance=1)
-        except exceptions.CommandError as e:
-            logger.error(
-                f'Command failed with code {e.returncode}: {e.command}')
-            logger.error(e.error_msg)
+        # TODO(woosuk): Handle possible exceptions.
+        bucket.download_file(
+            f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
+            f'{local_dir}/{_BENCHMARK_SUMMARY}',
+        )
+        progress.update(task, advance=1)
 
     with progress:
         backend_utils.run_in_parallel(_download_log, clusters)
