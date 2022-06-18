@@ -40,9 +40,9 @@ _Config = Dict[str, Any]
 
 def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
     if num_clusters == 1:
-        names = [f'benchmark-{benchmark}']
+        names = [f'sky-bench-{benchmark}']
     else:
-        names = [f'benchmark-{benchmark}-{i}' for i in range(num_clusters)]
+        names = [f'sky-bench-{benchmark}-{i}' for i in range(num_clusters)]
     for name in names:
         if global_user_state.get_cluster_from_name(name) is not None:
             raise ValueError(f'Cluster name {name} is taken. '
