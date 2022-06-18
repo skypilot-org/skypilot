@@ -2588,7 +2588,8 @@ def benchmark_launch(
         benchmark, config, candidates)
     # Show the benchmarking VM instances selected by the optimizer.
     # This also detects the case where the user requested infeasible resources.
-    benchmark_utils.print_benchmark_clusters(clusters, config, candidate_configs)
+    benchmark_utils.print_benchmark_clusters(clusters, config,
+                                             candidate_configs)
     if not yes:
         plural = 's' if len(candidates) > 1 else ''
         prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'

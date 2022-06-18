@@ -233,7 +233,8 @@ def generate_benchmark_configs(
     return clusters, candidate_configs
 
 
-def print_benchmark_clusters(clusters: List[str], config: _Config, candidate_configs: List[_Config]) -> None:
+def print_benchmark_clusters(clusters: List[str], config: _Config,
+                             candidate_configs: List[_Config]) -> None:
     candidate_resources = _get_optimized_resources(candidate_configs)
     _print_candidate_resources(clusters, config, candidate_resources)
 
