@@ -24,6 +24,7 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky import spot
+from sky import utils
 from sky.backends import backend_utils
 from sky.utils import timeline
 
@@ -171,7 +172,7 @@ def _execute(
             if teardown:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle)
-    except Exception:  # pylint: disable=broad-except
+    except Exception as e:  # pylint: disable=broad-except
         # UX: print live clusters to make users aware (to save costs).
         # Shorter stacktrace than raise e (e.g., no cli stuff).
         traceback.print_exc()
@@ -185,7 +186,8 @@ def _execute(
             backends.backend_utils.run('sky status')
         print('\x1b[?25h', end='')  # Show cursor.
         status_printed = True
-        sys.exit(1)
+        with utils.print_exception_no_traceback():
+            raise e
     finally:
         if not status_printed:
             # Needed because this finally doesn't always get executed on errors.

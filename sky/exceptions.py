@@ -20,18 +20,7 @@ class ResourcesMismatchError(Exception):
 
 
 class CommandError(Exception):
-    """Raised when a command fails.
-
-      returncode: The returncode of the command.
-      command: The command that was run.
-      error_message: The error message to print.
-    """
-
-    def __init__(self, returncode: int, command: str, error_msg: str) -> None:
-        super().__init__()
-        self.returncode = returncode
-        self.command = command
-        self.error_msg = error_msg
+    pass
 
 
 class StorageError(Exception):
