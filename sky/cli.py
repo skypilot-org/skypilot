@@ -902,7 +902,7 @@ def exec(
               default=False,
               is_flag=True,
               required=False,
-              help='Query remote clusters for their latest autostop settings.')
+              help='Query cluster status from the cloud provider.')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
@@ -914,9 +914,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     Each cluster can have one of the following statuses:
 
     \b
-    - INIT: Undergoing provisioning or runtime setup and may be live or
-      down. (In other words, a ``sky launch`` has started but has not
-      completed.)
+    - INIT: The cluster may be live or down. It can happen in following cases:
+      (1) undergoing provisioning or runtime setup. (In other words, a
+      ``sky launch`` has started but has not completed.)
+      (2) Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+      down, or the sky runtime has crashed.
     - UP: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
     - STOPPED: The cluster is stopped and the storage is persisted. Use

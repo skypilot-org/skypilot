@@ -1,4 +1,6 @@
 """Util constants/functions for the backends."""
+import contextlib
+import copy
 import datetime
 import difflib
 import enum
@@ -17,7 +19,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -27,6 +29,8 @@ import psutil
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
+from ray.autoscaler._private import commands as ray_commands
+from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -1030,7 +1034,9 @@ def handle_returncode(returncode: int,
             echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        raise exceptions.CommandError(f'Command failed with code {returncode}: {command}\n{format_err_msg}', returncode=returncode)
+        raise exceptions.CommandError(
+            f'Command failed with code {returncode}: {command}\n{format_err_msg}',
+            returncode=returncode)
 
 
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
@@ -1045,7 +1051,7 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
         with utils.print_exception_no_traceback():
             # Run the function in parallel on the arguments, keeping the order.
             return list(p.imap(func, args))
-            
+
 
 @timeline.event
 def run(cmd, **kwargs):
@@ -1270,9 +1276,51 @@ def _process_cli_query(
     ]
 
 
+@contextlib.contextmanager
+def subpress_output():
+    """Suppress stdout and stderr."""
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
+                devnull):
+            yield
+
+
+def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
+    """Returns a set of Ray launch config hashes, one per node type."""
+    # Use the cached Ray launch hashes if they exist.
+    metadata = global_user_state.get_cluster_metadata(cluster_name)
+    assert metadata is not None, cluster_name
+    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
+    if ray_launch_hashes is not None:
+        logger.debug('Using cached launch_caches')
+        return set(ray_launch_hashes)
+    with subpress_output():
+        ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
+    launch_hashes = set()
+    head_node_type = ray_config['head_node_type']
+    for node_type, node_config in ray_config['available_node_types'].items():
+        if node_type == head_node_type:
+            launch_config = ray_config.get('head_node', {})
+        else:
+            launch_config = ray_config.get('worker_nodes', {})
+        launch_config = copy.deepcopy(launch_config)
+
+        launch_config.update(node_config['node_config'])
+        with subpress_output():
+            current_hash = ray_util.hash_launch_conf(launch_config,
+                                                     ray_config['auth'])
+        launch_hashes.add(current_hash)
+    # Cache the launch hashes for the cluster.
+    metadata['ray_launch_hashes'] = list(launch_hashes)
+    global_user_state.set_cluster_metadata(cluster_name, metadata)
+    return launch_hashes
+
+
 def _query_status_aws(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
@@ -1284,9 +1332,12 @@ def _query_status_aws(
         'shutting-down': None,
         'terminated': None,
     }
-    region = ray_provider_config['region']
+    region = ray_config['provider']['region']
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ','.join(launch_hashes)
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
+                 f'Name=tag:ray-launch-config,Values={hash_filter_str} '
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1295,9 +1346,8 @@ def _query_status_aws(
 
 def _query_status_gcp(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
     status_map = {
         'PROVISIONING': global_user_state.ClusterStatus.INIT,
         'STARTING': global_user_state.ClusterStatus.INIT,
@@ -1310,19 +1360,21 @@ def _query_status_gcp(
         'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
         'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
     }
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ' '.join(launch_hashes)
     # TODO(zhwu): The status of the TPU attached to the cluster should also be
     # checked, since TPUs are not part of the VMs.
     query_cmd = ('gcloud compute instances list '
-                 f'--filter="labels.ray-cluster-name={cluster}" '
+                 f'--filter="(labels.ray-cluster-name={cluster} AND '
+                 f'labels.ray-launch-config=({hash_filter_str}))" '
                  '--format="value(status)"')
     return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
 
 
 def _query_status_azure(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
@@ -1335,13 +1387,13 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-
-    query_cmd = textwrap.dedent(f"""\
-            az vm show -d --ids \
-            $(az vm list --query \
-            "[?tags.\\"ray-cluster-name\\" == '{cluster}'].id" \
-            -o tsv) --query "powerState" -o tsv
-        """)
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
+    query_cmd = (
+        'az vm show -d --ids $(az vm list --query '
+        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\' && '
+        f'contains(\'[{hash_filter_str}]\', tags.\\"ray-launch-config\\")].id" '
+        '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
     # An alternative is the following command, but it will take more than
@@ -1367,9 +1419,8 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_provider_config = read_yaml(handle.cluster_yaml)['provider']
-    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name,
-                                           ray_provider_config)
+    ray_config = read_yaml(handle.cluster_yaml)
+    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
 def _update_cluster_status_no_lock(
@@ -1406,7 +1457,8 @@ def _update_cluster_status_no_lock(
         handle.head_ip = ips[0]
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
-                                                ready=True)
+                                                ready=True,
+                                                is_launch=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
@@ -1546,15 +1598,24 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
+    terminated_clusters = []
+
     def _refresh_cluster(cluster_name):
         record = _update_cluster_status(cluster_name,
                                         acquire_per_cluster_status_lock=True)
+        if record is None:
+            terminated_clusters.append(cluster_name)
         progress.update(task, advance=1)
         return record
 
     cluster_names = [record['name'] for record in records]
     with progress:
         updated_records = run_in_parallel(_refresh_cluster, cluster_names)
+    if terminated_clusters:
+        plural = 's were' if len(terminated_clusters) > 1 else ' was'
+        cluster_str = ', '.join(repr(name) for name in terminated_clusters)
+        logger.warning(f'The following cluster{plural} terminated on the cloud '
+                       f'and removed from Sky\'s cluster table:\n{cluster_str}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
