@@ -1,7 +1,7 @@
 import contextlib
 from typing import Optional
 
-from sky_callback import SkyCallback
+from sky_callback import base
 
 _SKY_CALLBACK = None
 
@@ -9,7 +9,7 @@ _SKY_CALLBACK = None
 def init(global_rank: int = 0, enable: bool = True) -> None:
     if global_rank == 0 and enable:
         global _SKY_CALLBACK
-        _SKY_CALLBACK = SkyCallback()
+        _SKY_CALLBACK = base.SkyCallback()
 
 
 def config(total_train_steps: Optional[int] = None) -> None:
