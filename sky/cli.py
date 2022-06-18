@@ -2503,7 +2503,7 @@ def benchmark_launch(
     """Benchmark a task on different resources.
 
     NOTE: Modify your program (as in doc) before using this API. Your program
-    is assumed to periodically call sky_callback APIs to log its progress.
+    is expected to periodically call sky_callback APIs to log its progress.
 
     Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
     will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
@@ -2620,6 +2620,7 @@ def benchmark_launch(
             '\nTo teardown the clusters: '
             f'{backend_utils.BOLD}sky bench down '
             f'{benchmark}{backend_utils.RESET_BOLD}')
+        backend_utils.run('sky bench ls')
     backend_utils.run('sky status')
 
 
@@ -2798,7 +2799,7 @@ def benchmark_stop(
     clusters_to_exclude: List[str],
     yes: bool,
 ) -> None:
-    """Stop the benchmarking clusters."""
+    """Stop all clusters belonging to a benchmark."""
     _terminate_or_stop_benchmark(benchmark,
                                  clusters_to_exclude,
                                  terminate=False,
@@ -2829,7 +2830,7 @@ def benchmark_down(
     clusters_to_exclude: List[str],
     yes: bool,
 ) -> None:
-    """Terminate the benchmarking clusters."""
+    """Terminate all clusters belonging to a benchmark."""
     _terminate_or_stop_benchmark(benchmark,
                                  clusters_to_exclude,
                                  terminate=True,
