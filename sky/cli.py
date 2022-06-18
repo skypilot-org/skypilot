@@ -2507,8 +2507,8 @@ def benchmark_launch(
 
     Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
     will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
-    Alternatively, specify the benchmarking resources in your YAML (see doc)
-    and skip `--gpus`.
+    Alternatively, specify the benchmarking resources in your YAML (see doc),
+    which allows benchmarking on many more resource fields.
     """
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
