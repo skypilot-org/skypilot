@@ -19,7 +19,7 @@ class SkyCallback:
 
     def __init__(self,
                  log_dir: Optional[str] = None,
-                 warmup_steps: int = 1):
+                 warmup_steps: int = 1) -> None:
         assert warmup_steps >= 0
 
         # Create a log directory.
@@ -39,15 +39,15 @@ class SkyCallback:
                                            self._step_begins, self._step_ends)
         self._worker.start()
 
-    def config(self, total_train_steps: int):
+    def config(self, total_train_steps: int) -> None:
         self._worker.total_steps = total_train_steps
 
-    def on_train_step_begin(self):
+    def on_train_step_begin(self) -> None:
         # Do not acuqire a lock for performance.
         now = time.time()
         self._step_begins.append(now)
 
-    def on_train_step_end(self):
+    def on_train_step_end(self) -> None:
         # Do not acuqire a lock for performance.
         now = time.time()
         self._step_ends.append(now)
@@ -67,7 +67,7 @@ class _AsyncSummaryWriter(threading.Thread):
                      warmup_end_time: Optional[float] = None,
                      last_time: Optional[float] = None,
                      step_time: Optional[float] = None,
-                     estimated_total_time: Optional[float] = None):
+                     estimated_total_time: Optional[float] = None) -> None:
             self.boot_time = boot_time
             self.create_time = create_time
             self.warmup_steps = warmup_steps
@@ -84,7 +84,7 @@ class _AsyncSummaryWriter(threading.Thread):
                  warmup_steps: int,
                  step_begins: List[float],
                  step_ends: List[float],
-                 write_interval: float = 1):
+                 write_interval: float = 1) -> None:
         threading.Thread.__init__(self)
         self.daemon = True
 
@@ -99,7 +99,7 @@ class _AsyncSummaryWriter(threading.Thread):
         self.write_interval = write_interval
         self.total_steps = None
 
-    def _update_summary(self):
+    def _update_summary(self) -> None:
         summary = self.summary
         summary.total_steps = self.total_steps
         if summary.total_steps is not None:
@@ -134,11 +134,11 @@ class _AsyncSummaryWriter(threading.Thread):
                 total_time = time_until_warmup + step_time * steps_after_warmup
                 summary.estimated_total_time = total_time
 
-    def _write_summary(self):
+    def _write_summary(self) -> None:
         with open(os.path.join(self.log_dir, _BENCHMARK_SUMMARY), 'w') as f:
             json.dump(self.summary.__dict__, f)
 
-    def run(self):
+    def run(self) -> None:
         while True:
             self._update_summary()
             self._write_summary()

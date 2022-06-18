@@ -17,12 +17,12 @@ def config(total_train_steps: Optional[int] = None) -> None:
         _SKY_CALLBACK.config(total_train_steps=total_train_steps)
 
 
-def on_step_begin():
+def on_step_begin() -> None:
     if _SKY_CALLBACK is not None:
         _SKY_CALLBACK.on_train_step_begin()
 
 
-def on_step_end():
+def on_step_end() -> None:
     if _SKY_CALLBACK is not None:
         _SKY_CALLBACK.on_train_step_end()
 
@@ -35,9 +35,10 @@ def train_step():
 
 
 # FIXME: Needs a better name.
+# FIXME: Fix type annotation.
 class step:
 
-    def __init__(self, iterable):
+    def __init__(self, iterable) -> None:
         self._iterable = iterable
 
     def __iter__(self):
