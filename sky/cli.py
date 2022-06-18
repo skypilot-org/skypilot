@@ -2417,16 +2417,16 @@ def spot_logs(name: Optional[str], job_id: Optional[int]):
 def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
-        Benchmark candidates are configured in the YAML file as a list of
-        dictionaries. Each dictionary defines a candidate config
-        by overriding resources. For example:
+    Benchmark candidates are configured in the YAML file as a list of
+    dictionaries. Each dictionary defines a candidate config
+    by overriding resources. For example:
 
-        resources:
-            cloud: aws
-            candidates:
-                - {accelerators: K80}
-                - {instance_type: g4dn.2xlarge}
-                - {cloud: gcp, accelerators: V100} # overrides cloud
+    resources:
+        cloud: aws
+        candidates:
+        - {accelerators: K80}
+        - {instance_type: g4dn.2xlarge}
+        - {cloud: gcp, accelerators: V100} # overrides cloud
     """
     config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
     assert isinstance(config, dict)
