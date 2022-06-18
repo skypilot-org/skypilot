@@ -10,10 +10,7 @@ class SkyCallback(keras.callbacks.Callback):
         self.sky_callback = None
 
     def _lazy_init(self):
-        if self.log_dir is None:
-            self.sky_callback = base.SkyCallback()
-        else:
-            self.sky_callback = base.SkyCallback(log_dir=self.log_dir)
+        self.sky_callback = base.SkyCallback(self.log_dir)
 
     def on_train_begin(self, logs=None):
         self.sky_callback.config()

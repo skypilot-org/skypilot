@@ -6,42 +6,51 @@ from typing import List, Optional
 
 import psutil
 
-# NOTE: SKY_REMOTE_BENCHMARK_DIR must be the same as
-# _SKY_REMOTE_BENCHMARK_DIR in sky/benchmark/contoller.py
-SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
-BENCHMARK_SUMMARY = 'benchmark_summary.json'
+# This must be the same as _SKY_REMOTE_BENCHMARK_DIR_SYMLINK
+# in sky/benchmark/benchmark_utils.py.
+_SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
+
+# This must be the same as _BENCHMARK_SUMMARY
+# in sky/benchmark/benchmark_utils.py.
+_BENCHMARK_SUMMARY = 'benchmark_summary.json'
 
 
 class SkyCallback:
 
     def __init__(self,
-                 log_dir: str = SKY_REMOTE_BENCHMARK_DIR,
+                 log_dir: Optional[str] = None,
                  warmup_steps: int = 1):
         assert warmup_steps >= 0
 
         # Create a log directory.
-        self.log_dir = os.path.expanduser(log_dir)
+        if log_dir is None:
+            self.log_dir = _SKY_REMOTE_BENCHMARK_DIR
+        else:
+            self.log_dir = log_dir
+        self.log_dir = os.path.expanduser(self.log_dir)
         os.makedirs(self.log_dir, exist_ok=True)
 
         # TODO(woosuk): Do not store the entire timestamps.
-        self.step_begins = []
-        self.step_ends = []
+        self._step_begins = []
+        self._step_ends = []
 
         # Create a writer thread.
         self._worker = _AsyncSummaryWriter(self.log_dir, warmup_steps,
-                                           self.step_begins, self.step_ends)
+                                           self._step_begins, self._step_ends)
         self._worker.start()
 
     def config(self, total_train_steps: int):
         self._worker.total_steps = total_train_steps
 
     def on_train_step_begin(self):
+        # Do not acuqire a lock for performance.
         now = time.time()
-        self.step_begins.append(now)
+        self._step_begins.append(now)
 
     def on_train_step_end(self):
+        # Do not acuqire a lock for performance.
         now = time.time()
-        self.step_ends.append(now)
+        self._step_ends.append(now)
 
 
 class _AsyncSummaryWriter(threading.Thread):
@@ -126,7 +135,7 @@ class _AsyncSummaryWriter(threading.Thread):
                 summary.estimated_total_time = total_time
 
     def _write_summary(self):
-        with open(os.path.join(self.log_dir, BENCHMARK_SUMMARY), 'w') as f:
+        with open(os.path.join(self.log_dir, _BENCHMARK_SUMMARY), 'w') as f:
             json.dump(self.summary.__dict__, f)
 
     def run(self):
