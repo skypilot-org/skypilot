@@ -1772,7 +1772,8 @@ def validate_schema(obj, schema, err_msg_prefix=''):
                         err_msg += f'\nInstead of {field}, did you mean {most_similar_field[0]}?'
 
     if err_msg:
-        raise ValueError(err_msg)
+        with print_exception_no_traceback():
+            raise ValueError(err_msg)
 
 
 @contextlib.contextmanager
