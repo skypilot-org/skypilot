@@ -2583,19 +2583,23 @@ def benchmark_launch(
                                                disk_size=disk_size)
     config['resources'].update(resources_config)
 
+    # Fully generate the benchmark candidate configs.
+    clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
+        benchmark, config, candidates)
+    # Show the benchmarking VM instances selected by the optimizer.
+    # This also detects the case where the user requested infeasible resources.
+    benchmark_utils.print_benchmark_clusters(clusters, config, candidate_configs)
+    if not yes:
+        plural = 's' if len(candidates) > 1 else ''
+        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
+        click.confirm(prompt, default=True, abort=True, show_default=True)
+
     # Configs that are only accepted by the CLI.
     commandline_args = {}
     if idle_minutes_to_autostop is not None:
         commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
     if len(env) > 0:
         commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
-
-    clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
-        benchmark, config, candidates)
-    if not yes:
-        plural = 's' if len(candidates) > 1 else ''
-        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
-        click.confirm(prompt, default=True, abort=True, show_default=True)
 
     # Launch the benchmarking clusters in detach mode in parallel.
     benchmark_created = benchmark_utils.launch_benchmark_clusters(

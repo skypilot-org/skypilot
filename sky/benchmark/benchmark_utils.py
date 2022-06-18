@@ -230,10 +230,12 @@ def generate_benchmark_configs(
             f'cp "$(echo {wheel_dir}/sky_callback-*.whl)" ~/sky_utils; ' +
             candidate_config['setup'])
         candidate_configs.append(candidate_config)
+    return clusters, candidate_configs
 
+
+def print_benchmark_clusters(clusters: List[str], config: _Config, candidate_configs: List[_Config]) -> None:
     candidate_resources = _get_optimized_resources(candidate_configs)
     _print_candidate_resources(clusters, config, candidate_resources)
-    return clusters, candidate_configs
 
 
 def launch_benchmark_clusters(benchmark: str, clusters: List[str],
