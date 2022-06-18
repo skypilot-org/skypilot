@@ -2576,11 +2576,12 @@ def benchmark_launch(
         config['workdir'] = workdir
     if num_nodes is not None:
         config['num_nodes'] = num_nodes
-    config['resources'] = _parse_resources_params(cloud=cloud,
-                                                  region=region,
-                                                  gpus=gpus,
-                                                  use_spot=use_spot,
-                                                  disk_size=disk_size)
+    resources_config = _parse_resources_params(cloud=cloud,
+                                               region=region,
+                                               gpus=gpus,
+                                               use_spot=use_spot,
+                                               disk_size=disk_size)
+    config['resources'].update(resources_config)
 
     # Configs that are only accepted by the CLI.
     commandline_args = {}
