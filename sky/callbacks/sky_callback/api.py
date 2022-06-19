@@ -1,3 +1,4 @@
+import collections
 import contextlib
 import os
 from typing import Optional
@@ -25,17 +26,15 @@ def on_step_end() -> None:
 
 
 @contextlib.contextmanager
-def train_step():
+def step():
     on_step_begin()
     yield
     on_step_end()
 
 
-# FIXME: Needs a better name.
-# FIXME: Fix type annotation.
-class step:
+class timer:
 
-    def __init__(self, iterable) -> None:
+    def __init__(self, iterable: collections.Iterable) -> None:
         self._iterable = iterable
 
     def __iter__(self):
