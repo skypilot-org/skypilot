@@ -1,4 +1,4 @@
-# A patch file to replace ImageNet dataset to a dummy dataset.
+# A patch file to replace ImageNet with a dummy dataset.
 # Use only for benchmarking purposes.
 
 diff --git a/train.py b/train.py
