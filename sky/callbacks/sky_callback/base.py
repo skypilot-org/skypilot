@@ -137,7 +137,12 @@ class _AsyncSummaryWriter(threading.Thread):
             json.dump(self.summary.__dict__, f)
 
     def run(self) -> None:
+        next_write_time = 0
         while True:
-            self._update_summary()
-            self._write_summary()
-            time.sleep(self.write_interval)
+            now = time.time()
+            if now >= next_write_time:
+                self._update_summary()
+                self._write_summary()
+                next_write_time = now + self.write_interval
+            else:
+                time.sleep(next_write_time - now)
