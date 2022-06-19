@@ -8,10 +8,10 @@ _DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK', 'False').lower() in (
 _SKY_CALLBACK = None
 
 
-def init(global_rank: int = 0, total_steps: Optional[int] = None) -> None:
+def init(global_rank: int = 0, log_dir: Optional[str] = None, total_steps: Optional[int] = None) -> None:
     if global_rank == 0 and not _DISABLE_CALLBACK:
         global _SKY_CALLBACK
-        _SKY_CALLBACK = base.BaseCallback()
+        _SKY_CALLBACK = base.BaseCallback(log_dir=log_dir, total_steps=total_steps)
 
 
 def on_step_begin() -> None:
