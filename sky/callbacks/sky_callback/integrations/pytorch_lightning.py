@@ -1,9 +1,21 @@
+"""SkyCallback integration with PyTorch Lightning."""
 import pytorch_lightning as pl
 
 from sky_callback import base
 
 
 class SkyPLCallback(pl.Callback):
+    """SkyCallback for PyTorch Lightning.
+    
+    Example:
+        ```python
+        from sky_callback import SkyPLCallback
+        trainer = pl.Trainer(..., callbacks=[SkyPLCallback()])
+        ```
+
+    Args:
+        log_dir: A directory to store the logs.
+    """
 
     def __init__(self, log_dir=None):
         self.log_dir = log_dir

@@ -1,9 +1,21 @@
+"""SkyCallback integration with HuggingFace Transformers."""
 import transformers
 
 from sky_callback import base
 
 
 class SkyHFCallback(transformers.TrainerCallback):
+    """SkyCallback for HuggingFace Transformers.
+    
+    Example:
+        ```python
+        from sky_callback import SkyHFCallback
+        trainer = transformers.Trainer(..., callbacks=[SkyHFCallback()])
+        ```
+
+    Args:
+        log_dir: A directory to store the logs.
+    """
 
     def __init__(self, log_dir=None):
         self.log_dir = log_dir

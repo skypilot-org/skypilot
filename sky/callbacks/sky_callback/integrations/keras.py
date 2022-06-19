@@ -1,9 +1,22 @@
+"""SkyCallback integration with Keras."""
+
 from tensorflow import keras
 
 from sky_callback import base
 
 
 class SkyKerasCallback(keras.callbacks.Callback):
+    """SkyCallback for Keras.
+
+    Example:
+        ```python
+        from sky_callback import SkyKerasCallback
+        model.fit(..., callbacks=[SkyKerasCallback()])
+        ```
+
+    Args:
+        log_dir: A directory to store the logs.
+    """
 
     def __init__(self, log_dir=None):
         self.log_dir = log_dir
