@@ -19,6 +19,7 @@ class BaseCallback:
 
     def __init__(self,
                  log_dir: Optional[str] = None,
+                 total_steps: Optional[int] = None,
                  warmup_steps: int = 1) -> None:
         assert warmup_steps >= 0
 
@@ -35,12 +36,9 @@ class BaseCallback:
         self._step_ends = []
 
         # Create a writer thread.
-        self._worker = _AsyncSummaryWriter(self.log_dir, warmup_steps,
+        self._worker = _AsyncSummaryWriter(self.log_dir, total_steps, warmup_steps,
                                            self._step_begins, self._step_ends)
         self._worker.start()
-
-    def config(self, total_train_steps: int) -> None:
-        self._worker.total_steps = total_train_steps
 
     def on_step_begin(self) -> None:
         # Do not acuqire a lock for the sake of performance.
@@ -60,8 +58,8 @@ class _AsyncSummaryWriter(threading.Thread):
         def __init__(self,
                      boot_time: float,
                      create_time: float,
+                     total_steps: Optional[int],
                      warmup_steps: int,
-                     total_steps: Optional[int] = None,
                      num_steps: int = 0,
                      train_start_time: Optional[float] = None,
                      warmup_end_time: Optional[float] = None,
@@ -81,6 +79,7 @@ class _AsyncSummaryWriter(threading.Thread):
 
     def __init__(self,
                  log_dir: str,
+                 total_steps: Optional[int],
                  warmup_steps: int,
                  step_begins: List[float],
                  step_ends: List[float],
@@ -92,16 +91,15 @@ class _AsyncSummaryWriter(threading.Thread):
         self.summary = self._BenchmarkSummary(
             boot_time=psutil.boot_time(),
             create_time=psutil.Process(os.getpid()).create_time(),
+            total_steps=total_steps,
             warmup_steps=warmup_steps,
         )
         self.step_begins = step_begins
         self.step_ends = step_ends
         self.write_interval = write_interval
-        self.total_steps = None
 
     def _update_summary(self) -> None:
         summary = self.summary
-        summary.total_steps = self.total_steps
         if summary.total_steps is not None:
             assert summary.warmup_steps < summary.total_steps
 

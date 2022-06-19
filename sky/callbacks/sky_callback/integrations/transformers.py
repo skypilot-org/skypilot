@@ -9,14 +9,10 @@ class SkyHFCallback(transformers.TrainerCallback):
         self.log_dir = log_dir
         self.sky_callback = None
 
-    def _lazy_init(self):
-        self.sky_callback = base.BaseCallback(self.log_dir)
-
     def on_train_begin(self, args, state, control, **kwargs):
         if state.is_world_process_zero:
             if self.sky_callback is None:
-                self._lazy_init()
-            self.sky_callback.config(total_train_steps=state.max_steps)
+                self.sky_callback = base.BaseCallback(log_dir=self.log_dir, total_steps=state.max_steps)
 
     def on_step_begin(self, args, state, control, **kwargs):
         if self.sky_callback is not None:
