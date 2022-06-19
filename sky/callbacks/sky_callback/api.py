@@ -9,7 +9,7 @@ _SKY_CALLBACK = None
 def init(global_rank: int = 0, enable: bool = True) -> None:
     if global_rank == 0 and enable:
         global _SKY_CALLBACK
-        _SKY_CALLBACK = base.SkyCallback()
+        _SKY_CALLBACK = base.BaseCallback()
 
 
 def config(total_train_steps: Optional[int] = None) -> None:
@@ -19,12 +19,12 @@ def config(total_train_steps: Optional[int] = None) -> None:
 
 def on_step_begin() -> None:
     if _SKY_CALLBACK is not None:
-        _SKY_CALLBACK.on_train_step_begin()
+        _SKY_CALLBACK.on_step_begin()
 
 
 def on_step_end() -> None:
     if _SKY_CALLBACK is not None:
-        _SKY_CALLBACK.on_train_step_end()
+        _SKY_CALLBACK.on_step_end()
 
 
 @contextlib.contextmanager
@@ -49,6 +49,6 @@ class step:
                 yield obj
         else:
             for obj in iterable:
-                _SKY_CALLBACK.on_train_step_begin()
+                _SKY_CALLBACK.on_step_begin()
                 yield obj
-                _SKY_CALLBACK.on_train_step_end()
+                _SKY_CALLBACK.on_step_end()

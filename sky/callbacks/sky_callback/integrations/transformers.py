@@ -10,7 +10,7 @@ class SkyCallback(transformers.TrainerCallback):
         self.sky_callback = None
 
     def _lazy_init(self):
-        self.sky_callback = base.SkyCallback(self.log_dir)
+        self.sky_callback = base.BaseCallback(self.log_dir)
 
     def on_train_begin(self, args, state, control, **kwargs):
         if state.is_world_process_zero:
@@ -20,8 +20,8 @@ class SkyCallback(transformers.TrainerCallback):
 
     def on_step_begin(self, args, state, control, **kwargs):
         if self.sky_callback is not None:
-            self.sky_callback.on_train_step_begin()
+            self.sky_callback.on_step_begin()
 
     def on_step_end(self, args, state, control, **kwargs):
         if self.sky_callback is not None:
-            self.sky_callback.on_train_step_begin()
+            self.sky_callback.on_step_end()

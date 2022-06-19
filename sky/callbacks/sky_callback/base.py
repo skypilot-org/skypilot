@@ -15,7 +15,7 @@ _SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
 _BENCHMARK_SUMMARY = 'benchmark_summary.json'
 
 
-class SkyCallback:
+class BaseCallback:
 
     def __init__(self,
                  log_dir: Optional[str] = None,
@@ -42,12 +42,12 @@ class SkyCallback:
     def config(self, total_train_steps: int) -> None:
         self._worker.total_steps = total_train_steps
 
-    def on_train_step_begin(self) -> None:
+    def on_step_begin(self) -> None:
         # Do not acuqire a lock for performance.
         now = time.time()
         self._step_begins.append(now)
 
-    def on_train_step_end(self) -> None:
+    def on_step_end(self) -> None:
         # Do not acuqire a lock for performance.
         now = time.time()
         self._step_ends.append(now)
