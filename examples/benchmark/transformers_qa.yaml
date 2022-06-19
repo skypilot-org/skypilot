@@ -22,7 +22,7 @@ setup: |
   # Install SkyCallback
   pip install ~/sky_utils/*.whl
 
-  # Apply patches
+  # Apply the patch to enable SkyCallback
   git apply ../callback.patch
 
 run: |
