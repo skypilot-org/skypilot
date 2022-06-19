@@ -2623,7 +2623,9 @@ def benchmark_launch(
             f'{backend_utils.BOLD}sky bench down '
             f'{benchmark}{backend_utils.RESET_BOLD}')
         backend_utils.run('sky bench ls')
-    backend_utils.run('sky status')
+    else:
+        logger.error('No benchmarking clusters are created.')
+        backend_utils.run('sky status')
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)
