@@ -1035,7 +1035,8 @@ def handle_returncode(returncode: int,
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         raise exceptions.CommandError(
-            f'Command failed with code {returncode}: {command}\n{format_err_msg}',
+            f'Command failed with code {returncode}: {command}\n'
+            f'{format_err_msg}',
             returncode=returncode)
 
 

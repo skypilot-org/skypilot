@@ -30,6 +30,7 @@ from sky import sky_logging
 from sky import optimizer
 from sky import spot as spot_lib
 from sky import task as task_lib
+from sky import utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
@@ -1264,7 +1265,7 @@ class CloudVmRayBackend(backends.Backend):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
-        with backend_utils.print_exception_no_traceback():
+        with utils.print_exception_no_traceback():
             # requested_resources <= actual_resources.
             if not (task.num_nodes <= handle.launched_nodes and
                     task_resources.less_demanding_than(launched_resources)):
