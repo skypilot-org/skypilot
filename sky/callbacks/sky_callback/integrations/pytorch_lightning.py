@@ -3,7 +3,7 @@ import pytorch_lightning as pl
 from sky_callback import base
 
 
-class SkyCallback(pl.Callback):
+class SkyPLCallback(pl.Callback):
 
     def __init__(self, log_dir=None):
         self.log_dir = log_dir

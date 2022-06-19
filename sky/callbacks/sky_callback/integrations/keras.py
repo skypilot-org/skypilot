@@ -3,7 +3,7 @@ from tensorflow import keras
 from sky_callback import base
 
 
-class SkyCallback(keras.callbacks.Callback):
+class SkyKerasCallback(keras.callbacks.Callback):
 
     def __init__(self, log_dir=None):
         self.log_dir = log_dir

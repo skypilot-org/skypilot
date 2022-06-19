@@ -3,7 +3,7 @@ import transformers
 from sky_callback import base
 
 
-class SkyCallback(transformers.TrainerCallback):
+class SkyHFCallback(transformers.TrainerCallback):
 
     def __init__(self, log_dir=None):
         self.log_dir = log_dir
