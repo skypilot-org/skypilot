@@ -1140,13 +1140,10 @@ class RetryingVmProvisioner(object):
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
-                # raise_error has to be True to make sure remove_cluster
-                # is called if provisioning fails.
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
-                                         _blocked_launchable_resources,
-                                         raise_error=True)
+                                         _blocked_launchable_resources)
                 to_provision = task.best_resources
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
@@ -1538,8 +1535,7 @@ class CloudVmRayBackend(backends.Backend):
                            source=workdir,
                            target=SKY_REMOTE_WORKDIR,
                            log_path=log_path,
-                           stream_logs=False,
-                           raise_error=True)
+                           stream_logs=False)
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
@@ -1665,8 +1661,7 @@ class CloudVmRayBackend(backends.Backend):
                     rc,
                     command,
                     f'Failed to sync {src} to {dst}.',
-                    stderr=stdout + stderr,
-                    raise_error=True)
+                    stderr=stdout + stderr)
 
             if run_rsync:
                 # TODO(zhwu): Optimize for large amount of files.
@@ -1676,8 +1671,7 @@ class CloudVmRayBackend(backends.Backend):
                                source=src,
                                target=dst,
                                log_path=log_path,
-                               stream_logs=False,
-                               raise_error=True)
+                               stream_logs=False)
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
@@ -1813,11 +1807,9 @@ class CloudVmRayBackend(backends.Backend):
                     log_path=log_path,
                     ssh_control_name=self._ssh_control_name(handle))
                 backend_utils.handle_returncode(
-                    returncode,
-                    symlink_command,
+                    returncode, symlink_command,
                     'Failed to create symlinks. The target destination '
-                    'may already exist',
-                    raise_error=True)
+                    'may already exist')
 
             backend_utils.run_in_parallel(_symlink_node, ip_list)
         end = time.time()
@@ -1865,8 +1857,7 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.handle_returncode(
                     returncode=returncode,
                     command=cmd,
-                    error_msg=f'Failed to setup with return code {returncode}',
-                    raise_error=True)
+                    error_msg=f'Failed to setup with return code {returncode}')
 
             num_nodes = handle.launched_nodes
             plural = 's' if num_nodes > 1 else ''
@@ -2456,16 +2447,13 @@ class CloudVmRayBackend(backends.Backend):
             os.remove(handle.cluster_yaml)
         return True
 
-    def _rsync_up(
-        self,
-        handle: ResourceHandle,
-        source: str,
-        target: str,
-        stream_logs: bool = True,
-        log_path: str = '/dev/null',
-        ip: Optional[str] = None,
-        raise_error: bool = True,
-    ) -> None:
+    def _rsync_up(self,
+                  handle: ResourceHandle,
+                  source: str,
+                  target: str,
+                  stream_logs: bool = True,
+                  log_path: str = '/dev/null',
+                  ip: Optional[str] = None) -> None:
         """Runs rsync from 'source' to the cluster's node 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
@@ -2511,10 +2499,8 @@ class CloudVmRayBackend(backends.Backend):
                                           stream_logs=stream_logs,
                                           shell=True)
         backend_utils.handle_returncode(
-            returncode,
-            command, f'Failed to rsync up {source} -> {target}, '
-            f'see {log_path} for details.',
-            raise_error=raise_error)
+            returncode, command, f'Failed to rsync up {source} -> {target}, '
+            f'see {log_path} for details.')
 
     def _ssh_control_name(self, handle: ResourceHandle) -> str:
         return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'

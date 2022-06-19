@@ -1,3 +1,4 @@
+"""Utility functions for sky."""
 import contextlib
 import sys
 
@@ -15,6 +16,6 @@ def print_exception_no_traceback():
             if error():
                 raise ValueError('...')
     """
-    sys.tracebacklimit = 0
+    sys.tracebacklimit = 1
     yield
     sys.tracebacklimit = 1000

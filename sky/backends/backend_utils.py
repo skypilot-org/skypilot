@@ -14,7 +14,6 @@ import re
 import shlex
 import socket
 import subprocess
-import sys
 import textwrap
 import threading
 import time
@@ -1026,7 +1025,6 @@ def handle_returncode(returncode: int,
         command: The command that was run.
         error_msg: The error message to print.
         stderr: The stderr of the command.
-        raise_error: Whether to raise an error instead of sys.exit.
     """
     echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
@@ -1036,8 +1034,7 @@ def handle_returncode(returncode: int,
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         raise exceptions.CommandError(
             f'Command failed with code {returncode}: {command}\n'
-            f'{format_err_msg}',
-            returncode=returncode)
+            f'{format_err_msg}')
 
 
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
@@ -1760,7 +1757,7 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1769,7 +1766,7 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    sys.exit(exceptions.SIGTSTP_CODE)
+    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 class Backoff:

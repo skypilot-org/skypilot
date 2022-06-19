@@ -15,7 +15,6 @@ Current task launcher:
 import enum
 import sys
 import time
-import traceback
 from typing import Any, List, Optional
 
 import sky
@@ -130,7 +129,6 @@ def _execute(
         # Optimizer should eventually choose where to store bucket
         task.add_storage_mounts()
 
-    status_printed = False
     try:
         if stages is None or Stage.PROVISION in stages:
             if handle is None:
@@ -173,9 +171,12 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle)
     except Exception as e:  # pylint: disable=broad-except
-        # UX: print live clusters to make users aware (to save costs).
         # Shorter stacktrace than raise e (e.g., no cli stuff).
-        traceback.print_exc()
+        with utils.print_exception_no_traceback():
+            raise e
+    finally:
+        # UX: print live clusters to make users aware (to save costs).
+        # Needed because this finally doesn't always get executed on errors.
         print()
         if cluster_name == spot.SPOT_CONTROLLER_NAME:
             # For spot controller task, it requires a while to have the
@@ -185,20 +186,6 @@ def _execute(
         else:
             backends.backend_utils.run('sky status')
         print('\x1b[?25h', end='')  # Show cursor.
-        status_printed = True
-        with utils.print_exception_no_traceback():
-            raise e
-    finally:
-        if not status_printed:
-            # Needed because this finally doesn't always get executed on errors.
-            if cluster_name == spot.SPOT_CONTROLLER_NAME:
-                # For spot controller task, it requires a while to have the
-                # managed spot status shown in the status table.
-                time.sleep(0.5)
-                backends.backend_utils.run('sky spot status')
-            else:
-                backends.backend_utils.run('sky status')
-            print('\x1b[?25h', end='')  # Show cursor.
 
 
 @timeline.event

@@ -8,6 +8,7 @@ import yaml
 
 import sky
 from sky import clouds
+from sky import utils
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
@@ -509,6 +510,7 @@ class Task:
                     raise ValueError(f'Storage Type {store_type} \
                         does not exist!')
 
+    @utils.print_exception_no_traceback()
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.
 

@@ -2,7 +2,6 @@
 import collections
 import colorama
 import enum
-import sys
 import typing
 from typing import Dict, List, Optional, Tuple
 
