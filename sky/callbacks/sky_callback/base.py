@@ -36,8 +36,9 @@ class BaseCallback:
         self._step_ends = []
 
         # Create a writer thread.
-        self._worker = _AsyncSummaryWriter(self.log_dir, total_steps, warmup_steps,
-                                           self._step_begins, self._step_ends)
+        self._worker = _AsyncSummaryWriter(self.log_dir, total_steps,
+                                           warmup_steps, self._step_begins,
+                                           self._step_ends)
         self._worker.start()
 
     def on_step_begin(self) -> None:

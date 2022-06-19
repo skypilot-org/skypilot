@@ -1,5 +1,4 @@
 """SkyCallback integration with Keras."""
-
 from tensorflow import keras
 
 from sky_callback import base

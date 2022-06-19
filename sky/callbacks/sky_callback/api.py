@@ -24,21 +24,26 @@ from typing import Optional
 
 from sky_callback import base
 
-_DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK', 'False').lower() in ('true', '1')
+_DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK',
+                                   'False').lower() in ('true', '1')
 _sky_callback = None
 _initialized = False
 
 
-def init(global_rank: int = 0, log_dir: Optional[str] = None, total_steps: Optional[int] = None) -> None:
+def init(global_rank: int = 0,
+         log_dir: Optional[str] = None,
+         total_steps: Optional[int] = None) -> None:
     if global_rank == 0 and not _DISABLE_CALLBACK:
         global _sky_callback, _initialized
-        _sky_callback = base.BaseCallback(log_dir=log_dir, total_steps=total_steps)
+        _sky_callback = base.BaseCallback(log_dir=log_dir,
+                                          total_steps=total_steps)
     _initialized = True
 
 
 def on_step_begin() -> None:
     if not _initialized:
-        raise RuntimeError('sky_callback is not initialized. '
+        raise RuntimeError(
+            'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
         _sky_callback.on_step_begin()
@@ -46,7 +51,8 @@ def on_step_begin() -> None:
 
 def on_step_end() -> None:
     if not _initialized:
-        raise RuntimeError('sky_callback is not initialized. '
+        raise RuntimeError(
+            'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
         _sky_callback.on_step_end()
@@ -63,7 +69,8 @@ class timer:
 
     def __init__(self, iterable: collections.Iterable) -> None:
         if not _initialized:
-            raise RuntimeError('sky_callback is not initialized. '
+            raise RuntimeError(
+                'sky_callback is not initialized. '
                 'Please call `sky_callback.init` before using sky_callback.')
         self._iterable = iterable
 
