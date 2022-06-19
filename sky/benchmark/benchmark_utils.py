@@ -45,9 +45,9 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
         names = [f'sky-bench-{benchmark}-{i}' for i in range(num_clusters)]
     for name in names:
         if global_user_state.get_cluster_from_name(name) is not None:
-            backend_utils.print_exception_no_traceback(
-                f'Cluster name {name} is taken. '
-                'Try using a different benchmark name.')
+            with backend_utils.print_exception_no_traceback():
+                raise ValueError(f'Cluster name {name} is taken. '
+                                 'Try using a different benchmark name.')
     return names
 
 
