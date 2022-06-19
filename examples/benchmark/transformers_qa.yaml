@@ -1,4 +1,4 @@
-name: transformers-qa
+name: squad_v2
 
 resources:
   cloud: aws
