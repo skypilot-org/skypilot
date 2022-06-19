@@ -1,20 +1,17 @@
 import contextlib
+import os
 from typing import Optional
 
 from sky_callback import base
 
+_DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK', 'False').lower() in ('true', '1')
 _SKY_CALLBACK = None
 
 
-def init(global_rank: int = 0, enable: bool = True) -> None:
-    if global_rank == 0 and enable:
+def init(global_rank: int = 0, total_steps: Optional[int] = None) -> None:
+    if global_rank == 0 and not _DISABLE_CALLBACK:
         global _SKY_CALLBACK
         _SKY_CALLBACK = base.BaseCallback()
-
-
-def config(total_train_steps: Optional[int] = None) -> None:
-    if _SKY_CALLBACK is not None:
-        _SKY_CALLBACK.config(total_train_steps=total_train_steps)
 
 
 def on_step_begin() -> None:
