@@ -1,3 +1,22 @@
+"""SkyCallback APIs to benchmark an iterative task on cloud resources.
+
+SkyCallback measures averaged time taken by each 'step', and extrapolates it to
+the makespan of the task. The APIs provide:
+- `init` function to initialize the callback.
+- 3 equivalent ways to measure the time taken by each step (see doc).
+
+Example:
+    ```python
+    import sky_callback
+    from sky_callback import timer
+
+    ...
+    sky_callback.init(total_steps=num_epochs * len(dataloader))
+    for epoch in range(num_epochs):
+        for batch in timer(dataloader):
+            ...
+    ```
+"""
 import collections
 import contextlib
 import os
