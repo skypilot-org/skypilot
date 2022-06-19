@@ -332,8 +332,8 @@ def update_benchmark_state(benchmark: str, clusters: List[str]):
         with open(summary, 'r') as f:
             summary = json.load(f)
 
-        prep_time = summary['train_start_time'] - summary['create_time']
-        run_time = summary['last_time'] - summary['train_start_time']
+        prep_time = summary['first_step_time'] - summary['create_time']
+        run_time = summary['last_step_time'] - summary['first_step_time']
         record = benchmark_state.BenchmarkRecord(
             prep_time=prep_time,
             run_time=run_time,
