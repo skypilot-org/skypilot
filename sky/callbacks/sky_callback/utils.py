@@ -4,6 +4,7 @@ from typing import Optional
 DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK',
                                   'False').lower() in ('true', '1')
 
+
 # FIXME(woosuk): Find a better way for lazy imports.
 class CallbackLoader:
 
