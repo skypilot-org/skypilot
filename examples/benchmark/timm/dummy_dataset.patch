@@ -12,13 +12,13 @@ index 6e3b058..8ddbcdd 100755
 +
 +class DummyImageDataset(torch.utils.data.Dataset):
 +    """Dummy dataset with synthetic images."""
-+    _IMAGE_WIDTH = 3072
-+    _IMAGE_HEIGHT = 2304
++    _IMAGE_HEIGHT = 3072
++    _IMAGE_WIDTH = 2304
 +
 +    def __init__(self, num_images, num_classes):
 +        import numpy as np
 +        from PIL import Image
-+        imarray = np.random.rand(self._IMAGE_WIDTH, self._IMAGE_WIDTH, 3) * 255
++        imarray = np.random.rand(self._IMAGE_HEIGHT, self._IMAGE_WIDTH, 3) * 255
 +        self.img = Image.fromarray(imarray.astype('uint8')).convert('RGB')
 +        self.num_images = num_images
 +        self.num_classes = num_classes
