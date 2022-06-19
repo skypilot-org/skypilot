@@ -45,6 +45,7 @@ class Stage(enum.Enum):
     TEARDOWN = enum.auto()
 
 
+@utils.print_exception_no_traceback()
 def _execute(
     dag: sky.Dag,
     dryrun: bool = False,

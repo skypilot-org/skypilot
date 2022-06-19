@@ -57,6 +57,7 @@ from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils.cli_utils import status_utils
 
+
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
