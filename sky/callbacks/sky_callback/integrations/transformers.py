@@ -27,8 +27,8 @@ class SkyHFCallback(transformers.TrainerCallback):
     def on_train_begin(self, args, state, control, **kwargs):
         if DISABLE_CALLBACK:
             return
+        assert self.sky_callback is None
         if state.is_world_process_zero:
-            assert self.sky_callback is None
             self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                   total_steps=state.max_steps)
 

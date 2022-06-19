@@ -27,8 +27,8 @@ class SkyPLCallback(pl.Callback):
     def on_train_start(self, trainer, pl_module):
         if DISABLE_CALLBACK:
             return
+        assert self.sky_callback is None
         if trainer.global_rank == 0:
-            assert self.sky_callback is None
             self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                   total_steps=trainer.max_steps)
 

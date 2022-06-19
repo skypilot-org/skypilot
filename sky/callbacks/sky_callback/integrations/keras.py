@@ -28,8 +28,8 @@ class SkyKerasCallback(keras.callbacks.Callback):
         if DISABLE_CALLBACK:
             return
         # TODO(woosuk): Add support for distributed training.
-        if self.sky_callback is None:
-            self.sky_callback = base.BaseCallback(log_dir=self.log_dir)
+        assert self.sky_callback is None
+        self.sky_callback = base.BaseCallback(log_dir=self.log_dir)
 
     def on_train_batch_begin(self, batch, logs=None):
         if DISABLE_CALLBACK:

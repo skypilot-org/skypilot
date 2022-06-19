@@ -34,6 +34,11 @@ def init(global_rank: int = 0,
          total_steps: Optional[int] = None) -> None:
     if DISABLE_CALLBACK:
         return
+    if _initialized:
+        raise RuntimeError(
+            'sky_callback is already initialized. '
+            'Please call `sky_callback.init` only once.')
+ 
     global _sky_callback, _initialized
     if global_rank == 0:
         _sky_callback = base.BaseCallback(log_dir=log_dir,
