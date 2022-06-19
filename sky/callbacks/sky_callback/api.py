@@ -33,8 +33,8 @@ _initialized = False
 def init(global_rank: int = 0,
          log_dir: Optional[str] = None,
          total_steps: Optional[int] = None) -> None:
+    global _sky_callback, _initialized
     if global_rank == 0 and not _DISABLE_CALLBACK:
-        global _sky_callback, _initialized
         _sky_callback = base.BaseCallback(log_dir=log_dir,
                                           total_steps=total_steps)
     _initialized = True
