@@ -23,7 +23,7 @@ setup: |
   pip install ~/sky_utils/*.whl
 
   # Apply patches
-  git apply ../transformers_qa.patch
+  git apply ../callback.patch
 
 run: |
   conda activate hf
