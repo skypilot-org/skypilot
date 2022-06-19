@@ -43,12 +43,12 @@ class BaseCallback:
         self._worker.total_steps = total_train_steps
 
     def on_step_begin(self) -> None:
-        # Do not acuqire a lock for performance.
+        # Do not acuqire a lock for the sake of performance.
         now = time.time()
         self._step_begins.append(now)
 
     def on_step_end(self) -> None:
-        # Do not acuqire a lock for performance.
+        # Do not acuqire a lock for the sake of performance.
         now = time.time()
         self._step_ends.append(now)
 
