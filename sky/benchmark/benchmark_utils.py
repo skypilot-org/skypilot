@@ -338,7 +338,7 @@ def update_benchmark_state(benchmark: str, clusters: List[str]):
             prep_time=prep_time,
             run_time=run_time,
             num_steps=summary['num_steps'],
-            step_time=summary['step_time'],
+            step_time=summary['time_per_step'],
             total_steps=summary['total_steps'],
             estimated_total_time=summary['estimated_total_time'],
         )

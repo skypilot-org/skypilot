@@ -61,20 +61,20 @@ class _AsyncSummaryWriter(threading.Thread):
                      total_steps: Optional[int],
                      warmup_steps: int,
                      num_steps: int = 0,
-                     train_start_time: Optional[float] = None,
+                     first_step_time: Optional[float] = None,
                      warmup_end_time: Optional[float] = None,
-                     last_time: Optional[float] = None,
-                     step_time: Optional[float] = None,
+                     last_step_time: Optional[float] = None,
+                     time_per_step: Optional[float] = None,
                      estimated_total_time: Optional[float] = None) -> None:
             self.boot_time = boot_time
             self.create_time = create_time
             self.warmup_steps = warmup_steps
             self.total_steps = total_steps
             self.num_steps = num_steps
-            self.train_start_time = train_start_time
+            self.first_step_time = first_step_time
             self.warmup_end_time = warmup_end_time
-            self.last_time = last_time
-            self.step_time = step_time
+            self.last_step_time = last_step_time
+            self.time_per_step = time_per_step
             self.estimated_total_time = estimated_total_time
 
     def __init__(self,
@@ -108,28 +108,28 @@ class _AsyncSummaryWriter(threading.Thread):
         summary.num_steps = num_steps
 
         if num_steps > 0:
-            last_time = self.step_begins[num_steps]
-            summary.last_time = last_time
+            last_step_time = self.step_begins[num_steps]
+            summary.last_step_time = last_step_time
 
-        if summary.train_start_time is None:
+        if summary.first_step_time is None:
             if num_step_begins > 0:
-                summary.train_start_time = self.step_begins[0]
+                summary.first_step_time = self.step_begins[0]
         if summary.warmup_end_time is None:
             if num_step_begins > summary.warmup_steps:
                 summary.warmup_end_time = self.step_begins[summary.warmup_steps]
 
         if num_step_begins > summary.warmup_steps + 1:
-            time_after_warmup = last_time - summary.warmup_end_time
+            time_after_warmup = last_step_time - summary.warmup_end_time
             steps_after_warmup = num_steps - summary.warmup_steps
-            step_time = time_after_warmup / steps_after_warmup
-            summary.step_time = step_time
+            time_per_step = time_after_warmup / steps_after_warmup
+            summary.time_per_step = time_per_step
 
             if summary.total_steps is not None:
                 # NOTE: total_time does not include the time
                 # between booting and the process creation.
                 time_until_warmup = summary.warmup_end_time - summary.create_time
                 steps_after_warmup = summary.total_steps - summary.warmup_steps
-                total_time = time_until_warmup + step_time * steps_after_warmup
+                total_time = time_until_warmup + time_per_step * steps_after_warmup
                 summary.estimated_total_time = total_time
 
     def _write_summary(self) -> None:
