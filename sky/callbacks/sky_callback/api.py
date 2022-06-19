@@ -19,13 +19,12 @@ Example:
 """
 import collections
 import contextlib
-import os
 from typing import Optional
 
 from sky_callback import base
+from sky_callback import utils
 
-_DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK',
-                                   'False').lower() in ('true', '1')
+DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 _sky_callback = None
 _initialized = False
 
@@ -33,28 +32,37 @@ _initialized = False
 def init(global_rank: int = 0,
          log_dir: Optional[str] = None,
          total_steps: Optional[int] = None) -> None:
+    if DISABLE_CALLBACK:
+        return
     global _sky_callback, _initialized
-    if global_rank == 0 and not _DISABLE_CALLBACK:
+    if global_rank == 0:
         _sky_callback = base.BaseCallback(log_dir=log_dir,
                                           total_steps=total_steps)
+    # Processes with non-zero ranks should also set this flag.
     _initialized = True
 
 
 def on_step_begin() -> None:
+    if DISABLE_CALLBACK:
+        return
     if not _initialized:
         raise RuntimeError(
             'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
+        # Only rank-0 process should call this function.
         _sky_callback.on_step_begin()
 
 
 def on_step_end() -> None:
+    if DISABLE_CALLBACK:
+        return
     if not _initialized:
         raise RuntimeError(
             'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
+        # Only rank-0 process should call this function.
         _sky_callback.on_step_end()
 
 
@@ -68,19 +76,22 @@ def step():
 class timer:
 
     def __init__(self, iterable: collections.Iterable) -> None:
+        self._iterable = iterable
+        if DISABLE_CALLBACK:
+            return
         if not _initialized:
             raise RuntimeError(
                 'sky_callback is not initialized. '
                 'Please call `sky_callback.init` before using sky_callback.')
-        self._iterable = iterable
 
     def __iter__(self):
         # Inlining for speed optimization.
         iterable = self._iterable
-        if _sky_callback is None:
+        if DISABLE_CALLBACK or _sky_callback is None:
             for obj in iterable:
                 yield obj
         else:
+            # Only rank-0 process should execute below.
             for obj in iterable:
                 _sky_callback.on_step_begin()
                 yield obj

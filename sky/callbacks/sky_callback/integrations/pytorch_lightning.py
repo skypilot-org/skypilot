@@ -2,6 +2,9 @@
 import pytorch_lightning as pl
 
 from sky_callback import base
+from sky_callback import utils
+
+DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 
 class SkyPLCallback(pl.Callback):
@@ -22,6 +25,8 @@ class SkyPLCallback(pl.Callback):
         self.sky_callback = None
 
     def on_train_start(self, trainer, pl_module):
+        if DISABLE_CALLBACK:
+            return
         if trainer.global_rank == 0:
             assert self.sky_callback is None
             self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
@@ -34,6 +39,8 @@ class SkyPLCallback(pl.Callback):
         batch,
         batch_idx,
     ):
+        if DISABLE_CALLBACK:
+            return
         if self.sky_callback is not None:
             self.sky_callback.on_step_begin()
 
@@ -45,5 +52,7 @@ class SkyPLCallback(pl.Callback):
         batch,
         batch_idx,
     ):
+        if DISABLE_CALLBACK:
+            return
         if self.sky_callback is not None:
             self.sky_callback.on_step_end()

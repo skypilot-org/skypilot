@@ -1,5 +1,3 @@
-from typing import Optional
-
 from sky_callback.api import (
     init,
     on_step_begin,
@@ -8,30 +6,11 @@ from sky_callback.api import (
     timer,
 )
 from sky_callback.base import BaseCallback
+from sky_callback.utils import CallbackLoader as _CallbackLoader
 
-
-# FIXME(woosuk): Find a better way for lazy imports.
-class CallbackLoader:
-
-    @staticmethod
-    def keras(log_dir: Optional[str] = None):
-        from sky_callback.integrations.keras import SkyKerasCallback
-        return SkyKerasCallback(log_dir=log_dir)
-
-    @staticmethod
-    def pytorch_lightning(log_dir: Optional[str] = None):
-        from sky_callback.integrations.pytorch_lightning import SkyPLCallback
-        return SkyPLCallback(log_dir=log_dir)
-
-    @staticmethod
-    def transformers(log_dir: Optional[str] = None):
-        from sky_callback.integrations.transformers import SkyHFCallback
-        return SkyHFCallback(log_dir=log_dir)
-
-
-SkyKerasCallback = CallbackLoader.keras
-SkyPLCallback = CallbackLoader.pytorch_lightning
-SkyHFCallback = CallbackLoader.transformers
+SkyKerasCallback = _CallbackLoader.keras
+SkyPLCallback = _CallbackLoader.pytorch_lightning
+SkyHFCallback = _CallbackLoader.transformers
 
 __all__ = [
     # APIs

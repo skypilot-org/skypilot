@@ -2,6 +2,9 @@
 import transformers
 
 from sky_callback import base
+from sky_callback import utils
+
+DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 
 class SkyHFCallback(transformers.TrainerCallback):
@@ -22,15 +25,21 @@ class SkyHFCallback(transformers.TrainerCallback):
         self.sky_callback = None
 
     def on_train_begin(self, args, state, control, **kwargs):
+        if DISABLE_CALLBACK:
+            return
         if state.is_world_process_zero:
             assert self.sky_callback is None
             self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                   total_steps=state.max_steps)
 
     def on_step_begin(self, args, state, control, **kwargs):
+        if DISABLE_CALLBACK:
+            return
         if self.sky_callback is not None:
             self.sky_callback.on_step_begin()
 
     def on_step_end(self, args, state, control, **kwargs):
+        if DISABLE_CALLBACK:
+            return
         if self.sky_callback is not None:
             self.sky_callback.on_step_end()

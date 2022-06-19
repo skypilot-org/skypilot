@@ -2,6 +2,9 @@
 from tensorflow import keras
 
 from sky_callback import base
+from sky_callback import utils
+
+DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 
 class SkyKerasCallback(keras.callbacks.Callback):
@@ -22,12 +25,18 @@ class SkyKerasCallback(keras.callbacks.Callback):
         self.sky_callback = None
 
     def on_train_begin(self, logs=None):
+        if DISABLE_CALLBACK:
+            return
         # TODO(woosuk): Add support for distributed training.
         if self.sky_callback is None:
             self.sky_callback = base.BaseCallback(log_dir=self.log_dir)
 
     def on_train_batch_begin(self, batch, logs=None):
+        if DISABLE_CALLBACK:
+            return
         self.sky_callback.on_step_begin()
 
     def on_train_batch_end(self, batch, logs=None):
+        if DISABLE_CALLBACK:
+            return
         self.sky_callback.on_step_end()
