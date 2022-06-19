@@ -13,6 +13,8 @@ class SkyCallback(keras.callbacks.Callback):
         self.sky_callback = base.SkyCallback(self.log_dir)
 
     def on_train_begin(self, logs=None):
+        if self.sky_callback is None:
+            self._lazy_init()
         self.sky_callback.config()
 
     def on_train_batch_begin(self, batch, logs=None):
