@@ -210,7 +210,7 @@ class Task:
             config = {}
 
         backend_utils.validate_schema(config, schemas.TASK_SCHEMA,
-                                      'Invalid task configuration: ')
+                                      'Invalid task YAML: ')
 
         task = Task(
             config.pop('name', None),
