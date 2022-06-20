@@ -24,14 +24,14 @@ def print_exception_no_traceback():
 
 def print_exception_no_traceback_decorator(func):
     """A decorator that prints out an exception without traceback.
-    
+
     It makes print_exception_no_traceback() a decorator for a function.
 
     Example usage:
 
-    @print_exception_no_traceback_decorator
-    def func():
-        raise Error('...')
+        @print_exception_no_traceback_decorator
+        def func():
+            raise Error('...')
     """
 
     @functools.wraps(func)
