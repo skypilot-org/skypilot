@@ -30,7 +30,6 @@ from sky import sky_logging
 from sky import optimizer
 from sky import spot as spot_lib
 from sky import task as task_lib
-from sky import utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
