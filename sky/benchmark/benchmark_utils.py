@@ -223,13 +223,6 @@ def generate_benchmark_configs(
             f'mkdir -p {benchmark_dir}; '
             f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; ' +
             candidate_config['setup'])
-
-        # Copy the sky callback wheel to ~/sky_utils.
-        wheel_dir = backend_utils.SKY_REMOTE_PATH
-        candidate_config['setup'] = (
-            'mkdir -p ~/sky_utils; '
-            f'cp "$(echo {wheel_dir}/sky_callback-*.whl)" ~/sky_utils; ' +
-            candidate_config['setup'])
         candidate_configs.append(candidate_config)
     return clusters, candidate_configs
 
