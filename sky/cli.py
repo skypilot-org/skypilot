@@ -2094,7 +2094,7 @@ def spot_launch(
     assert len(dag.tasks) == 1, dag
     task = dag.tasks[0]
     assert len(task.resources) == 1, task
-    resources = task.resources[0]
+    resources = list(task.resources)[0]
 
     change_default_value = dict()
     if not resources.use_spot_specified:
