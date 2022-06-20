@@ -87,6 +87,7 @@ class Optimizer:
         return egress_time
 
     @staticmethod
+    @utils.print_exception_no_traceback_decorator
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
@@ -251,8 +252,7 @@ class Optimizer:
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
-                    with utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(error_msg)
+                    raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
