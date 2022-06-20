@@ -21,7 +21,14 @@ class BaseCallback:
                  log_dir: Optional[str] = None,
                  total_steps: Optional[int] = None,
                  warmup_steps: int = 1) -> None:
-        assert warmup_steps >= 0
+        if total_steps is not None:
+            if total_steps < 0:
+                raise ValueError('total_steps should be non-negative.')
+            if total_steps < warmup_steps:
+                raise ValueError('total_steps should be greater than or '
+                                 'equal to warmup_steps.')
+        if warmup_steps < 0:
+            raise ValueError('warmup_steps should be non-negative.')
 
         # Create a log directory.
         if log_dir is None:
@@ -101,9 +108,6 @@ class _AsyncSummaryWriter(threading.Thread):
 
     def _update_summary(self) -> None:
         summary = self.summary
-        if summary.total_steps is not None:
-            assert summary.warmup_steps < summary.total_steps
-
         num_step_begins = len(self.step_begins)
         num_steps = max(num_step_begins - 1, 0)
         summary.num_steps = num_steps
