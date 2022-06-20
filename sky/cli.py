@@ -584,7 +584,6 @@ class _DocumentedCodeCommand(click.Command):
 
 
 @click.group(cls=_NaturalOrderGroup)
-@utils.print_exception_no_traceback_decorator
 def cli():
     pass
 
