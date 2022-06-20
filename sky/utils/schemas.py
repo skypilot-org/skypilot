@@ -4,6 +4,9 @@ Schemas conform to the JSON Schema specification as defined at
 https://json-schema.org/
 """
 
+from sky.clouds import cloud
+from sky.data import storage
+
 _RESOURCES_DEF = {
     'type': 'object',
     'required': [],
@@ -11,7 +14,7 @@ _RESOURCES_DEF = {
     'properties': {
         'cloud': {
             'type': 'string',
-            'enum': ['aws', 'azure', 'gcp']
+            'enum': list(cloud.CLOUD_REGISTRY.keys()),
         },
         'region': {
             'type': 'string',
@@ -61,14 +64,14 @@ _STORAGE_DEF = {
             },
             'store': {
                 'type': 'string',
-                'enum': ['s3', 'gcs']
+                'enum': [type.value for type in storage.StoreType]
             },
             'persistent': {
                 'type': 'boolean',
             },
             'mode': {
                 'type': 'string',
-                'enum': ['MOUNT', 'COPY']
+                'enum': [mode.value for mode in storage.StorageMode]
             }
         }
     }, {
