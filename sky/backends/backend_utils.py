@@ -1012,7 +1012,7 @@ def run_command_on_ip_via_ssh(
                                 executable=executable,
                                 **kwargs)
 
-
+@utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
@@ -1046,9 +1046,8 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
-        with utils.print_exception_no_traceback():
-            # Run the function in parallel on the arguments, keeping the order.
-            return list(p.imap(func, args))
+        # Run the function in parallel on the arguments, keeping the order.
+        return list(p.imap(func, args))
 
 
 @timeline.event
@@ -1795,7 +1794,7 @@ class Backoff:
                                         self.JITTER * self._backoff)
         return self._backoff
 
-
+@utils.print_exception_no_traceback_decorator
 def check_fields(provided_fields, known_fields):
     known_fields = set(known_fields)
     unknown_fields = []
@@ -1814,5 +1813,4 @@ def check_fields(provided_fields, known_fields):
                 key_invalid += f' Did you mean one of {similar_keys}?'
             key_invalid += '\n'
             invalid_keys += key_invalid
-        with utils.print_exception_no_traceback():
             raise ValueError(invalid_keys)

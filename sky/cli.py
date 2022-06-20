@@ -49,6 +49,7 @@ from sky import data
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import utils
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
@@ -61,6 +62,7 @@ if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)
+
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -352,6 +354,7 @@ def _check_resources_match(backend: backends.Backend,
     backend.check_resources_fit_cluster(handle, task)
 
 
+@utils.print_exception_no_traceback_decorator
 def _launch_with_confirm(
     dag: sky.Dag,
     backend: backends.Backend,
@@ -582,6 +585,7 @@ class _DocumentedCodeCommand(click.Command):
 
 
 @click.group(cls=_NaturalOrderGroup)
+@utils.print_exception_no_traceback_decorator
 def cli():
     pass
 
