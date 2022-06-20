@@ -73,6 +73,7 @@ class Task:
         'inputs', 'outputs', 'resources'
     ]
 
+    @utils.print_exception_no_traceback_decorator
     def __init__(
         self,
         name: Optional[str] = None,
@@ -152,7 +153,6 @@ class Task:
         if dag is not None:
             dag.add(self)
 
-    @utils.print_exception_no_traceback()
     def _validate(self):
         """Checks if the Task fields are valid."""
         if not _is_valid_name(self.name):
@@ -202,7 +202,7 @@ class Task:
                     f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    @utils.print_exception_no_traceback()
+    @utils.print_exception_no_traceback_decorator
     def from_yaml(yaml_path):
         with open(os.path.expanduser(yaml_path), 'r') as f:
             # TODO(zongheng): use
@@ -430,7 +430,7 @@ class Task:
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
 
-    @utils.print_exception_no_traceback()
+    @utils.print_exception_no_traceback_decorator
     def set_storage_mounts(
         self,
         storage_mounts: Optional[Dict[str, storage_lib.Storage]],
@@ -464,7 +464,7 @@ class Task:
         self.storage_mounts = storage_mounts
         return self
 
-    @utils.print_exception_no_traceback()
+    @utils.print_exception_no_traceback_decorator
     def add_storage_mounts(self) -> None:
         """Adds storage mounts to the Task."""
         # TODO(romilb): The optimizer should look at the source and destination
@@ -514,7 +514,7 @@ class Task:
                     raise ValueError(f'Storage Type {store_type} \
                         does not exist!')
 
-    @utils.print_exception_no_traceback()
+    @utils.print_exception_no_traceback_decorator
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.
 
@@ -561,7 +561,7 @@ class Task:
         self.file_mounts = file_mounts
         return self
 
-    @utils.print_exception_no_traceback()
+    @utils.print_exception_no_traceback_decorator
     def update_file_mounts(self, file_mounts: Dict[str, str]):
         """Updates the file mounts for this Task.
 

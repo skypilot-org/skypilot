@@ -45,7 +45,7 @@ class Stage(enum.Enum):
     TEARDOWN = enum.auto()
 
 
-@utils.print_exception_no_traceback()
+@utils.print_exception_no_traceback_decorator
 def _execute(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -171,14 +171,9 @@ def _execute(
             if teardown:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle)
-    except Exception as e:  # pylint: disable=broad-except
-        # Shorter stacktrace than raise e (e.g., no cli stuff).
-        with utils.print_exception_no_traceback():
-            raise e
     finally:
         # UX: print live clusters to make users aware (to save costs).
         # Needed because this finally doesn't always get executed on errors.
-        print()
         if cluster_name == spot.SPOT_CONTROLLER_NAME:
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
@@ -186,6 +181,7 @@ def _execute(
             backends.backend_utils.run('sky spot status')
         else:
             backends.backend_utils.run('sky status')
+        print()
         print('\x1b[?25h', end='')  # Show cursor.
 
 
