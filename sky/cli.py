@@ -540,7 +540,7 @@ def _check_yaml(entrypoint: str) -> bool:
     return is_yaml
 
 
-def _get_dag_from_entrypoint_with_override(
+def _make_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -563,9 +563,11 @@ def _get_dag_from_entrypoint_with_override(
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             task = sky.Task.from_yaml(entrypoint)
         else:
-            entrypoint = entrypoint if entrypoint else None
-            # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
+            if not entrypoint:
+                entrypoint = None
+            else:
+                # Treat entrypoint as a bash command.
+                click.secho('Task from command: ', fg='yellow', nl=False)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
         click.secho(entrypoint, bold=True)
@@ -750,7 +752,7 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
-    dag = _get_dag_from_entrypoint_with_override(
+    dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         workdir=workdir,
@@ -870,7 +872,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    dag = _get_dag_from_entrypoint_with_override(
+    dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         workdir=workdir,
@@ -2072,12 +2074,7 @@ def spot_launch(
     else:
         backend_utils.check_cluster_name_is_valid(name)
 
-    if not yes:
-        prompt = f'Launching a new spot task {name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    dag = _get_dag_from_entrypoint_with_override(
+    dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -2090,6 +2087,11 @@ def spot_launch(
         disk_size=disk_size,
         spot_recovery=spot_recovery,
     )
+
+    if not yes:
+        prompt = f'Launching a new spot task {name!r}. Proceed?'
+        if prompt is not None:
+            click.confirm(prompt, default=True, abort=True, show_default=True)
 
     assert len(dag.tasks) == 1, dag
     task = dag.tasks[0]
