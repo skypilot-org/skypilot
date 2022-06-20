@@ -538,9 +538,9 @@ class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
     @pytest.fixture
-    def tmp_mount(self, tmp_path):
+    def tmp_source(self, tmp_path):
         # Creates a temporary directory with a file in it
-        tmp_dir = tmp_path / 'tmp-mount'
+        tmp_dir = tmp_path / 'tmp-source'
         tmp_dir.mkdir()
         tmp_file = tmp_dir / 'tmp-file'
         tmp_file.write_text('test')
@@ -588,10 +588,10 @@ class TestStorageWithCredentials:
         yield from self.yield_storage_object(name=tmp_bucket_name)
 
     @pytest.fixture
-    def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
+    def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
-                                             source=tmp_mount)
+                                             source=tmp_source)
 
     @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
@@ -672,21 +672,21 @@ class TestStorageWithCredentials:
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS)])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
-                                       tmp_mount, store_type):
+                                       tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
         # sky) and verifies that files are written.
         bucket_name = request.getfixturevalue(ext_bucket_fixture)
-        storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_mount)
+        storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
         storage_obj.add_store(store_type)
 
-        # Check if tmp_mount/tmp-file exists in the bucket using aws cli
+        # Check if tmp_source/tmp-file exists in the bucket using aws cli
         out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
         # Check symlinks - symlinks don't get copied by sky storage
-        assert (pathlib.Path(tmp_mount) / 'circle-link').is_symlink(), (
+        assert (pathlib.Path(tmp_source) / 'circle-link').is_symlink(), (
             'circle-link was not found in the upload source - '
             'are the test fixtures correct?')
         assert 'circle-link' not in out.decode('utf-8'), (
