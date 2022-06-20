@@ -43,9 +43,9 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky import utils
 from sky.skylet import log_lib
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1013,7 +1013,7 @@ def run_command_on_ip_via_ssh(
                                 **kwargs)
 
 
-@utils.print_exception_no_traceback_decorator
+@ux_utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
@@ -1033,9 +1033,7 @@ def handle_returncode(returncode: int,
             echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        raise exceptions.CommandError(
-            f'Command failed with code {returncode}: {command}\n'
-            f'{format_err_msg}')
+        raise exceptions.CommandError(returncode, command, format_err_msg)
 
 
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
@@ -1781,7 +1779,7 @@ class Backoff:
         return self._backoff
 
 
-@utils.print_exception_no_traceback_decorator
+@ux_utils.print_exception_no_traceback_decorator
 def check_fields(provided_fields, known_fields):
     known_fields = set(known_fields)
     unknown_fields = []

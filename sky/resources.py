@@ -5,8 +5,8 @@ from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
-from sky import utils
 from sky.backends import backend_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -50,7 +50,7 @@ class Resources:
         'use_spot', 'spot_recovery', 'disk_size', 'region'
     ]
 
-    @utils.print_exception_no_traceback_decorator
+    @ux_utils.print_exception_no_traceback_decorator
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
@@ -445,7 +445,7 @@ class Resources:
         return resources
 
     @classmethod
-    @utils.print_exception_no_traceback_decorator
+    @ux_utils.print_exception_no_traceback_decorator
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()

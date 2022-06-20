@@ -15,7 +15,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
-from sky import utils
+from sky.utils import ux_utils
 from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
@@ -87,7 +87,7 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    @utils.print_exception_no_traceback_decorator
+    @ux_utils.print_exception_no_traceback_decorator
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[

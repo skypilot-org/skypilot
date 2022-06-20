@@ -23,9 +23,9 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky import spot
-from sky import utils
 from sky.backends import backend_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -45,7 +45,6 @@ class Stage(enum.Enum):
     TEARDOWN = enum.auto()
 
 
-@utils.print_exception_no_traceback_decorator
 def _execute(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -186,6 +185,7 @@ def _execute(
 
 
 @timeline.event
+@ux_utils.print_exception_no_traceback_decorator
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -217,6 +217,7 @@ def launch(
     )
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
@@ -232,13 +233,11 @@ def exec(  # pylint: disable=redefined-builtin
 
     status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
-        logger.error(f'Cluster {cluster_name!r} not found.  '
-                     'Use `sky launch` to provision first.')
-        sys.exit(1)
+        raise ValueError(f'Cluster {cluster_name!r} not found.  '
+                         'Use `sky launch` to provision first.')
     if status != global_user_state.ClusterStatus.UP:
-        logger.error(f'Cluster {cluster_name!r} is not up.  '
-                     'Use `sky status` to check the status.')
-        sys.exit(1)
+        raise ValueError(f'Cluster {cluster_name!r} is not up.  '
+                         'Use `sky status` to check the status.')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

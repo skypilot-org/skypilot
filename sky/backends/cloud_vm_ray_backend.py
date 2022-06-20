@@ -1270,8 +1270,8 @@ class CloudVmRayBackend(backends.Backend):
             if (task_resources.region is not None and
                     task_resources.region != launched_resources.region):
                 raise exceptions.ResourcesMismatchError(
-                    'Task requested the resources in region '
-                    f'{task_resources.region!r}, but the existed cluster '
+                    'Task requested resources in region '
+                    f'{task_resources.region!r}, but the existing cluster '
                     f'is in region {launched_resources.region!r}.')
             raise exceptions.ResourcesMismatchError(
                 'Requested resources do not match the existing cluster.\n'
