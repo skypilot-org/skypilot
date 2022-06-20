@@ -1,10 +1,10 @@
 """Util constants/functions for the backends."""
 import contextlib
+import copy
 import datetime
 import difflib
 import enum
 import hashlib
-import http.client as httplib
 import getpass
 from multiprocessing import pool
 import os
@@ -19,12 +19,18 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
+import filelock
 import jinja2
 import psutil
+import requests
+from requests import adapters
+from requests.packages.urllib3.util import retry as retry_lib
+from ray.autoscaler._private import commands as ray_commands
+from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -70,12 +76,12 @@ _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
-WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
+WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
-_TEST_IP = '8.8.8.8'
+_TEST_IP = 'https://8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
 # characters. Through testing, 37 chars is the maximum length for the Sky
@@ -88,6 +94,10 @@ _MAX_CLUSTER_NAME_LEN = 37
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
+
+# Filelocks for the cluster status change.
+CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
+CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
 
 
 def fill_template(template_name: str,
@@ -203,6 +213,7 @@ class SSHConfigHelper(object):
     """Helper for handling local SSH configuration."""
 
     ssh_conf_path = '~/.ssh/config'
+    ssh_conf_lock_path = os.path.expanduser('~/.sky/ssh_config.lock')
     ssh_multinode_path = SKY_USER_FILE_PATH + '/ssh/{}'
 
     @classmethod
@@ -222,6 +233,7 @@ class SSHConfigHelper(object):
         return codegen
 
     @classmethod
+    @timeline.FileLockEvent(ssh_conf_lock_path)
     def add_cluster(
         cls,
         cluster_name: str,
@@ -422,6 +434,7 @@ class SSHConfigHelper(object):
                 f.write('\n')
 
     @classmethod
+    @timeline.FileLockEvent(ssh_conf_lock_path)
     def remove_cluster(
         cls,
         cluster_name: str,
@@ -706,7 +719,7 @@ def wait_until_ray_cluster_ready(
     # launched especially for Azure.
     try:
         head_ip = query_head_ip_with_retries(
-            cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+            cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
     except RuntimeError as e:
         logger.error(e)
         return False  # failed
@@ -1004,7 +1017,8 @@ def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
                       stderr: Optional[str] = None,
-                      raise_error: bool = False) -> None:
+                      raise_error: bool = False,
+                      stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
     Args:
@@ -1014,15 +1028,16 @@ def handle_returncode(returncode: int,
         stderr: The stderr of the command.
         raise_error: Whether to raise an error instead of sys.exit.
     """
+    echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
         if stderr is not None:
-            logger.error(stderr)
+            echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         if raise_error:
             raise exceptions.CommandError(returncode, command, format_err_msg)
-        logger.error(f'Command failed with code {returncode}: {command}')
-        logger.error(format_err_msg)
+        echo(f'Command failed with code {returncode}: {command}')
+        echo(format_err_msg)
         sys.exit(returncode)
 
 
@@ -1136,41 +1151,51 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-@timeline.event
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        return_private_ips: bool = False,
-        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
-    """Returns the IPs of all nodes in the cluster."""
-    yaml_handle = cluster_yaml
-    if return_private_ips:
-        config = read_yaml(yaml_handle)
-        # Add this field to a temp file to get private ips.
-        config['provider']['use_internal_ips'] = True
-        yaml_handle = cluster_yaml + '.tmp'
-        dump_yaml(yaml_handle, config)
+def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
+    """Returns the ip of the head node from yaml file."""
+    for i in range(max_attempts):
+        try:
+            out = run(f'ray get-head-ip {cluster_yaml}',
+                      stdout=subprocess.PIPE).stdout.decode().strip()
+            head_ip = re.findall(IP_ADDR_REGEX, out)
+            assert 1 == len(head_ip), out
+            head_ip = head_ip[0]
+            break
+        except subprocess.CalledProcessError as e:
+            if i == max_attempts - 1:
+                raise RuntimeError('Failed to get head ip') from e
+            # Retry if the cluster is not up yet.
+            logger.debug('Retrying to get head ip.')
+            time.sleep(5)
+    return head_ip
 
+
+@timeline.event
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 head_ip_max_attempts: int = 1) -> List[str]:
+    """Returns the IPs of all nodes in the cluster."""
     # Try optimize for the common case where we have 1 node.
-    if (not return_private_ips and expected_num_nodes == 1 and
-            handle is not None and handle.head_ip is not None):
+    if (expected_num_nodes == 1 and handle is not None and
+            handle.head_ip is not None):
         return [handle.head_ip]
 
+    # Check the network connection first to avoid long hanging time for
+    # ray get-head-ip below, if a long-lasting network connection failure
+    # happens.
+    check_network_connection()
     try:
-        proc = run(f'ray get-head-ip {yaml_handle}',
-                   stdout=subprocess.PIPE,
-                   stderr=subprocess.PIPE)
-        out = proc.stdout.decode().strip()
-        head_ip = re.findall(IP_ADDR_REGEX, out)
-    except subprocess.CalledProcessError as e:
+        head_ip = query_head_ip_with_retries(cluster_yaml,
+                                             max_attempts=head_ip_max_attempts)
+    except RuntimeError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
-    if len(head_ip) != 1:
-        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    head_ip = [head_ip]
 
     if expected_num_nodes > 1:
         try:
-            proc = run(f'ray get-worker-ips {yaml_handle}',
+            proc = run(f'ray get-worker-ips {cluster_yaml}',
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
             out = proc.stdout.decode()
@@ -1182,8 +1207,6 @@ def get_node_ips(
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
-    if return_private_ips:
-        os.remove(yaml_handle)
     return head_ip + worker_ips
 
 
@@ -1191,11 +1214,11 @@ def get_node_ips(
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
-    retry_count: int = 1,
+    max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    assert not use_cached_head_ip or retry_count == 1, (
-        'Cannot use cached_head_ip when retry_count is not 1')
+    assert not use_cached_head_ip or max_attempts == 1, (
+        'Cannot use cached_head_ip when max_attempts is not 1')
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
@@ -1205,76 +1228,347 @@ def get_head_ip(
                 ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
-        head_ip = query_head_ip_with_retries(handle.cluster_yaml, retry_count)
+        head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
 
 
 def check_network_connection():
-    # A timeout of 1s seems to infrequently encounter 'socket.timeout'.
-    conn = httplib.HTTPSConnection(_TEST_IP, timeout=3)
+    # Tolerate 3 retries as it is observed that connections can fail.
+    adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
+    http = requests.Session()
+    http.mount('https://', adapter)
+    http.mount('http://', adapter)
     try:
-        conn.request('HEAD', '/')
-    except OSError as e:
+        http.head(_TEST_IP, timeout=3)
+    except requests.Timeout as e:
         raise exceptions.NetworkError(
             'Could not refresh the cluster. Network seems down.') from e
 
 
-def _ping_cluster_and_set_status(
-        record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Pings a cluster and potentially sets it to stopped.
+def _process_cli_query(
+    cloud: str, cluster: str, query_cmd: str, deliminiator: str,
+    status_map: Dict[str, global_user_state.ClusterStatus]
+) -> List[global_user_state.ClusterStatus]:
+    """Run the cloud CLI query and returns cluster status.
 
-    Setting it to STOPPED means (1) setting the clusters table, (2) removing it
-    from the SSH config.
-
+    Args:
+        cloud: The cloud provider name.
+        cluster: The cluster name.
+        query_cmd: The cloud CLI query command.
+        deliminiator: The deliminiator separating the status in the output
+            of the query command.
+        status_map: A map from the CLI status string to the corresponding
+            global_user_state.ClusterStatus.
     Returns:
-      If the cluster yaml is found to be concurrently removed, returns None.
-      Otherwise returns the input record with status potentially updated.
+        A list of global_user_state.ClusterStatus of all existing nodes in the
+        cluster. The list can be empty if none of the nodes in the clusters are
+        found, i.e. the nodes are all terminated.
     """
+    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
+                                                      '/dev/null',
+                                                      require_outputs=True,
+                                                      shell=True)
+    logger.debug(f'{query_cmd} returned {returncode}.\n'
+                 '**** STDOUT ****\n'
+                 f'{stdout}\n'
+                 '**** STDERR ****\n'
+                 f'{stderr}')
+    if (cloud == str(sky.Azure()) and returncode == 2 and
+            'argument --ids: expected at least one argument' in stderr):
+        # Azure CLI has a returncode 2 when the cluster is not found, as
+        # --ids <empty> is passed to the query command. In that case, the
+        # cluster should be considered as DOWN.
+        return []
+
+    if returncode != 0:
+        raise exceptions.ClusterStatusFetchingError(
+            f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
+        )
+
+    cluster_status = stdout.strip()
+    if cluster_status == '':
+        return []
+    return [
+        status_map[s]
+        for s in cluster_status.split(deliminiator)
+        if status_map[s] is not None
+    ]
+
+
+@contextlib.contextmanager
+def subpress_output():
+    """Suppress stdout and stderr."""
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
+                devnull):
+            yield
+
+
+def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
+    """Returns a set of Ray launch config hashes, one per node type."""
+    # Use the cached Ray launch hashes if they exist.
+    metadata = global_user_state.get_cluster_metadata(cluster_name)
+    assert metadata is not None, cluster_name
+    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
+    if ray_launch_hashes is not None:
+        logger.debug('Using cached launch_caches')
+        return set(ray_launch_hashes)
+    with subpress_output():
+        ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
+    launch_hashes = set()
+    head_node_type = ray_config['head_node_type']
+    for node_type, node_config in ray_config['available_node_types'].items():
+        if node_type == head_node_type:
+            launch_config = ray_config.get('head_node', {})
+        else:
+            launch_config = ray_config.get('worker_nodes', {})
+        launch_config = copy.deepcopy(launch_config)
+
+        launch_config.update(node_config['node_config'])
+        with subpress_output():
+            current_hash = ray_util.hash_launch_conf(launch_config,
+                                                     ray_config['auth'])
+        launch_hashes.add(current_hash)
+    # Cache the launch hashes for the cluster.
+    metadata['ray_launch_hashes'] = list(launch_hashes)
+    global_user_state.set_cluster_metadata(cluster_name, metadata)
+    return launch_hashes
+
+
+def _query_status_aws(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'pending': global_user_state.ClusterStatus.INIT,
+        'running': global_user_state.ClusterStatus.UP,
+        # TODO(zhwu): stopping and shutting-down could occasionally fail
+        # due to internal errors of AWS. We should cover that case.
+        'stopping': global_user_state.ClusterStatus.STOPPED,
+        'stopped': global_user_state.ClusterStatus.STOPPED,
+        'shutting-down': None,
+        'terminated': None,
+    }
+    region = ray_config['provider']['region']
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ','.join(launch_hashes)
+    query_cmd = ('aws ec2 describe-instances --filters '
+                 f'Name=tag:ray-cluster-name,Values={cluster} '
+                 f'Name=tag:ray-launch-config,Values={hash_filter_str} '
+                 f'--region {region} '
+                 '--query "Reservations[].Instances[].State.Name" '
+                 '--output text')
+    return _process_cli_query('AWS', cluster, query_cmd, '\t', status_map)
+
+
+def _query_status_gcp(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'PROVISIONING': global_user_state.ClusterStatus.INIT,
+        'STARTING': global_user_state.ClusterStatus.INIT,
+        'RUNNING': global_user_state.ClusterStatus.UP,
+        'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+        # 'TERMINATED' in GCP means stopped, with disk preserved.
+        'STOPPING': global_user_state.ClusterStatus.STOPPED,
+        'TERMINATED': global_user_state.ClusterStatus.STOPPED,
+        # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
+        'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
+        'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
+    }
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ' '.join(launch_hashes)
+    # TODO(zhwu): The status of the TPU attached to the cluster should also be
+    # checked, since TPUs are not part of the VMs.
+    query_cmd = ('gcloud compute instances list '
+                 f'--filter="(labels.ray-cluster-name={cluster} AND '
+                 f'labels.ray-launch-config=({hash_filter_str}))" '
+                 '--format="value(status)"')
+    return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
+
+
+def _query_status_azure(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'VM starting': global_user_state.ClusterStatus.INIT,
+        'VM running': global_user_state.ClusterStatus.UP,
+        # 'VM stopped' in Azure means Stopped (Allocated), which still bills
+        # for the VM.
+        'VM stopping': global_user_state.ClusterStatus.INIT,
+        'VM stopped': global_user_state.ClusterStatus.INIT,
+        # 'VM deallocated' in Azure means Stopped (Deallocated), which does not
+        # bill for the VM.
+        'VM deallocating': global_user_state.ClusterStatus.STOPPED,
+        'VM deallocated': global_user_state.ClusterStatus.STOPPED,
+    }
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
+    query_cmd = (
+        'az vm show -d --ids $(az vm list --query '
+        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\' && '
+        f'contains(\'[{hash_filter_str}]\', tags.\\"ray-launch-config\\")].id" '
+        '-o tsv) --query "powerState" -o tsv')
+    # NOTE: Azure cli should be handled carefully. The query command above
+    # takes about 1 second to run.
+    # An alternative is the following command, but it will take more than
+    # 20 seconds to run.
+    # query_cmd = (
+    #     f'az vm list --show-details --query "['
+    #     f'?tags.\\"ray-cluster-name\\" == \'{handle.cluster_name}\' '
+    #     '&& tags.\\"ray-node-type\\" == \'head\'].powerState" -o tsv'
+    # )
+    return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
+
+
+_QUERY_STATUS_FUNCS = {
+    'AWS': _query_status_aws,
+    'GCP': _query_status_gcp,
+    'Azure': _query_status_azure,
+}
+
+
+def _get_cluster_status_via_cloud_cli(
+    handle: 'backends.Backend.ResourceHandle'
+) -> List[global_user_state.ClusterStatus]:
+    """Returns the status of the cluster."""
+    resources: sky.Resources = handle.launched_resources
+    cloud = resources.cloud
+    ray_config = read_yaml(handle.cluster_yaml)
+    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
+
+
+def _update_cluster_status_no_lock(
+        cluster_name: str) -> Optional[Dict[str, Any]]:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
     handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        return record
+
     cluster_name = handle.cluster_name
-
-    check_network_connection()
-
     try:
+        # TODO(zhwu): This function cannot distinguish transient network error
+        # in ray's get IPs vs. ray runtime failing.
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        if handle.launched_nodes == 1:
+            # Check the ray cluster status. We have to check it for single node
+            # case, since the get_node_ips() does not require ray cluster to be
+            # running.
+            ssh_user, ssh_key = ssh_credential_from_yaml(handle.cluster_yaml)
+            returncode = run_command_on_ip_via_ssh(ips[0],
+                                                   'ray status',
+                                                   ssh_user=ssh_user,
+                                                   ssh_private_key=ssh_key,
+                                                   stream_logs=False)
+            if returncode:
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
         handle.head_ip = ips[0]
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle,
+                                                ready=True,
+                                                is_launch=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
-                     f'{cluster_name!r}, set to STOPPED')
-    if record['status'] == global_user_state.ClusterStatus.INIT:
-        # Should not set the cluster to STOPPED if INIT, since it may be
-        # still launching.
-        return record
-    # Set the cluster status to STOPPED. It is safe to do so, even if the
-    # cluster is still partially UP:
-    # 1. Autostop case: the whole cluster will be properly stopped soon.
-    # 2. Managed spot case: We will soon relaunch the cluster by the strategy
-    #    on the same region or terminate the cluster.
-    try:
-        config = read_yaml(handle.cluster_yaml)
-    except FileNotFoundError:
-        # This happens e.g., during smoke tests. A test calls `sky status
-        # --refresh`, processes another cluster (running this current func),
-        # while a concurrent test has torn down itself.
-        #
-        # We know we can't ping the IP and the cluster yaml has been
-        # removed. With high likelihood the cluster has been removed.
-        return None
-    auth_config = config['auth']
-    global_user_state.remove_cluster(cluster_name, terminate=False)
-    SSHConfigHelper.remove_cluster(cluster_name, handle.head_ip, auth_config)
+                     f'{cluster_name!r}, trying to fetch from provider.')
+
+    # For all code below, ray fails to get IPs for the cluster.
+    node_statuses = _get_cluster_status_via_cloud_cli(handle)
+
+    # If the node_statuses is empty, all the nodes are terminated. We can
+    # safely set the cluster status to TERMINATED. This handles the edge case
+    # where the cluster is terminated by the user manually through the UI.
+    to_terminate = not node_statuses
+
+    # A cluster is considered "abnormal", if not all nodes are TERMINATED or not all
+    # nodes are STOPPED. We check that with the following logic:
+    #   * not all nodes are terminated and there's at least one node terminated; or
+    #   * any of the non-TERMINATED nodes is in a non-STOPPED status.
+    #
+    # This includes these special cases:
+    # All stopped are considered normal and will be cleaned up at the end of the function.
+    # Some of the nodes UP should be considered abnormal, because the ray cluster is
+    # probably down.
+    # The cluster is partially terminated or stopped should be considered abnormal.
+    #
+    # An abnormal cluster will transition to INIT and have any autostop setting reset.
+    is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
+                   any(status != global_user_state.ClusterStatus.STOPPED
+                       for status in node_statuses))
+    if is_abnormal:
+        # Reset the autostop to avoid false information with best effort.
+        # Side effect: if the status is refreshed during autostopping, the
+        # autostop field in the local cache will be reset, even though the
+        # cluster will still be correctly stopped.
+        try:
+            backend = backends.CloudVmRayBackend()
+            backend.set_autostop(handle, -1, stream_logs=False)
+        except (Exception, SystemExit):  # pylint: disable=broad-except
+            logger.debug('Failed to reset autostop.')
+        global_user_state.set_cluster_autostop_value(handle.cluster_name, -1)
+
+        # If the user starts part of a STOPPED cluster, we still need a status to
+        # represent the abnormal status. For spot cluster, it can also represent
+        # that the cluster is partially preempted.
+        # TODO(zhwu): the definition of INIT should be audited/changed.
+        # Adding a new status UNHEALTHY for abnormal status can be a choice.
+        global_user_state.set_cluster_status(
+            cluster_name, global_user_state.ClusterStatus.INIT)
+        return global_user_state.get_cluster_from_name(cluster_name)
+    # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
+    backend = backends.CloudVmRayBackend()
+    # TODO(zhwu): adding output for the cluster removed by status refresh.
+    backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
+
+
+def _update_cluster_status(
+        cluster_name: str,
+        acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
+    """Update the cluster status by checking ray cluster and real status from cloud.
+
+    The function will update the cached cluster status in the global state. For the
+    design of the cluster status and transition, please refer to the
+    sky/design_docs/cluster_states.md
+
+    Returns:
+      If the cluster is terminated or does not exist, return None.
+      Otherwise returns the input record with status and ip potentially updated.
+    """
+    if not acquire_per_cluster_status_lock:
+        return _update_cluster_status_no_lock(cluster_name)
+
+    try:
+        # TODO(mraheja): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
+                               CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
+            return _update_cluster_status_no_lock(cluster_name)
+    except filelock.Timeout:
+        logger.debug(
+            f'Refreshing status: Failed get the lock for cluster {cluster_name!r}.'
+            ' Using the cached status.')
+        return global_user_state.get_cluster_from_name(cluster_name)
 
 
 @timeline.event
 def refresh_cluster_status_handle(
     cluster_name: str,
-    force_refresh: bool = False
+    *,
+    force_refresh: bool = False,
+    acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     record = global_user_state.get_cluster_from_name(cluster_name)
@@ -1286,7 +1580,9 @@ def refresh_cluster_status_handle(
         if force_refresh or record['autostop'] >= 0:
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
-            record = _ping_cluster_and_set_status(record)
+            record = _update_cluster_status(
+                cluster_name,
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
             if record is None:
                 return None, None
     return record['status'], handle
@@ -1312,7 +1608,6 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         ]
     if not refresh:
         return records
-    updated_records = []
 
     plural = 's' if len(records) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -1322,44 +1617,28 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
-    def _refresh_cluster(record):
-        handle = record['handle']
-        # TODO(zhwu): We need to decide whether to refresh the cluster status
-        # for clusters without autostop set. For those clusters, their status
-        # will only be changed, if the user manually modify the cluster on the
-        # cloud console. Our current refreshing may not be enough to get the
-        # correct status (e.g., the cluster is terminated, but we set it to
-        # STOPPED).
-        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-            record = _ping_cluster_and_set_status(record)
+    terminated_clusters = []
+
+    def _refresh_cluster(cluster_name):
+        record = _update_cluster_status(cluster_name,
+                                        acquire_per_cluster_status_lock=True)
+        if record is None:
+            terminated_clusters.append(cluster_name)
         progress.update(task, advance=1)
         return record
 
+    cluster_names = [record['name'] for record in records]
     with progress:
-        updated_records = run_in_parallel(_refresh_cluster, records)
+        updated_records = run_in_parallel(_refresh_cluster, cluster_names)
+    if terminated_clusters:
+        plural = 's were' if len(terminated_clusters) > 1 else ' was'
+        cluster_str = ', '.join(repr(name) for name in terminated_clusters)
+        logger.warning(f'The following cluster{plural} terminated on the cloud '
+                       f'and removed from Sky\'s cluster table:\n{cluster_str}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
     return updated_records
-
-
-def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
-    """Returns the ip of the head node from yaml file."""
-    for i in range(retry_count):
-        try:
-            out = run(f'ray get-head-ip {cluster_yaml}',
-                      stdout=subprocess.PIPE).stdout.decode().strip()
-            head_ip = re.findall(IP_ADDR_REGEX, out)
-            assert 1 == len(head_ip), out
-            head_ip = head_ip[0]
-            break
-        except subprocess.CalledProcessError as e:
-            if i == retry_count - 1:
-                raise RuntimeError('Failed to get head ip') from e
-            # Retry if the cluster is not up yet.
-            logger.debug('Retrying to get head ip.')
-            time.sleep(5)
-    return head_ip
 
 
 def get_backend_from_handle(
