@@ -96,6 +96,7 @@ class _AsyncSummaryWriter(threading.Thread):
         self.daemon = True
 
         self.log_dir = log_dir
+        self.log_path = os.path.join(self.log_dir, _BENCHMARK_SUMMARY)
         self.summary = self._BenchmarkSummary(
             boot_time=psutil.boot_time(),
             create_time=psutil.Process(os.getpid()).create_time(),
@@ -138,10 +139,11 @@ class _AsyncSummaryWriter(threading.Thread):
                 summary.estimated_total_time = total_time
 
     def _write_summary(self) -> None:
-        with open(os.path.join(self.log_dir, _BENCHMARK_SUMMARY), 'w') as f:
+        with open(self.log_path, 'w') as f:
             json.dump(self.summary.__dict__, f)
 
     def run(self) -> None:
+        # NOTE: Last few steps can be missing.
         next_write_time = 0
         while True:
             now = time.time()
