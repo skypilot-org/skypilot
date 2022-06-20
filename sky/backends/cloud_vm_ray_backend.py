@@ -76,6 +76,9 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
+# The maximum retry count for fetching head IP address.
+_HEAD_IP_MAX_ATTEMPTS = 3
+
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
     '{cluster_name}. {extra_reason}'
@@ -1421,7 +1424,9 @@ class CloudVmRayBackend(backends.Backend):
 
             with timeline.Event('backend.provision.get_node_ips'):
                 ip_list = backend_utils.get_node_ips(
-                    cluster_config_file, config_dict['launched_nodes'])
+                    cluster_config_file,
+                    config_dict['launched_nodes'],
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
@@ -2537,7 +2542,9 @@ class CloudVmRayBackend(backends.Backend):
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
-        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip)
+        max_attempts = 1 if use_cached_head_ip else _HEAD_IP_MAX_ATTEMPTS
+        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
+                                            max_attempts)
         ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         if under_remote_workdir:
