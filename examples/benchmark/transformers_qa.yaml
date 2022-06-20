@@ -20,7 +20,7 @@ setup: |
   pip install -r examples/pytorch/question-answering/requirements.txt
 
   # Install SkyCallback
-  pip install ~/sky_utils/*.whl
+  python -m pip install "git+https://github.com/sky-proj/sky.git#egg=sky-callback&subdirectory=sky/callbacks/"
 
   # Apply the patch to enable SkyCallback
   git apply ../callback.patch

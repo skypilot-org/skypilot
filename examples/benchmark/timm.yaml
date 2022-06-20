@@ -19,7 +19,7 @@ setup: |
   pip install -r requirements.txt
 
   # Install SkyCallback
-  pip install ~/sky_utils/*.whl
+  python -m pip install "git+https://github.com/sky-proj/sky.git#egg=sky-callback&subdirectory=sky/callbacks/"
 
   # Apply patches
   git apply ../callback.patch
