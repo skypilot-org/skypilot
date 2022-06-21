@@ -1404,9 +1404,10 @@ class CloudVmRayBackend(backends.Backend):
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
-                    raise exceptions.ResourcesUnavailableError(
+                    logger.info(
                         'To keep retrying until the cluster is up, use the '
                         '`--retry-until-up` flag.')
+                    raise exceptions.ResourcesUnavailableError() from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']

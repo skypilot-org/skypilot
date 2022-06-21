@@ -17,9 +17,10 @@ def print_exception_no_traceback():
             if error():
                 raise ValueError('...')
     """
+    original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
     sys.tracebacklimit = 0
     yield
-    sys.tracebacklimit = 1000
+    sys.tracebacklimit = original_tracelimit
 
 
 def print_exception_no_traceback_decorator(func):
