@@ -55,6 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
@@ -352,6 +353,7 @@ def _check_resources_match(backend: backends.Backend,
     backend.check_resources_fit_cluster(handle, task)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def _launch_with_confirm(
     dag: sky.Dag,
     backend: backends.Backend,
