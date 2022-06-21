@@ -2,7 +2,7 @@
 
 The main motivation behind extending the existing JSON Schema validator is to
 allow for case-insensitive enum matching since this is currently not supported
-by the latest JSON Schema specification.
+by the JSON Schema specification.
 """
 import jsonschema
 

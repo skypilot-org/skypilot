@@ -102,11 +102,11 @@ def get_task_schema():
             'num_nodes': {
                 'type': 'integer',
             },
-            # Resources config is validated separately using RESOURCES_SCHEMA
+            # resources config is validated separately using RESOURCES_SCHEMA
             'resources': {
                 'type': 'object',
             },
-            # Storage config is validated separately using STORAGE_SCHEMA
+            # storage config is validated separately using STORAGE_SCHEMA
             'file_mounts': {
                 'type': 'object',
             },
