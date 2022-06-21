@@ -5,6 +5,8 @@ from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
+from sky.backends import backend_utils
+from sky.utils import schemas
 
 logger = sky_logging.init_logger(__name__)
 
@@ -439,6 +441,9 @@ class Resources:
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()
+
+        backend_utils.validate_schema(config, schemas.get_resources_schema(),
+                                      'Invalid resources YAML: ')
 
         resources_fields = dict()
         if config.get('cloud') is not None:

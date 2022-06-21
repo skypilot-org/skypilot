@@ -209,7 +209,7 @@ class Task:
         if config is None:
             config = {}
 
-        backend_utils.validate_schema(config, schemas.TASK_SCHEMA,
+        backend_utils.validate_schema(config, schemas.get_task_schema(),
                                       'Invalid task YAML: ')
 
         task = Task(

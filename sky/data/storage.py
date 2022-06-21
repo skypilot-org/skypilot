@@ -11,6 +11,7 @@ import urllib.parse
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
+from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky import exceptions
@@ -619,6 +620,9 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
+        backend_utils.validate_schema(config, schemas.get_storage_schema(),
+                                      'Invalid storage YAML: ')
+
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
