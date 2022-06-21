@@ -13,7 +13,6 @@ Current task launcher:
   - ray exec + each task's commands
 """
 import enum
-import sys
 import time
 from typing import Any, List, Optional
 
@@ -92,8 +91,9 @@ def _execute(
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
-        raise ValueError('Spot recovery is specified in the task. To launch the '
-                     'managed spot job, please use: sky spot launch')
+        raise ValueError(
+            'Spot recovery is specified in the task. To launch the '
+            'managed spot job, please use: sky spot launch')
 
     cluster_exists = False
     if cluster_name is not None:

@@ -10,7 +10,6 @@ import os
 import pathlib
 import signal
 import subprocess
-import sys
 import tempfile
 import textwrap
 import time
