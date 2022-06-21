@@ -17,7 +17,7 @@ def get_resources_schema():
         'properties': {
             'cloud': {
                 'type': 'string',
-                'enum': list(cloud.CLOUD_REGISTRY.keys()),
+                'case_insensitive_enum': list(cloud.CLOUD_REGISTRY.keys())
             },
             'region': {
                 'type': 'string',
@@ -69,14 +69,18 @@ def get_storage_schema():
             },
             'store': {
                 'type': 'string',
-                'enum': [type.value for type in storage.StoreType]
+                'case_insensitive_enum': [
+                    type.value for type in storage.StoreType
+                ]
             },
             'persistent': {
                 'type': 'boolean',
             },
             'mode': {
                 'type': 'string',
-                'enum': [mode.value for mode in storage.StorageMode]
+                'case_insensitive_enum': [
+                    mode.value for mode in storage.StorageMode
+                ]
             }
         }
     }

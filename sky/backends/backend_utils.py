@@ -44,6 +44,7 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
 from sky.utils import timeline
+from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1759,7 +1760,7 @@ class Backoff:
 def validate_schema(obj, schema, err_msg_prefix=''):
     err_msg = None
     try:
-        jsonschema.validate(obj, schema)
+        validator.SchemaValidator(schema).validate(obj)
     except jsonschema.ValidationError as e:
         err_msg = err_msg_prefix + e.message
         if e.validator == 'additionalProperties':
