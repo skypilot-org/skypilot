@@ -11,6 +11,7 @@ from sky.utils import usage_logging
 PROM_PUSHGATEWAY_URL = '3.216.190.117:9091'
 current_cluster_name = 'NONE'
 
+
 class Label:
     """
     Label for prometheus metric
@@ -35,8 +36,8 @@ class Metric:
         self.val = 0
 
     def make_prom(self, label_names, registry):
-        self.prom_metric = prometheus_client.Gauge(
-            self.name, self.desc, label_names)
+        self.prom_metric = prometheus_client.Gauge(self.name, self.desc,
+                                                   label_names)
         registry.register(self.prom_metric)
 
     def set_value(self, val):
@@ -102,7 +103,8 @@ class MetricLogger:
             def wrapper_logging(*args, **kwargs):
                 self.set_labels({
                     'user': base_utils.get_user(),
-                    'transaction_id': base_utils.transaction_id})
+                    'transaction_id': base_utils.transaction_id
+                })
                 saved_ex = None
                 try:
                     start = time.time()
@@ -112,7 +114,7 @@ class MetricLogger:
                             {self.runtime_metric: time.time() - start})
                     if self.with_cluster_name:
                         self.set_labels({'cluster_name': current_cluster_name})
-                except Exception as ex:  # pylint: disable=broad-except
+                except (SystemExit, Exception) as ex:  # pylint: disable=broad-except
                     if with_return_code:
                         self.set_return_code(-1)
                     usage_logging.send_trace()
@@ -122,9 +124,14 @@ class MetricLogger:
                     metric.update_prom_metric(labels)
                 if os.environ.get('SKY_DISABLE_USAGE_COLLECTION') == '1':
                     return
-                prometheus_client.push_to_gateway(PROM_PUSHGATEWAY_URL,
-                                job=f'{base_utils.get_user()} {self.func_name}',
-                                registry=self.registry)
+                try:
+                    prometheus_client.push_to_gateway(
+                        PROM_PUSHGATEWAY_URL,
+                        job=f'{base_utils.transaction_id}',
+                        registry=self.registry)
+                except:  # pylint: disable=bare-except
+                    # TODO(mraheja): Print error ONLY for devs here
+                    pass
                 if saved_ex:
                     raise saved_ex
 

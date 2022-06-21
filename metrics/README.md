@@ -7,7 +7,6 @@ First, the security permissions of this instance should be set such that the 909
 Finally, connect to the instance using SSH and set it up using:
 
 ```
-sudo yum update -y
 sudo amazon-linux-extras install docker
 sudo service docker start
 sudo systemctl enable docker

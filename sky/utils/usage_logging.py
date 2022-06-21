@@ -13,6 +13,7 @@ from sky.utils import base_utils
 
 LOG_URL = 'https://178762:eyJrIjoiNzhlODNmOGQ1ZjUwOGJmYjE4NDI3YTMzNzFmMWMxZDc0YzA3ZmVlZiIsIm4iOiJhZHNmZHNhIiwiaWQiOjYxNTA0Nn0=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
 
+
 def _make_labels_str(d):
     dict_str = '{'
     for e in d:
