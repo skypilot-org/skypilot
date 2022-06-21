@@ -8,7 +8,7 @@ import jsonschema
 
 
 def case_insensitive_enum(validator, enums, instance, schema):  # pylint: disable=unused-argument
-    if instance.lower() not in enums:
+    if instance.lower() not in [enum.lower() for enum in enums]:
         yield jsonschema.ValidationError(
             f'{instance!r} is not one of {enums!r}')
 
