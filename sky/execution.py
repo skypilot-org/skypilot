@@ -92,9 +92,8 @@ def _execute(
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
-        logger.error('Spot recovery is specified in the task. To launch the '
+        raise ValueError('Spot recovery is specified in the task. To launch the '
                      'managed spot job, please use: sky spot launch')
-        sys.exit(1)
 
     cluster_exists = False
     if cluster_name is not None:
