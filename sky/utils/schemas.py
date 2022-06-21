@@ -10,7 +10,7 @@ from sky.data import storage
 
 def get_resources_schema():
     return {
-        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,
@@ -56,7 +56,7 @@ def get_resources_schema():
 
 def get_storage_schema():
     return {
-        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        '$schema': 'http://json-schema.org/draft-07/schema#',
         'type': 'object',
         'required': [],
         'additionalProperties': False,

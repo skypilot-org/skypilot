@@ -14,5 +14,5 @@ def case_insensitive_enum(validator, enums, instance, schema):  # pylint: disabl
 
 
 SchemaValidator = jsonschema.validators.extend(
-    jsonschema.Draft202012Validator,
+    jsonschema.Draft7Validator,
     validators={'case_insensitive_enum': case_insensitive_enum})
