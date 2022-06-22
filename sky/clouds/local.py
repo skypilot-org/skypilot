@@ -20,7 +20,7 @@ def _run_output(cmd):
 
 
 class Local(clouds.Cloud):
-    """A local/on-premise cloud, also acting as a local cluster.
+    """A local/on-premise cloud as a set of local clusters.
 
     This Cloud has the following special treatment of Cloud concepts:
 
@@ -56,23 +56,25 @@ class Local(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
+    def instance_type_to_hourly_cost(self, instance_type: str,
+                                     use_spot: bool) -> float:
         # On-prem machines on Sky are assumed free
         # (minus electricity/utility bills).
         return 0.0
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators,
+                                    use_spot: bool) -> float:
         # Hourly cost of accelerators is 0 for local cloud.
         return 0
 
-    def get_egress_cost(self, num_gigabytes: float):
+    def get_egress_cost(self, num_gigabytes: float) -> float:
         # Egress cost from a local cluster is assumed to be 0.
         return 0.0
 
     def __repr__(self):
         return 'Local'
 
-    def is_same_cloud(self, other: clouds.Cloud):
+    def is_same_cloud(self, other: clouds.Cloud) -> bool:
         # Returns true if the two clouds are the same cloud type
         # and has the matching cluster name.
         return isinstance(other, Local)
@@ -123,8 +125,3 @@ class Local(clouds.Cloud):
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
         return region == Local.LOCAL_REGION.name
-
-    @staticmethod
-    def get(cluster: str) -> Optional['Local']:
-        """Gets the local cluster object."""
-        return clouds.Local(cluster)

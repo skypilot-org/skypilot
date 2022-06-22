@@ -695,7 +695,7 @@ def get_local_ips(cluster_name: str) -> List[str]:
     return ips
 
 
-def get_local_cluster_config(cluster_name: str) -> Tuple[bool, dict]:
+def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
     """Gets the local cluster config in ~/.sky/local/."""
     local_file = os.path.expanduser(
         SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
@@ -706,8 +706,8 @@ def get_local_cluster_config(cluster_name: str) -> Tuple[bool, dict]:
                 yaml_config = yaml.safe_load(f)
         except yaml.YAMLError as e:
             raise ValueError(f'Could not open/read file: {local_file}') from e
-        return True, yaml_config
-    return False, None
+        return yaml_config
+    return None
 
 
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
@@ -728,17 +728,19 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
 
     def run_command_and_handle_ssh_failure(ip: str, command: str,
                                            failure_message: str):
-        rc = run_command_on_ip_via_ssh(ip,
-                                       command,
-                                       ssh_user=ssh_user,
-                                       ssh_private_key=ssh_key,
-                                       stream_logs=False)
+        rc, _, stderr = run_command_on_ip_via_ssh(ip,
+                                                  command,
+                                                  require_outputs=True,
+                                                  ssh_user=ssh_user,
+                                                  ssh_private_key=ssh_key,
+                                                  stream_logs=False)
         if rc == 255:
             # SSH failed
             raise ValueError(f'SSH with user {ssh_user} and key {ssh_key} '
                              f'to {ip} failed. Check your credentials and try '
                              f'again.')
         elif rc:
+            logger.info(stderr)
             raise ValueError(failure_message.format(ip=ip))
 
     for ip in ips:
@@ -836,16 +838,15 @@ def get_local_custom_resources(
     custom_resources = []
 
     # Ran on the remote cluster node to identify accelerator resources.
-    code = \
-    textwrap.dedent("""\
+    code = textwrap.dedent("""\
         import os
 
         all_accelerators = ['V100',
-                                'P100',
-                                'T4',
-                                'P4',
-                                'K80',
-                                'A100',]
+                            'P100',
+                            'T4',
+                            'P4',
+                            'K80',
+                            'A100',]
         accelerators_dict = {}
         for acc in all_accelerators:
             output_str = os.popen(f'lspci | grep \\'{acc}\\'').read()
@@ -917,8 +918,8 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     worker_ips = ip_list[1:]
 
     # Stops all running Ray instances on all nodes
-    display = rich_status.Status('[bold cyan]Stopping Ray Cluster')
-    display.start()
+    head_display = rich_status.Status('[bold cyan]Stopping Ray Cluster')
+    head_display.start()
 
     run_command_on_ip_via_ssh(head_ip,
                               'sudo ray stop -f',
@@ -935,82 +936,84 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
                                   stream_logs=False,
                                   require_outputs=False)
 
-    display.stop()
+    head_display.stop()
 
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
     head_cmd = ('sudo ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={head_resources!r}')
-    display = rich_status.Status('[bold cyan]Launching Ray Cluster on Head')
-    display.start()
-    rc, _, _ = run_command_on_ip_via_ssh(head_ip,
-                                         head_cmd,
-                                         ssh_user=ssh_user,
-                                         ssh_private_key=ssh_key,
-                                         stream_logs=False,
-                                         require_outputs=True)
-
-    handle_returncode(rc, head_cmd, 'Failed to launch Ray on Head node.')
-    display.stop()
+    head_display = rich_status.Status(
+        '[bold cyan]Launching Ray Cluster on Head')
+    head_display.start()
+    rc, _, stderr = run_command_on_ip_via_ssh(head_ip,
+                                              head_cmd,
+                                              ssh_user=ssh_user,
+                                              ssh_private_key=ssh_key,
+                                              stream_logs=False,
+                                              require_outputs=True)
+    handle_returncode(rc,
+                      head_cmd,
+                      'Failed to launch Ray on Head node.',
+                      stderr=stderr)
+    head_display.stop()
 
     # Launches Ray on the worker nodes and links Ray dashboard from the head
     # to worker node.
     remote_ssh_key = f'~/.ssh/{os.path.basename(ssh_key)}'
     dashboard_remote_path = '~/.sky/dashboard.sh'
-    port_cmd = (
-        f'ssh -tt -L 8265:localhost:8265 -i {remote_ssh_key} -o '
-        'StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o '
-        'IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o '
-        'ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ControlMaster=auto '
-        f'-o ControlPersist=10s -o ConnectTimeout=120s {ssh_user}@{head_ip} '
-        '\'while true; do sleep 86400; done\'')
+    with console.status('[bold cyan]Waiting for workers...') as worker_status:
+        for idx, ip in enumerate(worker_ips):
+            worker_status.update(
+                f'[bold cyan]Workers {idx}/{total_workers} Ready')
 
-    for idx, ip in enumerate(worker_ips):
-        display = rich_status.Status(
-            f'[bold cyan]Workers {idx}/{total_workers} Ready')
-        display.start()
+            worker_resources = json.dumps(custom_resources[idx + 1],
+                                          separators=(',', ':'))
+            worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
+                          '--object-manager-port=8076 --dashboard-port 8265 '
+                          f'--resources={worker_resources!r}')
 
-        worker_resources = json.dumps(custom_resources[idx + 1],
-                                      separators=(',', ':'))
-        worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
-                      '--object-manager-port=8076 --dashboard-port 8265 '
-                      f'--resources={worker_resources!r}')
+            rc, _, stderr = run_command_on_ip_via_ssh(ip,
+                                                      worker_cmd,
+                                                      ssh_user=ssh_user,
+                                                      ssh_private_key=ssh_key,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
 
-        rc, _, _ = run_command_on_ip_via_ssh(ip,
-                                             worker_cmd,
-                                             ssh_user=ssh_user,
-                                             ssh_private_key=ssh_key,
-                                             stream_logs=False,
-                                             require_outputs=True)
+            handle_returncode(rc,
+                              worker_cmd,
+                              'Failed to launch Ray on Worker node.',
+                              stderr=stderr)
 
-        handle_returncode(rc, worker_cmd,
-                          'Failed to launch Ray on Worker node:')
+            # Connect head node's Ray dashboard to worker nodes
+            # Worker nodes need access to Ray dashboard to poll the
+            # JobSubmissionClient (in subprocess_daemon.py) for completed,
+            # failed, or cancelled jobs.
+            port_cmd = (
+                f'ssh -tt -L 8265:localhost:8265 -i {remote_ssh_key} -o '
+                'StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o '
+                'IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o '
+                'ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ControlMaster=auto '
+                f'-o ControlPersist=10s -o ConnectTimeout=120s {ssh_user}@{head_ip} '
+                '\'while true; do sleep 86400; done\'')
+            rsync_to_ip(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
+            with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+                fp.write(port_cmd)
+                fp.flush()
+                rsync_to_ip(ip, fp.name, dashboard_remote_path, ssh_user,
+                            ssh_key)
+            rc = run_command_on_ip_via_ssh(
+                ip, f'chmod a+rwx {dashboard_remote_path};'
+                'screen -S ray-dashboard -X quit;'
+                f'screen -S ray-dashboard -dm {dashboard_remote_path}',
+                ssh_user=ssh_user,
+                ssh_private_key=ssh_key,
+                stream_logs=True)
 
-        # Connect head node's Ray dashboard to worker nodes
-        # Worker nodes need access to Ray dashboard to poll the
-        # JobSubmissionClient (in subprocess_daemon.py) for completed,
-        # failed, or cancelled jobs.
-        rsync_to_ip(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(port_cmd)
-            fp.flush()
-            rsync_to_ip(ip, fp.name, dashboard_remote_path, ssh_user, ssh_key)
-        rc = run_command_on_ip_via_ssh(
-            ip, f'chmod a+rwx {dashboard_remote_path};'
-            'screen -S ray-dashboard -X quit;'
-            f'screen -S ray-dashboard -dm {dashboard_remote_path}',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-            stream_logs=True)
-
-        display.stop()
-
-    if total_workers > 0:
-        display = rich_status.Status(
-            f'[bold cyan]Workers {total_workers}/{total_workers} Ready')
-        display.start()
-        display.stop()
+        if total_workers > 0:
+            worker_status.update(
+                f'[bold cyan]Workers {total_workers}/{total_workers} Ready')
+        worker_status.stop()
 
 
 def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]) -> None:
@@ -1132,12 +1135,9 @@ def wait_until_ray_cluster_ready(
             # to distinguish between head and worker node for local case).
             if isinstance(cloud, clouds.Local):
                 result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
-                if len(result) == 0:
-                    ready_workers = 0
-                else:
-                    # Here, ready_workers mean the total number of nodes
-                    # launched, including head.
-                    ready_workers = len(result)
+                # In the local case, ready_workers mean the total number
+                # of nodes launched, including head.
+                ready_workers = len(result)
             else:
                 result = _LAUNCHED_WORKER_PATTERN.findall(output)
                 if len(result) == 0:
@@ -1159,8 +1159,7 @@ def wait_until_ray_cluster_ready(
 
             # In the local case, ready_head=0 and ready_workers=num_nodes
             # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
-            if ready_head + ready_workers == num_nodes or \
-            ready_workers == num_nodes - 1:
+            if ready_head + ready_workers == num_nodes:
                 # All nodes are up.
                 break
 
@@ -1191,8 +1190,7 @@ def wait_until_ray_cluster_ready(
                     'Timed out when waiting for workers to be provisioned.')
                 return False  # failed
 
-            if ('(no pending nodes)' in output and '(no failures)' in output and
-                    not isinstance(cloud, clouds.Local)):
+            if '(no pending nodes)' in output and '(no failures)' in output:
                 # Bug in ray autoscaler: e.g., on GCP, if requesting 2 nodes
                 # that GCP can satisfy only by half, the worker node would be
                 # forgotten. The correct behavior should be for it to error out.

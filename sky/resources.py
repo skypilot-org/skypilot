@@ -172,7 +172,7 @@ class Resources:
             accelerators: A string or a dict of accelerator types to counts.
             accelerator_args: A dict of accelerator types to args.
         """
-        if accelerators is not None:
+        if accelerators:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}

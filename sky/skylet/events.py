@@ -1,4 +1,5 @@
 """skylet events"""
+import getpass
 import math
 import os
 import re
@@ -59,18 +60,8 @@ class JobUpdateEvent(SkyletEvent):
     # TODO(zhwu): This number should be tuned based on heuristics.
     _SUBMITTED_GAP_SECONDS = 60
 
-    def __init__(self):
-        super().__init__()
-        self.ray_yaml_path = os.path.abspath(
-            os.path.expanduser(backend_utils.SKY_RAY_YAML_REMOTE_PATH))
-
     def _run(self):
-        with open(self.ray_yaml_path, 'r') as f:
-            try:
-                config = yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                raise e
-        job_owner = config['auth']['ssh_user']
+        job_owner = getpass.getuser()
         job_lib.update_status(job_owner,
                               submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 

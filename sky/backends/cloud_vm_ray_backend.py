@@ -1041,7 +1041,7 @@ class RetryingVmProvisioner(object):
         # Ray autoscaler bug, where filemounting and setup does not work for
         # the on-prem case in Ray. Hence, this method here replicates
         # what the Ray autoscaler would do were it for public cloud.
-        def local_cloud_ray_up():
+        def local_cloud_ray_postprocess():
             """Launches Ray autoscaler on worker nodes for a local cluster."""
             with open(cluster_config_file, 'r') as f:
                 config = yaml.safe_load(f)
@@ -1129,7 +1129,7 @@ class RetryingVmProvisioner(object):
                     f' existing head VM. Waiting for workers.{style.RESET_ALL}')
 
         if isinstance(to_provision_cloud, clouds.Local):
-            local_cloud_ray_up()
+            local_cloud_ray_postprocess()
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
@@ -1349,9 +1349,8 @@ class CloudVmRayBackend(backends.Backend):
 
         def _set_local_config(self):
             self.local_config = {}
-            is_yaml, config = backend_utils.get_local_cluster_config(
-                self.cluster_name)
-            if is_yaml:
+            config = backend_utils.get_local_cluster_config(self.cluster_name)
+            if config is not None:
                 clus_config = config['cluster']
                 auth_config = config['auth']
                 ips = clus_config['ips']
@@ -2188,9 +2187,6 @@ class CloudVmRayBackend(backends.Backend):
             fp.write(codegen)
             fp.flush()
             script_path = os.path.join(SKY_REMOTE_APP_DIR, f'sky_job_{job_id}')
-            # We choose to sync code + exec, because the alternative of 'ray
-            # submit' may not work as it may use system python (python2) to
-            # execute the script.  Happens for AWS.
             self._rsync_up(handle,
                            source=fp.name,
                            target=script_path,
@@ -2224,9 +2220,8 @@ class CloudVmRayBackend(backends.Backend):
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(ray_command)
             fp.flush()
-            # We choose to sync code + exec, because the alternative of 'ray
-            # submit' may not work as it may use system python (python2) to
-            # execute the script.  Happens for AWS.
+            # We choose to sync code + exec, so that Ray job submission API will
+            # work for the multitenant case.
             self._rsync_up(handle,
                            source=fp.name,
                            target=remote_run_file,

@@ -22,12 +22,6 @@ file_mounts: {
 {%- endfor %}
 }
 
-rsync_exclude: [
-{%- for exclude_file in credential_excludes %}
-  "{{exclude_file}}",
-{%- endfor %}
-]
-
 # List of shell commands to run to set up nodes.
 # (Ray Autoscaler Bug) This will run only on head...
 setup_commands:
