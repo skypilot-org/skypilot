@@ -7,6 +7,7 @@ from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
 from sky.utils import schemas
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -44,6 +45,7 @@ class Resources:
     # 3. Modify the to_config method to handle the new fields.
     _VERSION = 3
 
+    @ux_utils.print_exception_no_traceback_decorator
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
@@ -438,6 +440,7 @@ class Resources:
         return resources
 
     @classmethod
+    @ux_utils.print_exception_no_traceback_decorator
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()
