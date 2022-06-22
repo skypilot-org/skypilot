@@ -2,7 +2,6 @@
 import collections
 import colorama
 import enum
-import sys
 import typing
 from typing import Dict, List, Optional, Tuple
 
@@ -16,6 +15,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.utils import ux_utils
 from sky.skylet.utils import log_utils
 
 if typing.TYPE_CHECKING:
@@ -87,11 +87,11 @@ class Optimizer:
         return egress_time
 
     @staticmethod
+    @ux_utils.print_exception_no_traceback_decorator
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
-                     resources_lib.Resources]] = None,
-                 raise_error: bool = False):
+                     resources_lib.Resources]] = None):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
@@ -99,8 +99,7 @@ class Optimizer:
             unused_best_plan = Optimizer._optimize_objective(
                 dag,
                 minimize_cost=minimize == OptimizeTarget.COST,
-                blocked_launchable_resources=blocked_launchable_resources,
-                raise_error=raise_error)
+                blocked_launchable_resources=blocked_launchable_resources)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
             # optimization fails.
@@ -202,7 +201,6 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
-        raise_error: bool = False,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -254,11 +252,7 @@ class Optimizer:
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
-                    if raise_error:
-                        raise exceptions.ResourcesUnavailableError(error_msg)
-                    else:
-                        logger.error(error_msg)
-                        sys.exit(1)
+                    raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -645,9 +639,9 @@ class Optimizer:
             elif isinstance(accelerators, dict) and len(accelerators) == 1:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
-
+            spot = '[Spot]' if resources.use_spot else ''
             return [
-                str(resources.cloud), resources.instance_type,
+                str(resources.cloud), resources.instance_type + spot,
                 str(accelerators)
             ]
 
@@ -733,7 +727,6 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
-        raise_error: bool = False,
     ) -> Dict[Task, resources_lib.Resources]:
         """Finds the optimal task-resource mapping for the entire DAG.
 
@@ -751,8 +744,7 @@ class Optimizer:
             Optimizer._estimate_nodes_cost_or_time(
                 topo_order,
                 minimize_cost,
-                blocked_launchable_resources,
-                raise_error)
+                blocked_launchable_resources)
 
         if dag.is_chain():
             best_plan, best_total_objective = Optimizer._optimize_by_dp(
