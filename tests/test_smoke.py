@@ -256,7 +256,7 @@ def test_tpu():
     run_one_test(test)
 
 
-# ---------- TPU. ----------
+# ---------- TPU VM. ----------
 def test_tpu_vm():
     name = _get_cluster_name()
     test = Test(

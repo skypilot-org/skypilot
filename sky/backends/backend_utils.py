@@ -5,6 +5,7 @@ import datetime
 import difflib
 import enum
 import hashlib
+import json
 import getpass
 from multiprocessing import pool
 import os
@@ -1403,7 +1404,6 @@ def _query_status_gcp(
         # TODO(zhwu): The status of the TPU attached to the cluster should also be
         # checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
-                     f'--zones {zone} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
                      '--format="value(status)"')
@@ -1776,6 +1776,42 @@ def check_cluster_name_not_reserved(
         msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         raise ValueError(msg)
+
+
+def check_gcp_cli_include_tpu_vm():
+    # TPU VM API available with gcloud version >= 382.0.0
+    version_cmd = 'gcloud version --format=json'
+    rcode, stdout, stderr = log_lib.run_with_log(
+        version_cmd,
+        '/dev/null',
+        shell=True,
+        stream_logs=False,
+        require_outputs=True)
+
+    if rcode != 0:
+        _FAILURE_MESSAGE = (
+        'Failed to run "gcloud version".'
+        '**** STDOUT ****\n'
+        '{stdout}\n'
+        '**** STDERR ****\n'
+        '{stderr}')
+        raise RuntimeError(_FAILURE_MESSAGE.format(stdout=stdout, stderr=stderr))
+
+    sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
+
+    if sdk_ver is None:
+        raise RuntimeError(
+            'Failed to get Google Cloud SDK version from'
+            f' "gcloud version": {stdout}')
+    else:
+        major_ver = sdk_ver.split('.')[0]
+        major_ver = int(major_ver)
+        if major_ver < 382:
+            raise RuntimeError(
+                'Google Cloud SDK version must be >= 382.0.0 to use'
+                ' TPU VM APIs, check "gcloud version" for details.')
+
+    return True
 
 
 def kill_children_processes():

@@ -477,10 +477,13 @@ class RetryingVmProvisioner(object):
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
             exception_dict = ast.literal_eval(exception_str)
+            # TPU VM returns a different structured response.
+            if 'errors' not in exception_dict:
+                exception_dict = {'errors': [exception_dict]}
             for error in exception_dict['errors']:
                 code = error['code']
                 message = error['message']
-                logger.warning(f'Got {code} in {zone.name} '
+                logger.warning(f'Got return code {code} in {zone.name} '
                                f'{style.DIM}(message: {message})'
                                f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':
@@ -505,6 +508,10 @@ class RetryingVmProvisioner(object):
                     # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
                     # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
                     # This seems to be not documented by GCP.
+                    self._blocked_zones.add(zone.name)
+                elif code == 8:
+                    # Error code 8 means TPU resources is out of capacity. Example:
+                    # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
                     self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
@@ -2346,31 +2353,8 @@ class CloudVmRayBackend(backends.Backend):
                 # TODO(wei-lin): refactor by calling functions of node provider
                 # that uses Python API rather than CLI
                 if config['provider'].get('_has_tpus', False):
-                    # TPU VM API available with gcloud version >= 382.0.0
-                    version_cmd = 'gcloud version --format=json'
-                    rcode, stdout, stderr = log_lib.run_with_log(
-                        version_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
-
-                    if rcode != 0:
-                        logger.error(
-                            _TEARDOWN_FAILURE_MESSAGE.format(
-                                extra_reason='',
-                                cluster_name=handle.cluster_name,
-                                stdout=stdout,
-                                stderr=stderr))
-                        return False
-
-                    sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
-                    assert sdk_ver is not None, (
-                        'Failed to get Google Cloud SDK version from'
-                        ' "gcloud version"')
-                    assert sdk_ver >= '382.0.0', (
-                        'Google Cloud SDK version must be >= 382.0.0 to use'
-                        ' TPU VM APIs, check "gcloud version".')
+                    # check if gcloud includes TPU VM API
+                    backend_utils.check_gcp_cli_include_tpu_vm()
 
                     query_cmd = (
                         f'gcloud compute tpus tpu-vm list --filter='
