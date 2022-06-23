@@ -14,7 +14,6 @@ import re
 import shlex
 import socket
 import subprocess
-import sys
 import textwrap
 import threading
 import time
@@ -25,6 +24,7 @@ import uuid
 import colorama
 import filelock
 import jinja2
+import jsonschema
 import psutil
 import requests
 from requests import adapters
@@ -40,12 +40,14 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import global_user_state
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
 from sky.utils import timeline
+from sky.utils import ux_utils
+from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1013,11 +1015,11 @@ def run_command_on_ip_via_ssh(
                                 **kwargs)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
                       stderr: Optional[str] = None,
-                      raise_error: bool = False,
                       stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
@@ -1026,7 +1028,6 @@ def handle_returncode(returncode: int,
         command: The command that was run.
         error_msg: The error message to print.
         stderr: The stderr of the command.
-        raise_error: Whether to raise an error instead of sys.exit.
     """
     echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
@@ -1034,11 +1035,7 @@ def handle_returncode(returncode: int,
             echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        if raise_error:
-            raise exceptions.CommandError(returncode, command, format_err_msg)
-        echo(f'Command failed with code {returncode}: {command}')
-        echo(format_err_msg)
-        sys.exit(returncode)
+        raise exceptions.CommandError(returncode, command, format_err_msg)
 
 
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
@@ -1050,22 +1047,8 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
-        try:
-            # Run the function in parallel on the arguments, keeping the order.
-            return list(p.imap(func, args))
-        except exceptions.CommandError as e:
-            # Print the error message here, to avoid the other processes'
-            # error messages mixed with the current one.
-            logger.error(
-                f'Command failed with code {e.returncode}: {e.command}')
-            logger.error(e.error_msg)
-            sys.exit(e.returncode)
-        except KeyboardInterrupt:
-            print()
-            logger.error(
-                f'{colorama.Fore.RED}Interrupted by user.{colorama.Style.RESET_ALL}'
-            )
-            sys.exit(1)
+        # Run the function in parallel on the arguments, keeping the order.
+        return list(p.imap(func, args))
 
 
 @timeline.event
@@ -1759,7 +1742,7 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1768,7 +1751,7 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    sys.exit(exceptions.SIGTSTP_CODE)
+    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 class Backoff:
@@ -1798,41 +1781,21 @@ class Backoff:
         return self._backoff
 
 
-def check_fields(provided_fields, known_fields):
-    known_fields = set(known_fields)
-    unknown_fields = []
-    for field in provided_fields:
-        if field not in known_fields:
-            unknown_fields.append(field)
+@ux_utils.print_exception_no_traceback_decorator
+def validate_schema(obj, schema, err_msg_prefix=''):
+    err_msg = None
+    try:
+        validator.SchemaValidator(schema).validate(obj)
+    except jsonschema.ValidationError as e:
+        err_msg = err_msg_prefix + e.message
+        if e.validator == 'additionalProperties':
+            known_fields = set(e.schema.get('properties', {}).keys())
+            for field in e.instance:
+                if field not in known_fields:
+                    most_similar_field = difflib.get_close_matches(
+                        field, known_fields, 1)
+                    if most_similar_field:
+                        err_msg += f'\nInstead of {field}, did you mean {most_similar_field[0]}?'
 
-    if len(unknown_fields) > 0:
-        invalid_keys = 'The following fields are invalid:\n'
-        for unknown_key in unknown_fields:
-            similar_keys = difflib.get_close_matches(unknown_key, known_fields)
-            key_invalid = f'    Unknown field \'{unknown_key}\'.'
-            if len(similar_keys) == 1:
-                key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
-            if len(similar_keys) > 1:
-                key_invalid += f' Did you mean one of {similar_keys}?'
-            key_invalid += '\n'
-            invalid_keys += key_invalid
-        with print_exception_no_traceback():
-            raise ValueError(invalid_keys)
-
-
-@contextlib.contextmanager
-def print_exception_no_traceback():
-    """A context manager that prints out an exception without traceback.
-
-    Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
-    tracebacks.
-
-    Example usage:
-
-        with print_exception_no_traceback():
-            if error():
-                raise ValueError('...')
-    """
-    sys.tracebacklimit = 0
-    yield
-    sys.tracebacklimit = 1000
+    if err_msg:
+        raise ValueError(err_msg)

@@ -27,6 +27,9 @@ class _CloudRegistry(dict):
     def from_str(self, name: Optional[str]) -> Optional['Cloud']:
         if name is None:
             return None
+        if name.lower() not in self:
+            raise ValueError(f'Cloud {name} is not a valid cloud among '
+                             '{list(self.keys())}')
         return self.get(name.lower())
 
     def register(self, cloud_cls: 'Cloud') -> None:

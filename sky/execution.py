@@ -13,9 +13,7 @@ Current task launcher:
   - ray exec + each task's commands
 """
 import enum
-import sys
 import time
-import traceback
 from typing import Any, List, Optional
 
 import sky
@@ -26,6 +24,7 @@ from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -92,9 +91,9 @@ def _execute(
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
-        logger.error('Spot recovery is specified in the task. To launch the '
-                     'managed spot job, please use: sky spot launch')
-        sys.exit(1)
+        raise ValueError(
+            'Spot recovery is specified in the task. To launch the '
+            'managed spot job, please use: sky spot launch')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -129,7 +128,6 @@ def _execute(
         # Optimizer should eventually choose where to store bucket
         task.add_storage_mounts()
 
-    status_printed = False
     try:
         if stages is None or Stage.PROVISION in stages:
             if handle is None:
@@ -171,11 +169,9 @@ def _execute(
             if teardown:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle)
-    except Exception:  # pylint: disable=broad-except
+    finally:
         # UX: print live clusters to make users aware (to save costs).
-        # Shorter stacktrace than raise e (e.g., no cli stuff).
-        traceback.print_exc()
-        print()
+        # Needed because this finally doesn't always get executed on errors.
         if cluster_name == spot.SPOT_CONTROLLER_NAME:
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
@@ -183,23 +179,12 @@ def _execute(
             backends.backend_utils.run('sky spot status')
         else:
             backends.backend_utils.run('sky status')
+        print()
         print('\x1b[?25h', end='')  # Show cursor.
-        status_printed = True
-        sys.exit(1)
-    finally:
-        if not status_printed:
-            # Needed because this finally doesn't always get executed on errors.
-            if cluster_name == spot.SPOT_CONTROLLER_NAME:
-                # For spot controller task, it requires a while to have the
-                # managed spot status shown in the status table.
-                time.sleep(0.5)
-                backends.backend_utils.run('sky spot status')
-            else:
-                backends.backend_utils.run('sky status')
-            print('\x1b[?25h', end='')  # Show cursor.
 
 
 @timeline.event
+@ux_utils.print_exception_no_traceback_decorator
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -231,6 +216,7 @@ def launch(
     )
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
@@ -246,13 +232,11 @@ def exec(  # pylint: disable=redefined-builtin
 
     status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
-        logger.error(f'Cluster {cluster_name!r} not found.  '
-                     'Use `sky launch` to provision first.')
-        sys.exit(1)
+        raise ValueError(f'Cluster {cluster_name!r} not found.  '
+                         'Use `sky launch` to provision first.')
     if status != global_user_state.ClusterStatus.UP:
-        logger.error(f'Cluster {cluster_name!r} is not up.  '
-                     'Use `sky status` to check the status.')
-        sys.exit(1)
+        raise ValueError(f'Cluster {cluster_name!r} is not up.  '
+                         'Use `sky status` to check the status.')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,
