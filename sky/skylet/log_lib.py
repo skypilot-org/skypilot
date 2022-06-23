@@ -22,7 +22,7 @@ from sky.skylet.utils import log_utils
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
-_SKY_LOG_TAILING_GAP_SECONDS = 0.2
+_SKY_LOG_TAILING_GAP_SECONDS = 0.02
 
 logger = sky_logging.init_logger(__name__)
 
@@ -103,9 +103,9 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     process_stream: bool = True,
-    use_sudo: bool = False,
     line_processor: Optional[log_utils.LineProcessor] = None,
     ray_job_id: Optional[str] = None,
+    use_sudo: bool = False,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -129,13 +129,14 @@ def run_with_log(
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     if use_sudo:
-        # Hack: Use sudo to make directory and logfile if there is no
-        # permission to do so. This case is encountered when submitting
+        # Sudo case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
         subprocess.call(
             f'sudo mkdir -p {dirname};sudo touch {log_path}; '
             f'sudo chmod a+rwx {log_path}',
             shell=True)
+        # Hack: Subprocess shell does not accept sudo.
+        shell = False
     else:
         os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
@@ -246,7 +247,6 @@ def run_bash_command_with_log(bash_command: str,
                               stream_logs: bool = False,
                               with_ray: bool = False,
                               use_sudo: bool = False):
-    ray_job_id = f'{job_id}-{job_owner}'
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         if env_vars is not None:
             export_env_vars = '\n'.join(
@@ -256,7 +256,6 @@ def run_bash_command_with_log(bash_command: str,
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
-        subprocess.call(f'chmod a+rwx {script_path}', shell=True)
 
         inner_command = f'/bin/bash -i {script_path}'
         gpu_list = ray.get_gpu_ids()
@@ -266,13 +265,14 @@ def run_bash_command_with_log(bash_command: str,
             # instead of the GPUs allocated.
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
                 gpu_list) + ' ' + inner_command
-
         if use_sudo:
+            subprocess.call(f'chmod a+rwx {script_path}', shell=True)
             subprocess_cmd = [
                 'sudo', '-H', 'su', '-', job_owner, '-c', inner_command
             ]
         else:
-            subprocess_cmd = [inner_command]
+            subprocess_cmd = inner_command
+
         return run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
             # Do not use shell=True because it will cause the environment
@@ -280,10 +280,11 @@ def run_bash_command_with_log(bash_command: str,
             # the cmd to be a list.
             subprocess_cmd,
             log_path,
-            ray_job_id=ray_job_id,
+            ray_job_id=f'{job_id}-{job_owner}',
             stream_logs=stream_logs,
             with_ray=with_ray,
-            use_sudo=True)
+            use_sudo=use_sudo,
+            shell=True)
 
 
 def _follow_job_logs(file,

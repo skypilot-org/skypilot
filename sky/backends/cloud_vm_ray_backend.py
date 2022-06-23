@@ -1337,7 +1337,7 @@ class CloudVmRayBackend(backends.Backend):
         # In the local cloud case, resources.accelerators means the task
         # resources. We do a hack where we replace resources.accelerators
         # with the local cluster's resources.
-        if handle.local_config is not None:
+        if handle.local_config:
             cluster_resources = handle.local_config['cluster_resources']
             merged_resources = {}
             for d in cluster_resources:
