@@ -44,10 +44,10 @@ Your usage of sky storage can fall under four broad use cases:
 2.  **You want to mount an existing S3/GCS bucket to your remote VM -** specify
     just the source field (e.g., s3://my-bucket/)
 
-3.  **You want to have a write-able path to directly write files to S3 buckets
+3.  **You want to have a write-able path to directly write files to S3 or GCS buckets
     -** specify a name (to create a bucket if it doesn't exist) and set the mode
     to MOUNT. This is useful for writing code outputs, such as checkpoints or
-    logs directly to a S3 bucket.
+    logs directly to a S3 or GCS bucket.
 
 4.  **You want to have a shared file-system across workers running on different
     nodes -** specify a name (to create a bucket if it doesn't exist) and set

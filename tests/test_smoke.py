@@ -560,9 +560,9 @@ class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
 
     @pytest.fixture
-    def tmp_mount(self, tmp_path):
+    def tmp_source(self, tmp_path):
         # Creates a temporary directory with a file in it
-        tmp_dir = tmp_path / 'tmp-mount'
+        tmp_dir = tmp_path / 'tmp-source'
         tmp_dir.mkdir()
         tmp_file = tmp_dir / 'tmp-file'
         tmp_file.write_text('test')
@@ -610,10 +610,10 @@ class TestStorageWithCredentials:
         yield from self.yield_storage_object(name=tmp_bucket_name)
 
     @pytest.fixture
-    def tmp_local_storage_obj(self, tmp_bucket_name, tmp_mount):
+    def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
         # Creates a temporary storage object. Stores must be added in the test.
         yield from self.yield_storage_object(name=tmp_bucket_name,
-                                             source=tmp_mount)
+                                             source=tmp_source)
 
     @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
@@ -635,17 +635,27 @@ class TestStorageWithCredentials:
             ['aws', 's3', 'rb', f's3://{tmp_bucket_name}', '--force'])
 
     @pytest.fixture
-    def tmp_public_storage_obj(self, tmp_bucket_name):
+    def tmp_gsutil_bucket(self, tmp_bucket_name):
+        # Creates a temporary bucket using gsutil
+        subprocess.check_call(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
+        yield tmp_bucket_name
+        subprocess.check_call(['gsutil', 'rm', '-r', f'gs://{tmp_bucket_name}'])
+
+    @pytest.fixture
+    def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
-        storage_obj = storage_lib.Storage(source='s3://tcga-2-open')
+        storage_obj = storage_lib.Storage(source=request.param)
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
-    def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj):
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
+                                              store_type):
         # Creates a new bucket with a local source, uploads files to it
         # and deletes it.
-        tmp_local_storage_obj.add_store(storage_lib.StoreType.S3)
+        tmp_local_storage_obj.add_store(store_type)
 
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
@@ -659,31 +669,46 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
-    def test_public_bucket(self, tmp_public_storage_obj):
+    @pytest.mark.parametrize(
+        'tmp_public_storage_obj, store_type',
+        [('s3://tcga-2-open', storage_lib.StoreType.S3),
+         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
+        indirect=['tmp_public_storage_obj'])
+    def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
         # added to global_user_state.
-        tmp_public_storage_obj.add_store(storage_lib.StoreType.S3)
+        tmp_public_storage_obj.add_store(store_type)
 
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
-    def test_upload_to_existing_bucket(self, tmp_awscli_bucket, tmp_mount):
+    @staticmethod
+    def cli_ls_cmd(store_type, bucket_name):
+        if store_type == storage_lib.StoreType.S3:
+            return ['aws', 's3', 'ls', f's3://{bucket_name}']
+        if store_type == storage_lib.StoreType.GCS:
+            return ['gsutil', 'ls', f'gs://{bucket_name}']
+
+    @pytest.mark.parametrize('ext_bucket_fixture, store_type',
+                             [('tmp_awscli_bucket', storage_lib.StoreType.S3),
+                              ('tmp_gsutil_bucket', storage_lib.StoreType.GCS)])
+    def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
+                                       tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
         # sky) and verifies that files are written.
-        storage_obj = storage_lib.Storage(name=tmp_awscli_bucket,
-                                          source=tmp_mount)
-        storage_obj.add_store(storage_lib.StoreType.S3)
+        bucket_name = request.getfixturevalue(ext_bucket_fixture)
+        storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
+        storage_obj.add_store(store_type)
 
-        # Check if tmp_mount/tmp-file exists in the bucket using aws cli
-        out = subprocess.check_output(
-            ['aws', 's3', 'ls', f's3://{tmp_awscli_bucket}'])
+        # Check if tmp_source/tmp-file exists in the bucket using aws cli
+        out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name))
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
         # Check symlinks - symlinks don't get copied by sky storage
-        assert (pathlib.Path(tmp_mount) / 'circle-link').is_symlink(), (
+        assert (pathlib.Path(tmp_source) / 'circle-link').is_symlink(), (
             'circle-link was not found in the upload source - '
             'are the test fixtures correct?')
         assert 'circle-link' not in out.decode('utf-8'), (
