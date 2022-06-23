@@ -460,7 +460,8 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
-            customized_image_id=override.pop('customized_image_id', self.customized_image_id),
+            customized_image_id=override.pop('customized_image_id',
+                                             self.customized_image_id),
         )
         assert len(override) == 0
         return resources
@@ -494,7 +495,7 @@ class Resources:
             resources_fields['region'] = config.pop('region')
         if config.get('image_id') is not None:
             logger.warning('image_id in resources is experimental. It only '
-                       'supports AWS cloud with specified region.')
+                           'supports AWS cloud with specified region.')
             resources_fields['customized_image_id'] = config.pop('image_id')
 
         assert not config, f'Invalid resource args: {config.keys()}'
