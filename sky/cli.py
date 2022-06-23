@@ -84,34 +84,10 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 }
 
 
-def _get_cloud(cloud: Optional[str],
-               cluster_name: Optional[str] = None) -> Optional[clouds.Cloud]:
+def _get_cloud(cloud: Optional[str],) -> Optional[clouds.Cloud]:
     """Check if cloud is registered and return cloud object."""
-
-    # Checks if cluster name is a local cluster name
-    if cluster_name in list_local_clusters():
-        if cloud is None:
-            cloud = 'local'
-        elif cloud != 'local':
-            raise click.UsageError(f'Local cluster {cluster_name} is '
-                                   f'not part of cloud: {cloud}.')
-    elif cluster_name is None and cloud.lower == 'local':
-        raise click.UsageError('Cloud is local. Must specify a cluster name.')
-
     cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
-
     if cloud is not None and cloud_obj is None:
-        if cloud.lower() == 'local':
-            local_cloud = clouds.Local()
-            if local_cloud is not None:
-                return local_cloud
-            if cluster_name is None:
-                raise ValueError(
-                    'Specify -c [local_cluster] to launch on a local cluster.\n'
-                    'See `sky status` for local cluster name(s).')
-            raise ValueError(
-                f'Local cluster \'{cluster_name}\' does not exist. \n'
-                'See `sky status` for local cluster name(s).')
         raise click.UsageError(
             f'Cloud {cloud!r} is not supported. '
             f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
@@ -605,40 +581,41 @@ def _check_cluster_config(yaml_config: dict):
             f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
-def _check_local_cloud(cloud: Optional[str] = None,
-                       yaml_cloud: Optional[str] = None,
-                       cluster: Optional[str] = None) -> bool:
+def _check_local_cloud_args(cloud: Optional[str] = None,
+                            cluster_name: Optional[str] = None,
+                            yaml_config: Optional[dict] = None) -> bool:
     """Checks if user-provided arguments satisfies local cloud specs."""
-    if cloud is None:
-        # Check if yaml file specifies local cloud
-        if yaml_cloud == 'local':
-            return True
+    yaml_cloud = None
+    if yaml_config and yaml_config.get('resources'):
+        yaml_cloud = yaml_config['resources'].get('cloud')
 
-    if cluster in list_local_clusters():
-        if ((yaml_cloud and yaml_cloud != 'local') or
-            (cloud and cloud != 'local')):
-            raise ValueError(f'Detected Local cluster {cluster}. Must specify '
-                             '`cloud: local` or no cloud.')
-        else:
-            return True
+    if cluster_name in list_local_clusters():
+        if cloud and cloud != 'local':
+            raise click.UsageError(f'Local cluster {cluster_name} is '
+                                   f'not part of cloud: {cloud}.')
+        elif yaml_cloud and yaml_cloud != 'local':
+            raise ValueError(
+                f'Detected Local cluster {cluster_name}. Must specify '
+                '`cloud: local` or no cloud in YAML.')
+        return True
+    else:
+        if cloud == 'local' or yaml_cloud == 'local':
+            if cluster_name:
+                raise click.UsageError(
+                    f'Local cluster \'{cluster_name}\' does not exist. \n'
+                    'See `sky status` for local cluster name(s).')
+            else:
+                raise click.UsageError(
+                    'Specify -c [local_cluster] to launch on a local cluster.\n'
+                    'See `sky status` for local cluster name(s).')
 
-    return False
+        return False
 
 
 def list_local_clusters() -> List[str]:
     """Lists all local clusters."""
-    local_dir = os.path.expanduser(
-        os.path.dirname(backend_utils.SKY_USER_LOCAL_CONFIG_PATH))
-    os.makedirs(local_dir, exist_ok=True)
-    local_cluster_paths = [os.path.join(local_dir, f) for f in \
-    os.listdir(local_dir) if os.path.isfile(os.path.join(local_dir, f))]
-
-    local_cluster_names = []
-    for clus in local_cluster_paths:
-        is_yaml, yaml_config = _check_yaml(clus, with_outputs=True)
-        if is_yaml:
-            local_cluster_names.append(yaml_config['cluster']['name'])
-    return local_cluster_names
+    backend_utils.update_local_clusters()
+    return global_user_state.get_local_clusters()
 
 
 def _start_cluster(cluster_name: str,
@@ -791,13 +768,7 @@ def launch(
         is_yaml = False
         yaml_config = None
 
-    yaml_cloud = None
-    if yaml_config:
-        if yaml_config.get('resources') and yaml_config['resources'].get(
-                'cloud'):
-            yaml_cloud = yaml_config['resources']['cloud']
-
-    if _check_local_cloud(cloud, yaml_cloud, cluster):
+    if _check_local_cloud_args(cloud, cluster, yaml_config):
         cloud = 'local'
 
     with sky.Dag() as dag:
@@ -815,11 +786,7 @@ def launch(
             if cloud.lower() == 'none':
                 override_params['cloud'] = None
             else:
-                # Limitation of Sky Launch and Task.from_yaml.
-                # Cloud object can not be fully constructed without the
-                # local cluster name. The newly constructed local cloud in
-                # override_params will replace the cloud object in Task.
-                override_params['cloud'] = _get_cloud(cloud, cluster)
+                override_params['cloud'] = _get_cloud(cloud)
         if region is not None:
             if region.lower() == 'none':
                 override_params['region'] = None
@@ -838,16 +805,6 @@ def launch(
         assert len(task.resources) == 1
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
-
-        # If local cloud, check if the cluster config is filled-out correctly.
-        if 'cloud' in override_params and isinstance(override_params['cloud'],
-                                                     clouds.Local):
-            local_cluster_path = os.path.expanduser(
-                backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster))
-            _, cluster_config = _check_yaml(local_cluster_path,
-                                            with_outputs=True)
-            _check_cluster_config(cluster_config)
-
         task.set_resources({new_resources})
 
         if num_nodes is not None:
@@ -989,7 +946,7 @@ def exec(
             if cloud.lower() == 'none':
                 override_params['cloud'] = None
             else:
-                override_params['cloud'] = _get_cloud(cloud, cluster)
+                override_params['cloud'] = _get_cloud(cloud)
         if region is not None:
             if region.lower() == 'none':
                 override_params['region'] = None
@@ -1780,7 +1737,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = _get_cloud(cloud, cluster)
+    cloud_provider = _get_cloud(cloud)
     if gpus is None and instance_type is None:
         # Use this request if both gpus and instance_type are not specified.
         gpus = default_resources.accelerators
@@ -1851,7 +1808,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = _get_cloud(cloud, cluster)
+    cloud_provider = _get_cloud(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if use_spot is None:

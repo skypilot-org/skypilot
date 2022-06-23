@@ -680,6 +680,41 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
+def update_local_clusters():
+    """Updates the local cluster table in ~/.sky"""
+    local_dir = os.path.expanduser(os.path.dirname(SKY_USER_LOCAL_CONFIG_PATH))
+    os.makedirs(local_dir, exist_ok=True)
+    local_cluster_paths = [os.path.join(local_dir, f) for f in \
+    os.listdir(local_dir) if os.path.isfile(os.path.join(local_dir, f))]
+
+    saved_clusters = global_user_state.get_local_clusters()
+
+    local_cluster_names = []
+    for clus in local_cluster_paths:
+        with open(clus, 'r') as f:
+            yaml_config = yaml.safe_load(f)
+            user_config = yaml_config['auth']
+            cluster_name = yaml_config['cluster']['name']
+        if AUTH_PLACEHOLDER in (user_config['ssh_user'],
+                                user_config['ssh_private_key']):
+            raise ValueError(
+                'Authentication into local cluster requires specifying '
+                'username and private key. '
+                'Please enter credentials in '
+                f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
+        local_cluster_names.append(cluster_name)
+
+    # Add clusters to the database.
+    for local_name in local_cluster_names:
+        if local_name not in saved_clusters:
+            global_user_state.add_or_update_local_cluster(local_name)
+
+    # Remove clusters from the database.
+    for local_name in saved_clusters:
+        if local_name not in local_cluster_names:
+            global_user_state.remove_local_cluster(local_name)
+
+
 def get_local_ips(cluster_name: str) -> List[str]:
     """Returns IP addresses of the local cluster."""
     config = get_local_cluster_config(cluster_name)

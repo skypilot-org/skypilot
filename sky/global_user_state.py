@@ -63,6 +63,10 @@ class _SQLiteConn(threading.local):
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
+        # Table for Local Clusters
+        self.cursor.execute("""\
+            CREATE TABLE IF NOT EXISTS local_clusters (
+            name TEXT PRIMARY KEY)""")
         # For backward compatibility.
         # TODO(zhwu): Remove this function after all users have migrated to
         # the latest version of Sky.
@@ -359,4 +363,29 @@ def get_storage() -> List[Dict[str, Any]]:
             'last_use': last_use,
             'status': StorageStatus[status],
         })
+    return records
+
+
+def add_or_update_local_cluster(cluster_name: str):
+    """Adds or updates local cluster into database."""
+    _DB.cursor.execute(
+        'INSERT or REPLACE INTO local_clusters'
+        '(name) '
+        'VALUES (?)', (cluster_name,))
+    _DB.conn.commit()
+
+
+def remove_local_cluster(cluster_name: str):
+    """Removes local cluster name from database."""
+    _DB.cursor.execute('DELETE FROM local_clusters WHERE name=(?)',
+                       (cluster_name,))
+    _DB.conn.commit()
+
+
+def get_local_clusters() -> List[str]:
+    """Gets all local clusters in from database."""
+    rows = _DB.cursor.execute('select * from local_clusters')
+    records = []
+    for name in rows:
+        records.append(name[0])
     return records
