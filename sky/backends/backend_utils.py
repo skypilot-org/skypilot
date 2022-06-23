@@ -1781,28 +1781,25 @@ def check_cluster_name_not_reserved(
 def check_gcp_cli_include_tpu_vm():
     # TPU VM API available with gcloud version >= 382.0.0
     version_cmd = 'gcloud version --format=json'
-    rcode, stdout, stderr = log_lib.run_with_log(
-        version_cmd,
-        '/dev/null',
-        shell=True,
-        stream_logs=False,
-        require_outputs=True)
+    rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
+                                                 '/dev/null',
+                                                 shell=True,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
 
     if rcode != 0:
-        _FAILURE_MESSAGE = (
-        'Failed to run "gcloud version".'
-        '**** STDOUT ****\n'
-        '{stdout}\n'
-        '**** STDERR ****\n'
-        '{stderr}')
-        raise RuntimeError(_FAILURE_MESSAGE.format(stdout=stdout, stderr=stderr))
+        failure_massage = ('Failed to run "gcloud version".'
+                           '**** STDOUT ****\n'
+                           '{stdout}\n'
+                           '**** STDERR ****\n'
+                           '{stderr}')
+        raise RuntimeError(failure_massage.format(stdout=stdout, stderr=stderr))
 
     sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
 
     if sdk_ver is None:
-        raise RuntimeError(
-            'Failed to get Google Cloud SDK version from'
-            f' "gcloud version": {stdout}')
+        raise RuntimeError('Failed to get Google Cloud SDK version from'
+                           f' "gcloud version": {stdout}')
     else:
         major_ver = sdk_ver.split('.')[0]
         major_ver = int(major_ver)
