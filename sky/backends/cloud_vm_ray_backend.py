@@ -380,7 +380,7 @@ class RayCodeGen:
                         script,
                         log_path,
                         getpass.getuser(),
-                        job_id = {self.job_id},
+                        job_id={self.job_id},
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -2117,7 +2117,7 @@ class CloudVmRayBackend(backends.Backend):
             # to user's $HOME/sky_logs/, and execute it as the specified user.
             ray_command = (f'{cd} && {executable} -u {script_path} '
                            f'> {remote_log_path} 2>&1')
-            job_submit_cmd = self.exec_code_on_local_head(
+            job_submit_cmd = self.gen_code_on_local_head(
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
@@ -2155,7 +2155,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    def exec_code_on_local_head(
+    def gen_code_on_local_head(
         self,
         handle: ResourceHandle,
         ray_command: str,
