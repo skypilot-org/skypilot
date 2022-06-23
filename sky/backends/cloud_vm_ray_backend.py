@@ -2299,7 +2299,8 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_no_lock(self,
                          handle: ResourceHandle,
                          terminate: bool,
-                         purge: bool = False) -> bool:
+                         purge: bool = False,
+                         post_cleanup: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2418,7 +2419,10 @@ class CloudVmRayBackend(backends.Backend):
                         stderr=stderr))
                 return False
 
-        return self.post_teardown_cleanup(handle, terminate, purge)
+        if post_cleanup:
+            return self.post_teardown_cleanup(handle, terminate, purge)
+        else:
+            return True
 
     def post_teardown_cleanup(self,
                               handle: ResourceHandle,
