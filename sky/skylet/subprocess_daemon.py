@@ -18,9 +18,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--parent-pid', type=int, required=True)
     parser.add_argument('--proc-pid', type=int, required=True)
-    parser.add_argument('--ray-job-id', type=str, required=False)
+    parser.add_argument('--local-ray-job-id', type=str, required=False)
     args = parser.parse_args()
-    ray_job_id = args.ray_job_id
+    local_ray_job_id = args.local_ray_job_id
 
     process = None
     parent_process = None
@@ -34,15 +34,17 @@ if __name__ == '__main__':
         sys.exit()
 
     wait_for_process = False
-    # If Ray job id is passed in, wait until the job is done/cancelled/failed.
-    if ray_job_id is None:
+    # Local Ray Job ID is only used in the Sky On-prem case.
+    # If Local Ray job id is passed in, wait until the job
+    # is done/cancelled/failed.
+    if local_ray_job_id is None:
         wait_for_process = True
     else:
         try:
             # Polls the Job submission client to check job status.
             client = job_sdk.JobSubmissionClient('http://127.0.0.1:8265')
             while True:
-                status_info = client.get_job_status(ray_job_id)
+                status_info = client.get_job_status(local_ray_job_id)
                 status = status_info.status
                 if status in {
                         job_common.JobStatus.SUCCEEDED,

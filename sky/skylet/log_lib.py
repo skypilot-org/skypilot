@@ -103,6 +103,7 @@ def run_with_log(
     shell: bool = False,
     with_ray: bool = False,
     process_stream: bool = True,
+    use_sudo: bool = False,
     line_processor: Optional[log_utils.LineProcessor] = None,
     ray_job_id: Optional[str] = None,
     **kwargs,
@@ -125,22 +126,18 @@ def run_with_log(
         process_stream, require_outputs,
         'require_outputs should be False when process_stream is False')
 
-    use_sudo = False
-    try:
-        log_path = os.path.expanduser(log_path)
-        dirname = os.path.dirname(log_path)
-        os.makedirs(dirname, exist_ok=True)
-    except PermissionError:
+    log_path = os.path.expanduser(log_path)
+    dirname = os.path.dirname(log_path)
+    if use_sudo:
         # Hack: Use sudo to make directory and logfile if there is no
         # permission to do so. This case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
-        use_sudo = True
         subprocess.call(
-            f'sudo mkdir -p {dirname} && sudo touch {log_path} '
-            f'&& sudo chmod a+rwx {log_path}',
+            f'sudo mkdir -p {dirname};sudo touch {log_path}; '
+            f'sudo chmod a+rwx {log_path}',
             shell=True)
-    except OSError as e:
-        raise e
+    else:
+        os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout = stderr = None
@@ -169,10 +166,14 @@ def run_with_log(
             '--proc-pid',
             str(proc.pid),
         ]
+        # Bool use_sudo is true in the Sky On-prem case.
+        # In this case, subprocess_daemon.py should run on the root user
+        # and the Ray job id should be passed for daemon to poll for
+        # job status (as `ray job stop` does not work in the
+        # multitenant case).
         if use_sudo:
             daemon_cmd.insert(0, 'sudo')
-        if ray_job_id is not None:
-            daemon_cmd.extend(['--ray-job-id', str(ray_job_id)])
+            daemon_cmd.extend(['--local-ray-job-id', str(ray_job_id)])
         subprocess.Popen(
             daemon_cmd,
             start_new_session=True,
@@ -243,7 +244,8 @@ def run_bash_command_with_log(bash_command: str,
                               job_id: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
-                              with_ray: bool = False):
+                              with_ray: bool = False,
+                              use_sudo: bool = False):
     ray_job_id = f'{job_id}-{job_owner}'
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         if env_vars is not None:
@@ -264,16 +266,24 @@ def run_bash_command_with_log(bash_command: str,
             # instead of the GPUs allocated.
             inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
                 gpu_list) + ' ' + inner_command
+
+        if use_sudo:
+            subprocess_cmd = [
+                'sudo', '-H', 'su', '-', job_owner, '-c', inner_command
+            ]
+        else:
+            subprocess_cmd = [inner_command]
         return run_with_log(
             # Need this `-i` option to make sure `source ~/.bashrc` work.
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
             # the cmd to be a list.
-            ['sudo', '-H', 'su', '-', job_owner, '-c', inner_command],
+            subprocess_cmd,
             log_path,
             ray_job_id=ray_job_id,
             stream_logs=stream_logs,
-            with_ray=with_ray)
+            with_ray=with_ray,
+            use_sudo=True)
 
 
 def _follow_job_logs(file,

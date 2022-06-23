@@ -316,6 +316,7 @@ class RayCodeGen:
         log_path: str,
         env_vars: Dict[str, str] = None,
         gang_scheduling_id: int = 0,
+        use_sudo: bool = False,
     ) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
@@ -383,6 +384,7 @@ class RayCodeGen:
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
+                        use_sudo={use_sudo},
                     ))""")
         ]
 
@@ -2317,12 +2319,14 @@ class CloudVmRayBackend(backends.Backend):
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
         command_for_node = task.run if isinstance(task.run, str) else None
+        use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_ray_task(
             bash_script=command_for_node,
             env_vars=task.envs,
             task_name=task.name,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
-            log_path=log_path)
+            log_path=log_path,
+            use_sudo=use_sudo)
 
         codegen.add_epilogue()
 
@@ -2360,7 +2364,7 @@ class CloudVmRayBackend(backends.Backend):
             # the corresponding node, represented by private IPs.
             name = f'node-{i}'
             log_path = os.path.join(f'{log_dir}', f'{name}.log')
-
+            use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
             codegen.add_ray_task(
                 bash_script=command_for_node,
                 env_vars=task.envs,
@@ -2368,6 +2372,7 @@ class CloudVmRayBackend(backends.Backend):
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
                 gang_scheduling_id=i,
+                use_sudo=use_sudo,
             )
 
         codegen.add_epilogue()
