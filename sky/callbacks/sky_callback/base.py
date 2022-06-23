@@ -6,12 +6,7 @@ from typing import List, Optional
 
 import psutil
 
-# This must be the same as _SKY_REMOTE_BENCHMARK_DIR_SYMLINK
-# in sky/benchmark/benchmark_utils.py.
 _SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
-
-# This must be the same as _BENCHMARK_SUMMARY
-# in sky/benchmark/benchmark_utils.py.
 _BENCHMARK_SUMMARY = 'benchmark_summary.json'
 
 
