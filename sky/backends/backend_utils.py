@@ -602,8 +602,10 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     credentials = sky_check.get_cloud_credential_file_mounts()
     ip_list = None
+    auth_config = None
     if isinstance(cloud, clouds.Local):
         ip_list = get_local_ips(cluster_name)
+        auth_config = get_local_auth_config(cluster_name)
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -680,19 +682,25 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
 def get_local_ips(cluster_name: str) -> List[str]:
     """Returns IP addresses of the local cluster."""
-    local_cluster_path = os.path.expanduser(
-        SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
-    try:
-        with open(local_cluster_path, 'r') as f:
-            config = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise ValueError(
-            f'Could not open/read file: {local_cluster_path}') from e
-
+    config = get_local_cluster_config(cluster_name)
     ips = config['cluster']['ips']
     if isinstance(ips, str):
         ips = [ips]
     return ips
+
+
+def get_local_auth_config(cluster_name: str) -> List[str]:
+    """Returns IP addresses of the local cluster."""
+    config = get_local_cluster_config(cluster_name)
+    return config['auth']
+
+
+def get_job_owner(handle: backends.Backend.ResourceHandle) -> str:
+    cluster_yaml = handle.cluster_yaml
+    with open(os.path.expanduser(cluster_yaml), 'r') as f:
+        cluster_config = yaml.safe_load(f)
+    # User name is guaranteed to exist (on all jinja files)
+    return cluster_config['auth']['ssh_user']
 
 
 def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
@@ -708,6 +716,80 @@ def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
             raise ValueError(f'Could not open/read file: {local_file}') from e
         return yaml_config
     return None
+
+
+def local_cloud_ray_postprocess(cluster_config_file: str):
+    """Launches Ray autoscaler on worker nodes for a local cluster."""
+    with open(cluster_config_file, 'r') as f:
+        config = yaml.safe_load(f)
+
+    ssh_user = config['auth']['ssh_user']
+    ssh_key = config['auth']['ssh_private_key']
+    worker_ips = config['provider']['worker_ips']
+    file_mounts = config['file_mounts']
+    setup_cmds = config['setup_commands']
+    rsync_exclude = 'virtenv'
+    setup_command = '\n'.join(setup_cmds)
+    setup_script = log_lib.make_task_bash_script(setup_command)
+
+    # Uploads setup script to the worker node
+    with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+        f.write(setup_script)
+        f.flush()
+        setup_sh_path = f.name
+        setup_file = os.path.basename(setup_sh_path)
+        file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
+
+        # Ray Autoscaler Bug: Filemounting + Ray Setup
+        # does not happen on workers.
+        def _ray_up_local_worker(ip):
+            # Unable to access methods in CloudVMRayBackend class,
+            # hence there is some replication in code below.
+            for dst, src in file_mounts.items():
+                if not os.path.isabs(dst) and \
+                not dst.startswith('~/'):
+                    dst = f'~/{dst}'
+                wrapped_dst = dst
+                if not dst.startswith('~/') and not dst.startswith('/tmp/'):
+                    wrapped_dst = \
+                    FileMountHelper.wrap_file_mount(
+                        dst)
+                full_src = os.path.abspath(os.path.expanduser(src))
+                if os.path.isfile(full_src):
+                    mkdir_for_wrapped_dst = \
+                        f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                else:
+                    full_src = f'{full_src}/'
+                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+                run_command_on_ip_via_ssh(ip,
+                                          mkdir_for_wrapped_dst,
+                                          ssh_user=ssh_user,
+                                          ssh_private_key=ssh_key,
+                                          stream_logs=False)
+                rsync_command = [
+                    'rsync', '-Pavz', '--filter=\'dir-merge,- .gitignore\'',
+                    f'--exclude=\'{rsync_exclude}\''
+                ]
+                ssh_options = ' '.join(ssh_options_list(ssh_key, None))
+                rsync_command.append(f'-e "ssh {ssh_options}"')
+                rsync_command.extend([
+                    full_src,
+                    f'{ssh_user}@{ip}:{wrapped_dst}',
+                ])
+                command = ' '.join(rsync_command)
+                log_lib.run_with_log(command,
+                                     stream_logs=False,
+                                     log_path='/dev/null',
+                                     shell=True)
+
+            cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+            run_command_on_ip_via_ssh(ip,
+                                      cmd,
+                                      ssh_user=ssh_user,
+                                      ssh_private_key=ssh_key,
+                                      stream_logs=False)
+
+        run_in_parallel(_ray_up_local_worker, worker_ips)
 
 
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):

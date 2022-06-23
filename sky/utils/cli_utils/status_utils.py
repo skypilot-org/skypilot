@@ -2,9 +2,12 @@
 from typing import Callable
 
 import click
+import colorama
+import yaml
 
 from sky import backends
 from sky.backends import backend_utils
+from sky import cli
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
@@ -72,6 +75,84 @@ def show_status_table(show_all: bool, refresh: bool):
                 ' Refresh statuses with: `sky status --refresh`.')
     else:
         click.echo('No existing clusters.')
+
+
+def show_local_status_table():
+    """Lists all local clusters.
+
+    Lists both uninitialized and initialized local clusters. Uninitialized local
+    clusters are clusters that have their cluster configs in ~/.sky/local.
+    Sky does not know if the cluster is valid yet and does not know what
+    resources the cluster has. Hence, this method will return blank values for
+    such clusters. Initialized local clusters are ran using `sky launch`.
+    Sky understands what types of resources are on the nodes and has ran at
+    least one job on the cluster.
+    """
+    clusters_status = backend_utils.get_clusters(include_reserved=False,
+                                                 refresh=False,
+                                                 include_cloud_clusters=False,
+                                                 include_local_clusters=True)
+    columns = [
+        'NAME',
+        'CLUSTER_USER',
+        'RESOURCES',
+        'COMMAND',
+    ]
+
+    cluster_table = log_utils.create_table(columns)
+    names = []
+    # Handling for initialized clusters.
+    for cluster_status in clusters_status:
+        handle = cluster_status['handle']
+        config_path = handle.cluster_yaml
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            username = config['auth']['ssh_user']
+
+        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+            if (handle.launched_nodes is not None and
+                    handle.launched_resources is not None):
+                local_clus_resources = handle.local_config['cluster_resources']
+                for idx, resource in enumerate(local_clus_resources):
+                    if not bool(resource):
+                        local_clus_resources[idx] = None
+                resources_str = (f'{local_clus_resources}')
+        else:
+            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+        cluster_name = handle.cluster_name
+        row = [
+            # NAME
+            cluster_name,
+            # CLUSTER USER
+            username,
+            # RESOURCES
+            resources_str,
+            # COMMAND
+            cluster_status['last_use'],
+        ]
+        names.append(cluster_name)
+        cluster_table.add_row(row)
+
+    # Handling for uninitialized clusters.
+    all_local_clusters = cli.list_local_clusters()
+    for clus in all_local_clusters:
+        if clus not in names:
+            row = [
+                # NAME
+                clus,
+                # CLUSTER USER
+                '-',
+                # RESOURCES
+                '-',
+                # COMMAND
+                '-',
+            ]
+            cluster_table.add_row(row)
+
+    if clusters_status or all_local_clusters:
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
+                   f'clusters:{colorama.Style.RESET_ALL}')
+        click.echo(cluster_table)
 
 
 _get_name = (lambda cluster_status: cluster_status['name'])

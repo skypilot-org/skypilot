@@ -89,7 +89,7 @@ def _get_cloud(cloud: Optional[str],
     """Check if cloud is registered and return cloud object."""
 
     # Checks if cluster name is a local cluster name
-    if cluster_name in _list_local_clusters():
+    if cluster_name in list_local_clusters():
         if cloud is None:
             cloud = 'local'
         elif cloud != 'local':
@@ -121,7 +121,7 @@ def _get_cloud(cloud: Optional[str],
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
-    local_clusters = _list_local_clusters()
+    local_clusters = list_local_clusters()
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
@@ -614,7 +614,7 @@ def _check_local_cloud(cloud: Optional[str] = None,
         if yaml_cloud == 'local':
             return True
 
-    if cluster in _list_local_clusters():
+    if cluster in list_local_clusters():
         if ((yaml_cloud and yaml_cloud != 'local') or
             (cloud and cloud != 'local')):
             raise ValueError(f'Detected Local cluster {cluster}. Must specify '
@@ -625,7 +625,7 @@ def _check_local_cloud(cloud: Optional[str] = None,
     return False
 
 
-def _list_local_clusters() -> List[str]:
+def list_local_clusters() -> List[str]:
     """Lists all local clusters."""
     local_dir = os.path.expanduser(
         os.path.dirname(backend_utils.SKY_USER_LOCAL_CONFIG_PATH))
@@ -839,7 +839,7 @@ def launch(
         old_resources = list(task.resources)[0]
         new_resources = old_resources.copy(**override_params)
 
-        # If local cloud, add authentication config to Task object
+        # If local cloud, check if the cluster config is filled-out correctly.
         if 'cloud' in override_params and isinstance(override_params['cloud'],
                                                      clouds.Local):
             local_cluster_path = os.path.expanduser(
@@ -847,8 +847,6 @@ def launch(
             _, cluster_config = _check_yaml(local_cluster_path,
                                             with_outputs=True)
             _check_cluster_config(cluster_config)
-            auth_config = cluster_config['auth']
-            task.set_auth_config(auth_config)
 
         task.set_resources({new_resources})
 
@@ -961,7 +959,7 @@ def exec(
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if cluster in _list_local_clusters():
+        if cluster in list_local_clusters():
             raise click.BadParameter(
                 f'Found local cluster {cluster!r}. '
                 'Use `sky launch` to set up local cluster.')
@@ -1053,7 +1051,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       ``sky start`` to restart the cluster.
     """
     status_utils.show_status_table(all, refresh)
-    local_status()
+    status_utils.show_local_status_table()
 
 
 @cli.command()
@@ -1154,7 +1152,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        if cluster in _list_local_clusters():
+        if cluster in list_local_clusters():
             raise click.BadParameter(
                 f'Found local cluster {cluster!r}. '
                 'Use `sky launch` to set up local cluster.')
@@ -1227,7 +1225,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
     if handle is None:
-        if cluster in _list_local_clusters():
+        if cluster in list_local_clusters():
             raise click.BadParameter(
                 f'Found local cluster {cluster!r}. '
                 'Use `sky launch` to set up local cluster.')
@@ -1421,7 +1419,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
       sky start cluster1 cluster2
 
     """
-    local_clusters = _list_local_clusters()
+    local_clusters = list_local_clusters()
     to_start = []
     if clusters:
         # Get GLOB cluster names
@@ -1577,7 +1575,7 @@ def _terminate_or_stop_clusters(
         operation = f'{verb} auto-stop on'
 
     if len(names) > 0:
-        local_clusters = _list_local_clusters()
+        local_clusters = list_local_clusters()
         reserved_clusters = [
             name for name in names
             if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
@@ -1773,7 +1771,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in _list_local_clusters():
+    if name in list_local_clusters():
         raise click.BadParameter(
             f'Local cluster {cluster!r} conflicts with gpunode.')
     if name is None:
@@ -1844,7 +1842,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in _list_local_clusters():
+    if name in list_local_clusters():
         raise click.BadParameter(
             f'Local cluster {cluster!r} conflicts with cpunode.')
     if name is None:
@@ -1912,7 +1910,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in _list_local_clusters():
+    if name in list_local_clusters():
         raise click.BadParameter(
             f'Local cluster name {cluster!r} conflicts with tpunode.')
     if name is None:
@@ -2218,84 +2216,6 @@ def admin_deploy(clusterspec_yaml: str):
         local_cluster_name)
     backend_utils.save_distributable_yaml(yaml_config)
     click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
-
-
-def local_status():
-    """Lists all local clusters.
-
-    Lists both uninitialized and initialized local clusters. Uninitialized local
-    clusters are clusters that have their cluster configs in ~/.sky/local.
-    Sky does not know if the cluster is valid yet and does not know what
-    resources the cluster has. Hence, this method will return blank values for
-    such clusters. Initialized local clusters are ran using `sky launch`.
-    Sky understands what types of resources are on the nodes and has ran at
-    least one job on the cluster.
-    """
-    clusters_status = backend_utils.get_clusters(include_reserved=False,
-                                                 refresh=False,
-                                                 include_cloud_clusters=False,
-                                                 include_local_clusters=True)
-    columns = [
-        'NAME',
-        'CLUSTER_USER',
-        'RESOURCES',
-        'COMMAND',
-    ]
-
-    cluster_table = log_utils.create_table(columns)
-    names = []
-    # Handling for initialized clusters.
-    for cluster_status in clusters_status:
-        handle = cluster_status['handle']
-        config_path = handle.cluster_yaml
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            username = config['auth']['ssh_user']
-
-        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-            if (handle.launched_nodes is not None and
-                    handle.launched_resources is not None):
-                local_clus_resources = handle.local_config['cluster_resources']
-                for idx, resource in enumerate(local_clus_resources):
-                    if not bool(resource):
-                        local_clus_resources[idx] = None
-                resources_str = (f'{local_clus_resources}')
-        else:
-            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
-        cluster_name = handle.cluster_name
-        row = [
-            # NAME
-            cluster_name,
-            # CLUSTER USER
-            username,
-            # RESOURCES
-            resources_str,
-            # COMMAND
-            cluster_status['last_use'],
-        ]
-        names.append(cluster_name)
-        cluster_table.add_row(row)
-
-    # Handling for uninitialized clusters.
-    all_local_clusters = _list_local_clusters()
-    for clus in all_local_clusters:
-        if clus not in names:
-            row = [
-                # NAME
-                clus,
-                # CLUSTER USER
-                '-',
-                # RESOURCES
-                '-',
-                # COMMAND
-                '-',
-            ]
-            cluster_table.add_row(row)
-
-    if clusters_status or all_local_clusters:
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
-                   f'clusters:{colorama.Style.RESET_ALL}')
-        click.echo(cluster_table)
 
 
 # Managed Spot CLIs

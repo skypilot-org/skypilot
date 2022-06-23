@@ -144,7 +144,6 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-        self.auth_config = None
         # Check if the task is legal.
         self._validate()
 
@@ -398,9 +397,6 @@ class Task:
 
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
-
-    def set_auth_config(self, auth_config: Dict[str, Dict[str, str]]):
-        self.auth_config = auth_config
 
     def set_resources(self, resources: Union['resources_lib.Resources',
                                              Set['resources_lib.Resources']]):

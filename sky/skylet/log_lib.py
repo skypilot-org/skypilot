@@ -244,7 +244,6 @@ def run_bash_command_with_log(bash_command: str,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
-
     ray_job_id = f'{job_id}-{job_owner}'
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
         if env_vars is not None:

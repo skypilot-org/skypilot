@@ -20,7 +20,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import click
 import colorama
 import filelock
-import yaml
 
 import sky
 from sky import backends
@@ -195,8 +194,6 @@ class RayCodeGen:
 
             # Connects to Ray cluster via Ray Client, requires redis password if an external user needs to access Ray cluster
             ray.init(address = 'ray://localhost:10001', _redis_password='5241590000000000', namespace='__sky__{job_id}__', log_to_driver=True)
-
-            job_id = {job_id!r}
 
             run_fn = None
             futures = []"""),
@@ -382,7 +379,7 @@ class RayCodeGen:
                         script,
                         log_path,
                         getpass.getuser(),
-                        job_id = job_id,
+                        job_id = {self.job_id},
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
                         with_ray=True,
@@ -829,8 +826,7 @@ class RetryingVmProvisioner(object):
                             dryrun: bool,
                             stream_logs: bool,
                             cluster_name: str,
-                            cluster_exists: bool = False,
-                            auth_config: Dict[str, str] = None):
+                            cluster_exists: bool = False):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -861,8 +857,7 @@ class RetryingVmProvisioner(object):
                 self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun,
-                auth_config=auth_config)
+                dryrun=dryrun)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1037,88 +1032,6 @@ class RetryingVmProvisioner(object):
         returncode, stdout, stderr = ray_up()
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
-        # Special handling is needed for the local case. This is due to a
-        # Ray autoscaler bug, where filemounting and setup does not work for
-        # the on-prem case in Ray. Hence, this method here replicates
-        # what the Ray autoscaler would do were it for public cloud.
-        def local_cloud_ray_postprocess():
-            """Launches Ray autoscaler on worker nodes for a local cluster."""
-            with open(cluster_config_file, 'r') as f:
-                config = yaml.safe_load(f)
-
-            ssh_user = config['auth']['ssh_user']
-            ssh_key = config['auth']['ssh_private_key']
-            worker_ips = config['provider']['worker_ips']
-            file_mounts = config['file_mounts']
-            setup_cmds = config['setup_commands']
-            rsync_exclude = 'virtenv'
-            setup_command = '\n'.join(setup_cmds)
-            setup_script = log_lib.make_task_bash_script(setup_command)
-
-            # Uploads setup script to the worker node
-            with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
-                f.write(setup_script)
-                f.flush()
-                setup_sh_path = f.name
-                setup_file = os.path.basename(setup_sh_path)
-                file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
-
-                # Ray Autoscaler Bug: Filemounting + Ray Setup
-                # does not happen on workers.
-                def _ray_up_local_worker(ip):
-                    # Unable to access methods in CloudVMRayBackend class,
-                    # hence there is some replication in code below.
-                    for dst, src in file_mounts.items():
-                        if not os.path.isabs(dst) and \
-                        not dst.startswith('~/'):
-                            dst = f'~/{dst}'
-                        wrapped_dst = dst
-                        if not dst.startswith('~/') and not dst.startswith(
-                                '/tmp/'):
-                            wrapped_dst = \
-                            backend_utils.FileMountHelper.wrap_file_mount(
-                                dst)
-                        full_src = os.path.abspath(os.path.expanduser(src))
-                        if os.path.isfile(full_src):
-                            mkdir_for_wrapped_dst = \
-                                f'mkdir -p {os.path.dirname(wrapped_dst)}'
-                        else:
-                            full_src = f'{full_src}/'
-                            mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-                        backend_utils.run_command_on_ip_via_ssh(
-                            ip,
-                            mkdir_for_wrapped_dst,
-                            ssh_user=ssh_user,
-                            ssh_private_key=ssh_key,
-                            stream_logs=False)
-                        rsync_command = [
-                            'rsync', '-Pavz',
-                            '--filter=\'dir-merge,- .gitignore\'',
-                            f'--exclude=\'{rsync_exclude}\''
-                        ]
-                        ssh_options = ' '.join(
-                            backend_utils.ssh_options_list(ssh_key, None))
-                        rsync_command.append(f'-e "ssh {ssh_options}"')
-                        rsync_command.extend([
-                            full_src,
-                            f'{ssh_user}@{ip}:{wrapped_dst}',
-                        ])
-                        command = ' '.join(rsync_command)
-                        log_lib.run_with_log(command,
-                                             stream_logs=False,
-                                             log_path='/dev/null',
-                                             shell=True)
-
-                    cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-                    backend_utils.run_command_on_ip_via_ssh(
-                        ip,
-                        cmd,
-                        ssh_user=ssh_user,
-                        ssh_private_key=ssh_key,
-                        stream_logs=False)
-
-                backend_utils.run_in_parallel(_ray_up_local_worker, worker_ips)
-
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
             return self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr
@@ -1128,8 +1041,12 @@ class RetryingVmProvisioner(object):
         logger.info(f'{style.BRIGHT}Successfully provisioned or found'
                     f' existing head VM. Waiting for workers.{style.RESET_ALL}')
 
+        # Special handling is needed for the local case. This is due to a
+        # Ray autoscaler bug, where filemounting and setup does not work for
+        # the on-prem case in Ray. Hence, this method here replicates
+        # what the Ray autoscaler would do were it for public cloud.
         if isinstance(to_provision_cloud, clouds.Local):
-            local_cloud_ray_postprocess()
+            backend_utils.local_cloud_ray_postprocess(cluster_config_file)
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
@@ -1216,12 +1133,6 @@ class RetryingVmProvisioner(object):
         cluster_name = to_provision_config.cluster_name
         to_provision = to_provision_config.resources
         num_nodes = to_provision_config.num_nodes
-        resources = to_provision_config.resources
-        # Special handling for local cloud case: number of nodes provisioned
-        # is not what the task specifies, but refers to the size of the
-        # local cluster.
-        if isinstance(resources.cloud, clouds.Local):
-            num_nodes = len(backend_utils.get_local_ips(cluster_name))
         cluster_exists = to_provision_config.cluster_exists
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
@@ -1238,8 +1149,7 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
-                    cluster_exists=cluster_exists,
-                    auth_config=task.auth_config)
+                    cluster_exists=cluster_exists)
                 if dryrun:
                     return
             except exceptions.ResourcesUnavailableError as e:
@@ -1419,10 +1329,12 @@ class CloudVmRayBackend(backends.Backend):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
         # Special handling for local cloud case.
-        # Resources.less_demanding_than takes in the Resources object of first
-        # task that was ran on the cluster. In the local cloud case,
-        # resources.accelerators means the task resources. We do a hack where we
-        # replace resources.accelerators with the local cluster's resources.
+        # ResourcesHandle is saved into ~/.sky/ when the first task is run on
+        # the cluster. For subsequent tasks,Resources.less_demanding_than takes
+        # in the Resources object of first task that was ran on the cluster.
+        # In the local cloud case, resources.accelerators means the task
+        # resources. We do a hack where we replace resources.accelerators
+        # with the local cluster's resources.
         if handle.local_config is not None:
             cluster_resources = handle.local_config['cluster_resources']
             merged_resources = {}
@@ -1459,14 +1371,20 @@ class CloudVmRayBackend(backends.Backend):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
+            # Special handling for local cloud case: number of nodes provisioned
+            # is not what the task specifies, but refers to the size of the
+            # local cluster.
+            num_nodes = handle.launched_nodes
+            if isinstance(handle.launched_resources.cloud, clouds.Local):
+                num_nodes = len(backend_utils.get_local_ips(cluster_name))
             return RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, handle.launched_resources, handle.launched_nodes,
-                True)
+                cluster_name, handle.launched_resources, num_nodes, True)
         cloud = to_provision.cloud
         # Alternative logging for local clusters, as opposed to public cloud
         # clusters.
         if isinstance(cloud, clouds.Local):
-            ssh_user = task.auth_config['ssh_user']
+            ssh_user = backend_utils.get_local_cluster_config(
+                cluster_name)['cluster']['name']
             logger.info(
                 f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
                 f'"{cluster_name}" [Username: {ssh_user}].'
@@ -1620,11 +1538,7 @@ class CloudVmRayBackend(backends.Backend):
                 # update_status will query the ray job status for all INIT /
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
-                cluster_yaml = handle.cluster_yaml
-                with open(os.path.expanduser(cluster_yaml), 'r') as f:
-                    cluster_config = yaml.safe_load(f)
-                # User name is guaranteed to exist (on all jinja files)
-                job_owner = cluster_config['auth']['ssh_user']
+                job_owner = backend_utils.get_job_owner(handle)
                 cmd = job_lib.JobLibCodeGen.update_status(job_owner)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
@@ -2085,14 +1999,7 @@ class CloudVmRayBackend(backends.Backend):
         return job_lib.JobStatus(result.split(' ')[-1])
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
-        # Get user name
-        cluster_yaml = handle.cluster_yaml
-        with open(os.path.expanduser(cluster_yaml), 'r') as f:
-            cluster_config = yaml.safe_load(f)
-
-        # User name is guaranteed to exist (on all jinja files)
-        job_owner = cluster_config['auth']['ssh_user']
-
+        job_owner = backend_utils.get_job_owner(handle)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
         # All error messages should have been redirected to stdout.
@@ -2194,61 +2101,29 @@ class CloudVmRayBackend(backends.Backend):
 
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
-        remote_run_file = os.path.join(remote_log_dir, 'run.sh')
-
-        head_ip = backend_utils.get_head_ip(handle, True)
-        ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
-
-        backend_utils.run_command_on_ip_via_ssh(
-            head_ip,
-            f'mkdir -p {remote_log_dir}',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_private_key,
-            ssh_control_name=self._ssh_control_name(handle))
 
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        # Ray Multitenancy is unsupported
-        # (Git Issue) https://github.com/ray-project/ray/issues/6800
-        # Temporary workaround - wrap the run command in a script, upload it
-        # to user's $HOME/sky_logs/, and execute it as the specified user.
-        ray_command = (f'{cd} && {executable} -u {script_path} '
-                       f'> {remote_log_path} 2>&1')
-
-        with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-            fp.write(ray_command)
-            fp.flush()
-            # We choose to sync code + exec, so that Ray job submission API will
-            # work for the multitenant case.
-            self._rsync_up(handle,
-                           source=fp.name,
-                           target=remote_run_file,
-                           stream_logs=False)
-
-        # Get the home directory of ssh_user
-        _, stdout, _ = backend_utils.run_command_on_ip_via_ssh(
-            head_ip,
-            f'chmod a+rwx {remote_run_file}; echo $HOME',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_private_key,
-            ssh_control_name=self._ssh_control_name(handle),
-            stream_logs=False,
-            require_outputs=True)
-
-        head_home_path = stdout.strip()
-        remote_run_file = remote_run_file.replace('~', head_home_path)
-
+        ssh_user, _ = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
         ray_job_id = f'{job_id}-{ssh_user}'
-        job_submit_cmd = (
-            'ray job submit -v '
-            f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-            f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
-        returncode, _, _ = self.run_on_head(handle,
-                                            job_submit_cmd,
-                                            require_outputs=True,
-                                            stream_logs=False)
+        if isinstance(handle.launched_resources.cloud, clouds.Local):
+            # Ray Multitenancy is unsupported
+            # (Git Issue) https://github.com/ray-project/ray/issues/6800
+            # Temporary workaround - wrap the run command in a script, upload it
+            # to user's $HOME/sky_logs/, and execute it as the specified user.
+            ray_command = (f'{cd} && {executable} -u {script_path} '
+                           f'> {remote_log_path} 2>&1')
+            job_submit_cmd = self.exec_code_on_local_head(
+                handle, ray_command, ray_job_id)
+        else:
+            job_submit_cmd = (
+                f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
+                f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
+                f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
+
+        returncode = self.run_on_head(handle, job_submit_cmd, stream_logs=False)
 
         backend_utils.handle_returncode(returncode, job_submit_cmd,
                                         f'Failed to submit job {job_id}.')
@@ -2278,17 +2153,47 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
+    def exec_code_on_local_head(
+        self,
+        handle: ResourceHandle,
+        ray_command: str,
+        ray_job_id: str,
+    ):
+        head_ip = backend_utils.get_head_ip(handle, True)
+        ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        remote_log_dir = self.log_dir
+
+        with tempfile.NamedTemporaryFile('w', prefix='sky_run_') as fp:
+            fp.write(ray_command)
+            fp.flush()
+            run_file = os.path.basename(fp.name)
+            remote_run_file = f'/tmp/{run_file}'
+            # We choose to sync code + exec, so that Ray job submission API will
+            # work for the multitenant case.
+            self._rsync_up(handle,
+                           source=fp.name,
+                           target=remote_run_file,
+                           stream_logs=False)
+
+        backend_utils.run_command_on_ip_via_ssh(
+            head_ip,
+            f'mkdir -p {remote_log_dir}; chmod a+rwx {remote_run_file}',
+            ssh_user=ssh_user,
+            ssh_private_key=ssh_private_key,
+            ssh_control_name=self._ssh_control_name(handle))
+
+        job_submit_cmd = (
+            'ray job submit -v '
+            f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
+            f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
+        return job_submit_cmd
+
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
                   spot_job_id: Optional[int] = None) -> int:
-        # Get user name
-        cluster_yaml = handle.cluster_yaml
-        with open(os.path.expanduser(cluster_yaml), 'r') as f:
-            cluster_config = yaml.safe_load(f)
-        # User name is guaranteed to exist (on all jinja files)
-        job_owner = cluster_config['auth']['ssh_user']
-
+        job_owner = backend_utils.get_job_owner(handle)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id)
