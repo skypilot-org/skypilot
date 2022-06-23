@@ -103,8 +103,12 @@ class Resources:
         if self.use_spot:
             use_spot = '[Spot]'
 
+        image_id = ''
+        if self.customized_image_id is not None:
+            image_id = f', image_id={self.customized_image_id}'
+
         return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args})')
+                f'{accelerators}{accelerator_args}{image_id})')
 
     @property
     def cloud(self):
@@ -354,6 +358,14 @@ class Resources:
             return False
         # self.region <= other.region
 
+        if (self.customized_image_id is None) != (other.customized_image_id is
+                                                  None):
+            # self and other's customized image id should be both None or both not None
+            return False
+
+        if (self.customized_image_id is not None and self.customized_image_id != other.customized_image_id):
+            return False
+
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
             return False
@@ -384,6 +396,10 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if (self.customized_image_id is not None and
+                self.customized_image_id != other.customized_image_id):
+            return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
