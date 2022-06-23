@@ -188,7 +188,6 @@ class Resources:
                 if accelerator_args is None:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', False)
-                # TODO(wei-lin): check if gcloud version >= 382
                 if use_tpu_vm:
                     backend_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:

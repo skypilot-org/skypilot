@@ -1365,10 +1365,11 @@ def _query_status_gcp(
             'STARTING': global_user_state.ClusterStatus.INIT,
             'RESTARTING': global_user_state.ClusterStatus.INIT,
             'READY': global_user_state.ClusterStatus.UP,
-            'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+            'REPAIRING': global_user_state.ClusterStatus.INIT,
             # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
             'STOPPING': global_user_state.ClusterStatus.STOPPED,
             'STOPPED': global_user_state.ClusterStatus.STOPPED,
+            'PREEMPTED': None,
         }
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
@@ -1380,7 +1381,7 @@ def _query_status_gcp(
             'PROVISIONING': global_user_state.ClusterStatus.INIT,
             'STARTING': global_user_state.ClusterStatus.INIT,
             'RUNNING': global_user_state.ClusterStatus.UP,
-            'REPAIRING': global_user_state.ClusterStatus.STOPPED,
+            'REPAIRING': global_user_state.ClusterStatus.INIT,
             # 'TERMINATED' in GCP means stopped, with disk preserved.
             'STOPPING': global_user_state.ClusterStatus.STOPPED,
             'TERMINATED': global_user_state.ClusterStatus.STOPPED,
@@ -1394,7 +1395,16 @@ def _query_status_gcp(
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
                      '--format="value(status)"')
-    return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
+    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
+
+    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
+    # TODO(wei-lin): handle multi-node cases.
+    if use_tpu_vm and len(status_list) == 0:
+        backend = backends.CloudVmRayBackend()
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
+        backend.teardown(handle, terminate=True, purge=False)
+
+    return status_list
 
 
 def _query_status_azure(
@@ -1746,7 +1756,7 @@ def check_cluster_name_not_reserved(
         raise ValueError(msg)
 
 
-def check_gcp_cli_include_tpu_vm():
+def check_gcp_cli_include_tpu_vm() -> None:
     # TPU VM API available with gcloud version >= 382.0.0
     version_cmd = 'gcloud version --format=json'
     rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
@@ -1756,7 +1766,7 @@ def check_gcp_cli_include_tpu_vm():
                                                  require_outputs=True)
 
     if rcode != 0:
-        failure_massage = ('Failed to run "gcloud version".'
+        failure_massage = ('Failed to run "gcloud version".\n'
                            '**** STDOUT ****\n'
                            '{stdout}\n'
                            '**** STDERR ****\n'
@@ -1775,8 +1785,6 @@ def check_gcp_cli_include_tpu_vm():
             raise RuntimeError(
                 'Google Cloud SDK version must be >= 382.0.0 to use'
                 ' TPU VM APIs, check "gcloud version" for details.')
-
-    return True
 
 
 def kill_children_processes():

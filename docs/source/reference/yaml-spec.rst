@@ -77,7 +77,7 @@ describe all fields available.
         # Default runtime_version is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
         runtime_version: 2.5.0
         tpu_name: mytpu
-        tpu_vm: False  # True to use TPU VM, False to use TPU node.
+        tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
     file_mounts:
       # Uses rsync to copy local files to all nodes of the cluster.
