@@ -2328,7 +2328,8 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              (prev_status == global_user_state.ClusterStatus.STOPPED or use_tpu_vm)):
+              (prev_status == global_user_state.ClusterStatus.STOPPED or
+               use_tpu_vm)):
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
@@ -2405,8 +2406,9 @@ class CloudVmRayBackend(backends.Backend):
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
                         reason='stopping/terminating cluster nodes'))
-            # This error returns when we call "gcloud delete" with an empty VM list
-            # where no instance exists. Safe to ignore it and do cleanup locally.
+            # This error returns when we call "gcloud delete" with an empty VM
+            # list where no instance exists. Safe to ignore it and do cleanup
+            # locally.
             elif 'TPU must be specified.' not in stderr:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(

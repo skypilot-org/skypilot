@@ -1395,7 +1395,8 @@ def _query_status_gcp(
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
                      '--format="value(status)"')
-    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
+    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
+                                     status_map)
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
