@@ -18,6 +18,7 @@ class SkyKerasCallback(keras.callbacks.Callback):
 
     Args:
         log_dir: A directory to store the logs.
+        total_steps: A total number of steps.
     """
 
     def __init__(self, log_dir=None, total_steps=None):
@@ -26,7 +27,7 @@ class SkyKerasCallback(keras.callbacks.Callback):
         self.sky_callback = None
 
     def on_train_begin(self, logs=None):
-        del logs # Unused.
+        del logs  # Unused.
         if DISABLE_CALLBACK:
             return
         # TODO(woosuk): Add support for distributed training.
@@ -34,13 +35,13 @@ class SkyKerasCallback(keras.callbacks.Callback):
         self.sky_callback = base.BaseCallback(log_dir=self.log_dir)
 
     def on_train_batch_begin(self, batch, logs=None):
-        del batch, logs # Unused.
+        del batch, logs  # Unused.
         if DISABLE_CALLBACK:
             return
         self.sky_callback.on_step_begin()
 
     def on_train_batch_end(self, batch, logs=None):
-        del batch, logs # Unused.
+        del batch, logs  # Unused.
         if DISABLE_CALLBACK:
             return
         self.sky_callback.on_step_end()

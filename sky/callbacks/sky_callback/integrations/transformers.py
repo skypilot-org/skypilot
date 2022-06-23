@@ -33,7 +33,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         return state.max_steps
 
     def on_train_begin(self, args, state, control, **kwargs):
-        del args, control, kwargs # Unused.
+        del args, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
         assert self.sky_callback is None
@@ -43,14 +43,14 @@ class SkyTransformersCallback(transformers.TrainerCallback):
                                                   total_steps=total_steps)
 
     def on_step_begin(self, args, state, control, **kwargs):
-        del args, state, control, kwargs # Unused.
+        del args, state, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
         if self.sky_callback is not None:
             self.sky_callback.on_step_begin()
 
     def on_step_end(self, args, state, control, **kwargs):
-        del args, state, control, kwargs # Unused.
+        del args, state, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
         if self.sky_callback is not None:

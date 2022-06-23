@@ -53,7 +53,7 @@ class SkyLightningCallback(pl.Callback):
         return total_steps
 
     def on_train_start(self, trainer, pl_module):
-        del pl_module # Unused.
+        del pl_module  # Unused.
         if DISABLE_CALLBACK:
             return
         assert self.sky_callback is None
@@ -69,7 +69,7 @@ class SkyLightningCallback(pl.Callback):
         batch,
         batch_idx,
     ):
-        del trainer, pl_module, batch, batch_idx # Unused.
+        del trainer, pl_module, batch, batch_idx  # Unused.
         if DISABLE_CALLBACK:
             return
         if self.sky_callback is not None:
@@ -83,7 +83,7 @@ class SkyLightningCallback(pl.Callback):
         batch,
         batch_idx,
     ):
-        del trainer, pl_module, outputs, batch, batch_idx # Unused.
+        del trainer, pl_module, outputs, batch, batch_idx  # Unused.
         if DISABLE_CALLBACK:
             return
         if self.sky_callback is not None:

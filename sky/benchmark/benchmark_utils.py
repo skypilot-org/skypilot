@@ -32,9 +32,9 @@ logger = sky_logging.init_logger(__name__)
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
-_SKY_REMOTE_BENCHMARK_DIR_SYMLINK = base._SKY_REMOTE_BENCHMARK_DIR
+_SKY_REMOTE_BENCHMARK_DIR_SYMLINK = base.SKY_REMOTE_BENCHMARK_DIR
 
-_BENCHMARK_SUMMARY = base._BENCHMARK_SUMMARY
+_BENCHMARK_SUMMARY = base.BENCHMARK_SUMMARY
 
 _Config = Dict[str, Any]
 
