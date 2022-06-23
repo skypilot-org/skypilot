@@ -63,10 +63,6 @@ class _SQLiteConn(threading.local):
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
-        # Table for Local Clusters
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS local_clusters (
-            name TEXT PRIMARY KEY)""")
         # For backward compatibility.
         # TODO(zhwu): Remove this function after all users have migrated to
         # the latest version of Sky.
@@ -241,8 +237,7 @@ def get_cluster_from_name(
         return record
 
 
-def get_clusters(include_cloud_clusters: bool = True,
-                 include_local_clusters: bool = False) -> List[Dict[str, Any]]:
+def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc')
     records = []
@@ -250,14 +245,6 @@ def get_clusters(include_cloud_clusters: bool = True,
     for name, launched_at, handle, last_use, status, autostop in rows:
         # TODO: use namedtuple instead of dict
         handle = pickle.loads(handle)
-        cloud = handle.launched_resources.cloud
-        # Check for public cloud.
-        if clouds.CLOUD_REGISTRY.from_str(
-                repr(cloud)) and not include_cloud_clusters:
-            continue
-        # Check for local cloud.
-        if isinstance(cloud, clouds.Local) and not include_local_clusters:
-            continue
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -363,29 +350,4 @@ def get_storage() -> List[Dict[str, Any]]:
             'last_use': last_use,
             'status': StorageStatus[status],
         })
-    return records
-
-
-def add_or_update_local_cluster(cluster_name: str):
-    """Adds or updates local cluster into database."""
-    _DB.cursor.execute(
-        'INSERT or REPLACE INTO local_clusters'
-        '(name) '
-        'VALUES (?)', (cluster_name,))
-    _DB.conn.commit()
-
-
-def remove_local_cluster(cluster_name: str):
-    """Removes local cluster name from database."""
-    _DB.cursor.execute('DELETE FROM local_clusters WHERE name=(?)',
-                       (cluster_name,))
-    _DB.conn.commit()
-
-
-def get_local_clusters() -> List[str]:
-    """Gets all local clusters in from database."""
-    rows = _DB.cursor.execute('select * from local_clusters')
-    records = []
-    for name in rows:
-        records.append(name[0])
     return records

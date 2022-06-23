@@ -680,14 +680,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def update_local_clusters():
-    """Updates the local cluster table in ~/.sky"""
+def list_local_clusters():
+    """Lists all local clusters."""
     local_dir = os.path.expanduser(os.path.dirname(SKY_USER_LOCAL_CONFIG_PATH))
     os.makedirs(local_dir, exist_ok=True)
     local_cluster_paths = [os.path.join(local_dir, f) for f in \
     os.listdir(local_dir) if os.path.isfile(os.path.join(local_dir, f))]
-
-    saved_clusters = global_user_state.get_local_clusters()
 
     local_cluster_names = []
     for clus in local_cluster_paths:
@@ -703,16 +701,7 @@ def update_local_clusters():
                 'Please enter credentials in '
                 f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
         local_cluster_names.append(cluster_name)
-
-    # Add clusters to the database.
-    for local_name in local_cluster_names:
-        if local_name not in saved_clusters:
-            global_user_state.add_or_update_local_cluster(local_name)
-
-    # Remove clusters from the database.
-    for local_name in saved_clusters:
-        if local_name not in local_cluster_names:
-            global_user_state.remove_local_cluster(local_name)
+    return local_cluster_names
 
 
 def get_local_ips(cluster_name: str) -> List[str]:
@@ -2066,8 +2055,7 @@ def refresh_cluster_status_handle(
 
 def get_clusters(include_reserved: bool,
                  refresh: bool,
-                 include_cloud_clusters: bool = True,
-                 include_local_clusters: bool = False) -> List[Dict[str, Any]]:
+                 filter_clouds: str = 'public') -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
     Combs through the Sky database (in ~/.sky/state.db) to get a list of records
@@ -2078,20 +2066,30 @@ def get_clusters(include_reserved: bool,
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
-        include_cloud_clusters: If True, all public cloud clusters are included.
-        include_local_clusters: If True, all local clusters are included.
+        filter_clouds: Sets which clouds to filer through from the global user
+            state. Supports two values, 'all' for all clouds, 'public' for public
+            clouds only, and 'local' for only local clouds.
 
     Returns:
         A list of cluster records.
     """
-    records = global_user_state.get_clusters(
-        include_cloud_clusters=include_cloud_clusters,
-        include_local_clusters=include_local_clusters)
+    records = global_user_state.get_clusters()
 
     if not include_reserved:
         records = [
             record for record in records
             if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
+        ]
+
+    def _is_local_cluster(record):
+        cluster_resources = record['handle'].launched_resources
+        return isinstance(cluster_resources.cloud, clouds.Local)
+
+    if filter_clouds == 'local':
+        records = [record for record in records if _is_local_cluster(record)]
+    elif filter_clouds == 'public':
+        records = [
+            record for record in records if not _is_local_cluster(record)
         ]
 
     if not refresh:

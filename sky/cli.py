@@ -97,7 +97,7 @@ def _get_cloud(cloud: Optional[str],) -> Optional[clouds.Cloud]:
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
-    local_clusters = list_local_clusters()
+    local_clusters = backend_utils.list_local_clusters()
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
@@ -589,7 +589,7 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
     if yaml_config and yaml_config.get('resources'):
         yaml_cloud = yaml_config['resources'].get('cloud')
 
-    if cluster_name in list_local_clusters():
+    if cluster_name in backend_utils.list_local_clusters():
         if cloud and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
@@ -610,12 +610,6 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
                     'See `sky status` for local cluster name(s).')
 
         return False
-
-
-def list_local_clusters() -> List[str]:
-    """Lists all local clusters."""
-    backend_utils.update_local_clusters()
-    return global_user_state.get_local_clusters()
 
 
 def _start_cluster(cluster_name: str,
@@ -916,7 +910,7 @@ def exec(
     entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if cluster in list_local_clusters():
+        if cluster in backend_utils.list_local_clusters():
             raise click.BadParameter(
                 f'Found local cluster {cluster!r}. '
                 'Use `sky launch` to set up local cluster.')
@@ -1038,8 +1032,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
-        cluster_infos = global_user_state.get_clusters(
-            include_local_clusters=True)
+        cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
     unsupported_clusters = []
@@ -1109,7 +1102,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        if cluster in list_local_clusters():
+        if cluster in backend_utils.list_local_clusters():
             raise click.BadParameter(
                 f'Found local cluster {cluster!r}. '
                 'Use `sky launch` to set up local cluster.')
@@ -1182,7 +1175,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
     if handle is None:
-        if cluster in list_local_clusters():
+        if cluster in backend_utils.list_local_clusters():
             raise click.BadParameter(
                 f'Found local cluster {cluster!r}. '
                 'Use `sky launch` to set up local cluster.')
@@ -1376,7 +1369,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
       sky start cluster1 cluster2
 
     """
-    local_clusters = list_local_clusters()
+    local_clusters = backend_utils.list_local_clusters()
     to_start = []
     if clusters:
         # Get GLOB cluster names
@@ -1532,7 +1525,7 @@ def _terminate_or_stop_clusters(
         operation = f'{verb} auto-stop on'
 
     if len(names) > 0:
-        local_clusters = list_local_clusters()
+        local_clusters = backend_utils.list_local_clusters()
         reserved_clusters = [
             name for name in names
             if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
@@ -1728,7 +1721,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in list_local_clusters():
+    if name in backend_utils.list_local_clusters():
         raise click.BadParameter(
             f'Local cluster {cluster!r} conflicts with gpunode.')
     if name is None:
@@ -1799,7 +1792,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in list_local_clusters():
+    if name in backend_utils.list_local_clusters():
         raise click.BadParameter(
             f'Local cluster {cluster!r} conflicts with cpunode.')
     if name is None:
@@ -1867,7 +1860,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in list_local_clusters():
+    if name in backend_utils.list_local_clusters():
         raise click.BadParameter(
             f'Local cluster name {cluster!r} conflicts with tpunode.')
     if name is None:

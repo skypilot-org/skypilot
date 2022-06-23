@@ -7,7 +7,6 @@ import yaml
 
 from sky import backends
 from sky.backends import backend_utils
-from sky import cli
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
@@ -90,8 +89,7 @@ def show_local_status_table():
     """
     clusters_status = backend_utils.get_clusters(include_reserved=False,
                                                  refresh=False,
-                                                 include_cloud_clusters=False,
-                                                 include_local_clusters=True)
+                                                 filter_clouds='local')
     columns = [
         'NAME',
         'CLUSTER_USER',
@@ -134,7 +132,7 @@ def show_local_status_table():
         cluster_table.add_row(row)
 
     # Handling for uninitialized clusters.
-    all_local_clusters = cli.list_local_clusters()
+    all_local_clusters = backend_utils.list_local_clusters()
     for clus in all_local_clusters:
         if clus not in names:
             row = [
