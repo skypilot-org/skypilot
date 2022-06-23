@@ -1403,7 +1403,10 @@ def _query_status_gcp(
     if use_tpu_vm and len(status_list) == 0:
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(cluster)
-        backend.teardown_no_lock(handle, terminate=True, purge=False, post_cleanup=False)
+        backend.teardown_no_lock(handle,
+                                 terminate=True,
+                                 purge=False,
+                                 post_cleanup=False)
 
     return status_list
 
