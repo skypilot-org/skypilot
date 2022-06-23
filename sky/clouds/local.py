@@ -107,8 +107,7 @@ class Local(clouds.Cloud):
         return [resources], []
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
-        # Cloud clouds.Local is not called in `sky check`
-        # (not part of global registry).
+        # Cloud clouds.Local is called in `sky check`.
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

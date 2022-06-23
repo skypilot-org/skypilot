@@ -848,6 +848,13 @@ def _fill_in_launchable_resources(
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds
+            # Hack: When >=2 cloud candidates, always remove local cloud from
+            # possible candidates.
+            # TODO(mluo): Add on-prem spillover.
+            if len(clouds_list) >= 2:
+                clouds_list = [
+                    c for c in clouds_list if not isinstance(c, clouds.Local)
+                ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list
