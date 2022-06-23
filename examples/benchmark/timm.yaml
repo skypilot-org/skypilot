@@ -23,7 +23,7 @@ setup: |
   git checkout v0.5.4
   pip install -r requirements.txt
 
-  # Apply patches
+  # Apply patches to enable SkyCallback and use a dummy ImageNet
   git apply ../callback.patch
   git apply ../dummy_dataset.patch
 

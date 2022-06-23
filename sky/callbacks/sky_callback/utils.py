@@ -9,16 +9,16 @@ DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK',
 class CallbackLoader:
 
     @staticmethod
-    def keras(log_dir: Optional[str] = None):
+    def keras(log_dir: Optional[str] = None, total_steps: Optional[int] = None):
         from sky_callback.integrations.keras import SkyKerasCallback
         return SkyKerasCallback(log_dir=log_dir)
 
     @staticmethod
-    def pytorch_lightning(log_dir: Optional[str] = None):
-        from sky_callback.integrations.pytorch_lightning import SkyPLCallback
-        return SkyPLCallback(log_dir=log_dir)
+    def pytorch_lightning(log_dir: Optional[str] = None, total_steps: Optional[int] = None):
+        from sky_callback.integrations.pytorch_lightning import SkyLightningCallback
+        return SkyLightningCallback(log_dir=log_dir)
 
     @staticmethod
-    def transformers(log_dir: Optional[str] = None):
-        from sky_callback.integrations.transformers import SkyHFCallback
-        return SkyHFCallback(log_dir=log_dir)
+    def transformers(log_dir: Optional[str] = None, total_steps: Optional[int] = None):
+        from sky_callback.integrations.transformers import SkyTransformersCallback
+        return SkyTransformersCallback(log_dir=log_dir)

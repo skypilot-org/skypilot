@@ -20,8 +20,9 @@ class SkyKerasCallback(keras.callbacks.Callback):
         log_dir: A directory to store the logs.
     """
 
-    def __init__(self, log_dir=None):
+    def __init__(self, log_dir=None, total_steps=None):
         self.log_dir = log_dir
+        self.total_steps = total_steps
         self.sky_callback = None
 
     def on_train_begin(self, logs=None):

@@ -8,8 +8,8 @@ import subprocess
 import sys
 import tempfile
 import typing
-import uuid
 from typing import Any, Dict, List, Tuple
+import uuid
 
 import colorama
 import prettytable
@@ -78,7 +78,7 @@ def _print_candidate_resources(
                 f'on candidate resources ({num_nodes} node{plural}):'
                 f'{colorama.Style.RESET_ALL}')
 
-    columns = ['NAME', 'CLOUD', 'INSTANCE', 'ACCELERATORS', 'COST ($/hr)']
+    columns = ['CLUSTER', 'CLOUD', 'INSTANCE', 'ACCELERATORS', 'COST ($/hr)']
     table_kwargs = {
         'hrules': prettytable.FRAME,
         'vrules': prettytable.NONE,
@@ -112,7 +112,7 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
     # Generate a bucket name.
     # TODO(woosuk): Use a more pleasant naming scheme.
     # TODO(woosuk): Ensure that the bucket name is globally unique.
-    bucket_name = f'sky-benchmark-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+    bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
     enabled_clouds = global_user_state.get_enabled_clouds()
@@ -209,9 +209,9 @@ def generate_benchmark_configs(
             candidate_config['file_mounts'] = {}
         # The bucket name and type are specified at launch time.
         candidate_config['file_mounts'][_SKY_REMOTE_BENCHMARK_DIR] = {
-            'name': '',
+            'name': None,
             'mode': 'MOUNT',
-            'store': ''
+            'store': None,
         }
 
         # Create a sym link to a directory in the benchmark bucket.

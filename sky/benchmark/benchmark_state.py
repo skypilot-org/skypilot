@@ -21,10 +21,12 @@ os.makedirs(pathlib.Path(_BENCHMARK_DB_PATH).parents[0], exist_ok=True)
 class _BenchmarkSQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database.
 
-    The database has two types of tables.
-    1. Benchmark table stores the benchmark name and
+    The database has three types of tables.
+    1. Benchmark table stores the benchmark names and
         which resources are used for benchmarking.
-    2. Benchmark Results table stores the benchmark results
+    2. Benchmark Config table stores Sky Benchmark configurations
+        (e.g., benchmark bucket name).
+    3. Benchmark Results table stores the benchmark results
         of the individual clusters used for benchmarking.
     """
 
@@ -43,7 +45,7 @@ class _BenchmarkSQLiteConn(threading.local):
             bucket TEXT,
             launched_at INTEGER,
             status TEXT)""")
-        # Table for Benchmark Config (e.g., benchmark bucket)
+        # Table for Benchmark Config (e.g., benchmark bucket name)
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS benchmark_config (
             key TEXT PRIMARY KEY, value TEXT)""")
