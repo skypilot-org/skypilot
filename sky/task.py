@@ -12,6 +12,7 @@ from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
+from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -66,12 +67,6 @@ def _is_valid_env_var(name: str) -> bool:
 
 class Task:
     """Task: a coarse-grained stage in an application."""
-
-    # Update the key list when a new field is added.
-    _YAML_KEYS = [
-        'name', 'run', 'workdir', 'setup', 'num_nodes', 'envs', 'file_mounts',
-        'inputs', 'outputs', 'resources'
-    ]
 
     @ux_utils.print_exception_no_traceback_decorator
     def __init__(
@@ -217,7 +212,8 @@ class Task:
         if config is None:
             config = {}
 
-        backend_utils.check_fields(config.keys(), Task._YAML_KEYS)
+        backend_utils.validate_schema(config, schemas.get_task_schema(),
+                                      'Invalid task YAML: ')
 
         task = Task(
             config.pop('name', None),

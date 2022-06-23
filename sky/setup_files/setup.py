@@ -28,6 +28,7 @@ install_requires = [
     'colorama',
     'cryptography',
     'jinja2',
+    'jsonschema',
     'networkx',
     'oauth2client',
     'pandas',

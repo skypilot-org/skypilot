@@ -24,6 +24,7 @@ import uuid
 import colorama
 import filelock
 import jinja2
+import jsonschema
 import psutil
 import requests
 from requests import adapters
@@ -46,6 +47,7 @@ from sky import spot as spot_lib
 from sky.skylet import log_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -1783,22 +1785,20 @@ class Backoff:
 
 
 @ux_utils.print_exception_no_traceback_decorator
-def check_fields(provided_fields, known_fields):
-    known_fields = set(known_fields)
-    unknown_fields = []
-    for field in provided_fields:
-        if field not in known_fields:
-            unknown_fields.append(field)
+def validate_schema(obj, schema, err_msg_prefix=''):
+    err_msg = None
+    try:
+        validator.SchemaValidator(schema).validate(obj)
+    except jsonschema.ValidationError as e:
+        err_msg = err_msg_prefix + e.message
+        if e.validator == 'additionalProperties':
+            known_fields = set(e.schema.get('properties', {}).keys())
+            for field in e.instance:
+                if field not in known_fields:
+                    most_similar_field = difflib.get_close_matches(
+                        field, known_fields, 1)
+                    if most_similar_field:
+                        err_msg += f'\nInstead of {field}, did you mean {most_similar_field[0]}?'
 
-    if len(unknown_fields) > 0:
-        invalid_keys = 'The following fields are invalid:\n'
-        for unknown_key in unknown_fields:
-            similar_keys = difflib.get_close_matches(unknown_key, known_fields)
-            key_invalid = f'    Unknown field \'{unknown_key}\'.'
-            if len(similar_keys) == 1:
-                key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
-            if len(similar_keys) > 1:
-                key_invalid += f' Did you mean one of {similar_keys}?'
-            key_invalid += '\n'
-            invalid_keys += key_invalid
-            raise ValueError(invalid_keys)
+    if err_msg:
+        raise ValueError(err_msg)
