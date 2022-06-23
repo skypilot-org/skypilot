@@ -2300,7 +2300,7 @@ class CloudVmRayBackend(backends.Backend):
                          handle: ResourceHandle,
                          terminate: bool,
                          purge: bool = False,
-                         post_cleanup: bool = True) -> bool:
+                         post_teardown_cleanup: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2329,8 +2329,7 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              (prev_status == global_user_state.ClusterStatus.STOPPED or
-               use_tpu_vm)):
+              prev_status == global_user_state.ClusterStatus.STOPPED):
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
@@ -2407,10 +2406,7 @@ class CloudVmRayBackend(backends.Backend):
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
                         reason='stopping/terminating cluster nodes'))
-            # This error returns when we call "gcloud delete" with an empty VM
-            # list where no instance exists. Safe to ignore it and do cleanup
-            # locally.
-            elif 'TPU must be specified.' not in stderr:
+            else:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
@@ -2419,7 +2415,7 @@ class CloudVmRayBackend(backends.Backend):
                         stderr=stderr))
                 return False
 
-        if post_cleanup:
+        if post_teardown_cleanup:
             return self.post_teardown_cleanup(handle, terminate, purge)
         else:
             return True

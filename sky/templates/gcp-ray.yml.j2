@@ -123,14 +123,13 @@ initialization_commands: []
 setup_commands:
   # GCP TPU VM image does not install conda by default.
   - which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/gcpuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base false)
-  - pip install --upgrade pip
   - (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`;
   - pip3 uninstall sky -y &> /dev/null;
     pip3 install "$(echo {{sky_remote_path}}/*.whl)";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
   # For TPU VM
-  - {{ tpu_vm is none }} || pip3 install --upgrade google-api-python-client
+  - {{ tpu_vm is none }} || (pip install --upgrade pip && pip3 install --upgrade google-api-python-client)
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

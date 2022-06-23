@@ -1371,6 +1371,7 @@ def _query_status_gcp(
             'STOPPED': global_user_state.ClusterStatus.STOPPED,
             'PREEMPTED': None,
         }
+        check_gcp_cli_include_tpu_vm()
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
@@ -1406,7 +1407,7 @@ def _query_status_gcp(
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,
-                                 post_cleanup=False)
+                                 post_teardown_cleanup=False)
 
     return status_list
 
