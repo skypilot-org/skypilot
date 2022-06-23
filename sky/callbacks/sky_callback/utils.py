@@ -11,14 +11,14 @@ class CallbackLoader:
     @staticmethod
     def keras(log_dir: Optional[str] = None, total_steps: Optional[int] = None):
         from sky_callback.integrations.keras import SkyKerasCallback
-        return SkyKerasCallback(log_dir=log_dir)
+        return SkyKerasCallback(log_dir=log_dir, total_steps=total_steps)
 
     @staticmethod
     def pytorch_lightning(log_dir: Optional[str] = None, total_steps: Optional[int] = None):
         from sky_callback.integrations.pytorch_lightning import SkyLightningCallback
-        return SkyLightningCallback(log_dir=log_dir)
+        return SkyLightningCallback(log_dir=log_dir, total_steps=total_steps)
 
     @staticmethod
     def transformers(log_dir: Optional[str] = None, total_steps: Optional[int] = None):
         from sky_callback.integrations.transformers import SkyTransformersCallback
-        return SkyTransformersCallback(log_dir=log_dir)
+        return SkyTransformersCallback(log_dir=log_dir, total_steps=total_steps)
