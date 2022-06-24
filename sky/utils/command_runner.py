@@ -102,19 +102,19 @@ def path_size_megabytes(path: str) -> int:
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
 
+class SshMode(enum.Enum):
+    """Enum for SSH mode."""
+    # Do not allocating pseudo-tty to avoid user input corrupting outputs.
+    NON_INTERACTIVE = 0
+    # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
+    # Be careful of this mode, as ctrl-c will be passed to remote process.
+    INTERACTIVE = 1
+    # Allocate a pseudo-tty and log into the ssh session.
+    LOGIN = 2
 
 class SSHCommandRunner:
     """Runner for SSH commands."""
 
-    class SshMode(enum.Enum):
-        """Enum for SSH mode."""
-        # Do not allocating pseudo-tty to avoid user input corrupting outputs.
-        NON_INTERACTIVE = 0
-        # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
-        # Be careful of this mode, as ctrl-c will be passed to remote process.
-        INTERACTIVE = 1
-        # Allocate a pseudo-tty and log into the ssh session.
-        LOGIN = 2
 
     def __init__(
         self,
@@ -140,7 +140,7 @@ class SSHCommandRunner:
     def _ssh_base_command(self, *, ssh_mode: SshMode,
                           port_forward: Optional[List[int]]) -> List[str]:
         ssh = ['ssh']
-        if ssh_mode == self.SshMode.NON_INTERACTIVE:
+        if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
             # ssh will be corrupted by the user's input.
             ssh += ['-T']
@@ -195,7 +195,7 @@ class SSHCommandRunner:
         """
         base_ssh_command = self._ssh_base_command(ssh_mode=ssh_mode,
                                                   port_forward=port_forward)
-        if ssh_mode == self.SshMode.LOGIN:
+        if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             command = base_ssh_command + cmd
             proc = subprocess_utils.run(command, shell=False, check=False)
@@ -219,7 +219,7 @@ class SSHCommandRunner:
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
             '2>&1',
         ]
-        if not process_stream and ssh_mode == self.SshMode.NON_INTERACTIVE:
+        if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
             command += [
                 # A hack to remove the following bash warnings (twice):
                 #  bash: cannot set terminal process group

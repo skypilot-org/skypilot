@@ -1743,7 +1743,7 @@ class CloudVmRayBackend(backends.Backend):
                     'Failed to create symlinks. The target destination '
                     'may already exist')
 
-            backend_utils.run_in_parallel(_symlink_node, ip_list)
+            subprocess_utils.run_in_parallel(_symlink_node, ip_list)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
@@ -1795,7 +1795,7 @@ class CloudVmRayBackend(backends.Backend):
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
-            backend_utils.run_in_parallel(_setup_node, ip_list)
+            subprocess_utils.run_in_parallel(_setup_node, ip_list)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -1981,7 +1981,7 @@ class CloudVmRayBackend(backends.Backend):
                 process_stream=False,
                 # Allocate a pseudo-terminal to disable output buffering.
                 # Otherwise, there may be 5 minutes delay in logging.
-                ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output in multithreading/multiprocessing.
                 # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
@@ -2013,7 +2013,7 @@ class CloudVmRayBackend(backends.Backend):
             code,
             stream_logs=True,
             process_stream=False,
-            ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
         )
 
@@ -2420,7 +2420,7 @@ class CloudVmRayBackend(backends.Backend):
         process_stream: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
-        ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         **kwargs,

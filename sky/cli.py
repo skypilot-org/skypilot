@@ -483,7 +483,7 @@ def _create_and_ssh_into_node(
     backend.run_on_head(handle,
                         commands,
                         port_forward=port_forward,
-                        ssh_mode=backend_utils.SshMode.LOGIN)
+                        ssh_mode=command_runner.SshMode.LOGIN)
     cluster_name = handle.cluster_name
 
     click.echo('To attach to it again:  ', nl=False)
@@ -1582,7 +1582,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        backend_utils.run_in_parallel(_terminate_or_stop, clusters)
+        subprocess_utils.run_in_parallel(_terminate_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
