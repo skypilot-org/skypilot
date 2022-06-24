@@ -512,6 +512,7 @@ def test_inline_spot_env():
     )
     run_one_test(test)
 
+# ---------- Testing customized image ----------
 def test_customized_image():
     """Test customized image"""
     name = _get_cluster_name()
