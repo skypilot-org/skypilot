@@ -36,7 +36,9 @@ def show_status_table(show_all: bool, refresh: bool):
     status_columns = [
         StatusColumn('NAME', _get_name),
         StatusColumn('LAUNCHED', _get_launched),
-        StatusColumn('RESOURCES', _get_resources),
+        StatusColumn('RESOURCES',
+                     _get_resources,
+                     trunc_length=50 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('DURATION', _get_duration, show_by_default=False),

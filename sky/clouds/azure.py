@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.adaptors import azure
@@ -166,7 +166,8 @@ class Azure(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
         if region is None:
-            assert zones is None, 'Set either both or neither for: region, zones.'
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
 

@@ -183,11 +183,13 @@ class AWS(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
         if region is None:
-            assert zones is None, 'Set either both or neither for: region, zones.'
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
         else:
-            assert zones is not None, 'Set either both or neither for: region, zones.'
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
 
         region_name = region.name
         zones = [zone.name for zone in zones]
@@ -200,8 +202,8 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        if r.customized_image_id is not None:
-            image_id = r.customized_image_id
+        if r.image_id is not None:
+            image_id = r.image_id
         else:
             image_id = self.get_default_ami(region_name, r.instance_type)
 

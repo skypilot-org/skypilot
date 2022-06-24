@@ -1002,6 +1002,15 @@ class RetryingVmProvisioner(object):
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
         returncode, stdout, stderr = ray_up()
+        if returncode != 0 and 'Processing file mounts' in stdout:
+            # Retry ray up if it failed due to file mounts, because it is
+            # probably due to too many ssh connections issue and can be fixed
+            # by retrying.
+            # This is required when using customized image for GCP.
+            logger.info(
+                'Retrying sky runtime setup due to ssh connection issue.')
+            returncode, stdout, stderr = ray_up()
+
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.

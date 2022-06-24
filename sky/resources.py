@@ -56,7 +56,7 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
-        customized_image_id: Optional[str] = None,
+        image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -83,7 +83,7 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._customized_image_id = customized_image_id
+        self._image_id = image_id
 
         self._set_accelerators(accelerators, accelerator_args)
 
@@ -104,8 +104,8 @@ class Resources:
             use_spot = '[Spot]'
 
         image_id = ''
-        if self.customized_image_id is not None:
-            image_id = f', image_id={self.customized_image_id!r}'
+        if self.image_id is not None:
+            image_id = f', image_id={self.image_id!r}'
 
         return (f'{self.cloud}({self._instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args}{image_id})')
@@ -158,8 +158,8 @@ class Resources:
         return self._disk_size
 
     @property
-    def customized_image_id(self) -> Optional[str]:
-        return self._customized_image_id
+    def image_id(self) -> Optional[str]:
+        return self._image_id
 
     def _set_accelerators(
         self,
@@ -314,7 +314,7 @@ class Resources:
                              f'{list(spot.SPOT_STRATEGIES.keys())}')
 
     def _try_validate_image_id(self) -> None:
-        if self._customized_image_id is None:
+        if self._image_id is None:
             return
 
         if not self._cloud.is_same_cloud(
@@ -360,13 +360,11 @@ class Resources:
             return False
         # self.region <= other.region
 
-        if (self.customized_image_id is None) != (other.customized_image_id is
-                                                  None):
+        if (self.image_id is None) != (other.image_id is None):
             # self and other's image id should be both None or both not None
             return False
 
-        if (self.customized_image_id is not None and
-                self.customized_image_id != other.customized_image_id):
+        if (self.image_id is not None and self.image_id != other.image_id):
             return False
 
         if (self._instance_type is not None and
@@ -400,8 +398,7 @@ class Resources:
             return False
         # self.region <= other.region
 
-        if (self.customized_image_id is not None and
-                self.customized_image_id != other.customized_image_id):
+        if (self.image_id is not None and self.image_id != other.image_id):
             return False
 
         if (self._instance_type is not None and
@@ -474,8 +471,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
-            customized_image_id=override.pop('image_id',
-                                             self.customized_image_id),
+            image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
         return resources
@@ -511,7 +507,7 @@ class Resources:
         if config.get('image_id') is not None:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS cloud with specified region.')
-            resources_fields['customized_image_id'] = config.pop('image_id')
+            resources_fields['image_id'] = config.pop('image_id')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -570,5 +566,5 @@ class Resources:
             self._spot_recovery = None
 
         if version < 4:
-            self._customized_image_id = None
+            self._image_id = None
         self.__dict__.update(state)

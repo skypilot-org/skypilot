@@ -26,7 +26,8 @@ _CREDENTIAL_FILES = [
     'legacy_credentials',
 ]
 
-_IMAGE_ID_PREFIX = 'projects/deeplearning-platform-release/global/images/family/'
+_IMAGE_ID_PREFIX = (
+    'projects/deeplearning-platform-release/global/images/family/')
 
 
 def _run_output(cmd):
@@ -158,11 +159,13 @@ class GCP(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
         if region is None:
-            assert zones is None, 'Set either both or neither for: region, zones.'
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
             region = self._get_default_region()
             zones = region.zones
         else:
-            assert zones is not None, 'Set either both or neither for: region, zones.'
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
 
         region_name = region.name
         zones = [zones[0].name]
@@ -201,8 +204,8 @@ class GCP(clouds.Cloud):
                 # CUDA driver version 470.103.01, CUDA Library 11.3
                 image_id = _IMAGE_ID_PREFIX + 'common-cu113'
 
-        if resources.customized_image_id is not None:
-            image_id = resources.customized_image_id
+        if resources.image_id is not None:
+            image_id = resources.image_id
 
         resources_vars['image_id'] = image_id
 
