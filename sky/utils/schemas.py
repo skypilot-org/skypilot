@@ -119,7 +119,7 @@ def get_task_schema():
             'inputs': {
                 'type': 'object',
                 'required': [],
-                "maxProperties": 1,
+                'maxProperties': 1,
                 'additionalProperties': {
                     'type': 'number'
                 }
@@ -127,7 +127,7 @@ def get_task_schema():
             'outputs': {
                 'type': 'object',
                 'required': [],
-                "maxProperties": 1,
+                'maxProperties': 1,
                 'additionalProperties': {
                     'type': 'number'
                 }
