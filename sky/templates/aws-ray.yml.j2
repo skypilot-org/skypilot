@@ -44,7 +44,7 @@ available_node_types:
     resources: {}
     node_config:
       InstanceType: {{instance_type}}
-      ImageId: {{aws_ami}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
+      ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
