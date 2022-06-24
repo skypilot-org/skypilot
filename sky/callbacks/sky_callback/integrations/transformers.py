@@ -31,7 +31,8 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         self.total_steps = total_steps
         self.sky_callback = None
 
-    def _infer_total_steps(self, state: transformers.TrainerState) -> Optional[int]:
+    def _infer_total_steps(self,
+                           state: transformers.TrainerState) -> Optional[int]:
         if self.total_steps is not None:
             return self.total_steps
         return state.max_steps

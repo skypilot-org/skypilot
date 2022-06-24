@@ -24,7 +24,9 @@ class SkyKerasCallback(keras.callbacks.Callback):
             the parameters passed in model.fit().
     """
 
-    def __init__(self, log_dir: Optional[str] = None, total_steps: Optional[int] = None) -> None:
+    def __init__(self,
+                 log_dir: Optional[str] = None,
+                 total_steps: Optional[int] = None) -> None:
         super().__init__()
         self.log_dir = log_dir
         self.total_steps = total_steps
@@ -49,7 +51,8 @@ class SkyKerasCallback(keras.callbacks.Callback):
         assert self.sky_callback is None
         # TODO(woosuk): Add support for distributed training.
         total_steps = self._infer_total_steps()
-        self.sky_callback = base.BaseCallback(log_dir=self.log_dir, total_steps=total_steps)
+        self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
+                                              total_steps=total_steps)
 
     def on_train_batch_begin(self, batch: int, logs: Dict = None) -> None:
         del batch, logs  # Unused.
