@@ -96,6 +96,7 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  # Make sure python3 & pip3 are available on this image.
   - pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
   - (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;

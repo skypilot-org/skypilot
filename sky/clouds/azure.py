@@ -169,7 +169,6 @@ class Azure(clouds.Cloud):
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
-            zones = region.zones
 
         region_name = region.name
         # Azure does not support specific zones.
