@@ -264,7 +264,8 @@ _TASK_OPTIONS = [
     click.option('--image-id',
                  required=False,
                  default=None,
-                 help=('Customized image id for launching the instances')),
+                 help=('Custom image id for launching the instances. '
+                       'Passing "none" resets the config.')),
     click.option(
         '--env',
         required=False,
@@ -567,16 +568,16 @@ def _make_dag_from_entrypoint_with_overrides(
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             task = sky.Task.from_yaml(entrypoint)
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
         else:
             if not entrypoint:
                 entrypoint = None
-            else:
-                # Treat entrypoint as a bash command.
-                click.secho('Task from command: ', fg='yellow', nl=False)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
+            if entrypoint is not None:
+                # Treat entrypoint as a bash command.
+                click.secho('Task from command: ', fg='yellow', nl=False)
         click.secho(entrypoint, bold=True)
         # Override.
         if workdir is not None:

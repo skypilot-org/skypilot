@@ -1007,7 +1007,7 @@ class RetryingVmProvisioner(object):
             # Retry ray up if it failed due to file mounts, because it is
             # probably due to too many ssh connections issue and can be fixed
             # by retrying.
-            # This is required when using customized image for GCP.
+            # This is required when using custom image for GCP.
             logger.info(
                 'Retrying sky runtime setup due to ssh connection issue.')
             returncode, stdout, stderr = ray_up()
@@ -2421,7 +2421,7 @@ class CloudVmRayBackend(backends.Backend):
                     require_outputs=True)
             if tpu_rc != 0:
                 if _TPU_NOT_FOUND_ERROR in tpu_stderr:
-                    logger.info(f'TPU {handle.tpu_name} not found. '
+                    logger.info('TPU not found. '
                                 'It should have been deleted already.')
                 elif purge:
                     logger.warning(

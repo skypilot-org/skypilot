@@ -513,14 +513,14 @@ def test_inline_spot_env():
     run_one_test(test)
 
 
-# ---------- Testing customized image ----------
-def test_customized_image():
-    """Test customized image"""
+# ---------- Testing custom image ----------
+def test_custom_image():
+    """Test custom image"""
     name = _get_cluster_name()
     test = Test(
-        'test-customized-image',
+        'test-custom-image',
         [
-            f'sky launch -c {name} --retry-until-up -y examples/customized_image.yaml',
+            f'sky launch -c {name} --retry-until-up -y examples/custom_image.yaml',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',

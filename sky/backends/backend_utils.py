@@ -617,7 +617,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 template_name,
                 dict(
                     resources_vars, **{
-                        'zones': ','.join(zones),
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
                     }),
@@ -1113,7 +1112,8 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     for i in range(max_attempts):
         try:
             out = run(f'ray get-head-ip {cluster_yaml}',
-                      stdout=subprocess.PIPE).stdout.decode().strip()
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.DEVNULL).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
             assert 1 == len(head_ip), out
             head_ip = head_ip[0]
