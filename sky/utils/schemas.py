@@ -118,6 +118,28 @@ def get_task_schema():
             },
             'run': {
                 'type': 'string',
-            }
+            },
+            'envs': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+            },
+            # inputs and outputs are experimental
+            'inputs': {
+                'type': 'object',
+                'required': [],
+                'maxProperties': 1,
+                'additionalProperties': {
+                    'type': 'number'
+                }
+            },
+            'outputs': {
+                'type': 'object',
+                'required': [],
+                'maxProperties': 1,
+                'additionalProperties': {
+                    'type': 'number'
+                }
+            },
         }
     }

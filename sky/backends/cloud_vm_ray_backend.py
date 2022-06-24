@@ -2453,7 +2453,7 @@ class CloudVmRayBackend(backends.Backend):
                     require_outputs=True)
             if tpu_rc != 0:
                 if _TPU_NOT_FOUND_ERROR in tpu_stderr:
-                    logger.info(f'TPU {handle.tpu_name} not found. '
+                    logger.info('TPU not found. '
                                 'It should have been deleted already.')
                 elif purge:
                     logger.warning(
