@@ -15,4 +15,4 @@ setup: |
   echo "running setup"
 
 run: |
-  echo 'hello sky'
+  echo "hello sky"
