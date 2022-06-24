@@ -317,6 +317,9 @@ class Resources:
         if self._image_id is None:
             return
 
+        if self.cloud is None:
+            raise ValueError('Cloud must be specified when image_id provided.')
+
         if not self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
             raise ValueError(

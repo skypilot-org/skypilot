@@ -512,6 +512,19 @@ def test_inline_spot_env():
     )
     run_one_test(test)
 
+def test_customized_image():
+    """Test customized image"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-customized-image',
+        [
+            f'sky launch -c {name} --retry-until-up -y examples/customized_image.yaml',
+            f'sky logs {name} 1 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
 
 @pytest.mark.slow
 def test_azure_start_stop_two_nodes():
