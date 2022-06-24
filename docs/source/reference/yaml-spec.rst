@@ -58,10 +58,26 @@ describe all fields available.
       # have a large working directory or tasks that write out large outputs.
       disk_size: 256
 
-      # Additional accelerator metadata (optional); only used for TPUs.
+      # Additional accelerator metadata (optional); only used for TPU node
+      # and TPU VM.
+      # Example usage:
+      #
+      #   To request a TPU node:
+      #     accelerator_args:
+      #       tpu_name: ...
+      #
+      #   To request a TPU VM:
+      #     accelerator_args:
+      #       tpu_vm: True
+      #
+      # By default, the value for "runtime_version" is decided based on which is
+      # requested and should work for either case. If passing in an incompatible
+      # version, GCP will throw an error during provisioning.
       accelerator_args:
-        tf_version: 2.5.0
+        # Default runtime_version is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
+        runtime_version: 2.5.0
         tpu_name: mytpu
+        tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
     file_mounts:
       # Uses rsync to copy local files to all nodes of the cluster.

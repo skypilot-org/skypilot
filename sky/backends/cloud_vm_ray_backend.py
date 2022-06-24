@@ -471,14 +471,21 @@ class RetryingVmProvisioner(object):
         zone = zones[0]
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
+        httperror_str = [
+            s for s in splits
+            if s.startswith('googleapiclient.errors.HttpError: ')
+        ]
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
             exception_dict = ast.literal_eval(exception_str)
+            # TPU VM returns a different structured response.
+            if 'errors' not in exception_dict:
+                exception_dict = {'errors': [exception_dict]}
             for error in exception_dict['errors']:
                 code = error['code']
                 message = error['message']
-                logger.warning(f'Got {code} in {zone.name} '
+                logger.warning(f'Got return code {code} in {zone.name} '
                                f'{style.DIM}(message: {message})'
                                f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':
@@ -504,8 +511,18 @@ class RetryingVmProvisioner(object):
                     # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
                     # This seems to be not documented by GCP.
                     self._blocked_zones.add(zone.name)
+                elif code == 8:
+                    # Error code 8 means TPU resources is out of capacity. Example:
+                    # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
+                    self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
+        elif len(httperror_str) >= 1:
+            # Parse HttpError for unauthorized regions. Example:
+            # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
+            # Details: "Location us-east1-d is not found or access is unauthorized.">
+            logger.info(f'Got {httperror_str[0]}')
+            self._blocked_zones.add(zone.name)
         else:
             # No such structured error response found.
             assert not exception_str, stderr
@@ -2282,7 +2299,8 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_no_lock(self,
                          handle: ResourceHandle,
                          terminate: bool,
-                         purge: bool = False) -> bool:
+                         purge: bool = False,
+                         post_teardown_cleanup: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2296,6 +2314,7 @@ class CloudVmRayBackend(backends.Backend):
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
+        use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2310,7 +2329,9 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              prev_status == global_user_state.ClusterStatus.STOPPED):
+              (prev_status == global_user_state.ClusterStatus.STOPPED or
+               use_tpu_vm)):
+            # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
@@ -2327,13 +2348,27 @@ class CloudVmRayBackend(backends.Backend):
                     f'--instance-ids $({query_cmd})')
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
-                query_cmd = (
-                    f'gcloud compute instances list '
-                    f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
-                    f'--zones={zone} --format=value\\(name\\)')
-                terminate_cmd = (
-                    f'gcloud compute instances delete --zone={zone} --quiet '
-                    f'$({query_cmd})')
+                # TODO(wei-lin): refactor by calling functions of node provider
+                # that uses Python API rather than CLI
+                if use_tpu_vm:
+                    # check if gcloud includes TPU VM API
+                    backend_utils.check_gcp_cli_include_tpu_vm()
+
+                    query_cmd = (
+                        f'gcloud compute tpus tpu-vm list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zone={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
+                else:
+                    query_cmd = (
+                        f'gcloud compute instances list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zones={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute instances delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
             else:
                 raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                  f'cluster {cluster_name!r}.')
@@ -2373,7 +2408,11 @@ class CloudVmRayBackend(backends.Backend):
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
                         reason='stopping/terminating cluster nodes'))
-            else:
+            # This error returns when we call "gcloud delete" with an empty VM
+            # list where no instance exists. Safe to ignore it and do cleanup
+            # locally.
+            # TODO(wei-lin): refactor error handling mechanism.
+            elif 'TPU must be specified.' not in stderr:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
@@ -2382,7 +2421,10 @@ class CloudVmRayBackend(backends.Backend):
                         stderr=stderr))
                 return False
 
-        return self.post_teardown_cleanup(handle, terminate, purge)
+        if post_teardown_cleanup:
+            return self.post_teardown_cleanup(handle, terminate, purge)
+        else:
+            return True
 
     def post_teardown_cleanup(self,
                               handle: ResourceHandle,
