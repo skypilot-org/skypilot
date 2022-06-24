@@ -256,6 +256,7 @@ class Task:
 
         if config.get('inputs') is not None:
             inputs_dict = config.pop('inputs')
+            assert len(inputs_dict) == 1, ('Only one input is allowed.')
             inputs = list(inputs_dict.keys())[0]
             estimated_size_gigabytes = list(inputs_dict.values())[0]
             # TODO: allow option to say (or detect) no download/egress cost.
@@ -264,6 +265,7 @@ class Task:
 
         if config.get('outputs') is not None:
             outputs_dict = config.pop('outputs')
+            assert len(outputs_dict) == 1, ('Only one output is allowed.')
             outputs = list(outputs_dict.keys())[0]
             estimated_size_gigabytes = list(outputs_dict.values())[0]
             task.set_outputs(outputs=outputs,
