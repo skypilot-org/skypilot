@@ -186,7 +186,7 @@ class GCPTPUNode(GCPNode):
     """Abstraction around tpu nodes"""
     # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State
 
-    NON_TERMINATED_STATUSES = {"CREATING", "STARTING", "RESTARTING", "READY", "PREEMPTED"}
+    NON_TERMINATED_STATUSES = {"CREATING", "STARTING", "RESTARTING", "READY"}
     RUNNING_STATUSES = {"READY"}
     STATUS_FIELD = "state"
 
