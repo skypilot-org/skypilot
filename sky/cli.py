@@ -568,17 +568,18 @@ def _make_dag_from_entrypoint_with_overrides(
     with sky.Dag() as dag:
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
-            task = sky.Task.from_yaml(entrypoint)
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
+            task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
                 entrypoint = None
-            task = sky.Task(name='sky-cmd', run=entrypoint)
-            task.set_resources({sky.Resources()})
-            if entrypoint is not None:
+            else:
                 # Treat entrypoint as a bash command.
                 click.secho('Task from command: ', fg='yellow', nl=False)
-        click.secho(entrypoint, bold=True)
+                click.secho(entrypoint, bold=True)
+            task = sky.Task(name='sky-cmd', run=entrypoint)
+            task.set_resources({sky.Resources()})
         # Override.
         if workdir is not None:
             task.workdir = workdir
