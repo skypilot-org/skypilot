@@ -572,6 +572,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     assert cluster_name is not None
 
     credentials = sky_check.get_cloud_credential_file_mounts()
+    region_name = resources_vars['region']
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -589,7 +590,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'security_group': f'sky-sg-{user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
-                'resource_group': f'{cluster_name}-{region}',
+                'resource_group': f'{cluster_name}-{region_name}',
                 # GCP only.
                 'gcp_project_id': gcp_project_id,
                 # Ray version.

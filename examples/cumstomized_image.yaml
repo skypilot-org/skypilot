@@ -1,0 +1,11 @@
+resources:
+  cloud: aws
+  region: us-east-2
+  image_id: ami-062ddd90fb6f8267a
+  accelerators: V100
+
+setup: |
+  echo "running setup"
+
+run: |
+  echo "hello sky"
