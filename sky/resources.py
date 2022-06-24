@@ -105,7 +105,7 @@ class Resources:
 
         image_id = ''
         if self.customized_image_id is not None:
-            image_id = f', image_id={self.customized_image_id}'
+            image_id = f', image_id={self.customized_image_id!r}'
 
         return (f'{self.cloud}({self._instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args}{image_id})')
@@ -317,11 +317,13 @@ class Resources:
         if self._customized_image_id is None:
             return
 
-        if not self._cloud.is_same_cloud(clouds.AWS()):
-            raise ValueError('image_id is only supported for AWS, please '
-                             'explicitly specify the cloud and region.')
+        if not self._cloud.is_same_cloud(
+                clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
+            raise ValueError(
+                'image_id is only supported for AWS and GCP, please '
+                'explicitly specify the cloud.')
 
-        if self._region is None:
+        if self._cloud.is_same_cloud(clouds.AWS()) and self._region is None:
             raise ValueError('image_id is only supported for AWS in a specific '
                              'region, please explicitly specify the region.')
 
@@ -360,10 +362,11 @@ class Resources:
 
         if (self.customized_image_id is None) != (other.customized_image_id is
                                                   None):
-            # self and other's customized image id should be both None or both not None
+            # self and other's image id should be both None or both not None
             return False
 
-        if (self.customized_image_id is not None and self.customized_image_id != other.customized_image_id):
+        if (self.customized_image_id is not None and
+                self.customized_image_id != other.customized_image_id):
             return False
 
         if (self._instance_type is not None and
@@ -471,7 +474,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
-            customized_image_id=override.pop('customized_image_id',
+            customized_image_id=override.pop('image_id',
                                              self.customized_image_id),
         )
         assert len(override) == 0

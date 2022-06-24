@@ -557,34 +557,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    resources_vars = cloud.make_deploy_resources_variables(to_provision)
+    resources_vars = cloud.make_deploy_resources_variables(
+        to_provision, region, zones)
     config_dict = {}
-
-    if region is None:
-        assert zones is None, 'Set either both or neither for: region, zones.'
-        region = cloud.get_default_region()
-        zones = region.zones
-    else:
-        assert isinstance(
-            cloud, clouds.Azure
-        ) or zones is not None, 'Set either both or neither for: region, zones.'
-    region = region.name
-    if isinstance(cloud, clouds.AWS):
-        # Only AWS supports multiple zones in the 'availability_zone' field.
-        zones = [zone.name for zone in zones]
-    elif isinstance(cloud, clouds.Azure):
-        # Azure does not support specific zones.
-        zones = []
-    else:
-        zones = [zones[0].name]
-
-    aws_ami = None
-    if isinstance(cloud, clouds.AWS):
-        instance_type = resources_vars['instance_type']
-        if to_provision.customized_image_id is not None:
-            aws_ami = to_provision.customized_image_id
-        else:
-            aws_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
@@ -605,11 +580,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
-                # Region/zones.
-                'region': region,
-                'zones': ','.join(zones),
-                # AWS only.
-                'aws_ami': aws_ami,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/sky-proj/sky/pull/742.
                 # Generate the name of the security group we're looking for.
