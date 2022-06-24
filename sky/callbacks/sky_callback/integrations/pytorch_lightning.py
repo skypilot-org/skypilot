@@ -65,7 +65,7 @@ class SkyLightningCallback(pl.Callback):
         if trainer.global_rank == 0:
             total_steps = self._infer_total_steps(trainer)
             self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
-                                                  total_steps=total_steps)
+                                                   total_steps=total_steps)
 
     def on_train_batch_start(
         self,
