@@ -1,4 +1,6 @@
 """SkyCallback integration with HuggingFace Transformers."""
+from typing import Optional
+
 import transformers
 
 from sky_callback import base
@@ -9,7 +11,7 @@ DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 class SkyTransformersCallback(transformers.TrainerCallback):
     """SkyCallback for HuggingFace Transformers.
-    
+
     Example:
         ```python
         from sky_callback import SkyTransformersCallback
@@ -22,17 +24,21 @@ class SkyTransformersCallback(transformers.TrainerCallback):
             the trainer state.
     """
 
-    def __init__(self, log_dir=None, total_steps=None):
+    def __init__(self,
+                 log_dir: Optional[str] = None,
+                 total_steps: Optional[int] = None) -> None:
         self.log_dir = log_dir
         self.total_steps = total_steps
         self.sky_callback = None
 
-    def _infer_total_steps(self, state):
+    def _infer_total_steps(self, state: transformers.TrainerState) -> Optional[int]:
         if self.total_steps is not None:
             return self.total_steps
         return state.max_steps
 
-    def on_train_begin(self, args, state, control, **kwargs):
+    def on_train_begin(self, args: transformers.TrainingArguments,
+                       state: transformers.TrainerState,
+                       control: transformers.TrainerControl, **kwargs) -> None:
         del args, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
@@ -42,14 +48,18 @@ class SkyTransformersCallback(transformers.TrainerCallback):
             self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                   total_steps=total_steps)
 
-    def on_step_begin(self, args, state, control, **kwargs):
+    def on_step_begin(self, args: transformers.TrainingArguments,
+                      state: transformers.TrainerState,
+                      control: transformers.TrainerControl, **kwargs) -> None:
         del args, state, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
         if self.sky_callback is not None:
             self.sky_callback.on_step_begin()
 
-    def on_step_end(self, args, state, control, **kwargs):
+    def on_substep_end(self, args: transformers.TrainingArguments,
+                       state: transformers.TrainerState,
+                       control: transformers.TrainerControl, **kwargs) -> None:
         del args, state, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return

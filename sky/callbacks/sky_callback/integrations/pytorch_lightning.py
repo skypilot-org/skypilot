@@ -1,4 +1,6 @@
 """SkyCallback integration with PyTorch Lightning."""
+from typing import Any, Optional
+
 import pytorch_lightning as pl
 
 from sky_callback import base
@@ -9,7 +11,7 @@ DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 class SkyLightningCallback(pl.Callback):
     """SkyCallback for PyTorch Lightning.
-    
+
     Example:
         ```python
         from sky_callback import SkyLightningCallback
@@ -22,12 +24,14 @@ class SkyLightningCallback(pl.Callback):
             the trainer.
     """
 
-    def __init__(self, log_dir=None, total_steps=None):
+    def __init__(self,
+                 log_dir: Optional[str] = None,
+                 total_steps: Optional[int] = None) -> None:
         self.log_dir = log_dir
         self.total_steps = total_steps
         self.sky_callback = None
 
-    def _infer_total_steps(self, trainer):
+    def _infer_total_steps(self, trainer: pl.Trainer) -> Optional[int]:
         if self.total_steps is not None:
             return self.total_steps
 
@@ -52,7 +56,8 @@ class SkyLightningCallback(pl.Callback):
                 total_steps = min(total_steps, max_steps)
         return total_steps
 
-    def on_train_start(self, trainer, pl_module):
+    def on_train_start(self, trainer: pl.Trainer,
+                       pl_module: pl.LightningModule) -> None:
         del pl_module  # Unused.
         if DISABLE_CALLBACK:
             return
@@ -64,11 +69,11 @@ class SkyLightningCallback(pl.Callback):
 
     def on_train_batch_start(
         self,
-        trainer,
-        pl_module,
-        batch,
-        batch_idx,
-    ):
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
         del trainer, pl_module, batch, batch_idx  # Unused.
         if DISABLE_CALLBACK:
             return
@@ -77,12 +82,12 @@ class SkyLightningCallback(pl.Callback):
 
     def on_train_batch_end(
         self,
-        trainer,
-        pl_module,
-        outputs,
-        batch,
-        batch_idx,
-    ):
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        outputs: Any,
+        batch: Any,
+        batch_idx: int,
+    ) -> None:
         del trainer, pl_module, outputs, batch, batch_idx  # Unused.
         if DISABLE_CALLBACK:
             return
