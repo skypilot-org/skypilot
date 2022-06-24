@@ -5,6 +5,7 @@ import datetime
 import difflib
 import enum
 import hashlib
+import json
 import getpass
 from multiprocessing import pool
 import os
@@ -592,7 +593,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
     assert cluster_name is not None
-
     credentials = sky_check.get_cloud_credential_file_mounts()
     yaml_path = fill_template(
         cluster_config_template,
@@ -632,7 +632,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
-    if resources_vars.get('tpu_type') is not None:
+    # For TPU nodes. TPU VMs do not need TPU_NAME.
+    if (resources_vars.get('tpu_type') is not None and
+            resources_vars.get('tpu_vm') is None):
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name
@@ -1351,27 +1353,64 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    status_map = {
-        'PROVISIONING': global_user_state.ClusterStatus.INIT,
-        'STARTING': global_user_state.ClusterStatus.INIT,
-        'RUNNING': global_user_state.ClusterStatus.UP,
-        'REPAIRING': global_user_state.ClusterStatus.STOPPED,
-        # 'TERMINATED' in GCP means stopped, with disk preserved.
-        'STOPPING': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATED': global_user_state.ClusterStatus.STOPPED,
-        # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
-        'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
-        'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
-    }
     launch_hashes = _ray_launch_hash(cluster, ray_config)
     hash_filter_str = ' '.join(launch_hashes)
-    # TODO(zhwu): The status of the TPU attached to the cluster should also be
-    # checked, since TPUs are not part of the VMs.
-    query_cmd = ('gcloud compute instances list '
-                 f'--filter="(labels.ray-cluster-name={cluster} AND '
-                 f'labels.ray-launch-config=({hash_filter_str}))" '
-                 '--format="value(status)"')
-    return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
+
+    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
+    zone = ray_config['provider'].get('availability_zone', '')
+    if use_tpu_vm:
+        # TPU VM's state definition is different from compute VM
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
+        status_map = {
+            'CREATING': global_user_state.ClusterStatus.INIT,
+            'STARTING': global_user_state.ClusterStatus.INIT,
+            'RESTARTING': global_user_state.ClusterStatus.INIT,
+            'READY': global_user_state.ClusterStatus.UP,
+            'REPAIRING': global_user_state.ClusterStatus.INIT,
+            # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
+            'STOPPING': global_user_state.ClusterStatus.STOPPED,
+            'STOPPED': global_user_state.ClusterStatus.STOPPED,
+            'PREEMPTED': None,
+        }
+        check_gcp_cli_include_tpu_vm()
+        query_cmd = ('gcloud compute tpus tpu-vm list '
+                     f'--zone {zone} '
+                     f'--filter="(labels.ray-cluster-name={cluster} AND '
+                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     '--format="value(state)"')
+    else:
+        status_map = {
+            'PROVISIONING': global_user_state.ClusterStatus.INIT,
+            'STARTING': global_user_state.ClusterStatus.INIT,
+            'RUNNING': global_user_state.ClusterStatus.UP,
+            'REPAIRING': global_user_state.ClusterStatus.INIT,
+            # 'TERMINATED' in GCP means stopped, with disk preserved.
+            'STOPPING': global_user_state.ClusterStatus.STOPPED,
+            'TERMINATED': global_user_state.ClusterStatus.STOPPED,
+            # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
+            'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
+            'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
+        }
+        # TODO(zhwu): The status of the TPU attached to the cluster should also be
+        # checked, since TPUs are not part of the VMs.
+        query_cmd = ('gcloud compute instances list '
+                     f'--filter="(labels.ray-cluster-name={cluster} AND '
+                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     '--format="value(status)"')
+    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
+                                     status_map)
+
+    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
+    # TODO(wei-lin): handle multi-node cases.
+    if use_tpu_vm and len(status_list) == 0:
+        backend = backends.CloudVmRayBackend()
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
+        backend.teardown_no_lock(handle,
+                                 terminate=True,
+                                 purge=False,
+                                 post_teardown_cleanup=False)
+
+    return status_list
 
 
 def _query_status_azure(
@@ -1466,7 +1505,6 @@ def _update_cluster_status_no_lock(
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
-
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
@@ -1722,6 +1760,37 @@ def check_cluster_name_not_reserved(
         msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         raise ValueError(msg)
+
+
+def check_gcp_cli_include_tpu_vm() -> None:
+    # TPU VM API available with gcloud version >= 382.0.0
+    version_cmd = 'gcloud version --format=json'
+    rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
+                                                 '/dev/null',
+                                                 shell=True,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
+
+    if rcode != 0:
+        failure_massage = ('Failed to run "gcloud version".\n'
+                           '**** STDOUT ****\n'
+                           '{stdout}\n'
+                           '**** STDERR ****\n'
+                           '{stderr}')
+        raise RuntimeError(failure_massage.format(stdout=stdout, stderr=stderr))
+
+    sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
+
+    if sdk_ver is None:
+        raise RuntimeError('Failed to get Google Cloud SDK version from'
+                           f' "gcloud version": {stdout}')
+    else:
+        major_ver = sdk_ver.split('.')[0]
+        major_ver = int(major_ver)
+        if major_ver < 382:
+            raise RuntimeError(
+                'Google Cloud SDK version must be >= 382.0.0 to use'
+                ' TPU VM APIs, check "gcloud version" for details.')
 
 
 def kill_children_processes():

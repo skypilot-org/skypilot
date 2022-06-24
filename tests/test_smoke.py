@@ -245,13 +245,35 @@ def test_tpu():
     test = Test(
         'tpu_app',
         [
-            f'sky launch -y -c {name} examples/tpu_app.yaml',
+            f'sky launch -y -c {name} examples/tpu/tpu_app.yaml',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -y -c {name} examples/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
+            f'sky launch -y -c {name} examples/tpu/tpu_app.yaml | grep "TPU .* already exists"',  # Ensure sky launch won't create another TPU.
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take >20 mins
+    )
+    run_one_test(test)
+
+
+# ---------- TPU VM. ----------
+def test_tpu_vm():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_vm_app',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky stop -y {name}',
+            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
+            f'sky start -y {name}',
+            f'sky exec {name} examples/tpu/tpuvm_mnist.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky stop -y {name}',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
     )
     run_one_test(test)
 
