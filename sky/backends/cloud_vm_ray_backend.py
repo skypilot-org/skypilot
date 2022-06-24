@@ -1002,7 +1002,8 @@ class RetryingVmProvisioner(object):
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
         returncode, stdout, stderr = ray_up()
-        if returncode != 0 and 'Processing file mounts' in stdout:
+        if (returncode != 0 and 'Processing file mounts' in stdout and
+                'Running setup commands' not in stdout):
             # Retry ray up if it failed due to file mounts, because it is
             # probably due to too many ssh connections issue and can be fixed
             # by retrying.
