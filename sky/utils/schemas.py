@@ -120,13 +120,17 @@ def get_task_schema():
                 'type': 'object',
                 'required': [],
                 "maxProperties": 1,
-                'additionalProperties': { 'type': 'number' }
+                'additionalProperties': {
+                    'type': 'number'
+                }
             },
             'outputs': {
                 'type': 'object',
                 'required': [],
                 "maxProperties": 1,
-                'additionalProperties': { 'type': 'number' }
+                'additionalProperties': {
+                    'type': 'number'
+                }
             },
             'envs': {
                 'type': 'object',
