@@ -63,7 +63,7 @@ describe all fields available.
         tf_version: 2.5.0
         tpu_name: mytpu
 
-      # Customized image id (optional, advanced). The image id used to boot the
+      # Custom image id (optional, advanced). The image id used to boot the
       # instances. Only supported for AWS and GCP. If not specified, sky will use
       # the default debian-based image suitable for machine learning tasks.
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
