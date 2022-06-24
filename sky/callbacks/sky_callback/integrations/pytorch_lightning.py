@@ -29,7 +29,7 @@ class SkyLightningCallback(pl.Callback):
                  total_steps: Optional[int] = None) -> None:
         self.log_dir = log_dir
         self.total_steps = total_steps
-        self.sky_callback = None
+        self._sky_callback = None
 
     def _infer_total_steps(self, trainer: pl.Trainer) -> Optional[int]:
         if self.total_steps is not None:
@@ -61,10 +61,10 @@ class SkyLightningCallback(pl.Callback):
         del pl_module  # Unused.
         if DISABLE_CALLBACK:
             return
-        assert self.sky_callback is None
+        assert self._sky_callback is None
         if trainer.global_rank == 0:
             total_steps = self._infer_total_steps(trainer)
-            self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
+            self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                   total_steps=total_steps)
 
     def on_train_batch_start(
@@ -77,8 +77,8 @@ class SkyLightningCallback(pl.Callback):
         del trainer, pl_module, batch, batch_idx  # Unused.
         if DISABLE_CALLBACK:
             return
-        if self.sky_callback is not None:
-            self.sky_callback.on_step_begin()
+        if self._sky_callback is not None:
+            self._sky_callback.on_step_begin()
 
     def on_train_batch_end(
         self,
@@ -91,5 +91,5 @@ class SkyLightningCallback(pl.Callback):
         del trainer, pl_module, outputs, batch, batch_idx  # Unused.
         if DISABLE_CALLBACK:
             return
-        if self.sky_callback is not None:
-            self.sky_callback.on_step_end()
+        if self._sky_callback is not None:
+            self._sky_callback.on_step_end()

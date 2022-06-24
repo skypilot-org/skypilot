@@ -29,7 +29,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
                  total_steps: Optional[int] = None) -> None:
         self.log_dir = log_dir
         self.total_steps = total_steps
-        self.sky_callback = None
+        self._sky_callback = None
 
     def _infer_total_steps(self,
                            state: transformers.TrainerState) -> Optional[int]:
@@ -43,10 +43,10 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         del args, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
-        assert self.sky_callback is None
+        assert self._sky_callback is None
         if state.is_world_process_zero:
             total_steps = self._infer_total_steps(state)
-            self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
+            self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                   total_steps=total_steps)
 
     def on_step_begin(self, args: transformers.TrainingArguments,
@@ -55,8 +55,8 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         del args, state, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
-        if self.sky_callback is not None:
-            self.sky_callback.on_step_begin()
+        if self._sky_callback is not None:
+            self._sky_callback.on_step_begin()
 
     def on_substep_end(self, args: transformers.TrainingArguments,
                        state: transformers.TrainerState,
@@ -64,5 +64,5 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         del args, state, control, kwargs  # Unused.
         if DISABLE_CALLBACK:
             return
-        if self.sky_callback is not None:
-            self.sky_callback.on_step_end()
+        if self._sky_callback is not None:
+            self._sky_callback.on_step_end()

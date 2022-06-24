@@ -30,7 +30,7 @@ class SkyKerasCallback(keras.callbacks.Callback):
         super().__init__()
         self.log_dir = log_dir
         self.total_steps = total_steps
-        self.sky_callback = None
+        self._sky_callback = None
 
     def _infer_total_steps(self) -> Optional[int]:
         if self.total_steps is not None:
@@ -48,20 +48,20 @@ class SkyKerasCallback(keras.callbacks.Callback):
         del logs  # Unused.
         if DISABLE_CALLBACK:
             return
-        assert self.sky_callback is None
+        assert self._sky_callback is None
         # TODO(woosuk): Add support for distributed training.
         total_steps = self._infer_total_steps()
-        self.sky_callback = base.BaseCallback(log_dir=self.log_dir,
+        self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                               total_steps=total_steps)
 
     def on_train_batch_begin(self, batch: int, logs: Dict = None) -> None:
         del batch, logs  # Unused.
         if DISABLE_CALLBACK:
             return
-        self.sky_callback.on_step_begin()
+        self._sky_callback.on_step_begin()
 
     def on_train_batch_end(self, batch: int, logs: Dict = None) -> None:
         del batch, logs  # Unused.
         if DISABLE_CALLBACK:
             return
-        self.sky_callback.on_step_end()
+        self._sky_callback.on_step_end()
