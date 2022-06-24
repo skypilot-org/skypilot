@@ -119,6 +119,12 @@ def get_task_schema():
             'run': {
                 'type': 'string',
             },
+            'envs': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+            },
+            # inputs and outputs are experimental
             'inputs': {
                 'type': 'object',
                 'required': [],
@@ -135,10 +141,5 @@ def get_task_schema():
                     'type': 'number'
                 }
             },
-            'envs': {
-                'type': 'object',
-                'required': [],
-                'additionalProperties': True,
-            }
         }
     }
