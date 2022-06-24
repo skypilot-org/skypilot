@@ -13,6 +13,7 @@ import sky
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
+from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
@@ -84,7 +85,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(msg)
     log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
-        backend_utils.run(
+        subprocess_utils.run(
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,

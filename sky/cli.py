@@ -55,6 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
@@ -2256,9 +2257,9 @@ def spot_status(all: bool, refresh: bool):
     code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
     returncode, job_table_str, stderr = backend.run_on_head(
         handle, code, require_outputs=True, stream_logs=False)
-    backend_utils.handle_returncode(returncode, code,
-                                    'Failed to fetch managed job statuses',
-                                    job_table_str + stderr)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to fetch managed job statuses',
+                                       job_table_str + stderr)
 
     spot_lib.dump_job_table_cache(job_table_str)
     click.echo(f'Managed spot jobs:\n{job_table_str}')
@@ -2339,8 +2340,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                                                 code,
                                                 require_outputs=True,
                                                 stream_logs=False)
-    backend_utils.handle_returncode(returncode, code,
-                                    'Failed to cancel managed spot job', stdout)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to cancel managed spot job',
+                                       stdout)
 
     click.echo(stdout)
     if 'Multiple jobs found with name' in stdout:

@@ -23,6 +23,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -176,9 +177,9 @@ def _execute(
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
             time.sleep(0.5)
-            backends.backend_utils.run('sky spot status')
+            subprocess_utils.run('sky spot status')
         else:
-            backends.backend_utils.run('sky status')
+            subprocess_utils.run('sky status')
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 
