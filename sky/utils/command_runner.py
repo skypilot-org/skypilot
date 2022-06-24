@@ -126,6 +126,11 @@ class SSHCommandRunner:
     ):
         """Initialize SSHCommandRunner.
 
+        Example Usage:
+            runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
+            runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
+            runner.rsync_up((source, target))
+
         Args:
             ip: The IP address of the remote machine.
             ssh_private_key: The path to the private key to use for ssh.
