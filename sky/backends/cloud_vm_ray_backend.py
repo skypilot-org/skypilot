@@ -1299,17 +1299,19 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             cluster_config_file)
 
-        for ip in ip_list:
+        runners = command_runner.SSHCommandRunner(ip_list, ssh_user, ssh_key)
+
+        def _setup_tpu_name_on_node(
+                runner: command_runner.SSHCommandRunner) -> None:
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
-            returncode = backend_utils.run_command_on_ip_via_ssh(
-                ip,
-                cmd,
-                ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                log_path=os.path.join(self.log_dir, 'tpu_setup.log'))
+            returncode = runner.run(cmd,
+                                    log_path=os.path.join(
+                                        self.log_dir, 'tpu_setup.log'))
             subprocess_utils.handle_returncode(
                 returncode, cmd, 'Failed to set TPU_NAME on node.')
+
+        subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
     @timeline.event
     def provision(self,
@@ -1628,6 +1630,11 @@ class CloudVmRayBackend(backends.Backend):
                                              handle.launched_nodes)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        runners = [
+            command_runner.SSHCommandRunner(ip, ssh_user, ssh_key,
+                                            self._ssh_control_name(handle))
+            for ip in ip_list
+        ]
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -1680,14 +1687,11 @@ class CloudVmRayBackend(backends.Backend):
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
                 backend_utils.parallel_cmd_with_rsync_up_on_all_ips(
-                    ip_list,
+                    runners,
                     source_target=(src, wrapped_dst),
                     cmd=mkdir_for_wrapped_dst,
                     run_rsync=True,
                     action_message='Syncing',
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
-                    ssh_control_name=self._ssh_control_name(handle),
                     log_path=log_path,
                     stream_logs=False,
                 )
@@ -1715,14 +1719,11 @@ class CloudVmRayBackend(backends.Backend):
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.
             backend_utils.parallel_cmd_with_rsync_up_on_all_ips(
-                ip_list,
+                runners,
                 source_target=(src, dst),
                 cmd=command,
                 action_message='Syncing',
                 run_rsync=False,
-                ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                ssh_control_name=self._ssh_control_name(handle),
                 log_path=log_path,
                 stream_logs=False,
             )
@@ -1730,14 +1731,8 @@ class CloudVmRayBackend(backends.Backend):
         symlink_command = ' && '.join(symlink_commands)
         if symlink_command:
 
-            def _symlink_node(ip):
-                returncode = backend_utils.run_command_on_ip_via_ssh(
-                    ip,
-                    symlink_command,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
-                    log_path=log_path,
-                    ssh_control_name=self._ssh_control_name(handle))
+            def _symlink_node(runner: command_runner.SSHCommandRunner):
+                returncode = runner.run(symlink_command, log_path=log_path)
                 subprocess_utils.handle_returncode(
                     returncode, symlink_command,
                     'Failed to create symlinks. The target destination '
@@ -1769,23 +1764,20 @@ class CloudVmRayBackend(backends.Backend):
                                                  handle=handle)
             ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
+            runners = command_runner.SSHCommandRunner.make_runner_list(
+                ip_list, ssh_user, ssh_key, self._ssh_control_name(handle))
 
-            def _setup_node(ip: int) -> int:
-                self._rsync_up(handle,
-                               ip=ip,
-                               source=setup_sh_path,
-                               target=f'/tmp/{setup_file}',
-                               stream_logs=False)
+            def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
+                runner.rsync_up(source_target=(setup_sh_path,
+                                               f'/tmp/{setup_file}'),
+                                stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-                returncode = backend_utils.run_command_on_ip_via_ssh(
-                    ip,
+                returncode = runner.run(
                     cmd,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
                     process_stream=False,
-                    ssh_control_name=self._ssh_control_name(handle))
+                )
                 subprocess_utils.handle_returncode(
                     returncode=returncode,
                     command=cmd,
@@ -1795,7 +1787,7 @@ class CloudVmRayBackend(backends.Backend):
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
-            subprocess_utils.run_in_parallel(_setup_node, ip_list)
+            subprocess_utils.run_in_parallel(_setup_node, runners)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -1906,6 +1898,8 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore
+        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(handle.head_ip, ssh_user, ssh_key, self._ssh_control_name(handle))
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -1913,9 +1907,7 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            self._rsync_up(handle,
-                           source=fp.name,
-                           target=script_path,
+            runner.rsync_up(source_target=(fp.name, script_path),
                            stream_logs=False)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
@@ -2420,7 +2412,8 @@ class CloudVmRayBackend(backends.Backend):
         process_stream: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
-        ssh_mode: command_runner.SshMode = command_runner.SshMode.NON_INTERACTIVE,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         **kwargs,
@@ -2431,20 +2424,19 @@ class CloudVmRayBackend(backends.Backend):
                                             max_attempts)
         ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(head_ip, ssh_user,
+                                                 ssh_private_key,
+                                                 self._ssh_control_name(handle))
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
-        return backend_utils.run_command_on_ip_via_ssh(
-            head_ip,
+        return runner.run(
             cmd,
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
             process_stream=process_stream,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
-            ssh_control_name=self._ssh_control_name(handle),
             require_outputs=require_outputs,
             **kwargs,
         )

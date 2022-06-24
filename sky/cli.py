@@ -55,6 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils

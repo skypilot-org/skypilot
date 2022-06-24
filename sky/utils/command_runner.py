@@ -102,6 +102,7 @@ def path_size_megabytes(path: str) -> int:
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
 
+
 class SshMode(enum.Enum):
     """Enum for SSH mode."""
     # Do not allocating pseudo-tty to avoid user input corrupting outputs.
@@ -112,9 +113,9 @@ class SshMode(enum.Enum):
     # Allocate a pseudo-tty and log into the ssh session.
     LOGIN = 2
 
+
 class SSHCommandRunner:
     """Runner for SSH commands."""
-
 
     def __init__(
         self,
@@ -136,6 +137,18 @@ class SSHCommandRunner:
         self.ssh_user = ssh_user
         self.ssh_private_key = ssh_private_key
         self.ssh_control_name = ssh_control_name
+
+    @staticmethod
+    def make_runner_list(
+            ip_list: List[str],
+            ssh_user: str,
+            ssh_private_key: str,
+            ssh_control_name: Optional[str] = None) -> List['SSHCommandRunner']:
+        """Helper function for creating runners with the same ssh credentials"""
+        return [
+            SSHCommandRunner(ip, ssh_user, ssh_private_key, ssh_control_name)
+            for ip in ip_list
+        ]
 
     def _ssh_base_command(self, *, ssh_mode: SshMode,
                           port_forward: Optional[List[int]]) -> List[str]:
