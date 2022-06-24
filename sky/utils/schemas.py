@@ -42,11 +42,14 @@ def get_resources_schema():
                 'required': [],
                 'additionalProperties': False,
                 'properties': {
-                    'tf_version': {
+                    'runtime_version': {
                         'type': 'string',
                     },
                     'tpu_name': {
                         'type': 'string',
+                    },
+                    'tpu_vm': {
+                        'type': 'boolean',
                     }
                 }
             },

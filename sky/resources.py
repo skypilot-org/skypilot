@@ -199,10 +199,22 @@ class Resources:
                     clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                if 'tf_version' not in accelerator_args:
-                    logger.info('Missing tf_version in accelerator_args, using'
-                                ' default (2.5.0)')
-                    accelerator_args['tf_version'] = '2.5.0'
+                use_tpu_vm = accelerator_args.get('tpu_vm', False)
+                if use_tpu_vm:
+                    backend_utils.check_gcp_cli_include_tpu_vm()
+                if self.instance_type is not None and use_tpu_vm:
+                    if self.instance_type != 'TPU-VM':
+                        raise ValueError(
+                            'Cannot specify instance type'
+                            f' (got "{self.instance_type}") for TPU VM.')
+                if 'runtime_version' not in accelerator_args:
+                    if use_tpu_vm:
+                        accelerator_args['runtime_version'] = 'tpu-vm-base'
+                    else:
+                        accelerator_args['runtime_version'] = '2.5.0'
+                    logger.info(
+                        'Missing runtime_version in accelerator_args, using'
+                        f' default ({accelerator_args["runtime_version"]})')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
