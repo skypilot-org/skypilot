@@ -18,13 +18,10 @@ file_mounts:
     source: .
     persistent: false
     mode: COPY
-  /imagenet:
-    source: s3://imagenet-bucket
   /imagenet-image:
     source: s3://sky-imagenet-data
 
 run: |
   set -ex
   ls ~/sky_workdir/sky
-  ls -l /imagenet | wc -l
   ls -l /imagenet-image/datasets
