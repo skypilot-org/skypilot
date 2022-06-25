@@ -89,7 +89,7 @@ class _AsyncSummaryWriter(threading.Thread):
                  warmup_steps: int,
                  step_begins: List[float],
                  step_ends: List[float],
-                 write_interval: float = 1) -> None:
+                 write_interval: float = 5) -> None:
         threading.Thread.__init__(self, daemon=True)
         self.log_path = os.path.join(log_dir, _BENCHMARK_SUMMARY)
         self.summary = self._BenchmarkSummary(
@@ -156,7 +156,8 @@ class _AsyncSummaryWriter(threading.Thread):
                 self._write_summary()
                 next_write_time = now + self.write_interval
             else:
-                time.sleep(next_write_time - now)
+                # Sleep for at most 1 second to avoid busy loop.
+                time.sleep(min(1, next_write_time - now))
 
         # Update and save the summary one last time.
         self._update_summary()
