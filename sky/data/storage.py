@@ -187,9 +187,9 @@ class AbstractStore:
             if not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
             logger.info(f'Downloading {remote_path} to {path}')
-            self.download_file(remote_path, path)
+            self._download_file(remote_path, path)
 
-    def download_file(self, remote_path: str, local_path: str) -> None:
+    def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on Store
 
         Args:
@@ -841,7 +841,7 @@ class S3Store(AbstractStore):
         bucket = self._create_s3_bucket(self.name)
         return bucket, True
 
-    def download_file(self, remote_path: str, local_path: str) -> None:
+    def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
         using the boto3 API
 
@@ -1107,7 +1107,7 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def download_file(self, remote_path: str, local_path: str) -> None:
+    def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
 
         Args:

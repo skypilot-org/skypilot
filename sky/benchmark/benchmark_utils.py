@@ -311,7 +311,8 @@ def update_benchmark_state(benchmark: str, clusters: List[str]):
         local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
         os.makedirs(local_dir, exist_ok=True)
         # TODO(woosuk): Handle possible exceptions.
-        bucket.download_file(
+        # pylint: disable=protected-access
+        bucket._download_file(
             f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
             f'{local_dir}/{_BENCHMARK_SUMMARY}',
         )
