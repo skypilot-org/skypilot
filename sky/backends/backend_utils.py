@@ -816,7 +816,8 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
 
 def parallel_cmd_with_rsync(
     runners: List['command_runner.SSHCommandRunner'],
-    source_target: Tuple[str, str],
+    source: str,
+    target: str,
     cmd: Optional[str],
     run_rsync: bool,
     *,
@@ -839,13 +840,13 @@ def parallel_cmd_with_rsync(
     fore = colorama.Fore
     style = colorama.Style
 
-    origin_source, target = source_target
+    origin_source = source
     if run_rsync:
         # Do this for local src paths, not for cloud store URIs
         # (otherwise we have '<abs path to cwd>/gs://.../object/').
         full_src = os.path.abspath(os.path.expanduser(origin_source))
         if not os.path.islink(full_src) and not os.path.isfile(full_src):
-            source_target = (os.path.join(full_src, ''), target)
+            source = os.path.join(full_src, '')
 
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:
@@ -863,7 +864,8 @@ def parallel_cmd_with_rsync(
             # TODO(zhwu): Optimize for large amount of files.
             # zip / transfer/ unzip
             runner.rsync_up(
-                source_target=source_target,
+                source=source,
+                target=target,
                 log_path=log_path,
                 stream_logs=stream_logs,
             )

@@ -129,7 +129,7 @@ class SSHCommandRunner:
         Example Usage:
             runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
-            runner.rsync_up((source, target))
+            runner.rsync_up(source, target)
 
         Args:
             ip: The IP address of the remote machine.
@@ -275,14 +275,14 @@ class SSHCommandRunner:
 
     def rsync_up(
         self,
-        source_target: Tuple[str, str],
+        source: str,
+        target: str,
         *,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
     ) -> Union[int, Tuple[int, str, str]]:
         """TODO(zhwu)"""
-        source, target = source_target
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used

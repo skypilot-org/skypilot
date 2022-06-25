@@ -1532,7 +1532,8 @@ class CloudVmRayBackend(backends.Backend):
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync_up(
-                source_target=(workdir, SKY_REMOTE_WORKDIR),
+                source=workdir,
+                target=SKY_REMOTE_WORKDIR,
                 log_path=log_path,
                 stream_logs=False,
             )
@@ -1601,7 +1602,8 @@ class CloudVmRayBackend(backends.Backend):
                          if storage_obj.source else storage_obj.name)
             backend_utils.parallel_cmd_with_rsync(
                 runners,
-                source_target=(src_print, dst),
+                source=src_print,
+                target=dst,
                 cmd=mount_cmd,
                 run_rsync=False,
                 action_message='Mounting',
@@ -1686,7 +1688,8 @@ class CloudVmRayBackend(backends.Backend):
                 # TODO(mluo): Fix method so that mkdir and rsync run together
                 backend_utils.parallel_cmd_with_rsync(
                     runners,
-                    source_target=(src, wrapped_dst),
+                    source=src,
+                    target=wrapped_dst,
                     cmd=mkdir_for_wrapped_dst,
                     run_rsync=True,
                     action_message='Syncing',
@@ -1718,7 +1721,8 @@ class CloudVmRayBackend(backends.Backend):
             # dst is only used for message printing.
             backend_utils.parallel_cmd_with_rsync(
                 runners,
-                source_target=(src, dst),
+                source=src,
+                target=dst,
                 cmd=command,
                 run_rsync=False,
                 action_message='Syncing',
@@ -1766,8 +1770,8 @@ class CloudVmRayBackend(backends.Backend):
                 ip_list, ssh_user, ssh_key, self._ssh_control_name(handle))
 
             def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
-                runner.rsync_up(source_target=(setup_sh_path,
-                                               f'/tmp/{setup_file}'),
+                runner.rsync_up(source=setup_sh_path,
+                                target=f'/tmp/{setup_file}',
                                 stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -1908,7 +1912,8 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            runner.rsync_up(source_target=(fp.name, script_path),
+            runner.rsync_up(source=fp.name,
+                            target=script_path,
                             stream_logs=False)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
