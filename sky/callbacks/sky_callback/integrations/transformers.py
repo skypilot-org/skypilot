@@ -27,14 +27,14 @@ class SkyTransformersCallback(transformers.TrainerCallback):
     def __init__(self,
                  log_dir: Optional[str] = None,
                  total_steps: Optional[int] = None) -> None:
-        self.log_dir = log_dir
-        self.total_steps = total_steps
+        self._log_dir = log_dir
+        self._total_steps = total_steps
         self._sky_callback = None
 
     def _infer_total_steps(self, args: transformers.TrainingArguments,
                            state: transformers.TrainerState) -> Optional[int]:
-        if self.total_steps is not None:
-            return self.total_steps
+        if self._total_steps is not None:
+            return self._total_steps
         total_steps = args.gradient_accumulation_steps * state.max_steps
         return total_steps
 
@@ -47,7 +47,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         assert self._sky_callback is None
         if state.is_world_process_zero:
             total_steps = self._infer_total_steps(args, state)
-            self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
+            self._sky_callback = base.BaseCallback(log_dir=self._log_dir,
                                                    total_steps=total_steps)
 
     def on_step_begin(self, args: transformers.TrainingArguments,

@@ -29,18 +29,18 @@ class BaseCallback:
 
         # Create a log directory.
         if log_dir is None:
-            self.log_dir = _SKY_REMOTE_BENCHMARK_DIR
+            self._log_dir = _SKY_REMOTE_BENCHMARK_DIR
         else:
-            self.log_dir = log_dir
-        self.log_dir = os.path.expanduser(self.log_dir)
-        os.makedirs(self.log_dir, exist_ok=True)
+            self._log_dir = log_dir
+        self._log_dir = os.path.expanduser(self._log_dir)
+        os.makedirs(self._log_dir, exist_ok=True)
 
         # TODO(woosuk): Do not store the entire timestamps.
         self._step_begins = []
         self._step_ends = []
 
         # Create a writer thread.
-        self._worker = _AsyncSummaryWriter(self.log_dir, total_steps,
+        self._worker = _AsyncSummaryWriter(self._log_dir, total_steps,
                                            warmup_steps, self._step_begins,
                                            self._step_ends)
         self._worker.start()
@@ -89,18 +89,18 @@ class _AsyncSummaryWriter(threading.Thread):
                  warmup_steps: int,
                  step_begins: List[float],
                  step_ends: List[float],
-                 write_interval: float = 5) -> None:
+                 write_interval_seconds: float = 5) -> None:
         threading.Thread.__init__(self, daemon=True)
-        self.log_path = os.path.join(log_dir, _BENCHMARK_SUMMARY)
-        self.summary = self._BenchmarkSummary(
+        self._log_path = os.path.join(log_dir, _BENCHMARK_SUMMARY)
+        self._summary = self._BenchmarkSummary(
             boot_time=psutil.boot_time(),
             create_time=psutil.Process(os.getpid()).create_time(),
             total_steps=total_steps,
             warmup_steps=warmup_steps,
         )
-        self.step_begins = step_begins
-        self.step_ends = step_ends
-        self.write_interval = write_interval
+        self._step_begins = step_begins
+        self._step_ends = step_ends
+        self._write_interval_seconds = write_interval_seconds
 
         # The thread will receive a stop signal when the main process exits,
         # so that it can save the up-to-date summary before termination.
@@ -111,21 +111,22 @@ class _AsyncSummaryWriter(threading.Thread):
         self.join()
 
     def _update_summary(self) -> None:
-        summary = self.summary
-        num_step_begins = len(self.step_begins)
-        num_step_ends = len(self.step_ends)
+        summary = self._summary
+        num_step_begins = len(self._step_begins)
+        num_step_ends = len(self._step_ends)
 
         if summary.first_step_time is None:
             if num_step_begins > 0:
-                summary.first_step_time = self.step_begins[0]
+                summary.first_step_time = self._step_begins[0]
         if summary.warmup_end_time is None:
             if num_step_ends >= summary.warmup_steps:
-                summary.warmup_end_time = self.step_ends[summary.warmup_steps - 1]
+                summary.warmup_end_time = self._step_ends[summary.warmup_steps -
+                                                          1]
 
         num_steps = num_step_ends
         summary.num_steps = num_steps
         if num_steps > 0:
-            last_step_time = self.step_ends[num_steps - 1]
+            last_step_time = self._step_ends[num_steps - 1]
             summary.last_step_time = last_step_time
 
         if num_steps > summary.warmup_steps:
@@ -143,8 +144,8 @@ class _AsyncSummaryWriter(threading.Thread):
                 summary.estimated_total_time = total_time
 
     def _write_summary(self) -> None:
-        with open(self.log_path, 'w') as f:
-            json.dump(self.summary.__dict__, f)
+        with open(self._log_path, 'w') as f:
+            json.dump(self._summary.__dict__, f)
 
     def run(self) -> None:
         """Periodically updates and saves the summary."""
@@ -154,7 +155,7 @@ class _AsyncSummaryWriter(threading.Thread):
             if now >= next_write_time:
                 self._update_summary()
                 self._write_summary()
-                next_write_time = now + self.write_interval
+                next_write_time = now + self._write_interval_seconds
             else:
                 # Sleep for at most 1 second to avoid busy loop.
                 time.sleep(min(1, next_write_time - now))

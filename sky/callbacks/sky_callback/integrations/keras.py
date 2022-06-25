@@ -29,8 +29,8 @@ class SkyKerasCallback(keras.callbacks.Callback):
                  log_dir: Optional[str] = None,
                  total_steps: Optional[int] = None) -> None:
         super().__init__()
-        self.log_dir = log_dir
-        self.total_steps = total_steps
+        self._log_dir = log_dir
+        self._total_steps = total_steps
         self._sky_callback = None
 
     def _is_chief(self) -> bool:
@@ -50,8 +50,8 @@ class SkyKerasCallback(keras.callbacks.Callback):
         return False
 
     def _infer_total_steps(self) -> Optional[int]:
-        if self.total_steps is not None:
-            return self.total_steps
+        if self._total_steps is not None:
+            return self._total_steps
 
         epochs = self.params['epochs']
         steps_per_epoch = self.params['steps']
@@ -68,7 +68,7 @@ class SkyKerasCallback(keras.callbacks.Callback):
         assert self._sky_callback is None
         if self._is_chief():
             total_steps = self._infer_total_steps()
-            self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
+            self._sky_callback = base.BaseCallback(log_dir=self._log_dir,
                                                    total_steps=total_steps)
 
     def on_train_batch_begin(self, batch: int, logs: Dict = None) -> None:
