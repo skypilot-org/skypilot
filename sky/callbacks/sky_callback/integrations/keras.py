@@ -1,6 +1,7 @@
 """SkyCallback integration with Keras."""
 from typing import Dict, Optional
 
+import tensorflow as tf
 from tensorflow import keras
 
 from sky_callback import base
@@ -32,6 +33,21 @@ class SkyKerasCallback(keras.callbacks.Callback):
         self.total_steps = total_steps
         self._sky_callback = None
 
+    def _is_chief(self) -> bool:
+        strategy = self.model.distribute_strategy
+        if strategy is None:
+            strategy = tf.distribute.get_strategy()
+        if strategy is None:
+            # Not in distributed training.
+            return True
+        if not strategy.extended._in_multi_worker_mode():
+            # Not in multi-worker distributed training.
+            return True
+        if strategy.extended.should_checkpoint:
+            # Chief worker.
+            return True
+        return False
+
     def _infer_total_steps(self) -> Optional[int]:
         if self.total_steps is not None:
             return self.total_steps
@@ -49,10 +65,10 @@ class SkyKerasCallback(keras.callbacks.Callback):
         if _DISABLE_CALLBACK:
             return
         assert self._sky_callback is None
-        # TODO(woosuk): Add support for distributed training.
-        total_steps = self._infer_total_steps()
-        self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
-                                               total_steps=total_steps)
+        if self._is_chief():
+            total_steps = self._infer_total_steps()
+            self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
+                                                   total_steps=total_steps)
 
     def on_train_batch_begin(self, batch: int, logs: Dict = None) -> None:
         del batch, logs  # Unused.
