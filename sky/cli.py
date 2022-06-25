@@ -2614,7 +2614,6 @@ def benchmark_ls() -> None:
         'TASK',
         'LAUNCHED',
         'STATUS',
-        '#NODES',
     ]
 
     max_num_candidates = 1
@@ -2649,11 +2648,19 @@ def benchmark_ls() -> None:
 
         benchmark_results = benchmark_state.get_benchmark_results(
             benchmark['name'])
-        # NODES
-        row.append(benchmark_results[0]['num_nodes'])
         # RESOURCES
         for b in benchmark_results:
-            row.append(str(b['resources']))
+            num_nodes = b['num_nodes']
+            resources = b['resources']
+            instance_type = resources.instance_type
+            if resources.accelerators is None:
+                accelerators = ''
+            else:
+                accelerator, count = list(resources.accelerators.items())[0]
+                accelerators = f' ({accelerator}:{count})'
+            # For brevity, do not display the cloud names.
+            resources_str = f'{num_nodes}x {instance_type}{accelerators}'
+            row.append(resources_str)
         row += [''] * (max_num_candidates - len(benchmark_results))
         benchmark_table.add_row(row)
     if benchmarks:
