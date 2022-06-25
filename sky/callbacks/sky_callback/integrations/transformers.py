@@ -31,8 +31,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         self.total_steps = total_steps
         self._sky_callback = None
 
-    def _infer_total_steps(self,
-                           args: transformers.TrainingArguments,
+    def _infer_total_steps(self, args: transformers.TrainingArguments,
                            state: transformers.TrainerState) -> Optional[int]:
         if self.total_steps is not None:
             return self.total_steps
