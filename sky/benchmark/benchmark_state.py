@@ -8,6 +8,7 @@ import threading
 import time
 import typing
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 

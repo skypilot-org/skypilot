@@ -41,7 +41,7 @@ class SkyLightningCallback(pl.Callback):
         # `reset_train_dataloader` which sets `num_training_batches`.
         num_training_batches = trainer.num_training_batches
 
-        # FIXME(woosuk): Check the early stopping flag.
+        # TODO(woosuk): Check the early stopping flag.
         # If it is set, total_steps should be None.
         if max_epochs == -1 and max_steps == -1:
             # Infinite training.
