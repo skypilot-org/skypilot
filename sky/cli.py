@@ -2658,7 +2658,7 @@ def benchmark_ls() -> None:
             else:
                 accelerator, count = list(resources.accelerators.items())[0]
                 accelerators = f' ({accelerator}:{count})'
-            # For brevity, do not display the cloud names.
+            # For brevity, skip the cloud names.
             resources_str = f'{num_nodes}x {instance_type}{accelerators}'
             row.append(resources_str)
         row += [''] * (max_num_candidates - len(benchmark_results))
