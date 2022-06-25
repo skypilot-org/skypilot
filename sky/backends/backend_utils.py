@@ -951,7 +951,7 @@ def rsync_to_ip(ip: str, source: str, target: str, ssh_user: str,
         f'ssh -i {ssh_key} {ssh_user}@{ip}')
 
 
-def get_local_custom_resources(
+def get_local_cluster_accelerators(
         ips: List[str], auth_config: Dict[str, str]) -> List[Dict[str, int]]:
     """Gets the custom accelerators for the local cluster.
 

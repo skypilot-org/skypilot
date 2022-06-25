@@ -1243,7 +1243,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
-            self._set_local_config()
+            self._generate_local_handle()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1259,20 +1259,19 @@ class CloudVmRayBackend(backends.Backend):
         def get_cluster_name(self):
             return self.cluster_name
 
-        def _set_local_config(self):
+        def _generate_local_handle(self):
             self.launched_resources = resources_lib.Resources(
                 cloud=clouds.Local(), region='Local')
-            self.local_config = {}
+            self.local_handle = {}
             config = backend_utils.get_local_cluster_config(self.cluster_name)
             if config is not None:
-                clus_config = config['cluster']
+                cluster_config = config['cluster']
                 auth_config = config['auth']
-                ips = clus_config['ips']
-                self.local_config['ips'] = ips
-                cluster_accs = backend_utils.get_local_custom_resources(
+                ips = cluster_config['ips']
+                self.local_handle['ips'] = ips
+                cluster_accs = backend_utils.get_local_cluster_accelerators(
                     ips, auth_config)
-                self.local_config['cluster_accelerators'] = cluster_accs
-                self.local_config['cluster_resources'] = \
+                self.local_handle['cluster_resources'] = \
                     [resources_lib.Resources(
                 cloud=clouds.Local(), accelerators=acc_dict, region='Local') \
                     for acc_dict in cluster_accs ]
@@ -1342,14 +1341,14 @@ class CloudVmRayBackend(backends.Backend):
         # in the Resources object of first task that was ran on the cluster.
         # In the local cloud case, resources.accelerators means the task
         # resources.
-        if handle.local_config:
-            launched_resources = handle.local_config['cluster_resources']
+        if handle.local_handle:
+            launched_resources = handle.local_handle['cluster_resources']
         # requested_resources <= actual_resources.
         with backend_utils.print_exception_no_traceback():
             # requested_resources <= actual_resources.
             if not (task.num_nodes <= handle.launched_nodes and
-                    task_resources.less_demanding_than(launched_resources,
-                                                       num_nodes=num_nodes)):
+                    task_resources.less_demanding_than(
+                        launched_resources, requested_num_nodes=num_nodes)):
                 if (task_resources.region is not None and
                         task_resources.region != launched_resources.region):
                     raise exceptions.ResourcesMismatchError(

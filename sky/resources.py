@@ -378,11 +378,18 @@ class Resources:
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
-                            num_nodes: Optional[int] = 1) -> bool:
-        """Returns whether this resources is less demanding than the other."""
+                            requested_num_nodes: Optional[int] = 1) -> bool:
+        """Returns whether this resources is less demanding than the other.
+
+        Args:
+            other: Resources of the launched cluster. If the cluster is
+              heterogeneous, it is represented as a list of Resource objects.
+            requested_num_nodes: Number of nodes that the current task
+              requests from the cluster.
+        """
         if isinstance(other, list):
             resources_list = [self.less_demanding_than(o) for o in other]
-            return sum(resources_list) <= num_nodes
+            return requested_num_nodes <= sum(resources_list)
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud

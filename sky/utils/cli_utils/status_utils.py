@@ -111,12 +111,14 @@ def show_local_status_table():
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
-                local_clus_resources = handle.local_config[
-                    'cluster_accelerators']
-                for idx, resource in enumerate(local_clus_resources):
+                local_cluster_resources = [
+                    r.accelerators
+                    for r in handle.local_handle['cluster_resources']
+                ]
+                for idx, resource in enumerate(local_cluster_resources):
                     if not bool(resource):
-                        local_clus_resources[idx] = None
-                resources_str = (f'{local_clus_resources}')
+                        local_cluster_resources[idx] = None
+                resources_str = (f'{local_cluster_resources}')
         else:
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
         cluster_name = handle.cluster_name
