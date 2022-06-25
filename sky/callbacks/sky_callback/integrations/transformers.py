@@ -32,20 +32,22 @@ class SkyTransformersCallback(transformers.TrainerCallback):
         self._sky_callback = None
 
     def _infer_total_steps(self,
+                           args: transformers.TrainingArguments,
                            state: transformers.TrainerState) -> Optional[int]:
         if self.total_steps is not None:
             return self.total_steps
-        return state.max_steps
+        total_steps = args.gradient_accumulation_steps * state.max_steps
+        return total_steps
 
     def on_train_begin(self, args: transformers.TrainingArguments,
                        state: transformers.TrainerState,
                        control: transformers.TrainerControl, **kwargs) -> None:
-        del args, control, kwargs  # Unused.
+        del control, kwargs  # Unused.
         if _DISABLE_CALLBACK:
             return
         assert self._sky_callback is None
         if state.is_world_process_zero:
-            total_steps = self._infer_total_steps(state)
+            total_steps = self._infer_total_steps(args, state)
             self._sky_callback = base.BaseCallback(log_dir=self.log_dir,
                                                    total_steps=total_steps)
 
