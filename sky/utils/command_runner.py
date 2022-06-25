@@ -37,7 +37,7 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     return path
 
 
-def ssh_options_list(ssh_private_key: Optional[str],
+def _ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
                      timeout=30) -> List[str]:
@@ -171,7 +171,7 @@ class SSHCommandRunner:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', f'{remote}:localhost:{local}']
-        return ssh + ssh_options_list(
+        return ssh + _ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name) + [f'{self.ssh_user}@{self.ip}']
 
@@ -302,7 +302,7 @@ class SSHCommandRunner:
                                                  _GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
-            ssh_options_list(self.ssh_private_key, self.ssh_control_name))
+            _ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         rsync_command.extend([
             source,
