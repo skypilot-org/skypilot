@@ -1,3 +1,5 @@
+"""Generic SkyCallback class used to build framework-specific callbacks."""
+import atexit
 import json
 import os
 import threading
@@ -42,6 +44,7 @@ class BaseCallback:
                                            warmup_steps, self._step_begins,
                                            self._step_ends)
         self._worker.start()
+        atexit.register(self._worker.stop)
 
     def on_step_begin(self) -> None:
         # Do not acuqire a lock for the sake of performance.
@@ -87,11 +90,8 @@ class _AsyncSummaryWriter(threading.Thread):
                  step_begins: List[float],
                  step_ends: List[float],
                  write_interval: float = 1) -> None:
-        threading.Thread.__init__(self)
-        self.daemon = True
-
-        self.log_dir = log_dir
-        self.log_path = os.path.join(self.log_dir, _BENCHMARK_SUMMARY)
+        threading.Thread.__init__(self, daemon=True)
+        self.log_path = os.path.join(log_dir, _BENCHMARK_SUMMARY)
         self.summary = self._BenchmarkSummary(
             boot_time=psutil.boot_time(),
             create_time=psutil.Process(os.getpid()).create_time(),
@@ -102,24 +102,33 @@ class _AsyncSummaryWriter(threading.Thread):
         self.step_ends = step_ends
         self.write_interval = write_interval
 
+        # The thread will receive a stop signal when the main process exits,
+        # so that it can save the up-to-date summary before termination.
+        self._received_stop_signal = threading.Event()
+
+    def stop(self) -> None:
+        self._received_stop_signal.set()
+        self.join()
+
     def _update_summary(self) -> None:
         summary = self.summary
         num_step_begins = len(self.step_begins)
-        num_steps = max(num_step_begins - 1, 0)
-        summary.num_steps = num_steps
-
-        if num_steps > 0:
-            last_step_time = self.step_begins[num_steps]
-            summary.last_step_time = last_step_time
+        num_step_ends = len(self.step_ends)
 
         if summary.first_step_time is None:
             if num_step_begins > 0:
                 summary.first_step_time = self.step_begins[0]
         if summary.warmup_end_time is None:
-            if num_step_begins > summary.warmup_steps:
-                summary.warmup_end_time = self.step_begins[summary.warmup_steps]
+            if num_step_ends >= summary.warmup_steps:
+                summary.warmup_end_time = self.step_ends[summary.warmup_steps - 1]
 
-        if num_step_begins > summary.warmup_steps + 1:
+        num_steps = num_step_ends
+        summary.num_steps = num_steps
+        if num_steps > 0:
+            last_step_time = self.step_ends[num_steps - 1]
+            summary.last_step_time = last_step_time
+
+        if num_steps > summary.warmup_steps:
             time_after_warmup = last_step_time - summary.warmup_end_time
             steps_after_warmup = num_steps - summary.warmup_steps
             time_per_step = time_after_warmup / steps_after_warmup
@@ -138,9 +147,9 @@ class _AsyncSummaryWriter(threading.Thread):
             json.dump(self.summary.__dict__, f)
 
     def run(self) -> None:
-        # NOTE: Last few steps can be missing.
+        """Periodically updates and saves the summary."""
         next_write_time = 0
-        while True:
+        while not self._received_stop_signal.is_set():
             now = time.time()
             if now >= next_write_time:
                 self._update_summary()
@@ -148,3 +157,7 @@ class _AsyncSummaryWriter(threading.Thread):
                 next_write_time = now + self.write_interval
             else:
                 time.sleep(next_write_time - now)
+
+        # Update and save the summary one last time.
+        self._update_summary()
+        self._write_summary()
