@@ -821,7 +821,6 @@ def parallel_cmd_with_rsync(
     run_rsync: bool,
     *,
     action_message: str,
-    ssh_control_name: Optional[str] = None,
     # Advanced options.
     log_path: str = os.devnull,
     stream_logs: bool = False,
@@ -846,16 +845,14 @@ def parallel_cmd_with_rsync(
         # (otherwise we have '<abs path to cwd>/gs://.../object/').
         full_src = os.path.abspath(os.path.expanduser(origin_source))
         if not os.path.islink(full_src) and not os.path.isfile(full_src):
-            source = os.path.join(full_src, '')
-        source_target = (source, target)
+            source_target = (os.path.join(full_src, ''), target)
 
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:
             rc, stdout, stderr = runner.run(cmd,
                                             log_path=log_path,
                                             stream_logs=stream_logs,
-                                            require_outputs=True,
-                                            ssh_control_name=ssh_control_name)
+                                            require_outputs=True)
             subprocess_utils.handle_returncode(
                 rc,
                 cmd,
@@ -871,14 +868,14 @@ def parallel_cmd_with_rsync(
                 stream_logs=stream_logs,
             )
 
-        num_nodes = len(runners)
-        plural = 's' if num_nodes > 1 else ''
-        message = (f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
-                   f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
-                   f'{style.BRIGHT}{target}{style.RESET_ALL}')
-        logger.info(message)
-        with safe_console_status(f'[bold cyan]{action_message}[/]'):
-            subprocess_utils.run_in_parallel(_sync_node, runners)
+    num_nodes = len(runners)
+    plural = 's' if num_nodes > 1 else ''
+    message = (f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
+               f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
+               f'{style.BRIGHT}{target}{style.RESET_ALL}')
+    logger.info(message)
+    with safe_console_status(f'[bold cyan]{action_message}[/]'):
+        subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
 def check_local_gpus() -> bool:

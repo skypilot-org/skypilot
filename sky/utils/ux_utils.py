@@ -18,7 +18,7 @@ def print_exception_no_traceback():
                 raise ValueError('...')
     """
     original_tracelimit = getattr(sys, 'tracebacklimit', 1000)
-    sys.tracebacklimit = 1
+    # sys.tracebacklimit = 1
     yield
     sys.tracebacklimit = original_tracelimit
 
