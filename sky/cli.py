@@ -2625,9 +2625,9 @@ def benchmark_ls() -> None:
             max_num_candidates = num_candidates
 
     if max_num_candidates == 1:
-        columns += ['RESOURCES']
+        columns += ['CANDIDATE']
     else:
-        columns += [f'RESOURCES {i}' for i in range(1, max_num_candidates + 1)]
+        columns += [f'CANDIDATE {i}' for i in range(1, max_num_candidates + 1)]
     benchmark_table = log_utils.create_table(columns)
 
     for benchmark in benchmarks:
