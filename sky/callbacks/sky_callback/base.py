@@ -6,8 +6,8 @@ from typing import List, Optional
 
 import psutil
 
-SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
-BENCHMARK_SUMMARY = 'benchmark_summary.json'
+_SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
+_BENCHMARK_SUMMARY = 'benchmark_summary.json'
 
 
 class BaseCallback:
