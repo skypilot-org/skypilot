@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -207,15 +207,6 @@ class Resources:
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
 
-    def override_accelerators(
-        self,
-        accelerators: Union[None, str, Dict[str, int]],
-        accelerator_args: Optional[Dict[str, str]] = None,
-    ) -> None:
-        """Override the accelerators of the current Resources class."""
-        self._accelerators = accelerators
-        self._accelerator_args = accelerator_args
-
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
@@ -385,8 +376,13 @@ class Resources:
         # self == other
         return True
 
-    def less_demanding_than(self, other: 'Resources') -> bool:
+    def less_demanding_than(self,
+                            other: Union[List['Resources'], 'Resources'],
+                            num_nodes: Optional[int] = 1) -> bool:
         """Returns whether this resources is less demanding than the other."""
+        if isinstance(other, list):
+            resources_list = [self.less_demanding_than(o) for o in other]
+            return sum(resources_list) <= num_nodes
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
