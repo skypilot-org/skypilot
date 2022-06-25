@@ -301,7 +301,8 @@ def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            gpus: Optional[str] = None,
                            use_spot: Optional[int] = None,
-                           disk_size: Optional[int] = None):
+                           disk_size: Optional[int] = None) -> Dict[str, Any]:
+    """Parses the override parameters into a dictionary."""
     override_params = {}
     if cloud is not None:
         if cloud.lower() == 'none':
