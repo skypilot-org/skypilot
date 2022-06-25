@@ -37,6 +37,7 @@ class SkyKerasCallback(keras.callbacks.Callback):
         strategy = self.model.distribute_strategy
         if strategy is None:
             strategy = tf.distribute.get_strategy()
+
         if strategy is None:
             # Not in distributed training.
             return True
