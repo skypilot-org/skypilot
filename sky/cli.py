@@ -2849,6 +2849,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             print('Both --all and benchmark(s) specified '
                   'for sky bench delete. Letting --all take effect.')
 
+    if not to_delete:
+        return
+
     benchmark_list = ', '.join([r['name'] for r in to_delete])
     plural = 's' if len(to_delete) > 1 else ''
     if not yes:
