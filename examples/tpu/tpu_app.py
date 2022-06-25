@@ -2,7 +2,7 @@ import sky
 
 with sky.Dag() as dag:
     # The working directory contains all code and will be synced to remote.
-    workdir = './examples/tpu_app_code'
+    workdir = './examples/tpu/tpu_app_code'
 
     # The setup command.  Will be run under the working directory.
     setup = 'pip install --upgrade pip && \
@@ -23,7 +23,7 @@ with sky.Dag() as dag:
     train.set_resources({
         sky.Resources(accelerators='tpu-v3-8',
                       accelerator_args={
-                          'tf_version': '2.5.0',
+                          'runtime_version': '2.5.0',
                           'tpu_name': 'weilin-bert-test-big'
                       }),
     })

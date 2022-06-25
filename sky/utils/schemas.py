@@ -42,11 +42,14 @@ def get_resources_schema():
                 'required': [],
                 'additionalProperties': False,
                 'properties': {
-                    'tf_version': {
+                    'runtime_version': {
                         'type': 'string',
                     },
                     'tpu_name': {
                         'type': 'string',
+                    },
+                    'tpu_vm': {
+                        'type': 'boolean',
                     }
                 }
             }
@@ -115,6 +118,28 @@ def get_task_schema():
             },
             'run': {
                 'type': 'string',
-            }
+            },
+            'envs': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': True,
+            },
+            # inputs and outputs are experimental
+            'inputs': {
+                'type': 'object',
+                'required': [],
+                'maxProperties': 1,
+                'additionalProperties': {
+                    'type': 'number'
+                }
+            },
+            'outputs': {
+                'type': 'object',
+                'required': [],
+                'maxProperties': 1,
+                'additionalProperties': {
+                    'type': 'number'
+                }
+            },
         }
     }

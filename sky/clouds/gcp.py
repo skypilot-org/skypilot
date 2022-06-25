@@ -155,6 +155,7 @@ class GCP(clouds.Cloud):
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
+            'tpu_vm': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
             'image_name': 'common-cpu',
@@ -169,7 +170,10 @@ class GCP(clouds.Cloud):
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
-                resources_vars['tf_version'] = r.accelerator_args['tf_version']
+
+                resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
+                resources_vars['runtime_version'] = r.accelerator_args[
+                    'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
@@ -206,9 +210,13 @@ class GCP(clouds.Cloud):
             assert len(
                 instance_list
             ) == 1, f'More than one instance type matched, {instance_list}'
+
             host_vm_type = instance_list[0]
             acc_dict = {acc: acc_count}
-
+            if resources.accelerator_args is not None:
+                use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+                if use_tpu_vm:
+                    host_vm_type = 'TPU-VM'
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
