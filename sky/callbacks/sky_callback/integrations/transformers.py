@@ -6,7 +6,7 @@ import transformers
 from sky_callback import base
 from sky_callback import utils
 
-DISABLE_CALLBACK = utils.DISABLE_CALLBACK
+_DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 
 class SkyTransformersCallback(transformers.TrainerCallback):
@@ -41,7 +41,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
                        state: transformers.TrainerState,
                        control: transformers.TrainerControl, **kwargs) -> None:
         del args, control, kwargs  # Unused.
-        if DISABLE_CALLBACK:
+        if _DISABLE_CALLBACK:
             return
         assert self._sky_callback is None
         if state.is_world_process_zero:
@@ -53,7 +53,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
                       state: transformers.TrainerState,
                       control: transformers.TrainerControl, **kwargs) -> None:
         del args, state, control, kwargs  # Unused.
-        if DISABLE_CALLBACK:
+        if _DISABLE_CALLBACK:
             return
         if self._sky_callback is not None:
             self._sky_callback.on_step_begin()
@@ -62,7 +62,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
                        state: transformers.TrainerState,
                        control: transformers.TrainerControl, **kwargs) -> None:
         del args, state, control, kwargs  # Unused.
-        if DISABLE_CALLBACK:
+        if _DISABLE_CALLBACK:
             return
         if self._sky_callback is not None:
             self._sky_callback.on_step_end()

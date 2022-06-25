@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from sky_callback import base
 from sky_callback import utils
 
-DISABLE_CALLBACK = utils.DISABLE_CALLBACK
+_DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 
 
 class SkyLightningCallback(pl.Callback):
@@ -59,7 +59,7 @@ class SkyLightningCallback(pl.Callback):
     def on_train_start(self, trainer: pl.Trainer,
                        pl_module: pl.LightningModule) -> None:
         del pl_module  # Unused.
-        if DISABLE_CALLBACK:
+        if _DISABLE_CALLBACK:
             return
         assert self._sky_callback is None
         if trainer.global_rank == 0:
@@ -75,7 +75,7 @@ class SkyLightningCallback(pl.Callback):
         batch_idx: int,
     ) -> None:
         del trainer, pl_module, batch, batch_idx  # Unused.
-        if DISABLE_CALLBACK:
+        if _DISABLE_CALLBACK:
             return
         if self._sky_callback is not None:
             self._sky_callback.on_step_begin()
@@ -89,7 +89,7 @@ class SkyLightningCallback(pl.Callback):
         batch_idx: int,
     ) -> None:
         del trainer, pl_module, outputs, batch, batch_idx  # Unused.
-        if DISABLE_CALLBACK:
+        if _DISABLE_CALLBACK:
             return
         if self._sky_callback is not None:
             self._sky_callback.on_step_end()
