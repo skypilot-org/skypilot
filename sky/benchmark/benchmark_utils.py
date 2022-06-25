@@ -21,7 +21,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
-from sky.callbacks.sky_callback import base
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
 
@@ -32,9 +31,12 @@ logger = sky_logging.init_logger(__name__)
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
-_SKY_REMOTE_BENCHMARK_DIR_SYMLINK = base.SKY_REMOTE_BENCHMARK_DIR
-
-_BENCHMARK_SUMMARY = base.BENCHMARK_SUMMARY
+# NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR
+# in sky/callbacks/sky_callback/base.py.
+_SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
+# NOTE: This must be the same as _BENCHMARK_SUMMARY
+# in sky/callbacks/sky_callback/base.py.
+_BENCHMARK_SUMMARY = 'benchmark_summary.json'
 
 _Config = Dict[str, Any]
 
