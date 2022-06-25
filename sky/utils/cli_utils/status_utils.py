@@ -87,9 +87,10 @@ def show_local_status_table():
     Sky understands what types of resources are on the nodes and has ran at
     least one job on the cluster.
     """
-    clusters_status = backend_utils.get_clusters(include_reserved=False,
-                                                 refresh=False,
-                                                 filter_clouds='local')
+    clusters_status = backend_utils.get_clusters(
+        include_reserved=False,
+        refresh=False,
+        filter_clouds=backend_utils.CloudFilterType.LOCAL)
     columns = [
         'NAME',
         'CLUSTER_USER',

@@ -1680,6 +1680,15 @@ class CloudVmRayBackend(backends.Backend):
 
         if not storage_mounts:
             return
+
+        cloud = handle.launched_resources.cloud
+        # TODO(romil): Support Mounting for Local (remove sudo installation)
+        if isinstance(cloud, clouds.Local):
+            logger.warning(
+                f'{colorama.Fore.RED}Sky On-prem does not support '
+                f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
+            return
+
         fore = colorama.Fore
         style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
@@ -1784,16 +1793,10 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
                     f': {style.BRIGHT}{src}{style.RESET_ALL} -> '
                     f'{style.BRIGHT}{dst}{style.RESET_ALL}')
-        cloud = handle.launched_resources.cloud
-        # TODO(romil): Support Mounting for Local (remove sudo installation)
-        if action_message == 'Mounting' and isinstance(cloud, clouds.Local):
-            logger.warning(
-                f'{colorama.Fore.RED}Sky On-prem does not support '
-                f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
-        else:
-            with backend_utils.safe_console_status(
-                    f'[bold cyan]{action_message}[/]'):
-                backend_utils.run_in_parallel(_sync_node, ip_list)
+
+        with backend_utils.safe_console_status(
+                f'[bold cyan]{action_message}[/]'):
+            backend_utils.run_in_parallel(_sync_node, ip_list)
 
     def _execute_file_mounts(self, handle: ResourceHandle,
                              file_mounts: Dict[Path, Path]):
@@ -2162,6 +2165,7 @@ class CloudVmRayBackend(backends.Backend):
         ray_command: str,
         ray_job_id: str,
     ):
+        """Generates and prepares job submission code for local clusters."""
         head_ip = backend_utils.get_head_ip(handle, True)
         ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)

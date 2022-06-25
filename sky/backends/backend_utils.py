@@ -689,6 +689,8 @@ def list_local_clusters():
 
     local_cluster_names = []
     for clus in local_cluster_paths:
+        # TODO(mluo): Define a scheme for cluster config to check if YAML
+        # schema is correct.
         with open(clus, 'r') as f:
             yaml_config = yaml.safe_load(f)
             user_config = yaml_config['auth']
@@ -742,8 +744,36 @@ def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def run_command_and_handle_ssh_failure(
+        ip: str,
+        command: str,
+        ssh_user: str,
+        ssh_key: str,
+        failure_message: Optional[str] = None) -> str:
+    """Runs command remote and returns the output with proper error handling."""
+    rc, stdout, stderr = run_command_on_ip_via_ssh(ip,
+                                                   command,
+                                                   require_outputs=True,
+                                                   ssh_user=ssh_user,
+                                                   ssh_private_key=ssh_key,
+                                                   stream_logs=False)
+    if rc == 255:
+        # SSH failed
+        raise ValueError(f'SSH with user {ssh_user} and key {ssh_key} '
+                         f'to {ip} failed. Check your credentials and try '
+                         f'again.')
+    handle_returncode(rc, command, failure_message, stderr=stderr)
+
+    return stdout
+
+
 def local_cloud_ray_postprocess(cluster_config_file: str):
-    """Launches Ray autoscaler on worker nodes for a local cluster."""
+    """Completes filemounting and setup on worker nodes.
+
+    Syncs filemounts and runs setup on worker nodes for a local cluster.
+    This is a workaround for Ray Autoscaler bug
+    in which ray up does not perform these tasks for a local cluster
+    """
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -785,11 +815,15 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
                 else:
                     full_src = f'{full_src}/'
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-                run_command_on_ip_via_ssh(ip,
-                                          mkdir_for_wrapped_dst,
-                                          ssh_user=ssh_user,
-                                          ssh_private_key=ssh_key,
-                                          stream_logs=False)
+
+                run_command_and_handle_ssh_failure(
+                    ip,
+                    mkdir_for_wrapped_dst,
+                    ssh_user=ssh_user,
+                    ssh_key=ssh_key,
+                    failure_message=
+                    f'Failed to run {mkdir_for_wrapped_dst} on remote.')
+
                 rsync_command = [
                     'rsync', '-Pavz', '--filter=\'dir-merge,- .gitignore\'',
                     f'--exclude=\'{rsync_exclude}\''
@@ -807,11 +841,13 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
                                      shell=True)
 
             cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-            run_command_on_ip_via_ssh(ip,
-                                      cmd,
-                                      ssh_user=ssh_user,
-                                      ssh_private_key=ssh_key,
-                                      stream_logs=False)
+            run_command_and_handle_ssh_failure(
+                ip,
+                cmd,
+                ssh_user=ssh_user,
+                ssh_key=ssh_key,
+                failure_message=
+                'Failed to setup Ray autoscaler commands on remote.')
 
         run_in_parallel(_ray_up_local_worker, worker_ips)
 
@@ -832,44 +868,32 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     ssh_key = auth_config['ssh_private_key']
     get_python_cmd = 'python3 --version | awk \'{{print $2}}\''
 
-    def run_command_and_handle_ssh_failure(ip: str, command: str,
-                                           failure_message: str):
-        rc, _, stderr = run_command_on_ip_via_ssh(ip,
-                                                  command,
-                                                  require_outputs=True,
-                                                  ssh_user=ssh_user,
-                                                  ssh_private_key=ssh_key,
-                                                  stream_logs=False)
-        if rc == 255:
-            # SSH failed
-            raise ValueError(f'SSH with user {ssh_user} and key {ssh_key} '
-                             f'to {ip} failed. Check your credentials and try '
-                             f'again.')
-        elif rc:
-            logger.info(stderr)
-            raise ValueError(failure_message.format(ip=ip))
-
     for ip in ips:
         # Checks for python3 installation.
-        run_command_and_handle_ssh_failure(ip, 'sudo python3 --version',
-                                           f'Python3 is not installed on {ip}')
+        run_command_and_handle_ssh_failure(
+            ip,
+            'sudo python3 --version',
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            failure_message=f'Python3 is not installed on {ip}')
 
         # Checks if base python and the root user (sudo) base python are the
         # same version.
-        _, base_python, _ = run_command_on_ip_via_ssh(ip,
-                                                      get_python_cmd,
-                                                      ssh_user=ssh_user,
-                                                      ssh_private_key=ssh_key,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-        base_python = base_python.strip()
+        base_python = run_command_and_handle_ssh_failure(
+            ip,
+            get_python_cmd,
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            failure_message=f'Check python installation on {ip}')
 
-        _, sudo_python, _ = run_command_on_ip_via_ssh(ip,
-                                                      f'sudo {get_python_cmd}',
-                                                      ssh_user=ssh_user,
-                                                      ssh_private_key=ssh_key,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
+        sudo_python = run_command_and_handle_ssh_failure(
+            ip,
+            f'sudo {get_python_cmd}',
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            failure_message=f'Check python installation on {ip}')
+
+        base_python = base_python.strip()
         sudo_python = sudo_python.strip()
 
         if base_python != sudo_python:
@@ -878,12 +902,20 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
                 f'from that of the root user\'s python version {sudo_python}.')
 
         # Checks for Ray installation.
-        run_command_and_handle_ssh_failure(ip, 'sudo ray --version',
-                                           f'Ray is not installed on {ip}')
+        run_command_and_handle_ssh_failure(
+            ip,
+            'sudo ray --version',
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            failure_message=f'Ray is not installed on {ip}')
 
         # Checks for Sky installation.
-        run_command_and_handle_ssh_failure(ip, 'sky --help',
-                                           f'Sky is not installed on {ip}')
+        run_command_and_handle_ssh_failure(
+            ip,
+            'sky --help',
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            failure_message=f'Sky is not installed on {ip}')
 
 
 # TODO(mluo): Make this function compatible with CloudVMRayBackend's rsync
@@ -895,11 +927,13 @@ def rsync_to_ip(ip: str, source: str, target: str, ssh_user: str,
         '-Pavz',
         '--filter=\'dir-merge,- .gitignore\'',
     ]
-    rc = run_command_on_ip_via_ssh(ip,
-                                   f'mkdir -p {os.path.dirname(target)}',
-                                   ssh_user=ssh_user,
-                                   ssh_private_key=ssh_key,
-                                   stream_logs=False)
+    directory_name = os.path.dirname(target)
+    run_command_and_handle_ssh_failure(
+        ip,
+        f'mkdir -p {directory_name}',
+        ssh_user=ssh_user,
+        ssh_key=ssh_key,
+        failure_message=f'Failed to create directory {directory_name}.')
     ssh_options = ' '.join(ssh_options_list(ssh_key, None))
     rsync_command.append(f'-e "ssh {ssh_options}"')
     rsync_command.extend([
@@ -974,17 +1008,13 @@ def get_local_custom_resources(
             rsync_to_ip(ip, fp.name, remote_resource_path, ssh_user, ssh_key)
 
         # Run code on the node to get cluster node accelerators.
-        rc, output, _ = run_command_on_ip_via_ssh(
+        output = run_command_and_handle_ssh_failure(
             ip,
             f'python3 {remote_resource_path}',
             ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-            stream_logs=False,
-            require_outputs=True)
-
-        if rc:
-            raise ValueError('Failed to execute resource group detector. '
-                             'Check if Python3 is installed correctly.')
+            ssh_key=ssh_key,
+            failure_message=('Failed to execute resource group detector. '
+                             'Check if Python3 is installed correctly.'))
 
         # Convert output into a custom resources dict
         ip_resources = ast.literal_eval(output)
@@ -1027,20 +1057,20 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     head_display = rich_status.Status('[bold cyan]Stopping Ray Cluster')
     head_display.start()
 
-    run_command_on_ip_via_ssh(head_ip,
-                              'sudo ray stop -f',
-                              ssh_user=ssh_user,
-                              ssh_private_key=ssh_key,
-                              stream_logs=False,
-                              require_outputs=False)
+    run_command_and_handle_ssh_failure(
+        head_ip,
+        'sudo ray stop -f',
+        ssh_user=ssh_user,
+        ssh_key=ssh_key,
+        failure_message=f'Failed to stop Ray on {head_ip}.')
     # TODO: Parallelize local cluster launching
     for idx, ip in enumerate(worker_ips):
-        run_command_on_ip_via_ssh(ip,
-                                  'sudo ray stop -f',
-                                  ssh_user=ssh_user,
-                                  ssh_private_key=ssh_key,
-                                  stream_logs=False,
-                                  require_outputs=False)
+        run_command_and_handle_ssh_failure(
+            ip,
+            'sudo ray stop -f',
+            ssh_user=ssh_user,
+            ssh_key=ssh_key,
+            failure_message=f'Failed to stop Ray on {ip}.')
 
     head_display.stop()
 
@@ -1052,22 +1082,18 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     head_display = rich_status.Status(
         '[bold cyan]Launching Ray Cluster on Head')
     head_display.start()
-    rc, _, stderr = run_command_on_ip_via_ssh(head_ip,
-                                              head_cmd,
-                                              ssh_user=ssh_user,
-                                              ssh_private_key=ssh_key,
-                                              stream_logs=False,
-                                              require_outputs=True)
-    handle_returncode(rc,
-                      head_cmd,
-                      'Failed to launch Ray on Head node.',
-                      stderr=stderr)
+    run_command_and_handle_ssh_failure(
+        head_ip,
+        head_cmd,
+        ssh_user=ssh_user,
+        ssh_key=ssh_key,
+        failure_message='Failed to launch Ray on Head node.')
     head_display.stop()
 
     # Launches Ray on the worker nodes and links Ray dashboard from the head
     # to worker node.
     remote_ssh_key = f'~/.ssh/{os.path.basename(ssh_key)}'
-    dashboard_remote_path = '~/.sky/dashboard.sh'
+    dashboard_remote_path = '~/.sky/dashboard_portforward.sh'
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         for idx, ip in enumerate(worker_ips):
             worker_status.update(
@@ -1079,17 +1105,12 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
                           '--object-manager-port=8076 --dashboard-port 8265 '
                           f'--resources={worker_resources!r}')
 
-            rc, _, stderr = run_command_on_ip_via_ssh(ip,
-                                                      worker_cmd,
-                                                      ssh_user=ssh_user,
-                                                      ssh_private_key=ssh_key,
-                                                      stream_logs=False,
-                                                      require_outputs=True)
-
-            handle_returncode(rc,
-                              worker_cmd,
-                              'Failed to launch Ray on Worker node.',
-                              stderr=stderr)
+            run_command_and_handle_ssh_failure(
+                ip,
+                worker_cmd,
+                ssh_user=ssh_user,
+                ssh_key=ssh_key,
+                failure_message='Failed to launch Ray on Worker node.')
 
             # Connect head node's Ray dashboard to worker nodes
             # Worker nodes need access to Ray dashboard to poll the
@@ -1108,13 +1129,14 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
                 fp.flush()
                 rsync_to_ip(ip, fp.name, dashboard_remote_path, ssh_user,
                             ssh_key)
-            rc = run_command_on_ip_via_ssh(
+            run_command_and_handle_ssh_failure(
                 ip, f'chmod a+rwx {dashboard_remote_path};'
                 'screen -S ray-dashboard -X quit;'
                 f'screen -S ray-dashboard -dm {dashboard_remote_path}',
                 ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                stream_logs=True)
+                ssh_key=ssh_key,
+                failure_message=
+                f'Failed to connect Ray dashboard to worker node {ip}.')
 
         if total_workers > 0:
             worker_status.update(
@@ -2053,9 +2075,19 @@ def refresh_cluster_status_handle(
     return record['status'], handle
 
 
-def get_clusters(include_reserved: bool,
-                 refresh: bool,
-                 filter_clouds: str = 'public') -> List[Dict[str, Any]]:
+class CloudFilterType(enum.Enum):
+    # Filter for all types of clouds.
+    ALL = 'all'
+    # Filter for only public clouds (aws, gcp, azure).
+    PUBLIC = 'public'
+    # Filter for only local clouds.
+    LOCAL = 'local'
+
+
+def get_clusters(
+        include_reserved: bool,
+        refresh: bool,
+        filter_clouds: str = CloudFilterType.PUBLIC) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
     Combs through the Sky database (in ~/.sky/state.db) to get a list of records
@@ -2067,7 +2099,7 @@ def get_clusters(include_reserved: bool,
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         filter_clouds: Sets which clouds to filer through from the global user
-            state. Supports two values, 'all' for all clouds, 'public' for public
+            state. Supports three values, 'all' for all clouds, 'public' for public
             clouds only, and 'local' for only local clouds.
 
     Returns:
@@ -2085,12 +2117,14 @@ def get_clusters(include_reserved: bool,
         cluster_resources = record['handle'].launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
 
-    if filter_clouds == 'local':
+    if filter_clouds == CloudFilterType.LOCAL:
         records = [record for record in records if _is_local_cluster(record)]
-    elif filter_clouds == 'public':
+    elif filter_clouds == CloudFilterType.PUBLIC:
         records = [
             record for record in records if not _is_local_cluster(record)
         ]
+    elif filter_clouds not in CloudFilterType:
+        raise ValueError(f'{filter_clouds} is not part of CloudFilterType.')
 
     if not refresh:
         return records

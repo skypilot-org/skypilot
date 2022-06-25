@@ -5,9 +5,19 @@ Submitting On-prem Jobs
 Registering local clusters
 -------------------
 
-To register a local cluster in Sky, regulars users should obtain a **distributable** cluster YAML from the system administrator or follow the steps in the :ref:`prior section <local-setup>`.
+To register a local cluster in Sky, users should follow two steps.
+
+For the first step, regular users should obtain a **distributable** cluster YAML from the system administrator or follow the steps in the :ref:`prior section <local-setup>`.
 
 The cluster YAML must have user credentials filled out and should be stored in :code:`~/.sky/local/`. An example is shown in the :ref:`cluster config docs <cluster-config>`.
+
+For the second step, regular users should run the following command:
+
+.. code-block:: console
+
+  $ sky launch -c my-local-cluster -- ''
+
+This ensures that Sky can fully register and profile the local cluster.
 
 Listing registered clusters
 -------------------

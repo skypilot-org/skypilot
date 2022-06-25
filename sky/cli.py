@@ -102,11 +102,11 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
             if cluster in local_clusters:
-                print(f'Local Cluster {cluster} is not initialized.\n'
-                      f'Run a task with `sky launch -c {cluster} ...` to '
-                      f'initialize the cluster.')
+                click.echo(f'Local Cluster {cluster} is not initialized.\n'
+                           f'Run a task with `sky launch -c {cluster} ...` to '
+                           f'initialize the cluster.')
             else:
-                print(f'Cluster {cluster} not found.')
+                click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
 
@@ -115,7 +115,7 @@ def _error_if_local_cluster(cluster: str, local_clusters: List[str],
                             error_msg: str) -> bool:
     """Raises error if the cluster name is not a local cluster."""
     if cluster in local_clusters:
-        print(error_msg)
+        click.echo(error_msg)
         return False
     return True
 
@@ -1414,7 +1414,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
                 #    zombied (remains as stopped in the cloud's UI).
                 #
                 #    This is dangerous and unwanted behavior!
-                print(f'Cluster {name} already has status UP.')
+                click.echo(f'Cluster {name} already has status UP.')
                 continue
             assert cluster_status in (
                 global_user_state.ClusterStatus.INIT,
@@ -1562,8 +1562,9 @@ def _terminate_or_stop_clusters(
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
-            print(f'Both --all and cluster(s) specified for sky {command}. '
-                  'Letting --all take effect.')
+            click.echo(
+                f'Both --all and cluster(s) specified for sky {command}. '
+                'Letting --all take effect.')
         # We should not remove reserved clusters when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a reserved
         # cluster.
@@ -1584,7 +1585,7 @@ def _terminate_or_stop_clusters(
         clusters.append({'name': name, 'handle': handle})
 
     if not clusters:
-        print('\nCluster(s) not found (tip: see `sky status`).')
+        click.echo('\nCluster(s) not found (tip: see `sky status`).')
         return
 
     if not no_confirm and len(clusters) > 0:
