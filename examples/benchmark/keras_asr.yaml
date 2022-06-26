@@ -6,7 +6,7 @@ resources:
   - {accelerators: T4}
   - {accelerators: V100}
 
-workdir: ./examples/benchmark/keras_movielens
+workdir: ./examples/benchmark/keras_asr
 
 setup: |
   conda create -n keras python=3.8 -y
@@ -28,4 +28,4 @@ setup: |
 run: |
   conda activate keras
   cd keras-io/examples/audio/
-  python transformers_asr.py
+  python transformer_asr.py
