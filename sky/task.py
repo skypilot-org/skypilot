@@ -575,8 +575,8 @@ class Task:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             f'File mount source {source!r} does not exist '
-                            'locally. To fix: check if it exists, and correct the '
-                            'path.')
+                            'locally. To fix: check if it exists, and correct '
+                            'the path.')
 
         self.file_mounts = file_mounts
         return self
