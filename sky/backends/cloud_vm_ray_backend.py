@@ -1858,7 +1858,7 @@ class CloudVmRayBackend(backends.Backend):
             return
 
         setup_script = log_lib.make_task_bash_script(task.setup,
-                                                     env_vars=task.envs)
+                                                     env_vars=task.set_envs)
         with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
             f.write(setup_script)
             f.flush()
@@ -2189,7 +2189,7 @@ class CloudVmRayBackend(backends.Backend):
         command_for_node = task.run if isinstance(task.run, str) else None
         codegen.add_ray_task(
             bash_script=command_for_node,
-            env_vars=task.envs,
+            env_vars=task.set_envs,
             task_name=task.name,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
             log_path=log_path)
@@ -2233,7 +2233,7 @@ class CloudVmRayBackend(backends.Backend):
 
             codegen.add_ray_task(
                 bash_script=command_for_node,
-                env_vars=task.envs,
+                env_vars=task.set_envs,
                 task_name=name,
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,

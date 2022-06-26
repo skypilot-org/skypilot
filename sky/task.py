@@ -331,8 +331,9 @@ class Task:
     def envs(self) -> Dict[str, str]:
         return self._envs
 
-    @envs.setter
-    def envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str, str]]):
+    @ux_utils.print_exception_no_traceback_decorator
+    def set_envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str,
+                                                                      str]]):
         if envs is None:
             self._envs = None
             return
@@ -357,6 +358,7 @@ class Task:
         return any(r.spot_recovery is not None for r in self.resources)
 
     @num_nodes.setter
+    @ux_utils.print_exception_no_traceback_decorator
     def num_nodes(self, num_nodes: Optional[int]) -> None:
         if num_nodes is None:
             num_nodes = 1

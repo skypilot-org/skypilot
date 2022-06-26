@@ -605,7 +605,7 @@ def _make_dag_from_entrypoint_with_overrides(
             task.num_nodes = num_nodes
         if name is not None:
             task.name = name
-        task.envs = env
+        task.set_envs(env)
     return dag
 
 
