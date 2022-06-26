@@ -38,9 +38,9 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
 
 
 def _ssh_options_list(ssh_private_key: Optional[str],
-                     ssh_control_name: Optional[str],
-                     *,
-                     timeout=30) -> List[str]:
+                      ssh_control_name: Optional[str],
+                      *,
+                      timeout=30) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
