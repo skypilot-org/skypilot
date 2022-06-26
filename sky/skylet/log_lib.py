@@ -147,7 +147,7 @@ def run_with_log(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
             'subprocess_daemon.py')
         daemon_cmd = [
-            'python',
+            'python3',
             daemon_script,
             '--parent-pid',
             str(parent_pid),
