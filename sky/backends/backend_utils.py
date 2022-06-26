@@ -111,9 +111,7 @@ def fill_template(template_name: str,
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
     if not os.path.exists(template_path):
-        with ux_utils.print_exception_no_traceback():
-            raise FileNotFoundError(
-                f'Template "{template_name}" does not exist.')
+        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     if output_path is None:
