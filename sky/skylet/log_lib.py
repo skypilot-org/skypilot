@@ -203,8 +203,8 @@ def make_task_bash_script(codegen: str,
             #!/bin/bash
             source ~/.bashrc
             set -a
-            (conda --version > /dev/null 2>&1 && \
-            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null) \
+            conda --version && \
+            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null \
             || true
             set +a
             cd {SKY_REMOTE_WORKDIR}"""),
