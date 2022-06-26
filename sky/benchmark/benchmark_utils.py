@@ -217,14 +217,14 @@ def generate_benchmark_configs(
             'store': None,
         }
 
-        # Create a sym link to a directory in the benchmark bucket.
+        # Create a symbolic link to a directory in the benchmark bucket.
         benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark,
                                      cluster)
         if 'setup' not in candidate_config:
             candidate_config['setup'] = ''
         candidate_config['setup'] = (
-            f'mkdir -p {benchmark_dir}; '
-            f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}; ' +
+            f'mkdir -p {benchmark_dir}\n'
+            f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}\n' +
             candidate_config['setup'])
         candidate_configs.append(candidate_config)
     return clusters, candidate_configs
