@@ -111,7 +111,9 @@ def fill_template(template_name: str,
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
     if not os.path.exists(template_path):
-        raise FileNotFoundError(f'Template "{template_name}" does not exist.')
+        with ux_utils.print_exception_no_traceback():
+            raise FileNotFoundError(
+                f'Template "{template_name}" does not exist.')
     with open(template_path) as fin:
         template = fin.read()
     if output_path is None:
@@ -662,22 +664,23 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
+def _add_auth_to_cluster_config(cloud: str, cluster_config_file: str):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
     """
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)
-    cloud_type = str(cloud_type)
-    if cloud_type == 'AWS':
+    cloud = str(cloud)
+    # Check the availability of the cloud type.
+    clouds.CLOUD_REGISTRY.from_str(cloud)
+    if cloud == 'AWS':
         config = auth.setup_aws_authentication(config)
-    elif cloud_type == 'GCP':
+    elif cloud == 'GCP':
         config = auth.setup_gcp_authentication(config)
-    elif cloud_type == 'Azure':
-        config = auth.setup_azure_authentication(config)
     else:
-        raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
+        assert cloud == 'Azure', cloud
+        config = auth.setup_azure_authentication(config)
     dump_yaml(cluster_config_file, config)
 
 
@@ -1149,7 +1152,8 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
-                raise RuntimeError('Failed to get head ip') from e
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(5)
@@ -1175,8 +1179,9 @@ def get_node_ips(cluster_yaml: str,
         head_ip = query_head_ip_with_retries(cluster_yaml,
                                              max_attempts=head_ip_max_attempts)
     except RuntimeError as e:
-        raise exceptions.FetchIPError(
-            exceptions.FetchIPError.Reason.HEAD) from e
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
 
     if expected_num_nodes > 1:
@@ -1187,10 +1192,13 @@ def get_node_ips(cluster_yaml: str,
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
         except subprocess.CalledProcessError as e:
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.WORKER) from e
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.FetchIPError(
+                    exceptions.FetchIPError.Reason.WORKER) from e
         if len(worker_ips) != expected_num_nodes - 1:
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.FetchIPError(
+                    exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
     return head_ip + worker_ips
@@ -1208,10 +1216,11 @@ def get_head_ip(
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
-            raise ValueError(
-                'Cluster\'s head IP not found; is it up? To fix: '
-                'run a successful launch first (`sky launch`) to ensure'
-                ' the cluster status is UP (`sky status`).')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cluster\'s head IP not found; is it up? To fix: '
+                    'run a successful launch first (`sky launch`) to ensure'
+                    ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
         head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
@@ -1227,8 +1236,9 @@ def check_network_connection():
     try:
         http.head(_TEST_IP, timeout=3)
     except requests.Timeout as e:
-        raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network seems down.') from e
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NetworkError(
+                'Could not refresh the cluster. Network seems down.') from e
 
 
 def _process_cli_query(
@@ -1267,9 +1277,10 @@ def _process_cli_query(
         return []
 
     if returncode != 0:
-        raise exceptions.ClusterStatusFetchingError(
-            f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
-        )
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterStatusFetchingError(
+                f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
+            )
 
     cluster_status = stdout.strip()
     if cluster_status == '':
@@ -1490,8 +1501,9 @@ def _update_cluster_status_no_lock(
                                                    ssh_private_key=ssh_key,
                                                    stream_logs=False)
             if returncode:
-                raise exceptions.FetchIPError(
-                    reason=exceptions.FetchIPError.Reason.HEAD)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.FetchIPError(
+                        reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
@@ -1723,6 +1735,7 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     return resources_str
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
 
@@ -1744,6 +1757,7 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
             f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
@@ -1762,6 +1776,7 @@ def check_cluster_name_not_reserved(
         raise ValueError(msg)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def check_gcp_cli_include_tpu_vm() -> None:
     # TPU VM API available with gcloud version >= 382.0.0
     version_cmd = 'gcloud version --format=json'
@@ -1812,7 +1827,8 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
+    with ux_utils.print_exception_no_traceback():
+        raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1821,7 +1837,8 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
+    with ux_utils.print_exception_no_traceback():
+        raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 class Backoff:
@@ -1851,7 +1868,6 @@ class Backoff:
         return self._backoff
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def validate_schema(obj, schema, err_msg_prefix=''):
     err_msg = None
     try:
@@ -1868,4 +1884,5 @@ def validate_schema(obj, schema, err_msg_prefix=''):
                         err_msg += f'\nInstead of {field}, did you mean {most_similar_field[0]}?'
 
     if err_msg:
-        raise ValueError(err_msg)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(err_msg)

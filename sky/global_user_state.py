@@ -19,6 +19,7 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from sky import clouds
+from sky.utils import ux_utils
 from sky.skylet.utils import db_utils
 
 if typing.TYPE_CHECKING:
@@ -132,6 +133,7 @@ def _get_pretty_entry_point() -> str:
     return ' '.join(argv)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool,
@@ -184,6 +186,7 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
@@ -191,6 +194,7 @@ def update_last_use(cluster_name: str):
     _DB.conn.commit()
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
     if terminate:
@@ -213,6 +217,7 @@ def remove_cluster(cluster_name: str, terminate: bool):
     _DB.conn.commit()
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
@@ -222,6 +227,7 @@ def get_handle_from_cluster_name(
         return pickle.loads(handle)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_glob_cluster_names(cluster_name: str) -> List[str]:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name GLOB (?)',
@@ -229,6 +235,7 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,
@@ -241,6 +248,7 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
     _DB.cursor.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
         idle_minutes,
@@ -253,6 +261,7 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
@@ -262,6 +271,7 @@ def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
         return json.loads(metadata)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
     _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
         json.dumps(metadata),
@@ -274,6 +284,7 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
@@ -291,6 +302,7 @@ def get_cluster_from_name(
         return record
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc')
@@ -310,6 +322,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_enabled_clouds() -> List[clouds.Cloud]:
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_ENABLED_CLOUDS_KEY,))
@@ -320,12 +333,14 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     return [clouds.CLOUD_REGISTRY.from_str(cloud) for cloud in ret]
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
                        (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))
     _DB.conn.commit()
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
                           storage_status: StorageStatus):
@@ -345,12 +360,14 @@ def add_or_update_storage(storage_name: str,
     _DB.conn.commit()
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
     _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def set_storage_status(storage_name: str, status: StorageStatus) -> None:
     _DB.cursor.execute('UPDATE storage SET status=(?) WHERE name=(?)', (
         status.value,
@@ -363,6 +380,7 @@ def set_storage_status(storage_name: str, status: StorageStatus) -> None:
         raise ValueError(f'Storage {storage_name} not found.')
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_storage_status(storage_name: str) -> None:
     assert storage_name is not None, 'storage_name cannot be None'
     rows = _DB.cursor.execute('SELECT status FROM storage WHERE name=(?)',
@@ -371,6 +389,7 @@ def get_storage_status(storage_name: str) -> None:
         return StorageStatus[status]
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
     _DB.cursor.execute('UPDATE storage SET handle=(?) WHERE name=(?)', (
         pickle.dumps(handle),
@@ -383,6 +402,7 @@ def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
         raise ValueError(f'Storage{storage_name} not found.')
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_handle_from_storage_name(storage_name: str):
     assert storage_name is not None, 'storage_name cannot be None'
     rows = _DB.cursor.execute('SELECT handle FROM storage WHERE name=(?)',
@@ -391,6 +411,7 @@ def get_handle_from_storage_name(storage_name: str):
         return pickle.loads(handle)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def get_storage() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from storage')
     records = []

@@ -13,6 +13,7 @@ from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 
 from sky.adaptors import aws, gcp
+from sky.utils import ux_utils
 
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
@@ -127,8 +128,9 @@ def setup_aws_authentication(config):
                                     PublicKeyMaterial=public_key)
                 break
         if fail_counter == MAX_TRIALS - 1:
-            raise RuntimeError(
-                'Failed to generate a unique key pair ID for AWS')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to generate a unique key pair ID for AWS')
 
     node_types = config['available_node_types']
 

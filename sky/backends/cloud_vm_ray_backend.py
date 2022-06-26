@@ -38,6 +38,7 @@ from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -539,8 +540,10 @@ class RetryingVmProvisioner(object):
                 logger.info('====== stderr ======')
                 for s in splits:
                     print(s)
-                raise RuntimeError('Errors occurred during provision; '
-                                   'check logs above.')
+
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError('Errors occurred during provision; '
+                                       'check logs above.')
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
@@ -571,8 +574,9 @@ class RetryingVmProvisioner(object):
             logger.info('====== stderr ======')
             for s in stderr_splits:
                 print(s)
-            raise RuntimeError('Errors occurred during provision; '
-                               'check logs above.')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
         logger.warning(f'Got error(s) in all zones of {region.name}:')
@@ -599,8 +603,9 @@ class RetryingVmProvisioner(object):
             logger.info('====== stderr ======')
             for s in stderr_splits:
                 print(s)
-            raise RuntimeError('Errors occurred during provision; '
-                               'check logs above.')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
 
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
@@ -665,11 +670,12 @@ class RetryingVmProvisioner(object):
                     else:
                         assert False, cloud
                     if region != prev_resources.region:
-                        raise ValueError(
-                            f'Region mismatch. The region in '
-                            f'{handle.cluster_yaml} '
-                            f'has been changed from {prev_resources.region} '
-                            f'to {region}.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Region mismatch. The region in '
+                                f'{handle.cluster_yaml} '
+                                'has been changed from '
+                                f'{prev_resources.region} to {region}.')
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -713,9 +719,9 @@ class RetryingVmProvisioner(object):
                 # cases.
                 global_user_state.set_cluster_status(
                     cluster_name, global_user_state.ClusterStatus.UP)
-
-                raise exceptions.ResourcesUnavailableError(message,
-                                                           no_failover=True)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(message,
+                                                               no_failover=True)
 
             # If it reaches here: the cluster status gets set to INIT, since
             # a launch request was issued but failed.
@@ -735,8 +741,9 @@ class RetryingVmProvisioner(object):
                 global_user_state.set_cluster_status(
                     cluster_name, global_user_state.ClusterStatus.STOPPED)
 
-                raise exceptions.ResourcesUnavailableError(message,
-                                                           no_failover=True)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError(message,
+                                                               no_failover=True)
 
             assert cluster_status == global_user_state.ClusterStatus.INIT
             message = (f'Failed to launch cluster {cluster_name!r} '
@@ -755,7 +762,8 @@ class RetryingVmProvisioner(object):
             # live.  And if it hits here, it's definitely not alive (because
             # step (2) failed).  Hence it's ok to retry with different
             # cloud/region and with current resources.
-            raise exceptions.ResourcesUnavailableError()
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError()
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
@@ -798,7 +806,8 @@ class RetryingVmProvisioner(object):
                     'exhaustion. Please visit '
                     'https://console.cloud.google.com/iam-admin/quotas '
                     'for more information.')
-                raise exceptions.ResourcesUnavailableError()
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesUnavailableError()
 
             if 'PERMISSION_DENIED' in stderr:
                 logger.info('  TPUs are not available in this zone.')
@@ -960,8 +969,8 @@ class RetryingVmProvisioner(object):
         message = ('Failed to acquire resources in all regions/zones of '
                    f'{to_provision.cloud}. '
                    'Try changing resource requirements or use another cloud.')
-        logger.error(message)
-        raise exceptions.ResourcesUnavailableError()
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesUnavailableError(message)
 
     @timeline.event
     def _gang_schedule_ray_up(
@@ -1125,14 +1134,16 @@ class RetryingVmProvisioner(object):
                     return
             except exceptions.ResourcesUnavailableError as e:
                 if e.no_failover:
-                    raise e
+                    with ux_utils.print_exception_no_traceback():
+                        raise e
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
                         'to enable cross-cloud retry. '
                         'To fix, call backend.register_info(dag=dag, '
                         'optimize_target=sky.OptimizeTarget.COST)')
-                    raise e
+                    with ux_utils.print_exception_no_traceback():
+                        raise e
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
@@ -1285,17 +1296,19 @@ class CloudVmRayBackend(backends.Backend):
                 task_resources.less_demanding_than(launched_resources)):
             if (task_resources.region is not None and
                     task_resources.region != launched_resources.region):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        'Task requested resources in region '
+                        f'{task_resources.region!r}, but the existing cluster '
+                        f'is in region {launched_resources.region!r}.')
+            with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
-                    'Task requested resources in region '
-                    f'{task_resources.region!r}, but the existing cluster '
-                    f'is in region {launched_resources.region!r}.')
-            raise exceptions.ResourcesMismatchError(
-                'Requested resources do not match the existing cluster.\n'
-                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
-                f'  Existing:\t{handle.launched_nodes}x '
-                f'{handle.launched_resources}\n'
-                f'To fix: specify a new cluster name, or down the '
-                f'existing cluster first: sky down {cluster_name}')
+                    'Requested resources do not match the existing cluster.\n'
+                    f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                    f'  Existing:\t{handle.launched_nodes}x '
+                    f'{handle.launched_resources}\n'
+                    f'To fix: specify a new cluster name, or down the '
+                    f'existing cluster first: sky down {cluster_name}')
 
     @timeline.event
     def _check_existing_cluster(
@@ -1424,7 +1437,8 @@ class CloudVmRayBackend(backends.Backend):
                     logger.info(
                         'To keep retrying until the cluster is up, use the '
                         '`--retry-until-up` flag.')
-                    raise exceptions.ResourcesUnavailableError() from None
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError() from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -2122,8 +2136,9 @@ class CloudVmRayBackend(backends.Backend):
             job_id = int(job_id_str)
         except ValueError as e:
             logger.error(stderr)
-            raise ValueError(f'Failed to parse job id: {job_id_str}; '
-                             f'Returncode: {returncode}') from e
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Failed to parse job id: {job_id_str}; '
+                                 f'Returncode: {returncode}') from e
         return job_id
 
     @timeline.event
@@ -2370,8 +2385,9 @@ class CloudVmRayBackend(backends.Backend):
                         f'gcloud compute instances delete --zone={zone}'
                         f' --quiet $({query_cmd})')
             else:
-                raise ValueError(f'Unsupported cloud {cloud} for stopped '
-                                 f'cluster {cluster_name!r}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Unsupported cloud {cloud} for stopped '
+                                     f'cluster {cluster_name!r}.')
             with backend_utils.safe_console_status(f'[bold cyan]Terminating '
                                                    f'[green]{cluster_name}'):
                 returncode, stdout, stderr = log_lib.run_with_log(
@@ -2504,9 +2520,11 @@ class CloudVmRayBackend(backends.Backend):
         if ip is None:
             ip = handle.head_ip
         if handle.head_ip is None:
-            raise ValueError(
-                f'The cluster "{handle.cluster_name}" appears to be down. '
-                'Run a re-provisioning command (e.g., sky launch) and retry.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'The cluster "{handle.cluster_name}" appears to be '
+                    'down. Run a re-provisioning command (e.g., sky launch) '
+                    'and retry.')
 
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)

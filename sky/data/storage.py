@@ -16,6 +16,7 @@ from sky.data import mounting_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -38,6 +39,7 @@ class StorageMode(enum.Enum):
     COPY = 'COPY'
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def _get_storetype_from_store(store: 'Storage') -> StoreType:
     if isinstance(store, S3Store):
         return StoreType.S3
@@ -355,7 +357,8 @@ class Storage(object):
                     store = GcsStore.from_metadata(s_metadata,
                                                    source=self.source)
                 else:
-                    raise ValueError(f'Unknown store type: {s_type}')
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unknown store type: {s_type}')
 
                 self._add_store(store, is_reconstructed=True)
 
@@ -408,16 +411,19 @@ class Storage(object):
         split_path = urllib.parse.urlsplit(source)
         if split_path.scheme == '':
             if source.endswith('/'):
-                raise exceptions.StorageSourceError(
-                    'Storage source paths cannot end with a slash '
-                    '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                    f'Found source={source}')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Storage source paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found source={source}')
             # Local path, check if it exists
             source = os.path.abspath(os.path.expanduser(source))
             # Only check if local source exists if it is synced to the bucket
             if not os.path.exists(source) and sync_on_reconstruction:
-                raise exceptions.StorageSourceError('Local source path does not'
-                                                    f' exist: {source}')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Local source path does not'
+                        f' exist: {source}')
             # Raise warning if user's path is a symlink
             elif os.path.islink(source):
                 logger.warning(f'Source path {source} is a symlink. '
@@ -430,15 +436,17 @@ class Storage(object):
             # cloud store - ensure path points to only a directory
             if mode == StorageMode.MOUNT:
                 if split_path.path.strip('/') != '':
-                    raise exceptions.StorageModeError(
-                        'MOUNT mode does not support'
-                        ' mounting specific files from cloud'
-                        ' storage. Please use COPY mode or'
-                        ' specify only the bucket name as'
-                        ' the source.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageModeError(
+                            'MOUNT mode does not support'
+                            ' mounting specific files from cloud'
+                            ' storage. Please use COPY mode or'
+                            ' specify only the bucket name as'
+                            ' the source.')
         else:
-            raise exceptions.StorageSourceError(
-                f'Supported paths: local, s3://, gs://. Got: {source}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSourceError(
+                    f'Supported paths: local, s3://, gs://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self) -> None:
@@ -457,16 +465,18 @@ class Storage(object):
                 if handle is not None:
                     return
                 else:
-                    raise exceptions.StorageSourceError(
-                        'New storage object: source must be specified when '
-                        'using COPY mode.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSourceError(
+                            'New storage object: source must be specified when '
+                            'using COPY mode.')
             else:
                 # If source is not specified in COPY mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
                 if not self.name:
-                    raise exceptions.StorageSpecError(
-                        'Storage source or storage name must be specified.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Storage source or storage name must be specified.')
                 else:
                     # Create bucket and mount
                     return
@@ -476,9 +486,10 @@ class Storage(object):
 
             if not self.name:
                 if is_local_source:
-                    raise exceptions.StorageNameError(
-                        'Storage name must be specified if the source is local.'
-                    )
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageNameError(
+                            'Storage name must be specified if the source is '
+                            'local.')
                 else:
                     # Set name to source bucket name and continue
                     self.name = urllib.parse.urlsplit(source).netloc
@@ -490,9 +501,10 @@ class Storage(object):
                 else:
                     # Both name and source should not be specified if the source
                     # is a URI. Name will be inferred from the URI.
-                    raise exceptions.StorageSpecError(
-                        'Storage name should not be specified if the source is '
-                        'a remote URI.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Storage name should not be specified if the '
+                            'source is a remote URI.')
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
@@ -518,8 +530,9 @@ class Storage(object):
         elif store_type == StoreType.GCS:
             store_cls = GcsStore
         else:
-            raise exceptions.StorageSpecError(
-                f'{store_type} not supported as a Store.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSpecError(
+                    f'{store_type} not supported as a Store.')
 
         # Initialize store object and get/create bucket
         try:
@@ -722,6 +735,7 @@ class S3Store(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
+    @ux_utils.print_exception_no_traceback_decorator
     def upload(self):
         """Uploads source to store bucket.
 
@@ -779,14 +793,14 @@ class S3Store(AbstractStore):
                                      'the S3 bucket. The bucket does not have '
                                      'write permissions. It is possible that '
                                      'the bucket is public.')
-                        e = PermissionError('Can\'t write to bucket!')
-                        logger.error(e)
-                        raise e
-                retcode = process.wait()
-                if retcode != 0:
-                    raise exceptions.StorageUploadError(
-                        f'Upload to S3 failed for store {self.name} and source '
-                        f'{self.source}. Please check the logs.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise PermissionError('Can\'t write to bucket!')
+                returncode = process.wait()
+                if returncode != 0:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageUploadError(
+                            f'Upload to S3 failed for store {self.name} and '
+                            f'source {self.source}. Please check the logs.')
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -824,17 +838,18 @@ class S3Store(AbstractStore):
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `aws s3 ls {self.name}` to debug.')
-                logger.error(ex)
-                raise ex from e
+                with ux_utils.print_exception_no_traceback():
+                    raise ex from e
             # Try private bucket case.
             if data_utils.verify_s3_bucket(self.name):
                 return bucket, False
 
         if self.source is not None and self.source.startswith('s3://'):
-            raise exceptions.StorageBucketGetError(
-                'Attempted to connect to a non-existent bucket: '
-                f'{self.source}. Consider using `aws s3 ls '
-                f'{self.source}` to debug.') from e
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to connect to a non-existent bucket: '
+                    f'{self.source}. Consider using `aws s3 ls '
+                    f'{self.source}` to debug.') from e
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is created by Sky.
@@ -891,10 +906,10 @@ class S3Store(AbstractStore):
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.client_exception() as e:
-            logger.error(e)
-            raise exceptions.StorageBucketCreateError(
-                f'Attempted to create a bucket '
-                f'{self.name} but failed.') from e
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Attempted to create a bucket '
+                    f'{self.name} but failed.') from e
         return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> None:
@@ -917,8 +932,9 @@ class S3Store(AbstractStore):
                 subprocess.check_output(remove_command.split(' '))
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
-            raise exceptions.StorageBucketDeleteError(
-                f'Failed to delete S3 bucket {bucket_name}.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketDeleteError(
+                    f'Failed to delete S3 bucket {bucket_name}.')
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_s3_bucket(bucket_name):
@@ -973,6 +989,7 @@ class GcsStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
+    @ux_utils.print_exception_no_traceback_decorator
     def upload(self):
         """Uploads source to store bucket.
 
@@ -1024,14 +1041,14 @@ class GcsStore(AbstractStore):
                                      'GCS. The bucket does not have '
                                      'write permissions. It is possible that '
                                      'the bucket is public.')
-                        e = PermissionError('Can\'t write to bucket!')
-                        logger.error(e)
-                        raise e
-                retcode = process.wait()
-                if retcode != 0:
-                    raise exceptions.StorageUploadError(
-                        f'Upload to GCS failed for store {self.name} and '
-                        f'source {self.source}. Please check logs.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise PermissionError('Can\'t write to bucket!')
+                returncode = process.wait()
+                if returncode != 0:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageUploadError(
+                            f'Upload to GCS failed for store {self.name} and '
+                            f'source {self.source}. Please check logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
@@ -1054,9 +1071,10 @@ class GcsStore(AbstractStore):
             return bucket, False
         except gcp.not_found_exception() as e:
             if self.source is not None and self.source.startswith('gs://'):
-                raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
-                    f'{self.source}') from e
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        'Attempted to connect to a non-existent bucket: '
+                        f'{self.source}') from e
             else:
                 bucket = self._create_gcs_bucket(self.name)
                 return bucket, True
@@ -1076,16 +1094,16 @@ class GcsStore(AbstractStore):
                     'Check if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                logger.error(ex)
-                raise ex from e
+                with ux_utils.print_exception_no_traceback():
+                    raise ex from e
             except ValueError as e:
                 ex = exceptions.StorageBucketGetError(
                     f'Attempted to access a private external bucket {self.name}'
                     '\nCheck if the 1) the bucket name is taken and/or '
                     '2) the bucket permissions are not setup correctly. '
                     f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                logger.error(ex)
-                raise ex from e
+                with ux_utils.print_exception_no_traceback():
+                    raise ex from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
@@ -1117,6 +1135,7 @@ class GcsStore(AbstractStore):
         blob = self.bucket.blob(remote_path)
         blob.download_to_filename(local_path, timeout=None)
 
+    @ux_utils.print_exception_no_traceback_decorator
     def _create_gcs_bucket(self,
                            bucket_name: str,
                            region='us-central1') -> StorageHandle:
@@ -1131,7 +1150,6 @@ class GcsStore(AbstractStore):
             bucket.storage_class = 'STANDARD'
             new_bucket = self.client.create_bucket(bucket, location=region)
         except Exception as e:
-            logger.error(e)
             raise exceptions.StorageBucketCreateError(
                 f'Attempted to create a bucket {self.name} but failed.') from e
         logger.info(
@@ -1151,8 +1169,8 @@ class GcsStore(AbstractStore):
             # Try public bucket to see if bucket exists
             logger.error('External Bucket detected. User not allowed to delete '
                          'external bucket.')
-            logger.error(e)
-            raise e
+            with ux_utils.print_exception_no_traceback():
+                raise e
 
         num_files = subprocess.check_output(
             f'gsutil du gs://{bucket_name} | wc -l', shell=True)
@@ -1167,5 +1185,6 @@ class GcsStore(AbstractStore):
                 bucket.delete(force=True)
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
-            raise exceptions.StorageBucketDeleteError(
-                f'Failed to delete GCS bucket {bucket_name}.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketDeleteError(
+                    f'Failed to delete GCS bucket {bucket_name}.')

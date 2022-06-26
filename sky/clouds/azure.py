@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
 
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
@@ -269,6 +270,7 @@ class Azure(clouds.Cloud):
         return service_catalog.region_exists(region, 'azure')
 
     @classmethod
+    @ux_utils.print_exception_no_traceback_decorator
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'

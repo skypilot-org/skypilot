@@ -91,9 +91,10 @@ def _execute(
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
-        raise ValueError(
-            'Spot recovery is specified in the task. To launch the '
-            'managed spot job, please use: sky spot launch')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Spot recovery is specified in the task. To launch the '
+                'managed spot job, please use: sky spot launch')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -105,9 +106,10 @@ def _execute(
     if not isinstance(backend, backends.CloudVmRayBackend
                      ) and idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
-        raise ValueError(
-            f'Backend {backend.NAME} does not support autostop, please try '
-            f'{backends.CloudVmRayBackend.NAME}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Backend {backend.NAME} does not support autostop, please try '
+                f'{backends.CloudVmRayBackend.NAME}')
 
     if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
         if task.best_resources is None:
@@ -184,7 +186,6 @@ def _execute(
 
 
 @timeline.event
-@ux_utils.print_exception_no_traceback_decorator
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -216,7 +217,6 @@ def launch(
     )
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
@@ -231,12 +231,13 @@ def exec(  # pylint: disable=redefined-builtin
                                                   operation_str='sky.exec')
 
     status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
-    if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} not found.  '
-                         'Use `sky launch` to provision first.')
-    if status != global_user_state.ClusterStatus.UP:
-        raise ValueError(f'Cluster {cluster_name!r} is not up.  '
-                         'Use `sky status` to check the status.')
+    with ux_utils.print_exception_no_traceback():
+        if handle is None:
+            raise ValueError(f'Cluster {cluster_name!r} not found.  '
+                             'Use `sky launch` to provision first.')
+        if status != global_user_state.ClusterStatus.UP:
+            raise ValueError(f'Cluster {cluster_name!r} is not up.  '
+                             'Use `sky status` to check the status.')
     _execute(dag=dag,
              dryrun=dryrun,
              teardown=teardown,

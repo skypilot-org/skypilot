@@ -85,16 +85,6 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 }
 
 
-def _get_cloud(cloud: Optional[str]) -> Optional[clouds.Cloud]:
-    """Check if cloud is registered and return cloud object."""
-    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if cloud is not None and cloud_obj is None:
-        raise click.UsageError(
-            f'Cloud {cloud!r} is not supported. '
-            f'Supported clouds: {list(clouds.CLOUD_REGISTRY.keys())}')
-    return cloud_obj
-
-
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
@@ -353,7 +343,6 @@ def _check_resources_match(backend: backends.Backend,
     backend.check_resources_fit_cluster(handle, task)
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def _launch_with_confirm(
     dag: sky.Dag,
     backend: backends.Backend,
@@ -563,6 +552,7 @@ def _make_dag_from_entrypoint_with_overrides(
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
             task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
@@ -570,9 +560,9 @@ def _make_dag_from_entrypoint_with_overrides(
             else:
                 # Treat entrypoint as a bash command.
                 click.secho('Task from command: ', fg='yellow', nl=False)
+                click.secho(entrypoint, bold=True)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
-        click.secho(entrypoint, bold=True)
         # Override.
         if workdir is not None:
             task.workdir = workdir
@@ -582,7 +572,7 @@ def _make_dag_from_entrypoint_with_overrides(
             if cloud.lower() == 'none':
                 override_params['cloud'] = None
             else:
-                override_params['cloud'] = _get_cloud(cloud)
+                override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
         if region is not None:
             if region.lower() == 'none':
                 override_params['region'] = None
@@ -772,7 +762,8 @@ def launch(
     elif backend_name == backends.CloudVmRayBackend.NAME:
         backend = backends.CloudVmRayBackend()
     else:
-        raise ValueError(f'{backend_name} backend is not supported.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'{backend_name} backend is not supported.')
 
     _launch_with_confirm(
         dag,
@@ -1633,7 +1624,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    cloud_provider = _get_cloud(cloud)
+    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if gpus is None and instance_type is None:
         # Use this request if both gpus and instance_type are not specified.
         gpus = default_resources.accelerators
@@ -1701,7 +1692,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (cloud is None and instance_type is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    cloud_provider = _get_cloud(cloud)
+    cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if instance_type is None:
         instance_type = default_resources.instance_type
     if use_spot is None:
@@ -2153,7 +2144,8 @@ def spot_launch(
             elif store_type == StoreType.GCS:
                 storage_obj.source = f'gs://{storage_obj.name}'
             else:
-                raise ValueError(f'Unsupported store type: {store_type}')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Unsupported store type: {store_type}')
             storage_obj.name = None
 
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
