@@ -1179,9 +1179,8 @@ def get_node_ips(cluster_yaml: str,
         head_ip = query_head_ip_with_retries(cluster_yaml,
                                              max_attempts=head_ip_max_attempts)
     except RuntimeError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.HEAD) from e
+        raise exceptions.FetchIPError(
+            exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
 
     if expected_num_nodes > 1:
@@ -1192,13 +1191,11 @@ def get_node_ips(cluster_yaml: str,
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
         except subprocess.CalledProcessError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.FetchIPError(
-                    exceptions.FetchIPError.Reason.WORKER) from e
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.WORKER) from e
         if len(worker_ips) != expected_num_nodes - 1:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.FetchIPError(
-                    exceptions.FetchIPError.Reason.WORKER)
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
     return head_ip + worker_ips
