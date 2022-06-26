@@ -1192,8 +1192,7 @@ def get_node_ips(cluster_yaml: str,
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.WORKER) from e
         if len(worker_ips) != expected_num_nodes - 1:
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.WORKER)
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
     return head_ip + worker_ips

@@ -19,7 +19,6 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from sky import clouds
-from sky.utils import ux_utils
 from sky.skylet.utils import db_utils
 
 if typing.TYPE_CHECKING:
