@@ -147,7 +147,7 @@ def run_with_log(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
             'subprocess_daemon.py')
         daemon_cmd = [
-            'python3',
+            'python',
             daemon_script,
             '--parent-pid',
             str(parent_pid),
@@ -203,8 +203,8 @@ def make_task_bash_script(codegen: str,
             #!/bin/bash
             source ~/.bashrc
             set -a
-            conda --version > /dev/null 2>&1 && \
-            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null \
+            (conda --version > /dev/null 2>&1 && \
+            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null) \
             || true
             set +a
             cd {SKY_REMOTE_WORKDIR}"""),
