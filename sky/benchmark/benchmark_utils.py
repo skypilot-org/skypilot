@@ -81,7 +81,7 @@ def _print_candidate_resources(
                 f'on candidate resources ({num_nodes} node{plural}):'
                 f'{colorama.Style.RESET_ALL}')
 
-    columns = ['CLUSTER', 'CLOUD', 'INSTANCE', 'ACCELERATORS', 'COST ($/hr)']
+    columns = ['CLUSTER', 'CLOUD', 'INSTANCE', 'ACCELERATORS', 'PRICE ($/hr)']
     table_kwargs = {
         'hrules': prettytable.FRAME,
         'vrules': prettytable.NONE,
