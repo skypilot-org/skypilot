@@ -557,31 +557,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    resources_vars = cloud.make_deploy_resources_variables(to_provision)
+    resources_vars = cloud.make_deploy_resources_variables(
+        to_provision, region, zones)
     config_dict = {}
-
-    if region is None:
-        assert zones is None, 'Set either both or neither for: region, zones.'
-        region = cloud.get_default_region()
-        zones = region.zones
-    else:
-        assert isinstance(
-            cloud, clouds.Azure
-        ) or zones is not None, 'Set either both or neither for: region, zones.'
-    region = region.name
-    if isinstance(cloud, clouds.AWS):
-        # Only AWS supports multiple zones in the 'availability_zone' field.
-        zones = [zone.name for zone in zones]
-    elif isinstance(cloud, clouds.Azure):
-        # Azure does not support specific zones.
-        zones = []
-    else:
-        zones = [zones[0].name]
-
-    aws_default_ami = None
-    if isinstance(cloud, clouds.AWS):
-        instance_type = resources_vars['instance_type']
-        aws_default_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
@@ -593,6 +571,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
+    region_name = resources_vars['region']
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -601,11 +580,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
-                # Region/zones.
-                'region': region,
-                'zones': ','.join(zones),
-                # AWS only.
-                'aws_default_ami': aws_default_ami,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/sky-proj/sky/pull/742.
                 # Generate the name of the security group we're looking for.
@@ -615,7 +589,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'security_group': f'sky-sg-{user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
-                'resource_group': f'{cluster_name}-{region}',
+                'resource_group': f'{cluster_name}-{region_name}',
                 # GCP only.
                 'gcp_project_id': gcp_project_id,
                 # Ray version.
@@ -644,7 +618,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 template_name,
                 dict(
                     resources_vars, **{
-                        'zones': ','.join(zones),
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
                     }),

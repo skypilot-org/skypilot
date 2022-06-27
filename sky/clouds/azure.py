@@ -2,11 +2,15 @@
 import json
 import os
 import subprocess
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
@@ -157,7 +161,19 @@ class Azure(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
 
-    def make_deploy_resources_variables(self, resources):
+    def make_deploy_resources_variables(
+            self, resources: 'resources.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+
+        region_name = region.name
+        # Azure does not support specific zones.
+        zones = []
+
         r = resources
         assert not r.use_spot, \
             'Our subscription offer ID does not support spot instances.'
@@ -175,6 +191,8 @@ class Azure(clouds.Cloud):
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
+            'region': region_name,
+            'zones': zones,
             **image_config
         }
 
