@@ -662,22 +662,20 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def _add_auth_to_cluster_config(cloud: str, cluster_config_file: str):
+def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
     """
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)
-    cloud = str(cloud)
     # Check the availability of the cloud type.
-    clouds.CLOUD_REGISTRY.from_str(cloud)
-    if cloud == 'AWS':
+    if isinstance(cloud, clouds.AWS):
         config = auth.setup_aws_authentication(config)
-    elif cloud == 'GCP':
+    elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
     else:
-        assert cloud == 'Azure', cloud
+        assert isinstance(cloud, clouds.Azure), cloud
         config = auth.setup_azure_authentication(config)
     dump_yaml(cluster_config_file, config)
 
@@ -1229,9 +1227,8 @@ def check_network_connection():
     try:
         http.head(_TEST_IP, timeout=3)
     except requests.Timeout as e:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NetworkError(
-                'Could not refresh the cluster. Network seems down.') from e
+        raise exceptions.NetworkError(
+            'Could not refresh the cluster. Network seems down.') from e
 
 
 def _process_cli_query(
@@ -1819,8 +1816,7 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    with ux_utils.print_exception_no_traceback():
-        raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
+    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1829,8 +1825,7 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    with ux_utils.print_exception_no_traceback():
-        raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
+    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 class Backoff:

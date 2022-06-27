@@ -670,12 +670,11 @@ class RetryingVmProvisioner(object):
                     else:
                         assert False, cloud
                     if region != prev_resources.region:
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                f'Region mismatch. The region in '
-                                f'{handle.cluster_yaml} '
-                                'has been changed from '
-                                f'{prev_resources.region} to {region}.')
+                        raise ValueError(
+                            f'Region mismatch. The region in '
+                            f'{handle.cluster_yaml} '
+                            'has been changed from '
+                            f'{prev_resources.region} to {region}.')
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -749,7 +748,6 @@ class RetryingVmProvisioner(object):
             message = (f'Failed to launch cluster {cluster_name!r} '
                        f'(previous status: {cluster_status.value}) '
                        f'with the original resources: {to_provision}.')
-            logger.error(message)
             # We attempted re-launching a previously INIT cluster with the
             # same cloud/region/resources, but failed. Here no_failover=False,
             # so we will retry provisioning it with the current requested
@@ -763,7 +761,7 @@ class RetryingVmProvisioner(object):
             # step (2) failed).  Hence it's ok to retry with different
             # cloud/region and with current resources.
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesUnavailableError()
+                raise exceptions.ResourcesUnavailableError(message)
 
         for region, zones in cloud.region_zones_provision_loop(
                 instance_type=to_provision.instance_type,
@@ -801,13 +799,12 @@ class RetryingVmProvisioner(object):
                 return True
 
             if 'RESOURCE_EXHAUSTED' in stderr:
-                logger.warning(
-                    f'  TPU {tpu_name} creation failed due to quota '
-                    'exhaustion. Please visit '
-                    'https://console.cloud.google.com/iam-admin/quotas '
-                    'for more information.')
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesUnavailableError()
+                    raise exceptions.ResourcesUnavailableError(
+                        f'TPU {tpu_name} creation failed due to quota '
+                        'exhaustion. Please visit '
+                        'https://console.cloud.google.com/iam-admin/quotas '
+                        'for more information.')
 
             if 'PERMISSION_DENIED' in stderr:
                 logger.info('  TPUs are not available in this zone.')
@@ -969,8 +966,7 @@ class RetryingVmProvisioner(object):
         message = ('Failed to acquire resources in all regions/zones of '
                    f'{to_provision.cloud}. '
                    'Try changing resource requirements or use another cloud.')
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ResourcesUnavailableError(message)
+        raise exceptions.ResourcesUnavailableError(message)
 
     @timeline.event
     def _gang_schedule_ray_up(
@@ -1134,16 +1130,14 @@ class RetryingVmProvisioner(object):
                     return
             except exceptions.ResourcesUnavailableError as e:
                 if e.no_failover:
-                    with ux_utils.print_exception_no_traceback():
-                        raise e
+                    raise e
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
                         'to enable cross-cloud retry. '
                         'To fix, call backend.register_info(dag=dag, '
                         'optimize_target=sky.OptimizeTarget.COST)')
-                    with ux_utils.print_exception_no_traceback():
-                        raise e
+                    raise e
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
@@ -1411,17 +1405,18 @@ class CloudVmRayBackend(backends.Backend):
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
                     if e.no_failover:
-                        logger.error(e)
+                        error_message = str(e)
                     else:
                         # Clean up the cluster's entry in `sky status`.
                         global_user_state.remove_cluster(cluster_name,
                                                          terminate=True)
-                        logger.error(
+                        error_message = (
                             'Failed to provision all possible launchable '
                             'resources.'
                             f' Relax the task\'s resource requirements: '
                             f'{task.num_nodes}x {task.resources}')
                     if retry_until_up:
+                        logger.error(error_message)
                         # Sleep and retry.
                         gap_seconds = backoff.current_backoff()
                         plural = 's' if attempt_cnt > 1 else ''
@@ -1434,11 +1429,12 @@ class CloudVmRayBackend(backends.Backend):
                         attempt_cnt += 1
                         time.sleep(gap_seconds)
                         continue
-                    logger.info(
-                        'To keep retrying until the cluster is up, use the '
+                    error_message += (
+                        '\nTo keep retrying until the cluster is up, use the '
                         '`--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError() from None
+                        raise exceptions.ResourcesUnavailableError(
+                            error_message) from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -2136,9 +2132,8 @@ class CloudVmRayBackend(backends.Backend):
             job_id = int(job_id_str)
         except ValueError as e:
             logger.error(stderr)
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Failed to parse job id: {job_id_str}; '
-                                 f'Returncode: {returncode}') from e
+            raise ValueError(f'Failed to parse job id: {job_id_str}; '
+                             f'Returncode: {returncode}') from e
         return job_id
 
     @timeline.event

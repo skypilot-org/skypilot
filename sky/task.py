@@ -340,7 +340,6 @@ class Task:
     def envs(self) -> Dict[str, str]:
         return self._envs
 
-    @ux_utils.print_exception_no_traceback_decorator
     def set_envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str,
                                                                       str]]):
         if envs is None:
@@ -363,7 +362,7 @@ class Task:
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'envs must be List[Tuple[str, str]] or Dict[str, str] '
+                    'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
         self._envs = envs
 
@@ -528,8 +527,8 @@ class Task:
                     assert False, 'TODO: Azure Blob not mountable yet'
                 else:
                     with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Storage Type {store_type} \
-                            does not exist!')
+                        raise ValueError(f'Storage Type {store_type} '
+                                         'does not exist!')
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
         """Sets the file mounts for this Task.

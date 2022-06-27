@@ -244,7 +244,7 @@ class Resources:
             if len(valid_clouds) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Ambiguous region {region!r} '
+                        f'Ambiguous region {region!r}. '
                         f'Please specify cloud explicitly among {valid_clouds}.'
                     )
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '

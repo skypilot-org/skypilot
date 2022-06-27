@@ -39,14 +39,14 @@ class StorageMode(enum.Enum):
     COPY = 'COPY'
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def _get_storetype_from_store(store: 'Storage') -> StoreType:
     if isinstance(store, S3Store):
         return StoreType.S3
     elif isinstance(store, GcsStore):
         return StoreType.GCS
     else:
-        raise ValueError(f'Unknown store type: {store}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {store}')
 
 
 class AbstractStore:
@@ -735,7 +735,6 @@ class S3Store(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
-    @ux_utils.print_exception_no_traceback_decorator
     def upload(self):
         """Uploads source to store bucket.
 
@@ -789,12 +788,12 @@ class S3Store(AbstractStore):
                     logger.info(str_line)
                     if 'Access Denied' in str_line:
                         process.kill()
-                        logger.error('Sky Storage failed to upload files to '
-                                     'the S3 bucket. The bucket does not have '
-                                     'write permissions. It is possible that '
-                                     'the bucket is public.')
                         with ux_utils.print_exception_no_traceback():
-                            raise PermissionError('Can\'t write to bucket!')
+                            raise PermissionError(
+                                'Sky Storage failed to upload files to '
+                                'the S3 bucket. The bucket does not have '
+                                'write permissions. It is possible that '
+                                'the bucket is public.')
                 returncode = process.wait()
                 if returncode != 0:
                     with ux_utils.print_exception_no_traceback():
@@ -989,7 +988,6 @@ class GcsStore(AbstractStore):
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
-    @ux_utils.print_exception_no_traceback_decorator
     def upload(self):
         """Uploads source to store bucket.
 
@@ -1037,12 +1035,12 @@ class GcsStore(AbstractStore):
                     logger.info(str_line)
                     if 'AccessDeniedException' in str_line:
                         process.kill()
-                        logger.error('Sky Storage failed to upload files to '
-                                     'GCS. The bucket does not have '
-                                     'write permissions. It is possible that '
-                                     'the bucket is public.')
                         with ux_utils.print_exception_no_traceback():
-                            raise PermissionError('Can\'t write to bucket!')
+                            raise PermissionError(
+                                'Sky Storage failed to upload files to '
+                                'GCS. The bucket does not have '
+                                'write permissions. It is possible that '
+                                'the bucket is public.')
                 returncode = process.wait()
                 if returncode != 0:
                     with ux_utils.print_exception_no_traceback():

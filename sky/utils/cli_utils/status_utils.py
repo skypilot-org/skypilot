@@ -4,7 +4,6 @@ import click
 
 from sky import backends
 from sky.backends import backend_utils
-from sky.utils import ux_utils
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
@@ -97,8 +96,7 @@ def _get_resources(cluster_status):
             resources_str = (f'{handle.launched_nodes}x '
                              f'{launched_resource_str}')
     else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+        raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
 
 
