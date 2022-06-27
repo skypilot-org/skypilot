@@ -23,19 +23,16 @@ def get_resources_schema():
                 'type': 'string',
             },
             'accelerators': {
-                'anyOf': [
-                    {
-                        "type": "string",
-                    },
-                    {
-                        "type": "object",
-                        'required': [],
-                        'maxProperties': 1,
-                        'additionalProperties': {
-                            'type': 'number'
-                        }
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'maxProperties': 1,
+                    'additionalProperties': {
+                        'type': 'number'
                     }
-                ]
+                }]
             },
             'instance_type': {
                 'type': 'string',
