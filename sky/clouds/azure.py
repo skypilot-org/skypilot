@@ -270,7 +270,6 @@ class Azure(clouds.Cloud):
         return service_catalog.region_exists(region, 'azure')
 
     @classmethod
-    @ux_utils.print_exception_no_traceback_decorator
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
@@ -279,13 +278,16 @@ class Azure(clouds.Cloud):
             if not azure_subscription_id:
                 raise ValueError  # The error message will be replaced.
         except ModuleNotFoundError as e:
-            raise ModuleNotFoundError('Unable to import azure python '
-                                      'module. Is azure-cli python package '
-                                      'installed? Try pip install '
-                                      '.[azure] in the sky repo.') from e
-        except Exception as e:
-            raise RuntimeError(
-                'Failed to get subscription id from azure cli. '
-                'Make sure you have logged in and run this Azure '
-                'cli command: "az account set -s <subscription_id>".') from e
+            with ux_utils.print_exception_no_traceback():
+                raise ModuleNotFoundError('Unable to import azure python '
+                                          'module. Is azure-cli python package '
+                                          'installed? Try pip install '
+                                          '.[azure] in the sky repo.') from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to get subscription id from azure cli. '
+                    'Make sure you have logged in and run this Azure '
+                    'cli command: "az account set -s <subscription_id>".'
+                ) from e
         return azure_subscription_id

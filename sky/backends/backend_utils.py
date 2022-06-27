@@ -1016,7 +1016,6 @@ def run_command_on_ip_via_ssh(
                                 **kwargs)
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
@@ -1036,7 +1035,8 @@ def handle_returncode(returncode: int,
             echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        raise exceptions.CommandError(returncode, command, format_err_msg)
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(returncode, command, format_err_msg)
 
 
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
@@ -1724,7 +1724,6 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     return resources_str
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def check_cluster_name_is_valid(cluster_name: str) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
 
@@ -1738,15 +1737,17 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
-        raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
-                         f'ensure it is fully matched by regex: {valid_regex}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cluster name "{cluster_name}" is invalid; '
+                f'ensure it is fully matched by regex: {valid_regex}')
     if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
-        raise ValueError(
-            f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-            f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+                f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
@@ -1762,10 +1763,10 @@ def check_cluster_name_not_reserved(
     if operation_str is not None:
         msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        raise ValueError(msg)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(msg)
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def check_gcp_cli_include_tpu_vm() -> None:
     # TPU VM API available with gcloud version >= 382.0.0
     version_cmd = 'gcloud version --format=json'
@@ -1781,20 +1782,24 @@ def check_gcp_cli_include_tpu_vm() -> None:
                            '{stdout}\n'
                            '**** STDERR ****\n'
                            '{stderr}')
-        raise RuntimeError(failure_massage.format(stdout=stdout, stderr=stderr))
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                failure_massage.format(stdout=stdout, stderr=stderr))
 
     sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
 
     if sdk_ver is None:
-        raise RuntimeError('Failed to get Google Cloud SDK version from'
-                           f' "gcloud version": {stdout}')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to get Google Cloud SDK version from'
+                               f' "gcloud version": {stdout}')
     else:
         major_ver = sdk_ver.split('.')[0]
         major_ver = int(major_ver)
         if major_ver < 382:
-            raise RuntimeError(
-                'Google Cloud SDK version must be >= 382.0.0 to use'
-                ' TPU VM APIs, check "gcloud version" for details.')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Google Cloud SDK version must be >= 382.0.0 to use'
+                    ' TPU VM APIs, check "gcloud version" for details.')
 
 
 def kill_children_processes():

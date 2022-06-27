@@ -27,6 +27,12 @@ StorageStatus = global_user_state.StorageStatus
 # Max number of objects a GCS bucket can be directly deleted with
 _GCS_RM_MAX_OBJS = 256
 
+_BUCKET_FAIL_TO_CONNECT_MESSAGE = (
+    'Failed to connect to an existing bucket {name!r}.\n'
+    'Please check if:\n  1) the bucket name is taken and/or '
+    '\n  2) the bucket permissions are not setup correctly. '
+    'Consider using {command} to debug.')
+
 
 class StoreType(enum.Enum):
     S3 = 'S3'
@@ -832,13 +838,11 @@ class S3Store(AbstractStore):
             # AccessDenied error for buckets that are private and not owned by
             # user.
             if error_code == 'AccessDenied':
-                ex = exceptions.StorageBucketGetError(
-                    f'Failed to connect to an existing bucket {self.name!r}.\n'
-                    'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `aws s3 ls {self.name}` to debug.')
+                command = f'aws s3 ls {self.name}'
                 with ux_utils.print_exception_no_traceback():
-                    raise ex from e
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                            name=self.name, command=command)) from e
             # Try private bucket case.
             if data_utils.verify_s3_bucket(self.name):
                 return bucket, False
@@ -848,7 +852,7 @@ class S3Store(AbstractStore):
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
                     f'{self.source}. Consider using `aws s3 ls '
-                    f'{self.source}` to debug.') from e
+                    f'{self.source}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is created by Sky.
@@ -1087,13 +1091,11 @@ class GcsStore(AbstractStore):
                 next(bucket.list_blobs())
                 return bucket, False
             except gcp.not_found_exception() as e:
-                ex = exceptions.StorageBucketGetError(
-                    f'Failed to connect to external bucket {self.name} \n'
-                    'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
+                command = f'gsutil ls gs://{self.name}'
                 with ux_utils.print_exception_no_traceback():
-                    raise ex from e
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                            name=self.name, command=command)) from e
             except ValueError as e:
                 ex = exceptions.StorageBucketGetError(
                     f'Attempted to access a private external bucket {self.name}'
@@ -1133,7 +1135,6 @@ class GcsStore(AbstractStore):
         blob = self.bucket.blob(remote_path)
         blob.download_to_filename(local_path, timeout=None)
 
-    @ux_utils.print_exception_no_traceback_decorator
     def _create_gcs_bucket(self,
                            bucket_name: str,
                            region='us-central1') -> StorageHandle:
@@ -1147,9 +1148,11 @@ class GcsStore(AbstractStore):
             bucket = self.client.bucket(bucket_name)
             bucket.storage_class = 'STANDARD'
             new_bucket = self.client.create_bucket(bucket, location=region)
-        except Exception as e:
-            raise exceptions.StorageBucketCreateError(
-                f'Attempted to create a bucket {self.name} but failed.') from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Attempted to create a bucket {self.name} but failed.'
+                ) from e
         logger.info(
             f'Created GCS bucket {new_bucket.name} in {new_bucket.location} '
             f'with storage class {new_bucket.storage_class}')
@@ -1165,10 +1168,10 @@ class GcsStore(AbstractStore):
             bucket = self.client.get_bucket(bucket_name)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
-            logger.error('External Bucket detected. User not allowed to delete '
-                         'external bucket.')
             with ux_utils.print_exception_no_traceback():
-                raise e
+                raise PermissionError(
+                    'External Bucket detected. User not allowed to delete '
+                    'external bucket.') from e
 
         num_files = subprocess.check_output(
             f'gsutil du gs://{bucket_name} | wc -l', shell=True)

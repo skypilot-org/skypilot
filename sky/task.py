@@ -371,13 +371,13 @@ class Task:
         return any(r.spot_recovery is not None for r in self.resources)
 
     @num_nodes.setter
-    @ux_utils.print_exception_no_traceback_decorator
     def num_nodes(self, num_nodes: Optional[int]) -> None:
         if num_nodes is None:
             num_nodes = 1
         if not isinstance(num_nodes, int) or num_nodes <= 0:
-            raise ValueError(
-                f'num_nodes should be a positive int. Got: {num_nodes}')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes should be a positive int. Got: {num_nodes}')
         self._num_nodes = num_nodes
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
@@ -479,7 +479,6 @@ class Task:
         self.storage_mounts = storage_mounts
         return self
 
-    @ux_utils.print_exception_no_traceback_decorator
     def add_storage_mounts(self) -> None:
         """Adds storage mounts to the Task."""
         # TODO(romilb): The optimizer should look at the source and destination
@@ -580,7 +579,6 @@ class Task:
         self.file_mounts = file_mounts
         return self
 
-    @ux_utils.print_exception_no_traceback_decorator
     def update_file_mounts(self, file_mounts: Dict[str, str]):
         """Updates the file mounts for this Task.
 
