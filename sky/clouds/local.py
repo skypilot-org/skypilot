@@ -94,8 +94,10 @@ class Local(clouds.Cloud):
         # catalog.
         raise NotImplementedError
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources'):
+    def make_deploy_resources_variables(
+            self, resources: 'resources_lib.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
         return {}
 
     def get_feasible_launchable_resources(self,

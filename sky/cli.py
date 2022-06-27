@@ -2175,7 +2175,7 @@ def admin_deploy(clusterspec_yaml: str):
     click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
                 fg='green',
                 nl=False)
-    custom_resources = backend_utils.get_local_custom_resources(
+    custom_resources = backend_utils.get_local_cluster_accelerators(
         ips, auth_config)
     steps += 1
 

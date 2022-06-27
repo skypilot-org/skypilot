@@ -1293,6 +1293,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_config = config['cluster']
                 auth_config = config['auth']
                 ips = cluster_config['ips']
+                self.launched_nodes = len(ips)
                 self.local_handle['ips'] = ips
                 cluster_accs = backend_utils.get_local_cluster_accelerators(
                     ips, auth_config)
@@ -1356,7 +1357,6 @@ class CloudVmRayBackend(backends.Backend):
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
-        num_nodes = task.num_nodes
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
@@ -1372,7 +1372,7 @@ class CloudVmRayBackend(backends.Backend):
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(
-                    launched_resources, requested_num_nodes=num_nodes)):
+                    launched_resources, requested_num_nodes=task.num_nodes)):
             if (task_resources.region is not None and
                     task_resources.region != launched_resources.region):
                 raise exceptions.ResourcesMismatchError(
