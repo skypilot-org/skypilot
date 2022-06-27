@@ -2,12 +2,16 @@
 import json
 import os
 import subprocess
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
@@ -21,6 +25,9 @@ _CREDENTIAL_FILES = [
     'configurations',
     'legacy_credentials',
 ]
+
+_IMAGE_ID_PREFIX = (
+    'projects/deeplearning-platform-release/global/images/family/')
 
 
 def _run_output(cmd):
@@ -144,20 +151,39 @@ class GCP(clouds.Cloud):
         return 'n1-highmem-8'
 
     @classmethod
-    def get_default_region(cls) -> clouds.Region:
+    def _get_default_region(cls) -> clouds.Region:
         return cls.regions()[-1]
 
-    def make_deploy_resources_variables(self, resources):
+    def make_deploy_resources_variables(
+            self, resources: 'resources.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+            zones = region.zones
+        else:
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
+
+        region_name = region.name
+        zones = [zones[0].name]
+
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu'
+
         r = resources
         # Find GPU spec, if any.
         resources_vars = {
             'instance_type': r.instance_type,
+            'region': region_name,
+            'zones': ','.join(zones),
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
+            'tpu_vm': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
-            'image_name': 'common-cpu',
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -169,7 +195,10 @@ class GCP(clouds.Cloud):
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
-                resources_vars['tf_version'] = r.accelerator_args['tf_version']
+
+                resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
+                resources_vars['runtime_version'] = r.accelerator_args[
+                    'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
@@ -177,7 +206,12 @@ class GCP(clouds.Cloud):
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 # CUDA driver version 470.103.01, CUDA Library 11.3
-                resources_vars['image_name'] = 'common-cu113'
+                image_id = _IMAGE_ID_PREFIX + 'common-cu113'
+
+        if resources.image_id is not None:
+            image_id = resources.image_id
+
+        resources_vars['image_id'] = image_id
 
         return resources_vars
 
@@ -206,9 +240,13 @@ class GCP(clouds.Cloud):
             assert len(
                 instance_list
             ) == 1, f'More than one instance type matched, {instance_list}'
+
             host_vm_type = instance_list[0]
             acc_dict = {acc: acc_count}
-
+            if resources.accelerator_args is not None:
+                use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+                if use_tpu_vm:
+                    host_vm_type = 'TPU-VM'
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,

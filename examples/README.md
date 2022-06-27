@@ -19,7 +19,7 @@ Machine learning examples:
  
 5. [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): Run **grid search** on the above.  Run many trials concurrently on the same VM.
 
-6. [**`tpu_app.py`**](./tpu_app.py): **Train on a TPU** (v3-8) on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
+6. [**`tpu_app.py`**](./tpu/tpu_app.py): **Train on a TPU** (v3-8) on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
 
 
 General examples:

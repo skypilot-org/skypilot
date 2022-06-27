@@ -1,12 +1,12 @@
 name: tpu_app
 
 # The working directory contains all code and will be synced to remote.
-workdir: ./examples/tpu_app_code
+workdir: ./examples/tpu/tpu_app_code
 
 resources:
   accelerators: tpu-v2-8
   accelerator_args:
-    tf_version: 2.5.0
+    runtime_version: 2.5.0
 
 # The setup command.  Will be run under the working directory.
 setup: |

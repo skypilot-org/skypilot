@@ -14,4 +14,7 @@ def truncate_long_string(s: str, max_length: int = 35) -> str:
         total += len(part)
         if total >= max_length:
             break
-    return ' '.join(splits[:i]) + ' ...'
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'

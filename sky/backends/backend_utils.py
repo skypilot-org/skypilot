@@ -1,9 +1,11 @@
 """Util constants/functions for the backends."""
 import contextlib
+import copy
 import datetime
 import difflib
 import enum
 import hashlib
+import json
 import getpass
 from multiprocessing import pool
 import os
@@ -13,21 +15,23 @@ import re
 import shlex
 import socket
 import subprocess
-import sys
 import textwrap
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
 import filelock
 import jinja2
+import jsonschema
 import psutil
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
+from ray.autoscaler._private import commands as ray_commands
+from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -37,12 +41,14 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import global_user_state
 from sky import exceptions
+from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
 from sky.utils import timeline
+from sky.utils import ux_utils
+from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -73,7 +79,7 @@ _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # 10.133.0.5: ray.worker.default,
 _LAUNCHING_IP_PATTERN = re.compile(
     r'({}): ray[._]worker[._]default'.format(IP_ADDR_REGEX))
-WAIT_HEAD_NODE_IP_RETRY_COUNT = 3
+WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 
 # We use fixed IP address to avoid DNS lookup blocking the check, for machine
 # with no internet connection.
@@ -552,31 +558,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
-    resources_vars = cloud.make_deploy_resources_variables(to_provision)
+    resources_vars = cloud.make_deploy_resources_variables(
+        to_provision, region, zones)
     config_dict = {}
-
-    if region is None:
-        assert zones is None, 'Set either both or neither for: region, zones.'
-        region = cloud.get_default_region()
-        zones = region.zones
-    else:
-        assert isinstance(
-            cloud, clouds.Azure
-        ) or zones is not None, 'Set either both or neither for: region, zones.'
-    region = region.name
-    if isinstance(cloud, clouds.AWS):
-        # Only AWS supports multiple zones in the 'availability_zone' field.
-        zones = [zone.name for zone in zones]
-    elif isinstance(cloud, clouds.Azure):
-        # Azure does not support specific zones.
-        zones = []
-    else:
-        zones = [zones[0].name]
-
-    aws_default_ami = None
-    if isinstance(cloud, clouds.AWS):
-        instance_type = resources_vars['instance_type']
-        aws_default_ami = cloud.get_default_ami(region, instance_type)
 
     azure_subscription_id = None
     if isinstance(cloud, clouds.Azure):
@@ -587,8 +571,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
         gcp_project_id = cloud.get_project_id(dryrun=dryrun)
 
     assert cluster_name is not None
-
     credentials = sky_check.get_cloud_credential_file_mounts()
+    region_name = resources_vars['region']
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -597,11 +581,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
-                # Region/zones.
-                'region': region,
-                'zones': ','.join(zones),
-                # AWS only.
-                'aws_default_ami': aws_default_ami,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/sky-proj/sky/pull/742.
                 # Generate the name of the security group we're looking for.
@@ -611,7 +590,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'security_group': f'sky-sg-{user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
-                'resource_group': f'{cluster_name}-{region}',
+                'resource_group': f'{cluster_name}-{region_name}',
                 # GCP only.
                 'gcp_project_id': gcp_project_id,
                 # Ray version.
@@ -627,7 +606,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
-    if resources_vars.get('tpu_type') is not None:
+    # For TPU nodes. TPU VMs do not need TPU_NAME.
+    if (resources_vars.get('tpu_type') is not None and
+            resources_vars.get('tpu_vm') is None):
         tpu_name = resources_vars.get('tpu_name')
         if tpu_name is None:
             tpu_name = cluster_name
@@ -638,7 +619,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 template_name,
                 dict(
                     resources_vars, **{
-                        'zones': ','.join(zones),
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
                     }),
@@ -716,7 +696,7 @@ def wait_until_ray_cluster_ready(
     # launched especially for Azure.
     try:
         head_ip = query_head_ip_with_retries(
-            cluster_config_file, retry_count=WAIT_HEAD_NODE_IP_RETRY_COUNT)
+            cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
     except RuntimeError as e:
         logger.error(e)
         return False  # failed
@@ -1010,11 +990,11 @@ def run_command_on_ip_via_ssh(
                                 **kwargs)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
                       stderr: Optional[str] = None,
-                      raise_error: bool = False,
                       stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
 
@@ -1023,7 +1003,6 @@ def handle_returncode(returncode: int,
         command: The command that was run.
         error_msg: The error message to print.
         stderr: The stderr of the command.
-        raise_error: Whether to raise an error instead of sys.exit.
     """
     echo = logger.error if stream_logs else lambda _: None
     if returncode != 0:
@@ -1031,11 +1010,7 @@ def handle_returncode(returncode: int,
             echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        if raise_error:
-            raise exceptions.CommandError(returncode, command, format_err_msg)
-        echo(f'Command failed with code {returncode}: {command}')
-        echo(format_err_msg)
-        sys.exit(returncode)
+        raise exceptions.CommandError(returncode, command, format_err_msg)
 
 
 def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
@@ -1047,22 +1022,8 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     with pool.ThreadPool() as p:
-        try:
-            # Run the function in parallel on the arguments, keeping the order.
-            return list(p.imap(func, args))
-        except exceptions.CommandError as e:
-            # Print the error message here, to avoid the other processes'
-            # error messages mixed with the current one.
-            logger.error(
-                f'Command failed with code {e.returncode}: {e.command}')
-            logger.error(e.error_msg)
-            sys.exit(e.returncode)
-        except KeyboardInterrupt:
-            print()
-            logger.error(
-                f'{colorama.Fore.RED}Interrupted by user.{colorama.Style.RESET_ALL}'
-            )
-            sys.exit(1)
+        # Run the function in parallel on the arguments, keeping the order.
+        return list(p.imap(func, args))
 
 
 @timeline.event
@@ -1148,24 +1109,35 @@ def generate_cluster_name():
     return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
 
-@timeline.event
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        return_private_ips: bool = False,
-        handle: Optional[backends.Backend.ResourceHandle] = None) -> List[str]:
-    """Returns the IPs of all nodes in the cluster."""
-    yaml_handle = cluster_yaml
-    if return_private_ips:
-        config = read_yaml(yaml_handle)
-        # Add this field to a temp file to get private ips.
-        config['provider']['use_internal_ips'] = True
-        yaml_handle = cluster_yaml + '.tmp'
-        dump_yaml(yaml_handle, config)
+def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
+    """Returns the ip of the head node from yaml file."""
+    for i in range(max_attempts):
+        try:
+            out = run(f'ray get-head-ip {cluster_yaml}',
+                      stdout=subprocess.PIPE,
+                      stderr=subprocess.DEVNULL).stdout.decode().strip()
+            head_ip = re.findall(IP_ADDR_REGEX, out)
+            assert 1 == len(head_ip), out
+            head_ip = head_ip[0]
+            break
+        except subprocess.CalledProcessError as e:
+            if i == max_attempts - 1:
+                raise RuntimeError('Failed to get head ip') from e
+            # Retry if the cluster is not up yet.
+            logger.debug('Retrying to get head ip.')
+            time.sleep(5)
+    return head_ip
 
+
+@timeline.event
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 head_ip_max_attempts: int = 1) -> List[str]:
+    """Returns the IPs of all nodes in the cluster."""
     # Try optimize for the common case where we have 1 node.
-    if (not return_private_ips and expected_num_nodes == 1 and
-            handle is not None and handle.head_ip is not None):
+    if (expected_num_nodes == 1 and handle is not None and
+            handle.head_ip is not None):
         return [handle.head_ip]
 
     # Check the network connection first to avoid long hanging time for
@@ -1173,20 +1145,16 @@ def get_node_ips(
     # happens.
     check_network_connection()
     try:
-        proc = run(f'ray get-head-ip {yaml_handle}',
-                   stdout=subprocess.PIPE,
-                   stderr=subprocess.PIPE)
-        out = proc.stdout.decode().strip()
-        head_ip = re.findall(IP_ADDR_REGEX, out)
-    except subprocess.CalledProcessError as e:
+        head_ip = query_head_ip_with_retries(cluster_yaml,
+                                             max_attempts=head_ip_max_attempts)
+    except RuntimeError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
-    if len(head_ip) != 1:
-        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    head_ip = [head_ip]
 
     if expected_num_nodes > 1:
         try:
-            proc = run(f'ray get-worker-ips {yaml_handle}',
+            proc = run(f'ray get-worker-ips {cluster_yaml}',
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE)
             out = proc.stdout.decode()
@@ -1198,8 +1166,6 @@ def get_node_ips(
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
-    if return_private_ips:
-        os.remove(yaml_handle)
     return head_ip + worker_ips
 
 
@@ -1207,11 +1173,11 @@ def get_node_ips(
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
-    retry_count: int = 1,
+    max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    assert not use_cached_head_ip or retry_count == 1, (
-        'Cannot use cached_head_ip when retry_count is not 1')
+    assert not use_cached_head_ip or max_attempts == 1, (
+        'Cannot use cached_head_ip when max_attempts is not 1')
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
@@ -1221,7 +1187,7 @@ def get_head_ip(
                 ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
-        head_ip = query_head_ip_with_retries(handle.cluster_yaml, retry_count)
+        head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
 
 
@@ -1288,9 +1254,51 @@ def _process_cli_query(
     ]
 
 
+@contextlib.contextmanager
+def subpress_output():
+    """Suppress stdout and stderr."""
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
+                devnull):
+            yield
+
+
+def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
+    """Returns a set of Ray launch config hashes, one per node type."""
+    # Use the cached Ray launch hashes if they exist.
+    metadata = global_user_state.get_cluster_metadata(cluster_name)
+    assert metadata is not None, cluster_name
+    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
+    if ray_launch_hashes is not None:
+        logger.debug('Using cached launch_caches')
+        return set(ray_launch_hashes)
+    with subpress_output():
+        ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
+    launch_hashes = set()
+    head_node_type = ray_config['head_node_type']
+    for node_type, node_config in ray_config['available_node_types'].items():
+        if node_type == head_node_type:
+            launch_config = ray_config.get('head_node', {})
+        else:
+            launch_config = ray_config.get('worker_nodes', {})
+        launch_config = copy.deepcopy(launch_config)
+
+        launch_config.update(node_config['node_config'])
+        with subpress_output():
+            current_hash = ray_util.hash_launch_conf(launch_config,
+                                                     ray_config['auth'])
+        launch_hashes.add(current_hash)
+    # Cache the launch hashes for the cluster.
+    metadata['ray_launch_hashes'] = list(launch_hashes)
+    global_user_state.set_cluster_metadata(cluster_name, metadata)
+    return launch_hashes
+
+
 def _query_status_aws(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
@@ -1302,9 +1310,12 @@ def _query_status_aws(
         'shutting-down': None,
         'terminated': None,
     }
-    region = ray_provider_config['region']
+    region = ray_config['provider']['region']
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ','.join(launch_hashes)
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
+                 f'Name=tag:ray-launch-config,Values={hash_filter_str} '
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1313,34 +1324,72 @@ def _query_status_aws(
 
 def _query_status_gcp(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
-    status_map = {
-        'PROVISIONING': global_user_state.ClusterStatus.INIT,
-        'STARTING': global_user_state.ClusterStatus.INIT,
-        'RUNNING': global_user_state.ClusterStatus.UP,
-        'REPAIRING': global_user_state.ClusterStatus.STOPPED,
-        # 'TERMINATED' in GCP means stopped, with disk preserved.
-        'STOPPING': global_user_state.ClusterStatus.STOPPED,
-        'TERMINATED': global_user_state.ClusterStatus.STOPPED,
-        # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
-        'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
-        'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
-    }
-    # TODO(zhwu): The status of the TPU attached to the cluster should also be
-    # checked, since TPUs are not part of the VMs.
-    query_cmd = ('gcloud compute instances list '
-                 f'--filter="labels.ray-cluster-name={cluster}" '
-                 '--format="value(status)"')
-    return _process_cli_query('GCP', cluster, query_cmd, '\n', status_map)
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ' '.join(launch_hashes)
+
+    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
+    zone = ray_config['provider'].get('availability_zone', '')
+    if use_tpu_vm:
+        # TPU VM's state definition is different from compute VM
+        # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
+        status_map = {
+            'CREATING': global_user_state.ClusterStatus.INIT,
+            'STARTING': global_user_state.ClusterStatus.INIT,
+            'RESTARTING': global_user_state.ClusterStatus.INIT,
+            'READY': global_user_state.ClusterStatus.UP,
+            'REPAIRING': global_user_state.ClusterStatus.INIT,
+            # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
+            'STOPPING': global_user_state.ClusterStatus.STOPPED,
+            'STOPPED': global_user_state.ClusterStatus.STOPPED,
+            'PREEMPTED': None,
+        }
+        check_gcp_cli_include_tpu_vm()
+        query_cmd = ('gcloud compute tpus tpu-vm list '
+                     f'--zone {zone} '
+                     f'--filter="(labels.ray-cluster-name={cluster} AND '
+                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     '--format="value(state)"')
+    else:
+        status_map = {
+            'PROVISIONING': global_user_state.ClusterStatus.INIT,
+            'STARTING': global_user_state.ClusterStatus.INIT,
+            'RUNNING': global_user_state.ClusterStatus.UP,
+            'REPAIRING': global_user_state.ClusterStatus.INIT,
+            # 'TERMINATED' in GCP means stopped, with disk preserved.
+            'STOPPING': global_user_state.ClusterStatus.STOPPED,
+            'TERMINATED': global_user_state.ClusterStatus.STOPPED,
+            # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
+            'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
+            'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
+        }
+        # TODO(zhwu): The status of the TPU attached to the cluster should also be
+        # checked, since TPUs are not part of the VMs.
+        query_cmd = ('gcloud compute instances list '
+                     f'--filter="(labels.ray-cluster-name={cluster} AND '
+                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     '--format="value(status)"')
+    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
+                                     status_map)
+
+    # GCP does not clean up preempted TPU VMs. We remove it ourselves.
+    # TODO(wei-lin): handle multi-node cases.
+    if use_tpu_vm and len(status_list) == 0:
+        backend = backends.CloudVmRayBackend()
+        handle = global_user_state.get_handle_from_cluster_name(cluster)
+        backend.teardown_no_lock(handle,
+                                 terminate=True,
+                                 purge=False,
+                                 post_teardown_cleanup=False)
+
+    return status_list
 
 
 def _query_status_azure(
     cluster: str,
-    ray_provider_config: Dict[str, Any],
+    ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    del ray_provider_config  # unused
     status_map = {
         'VM starting': global_user_state.ClusterStatus.INIT,
         'VM running': global_user_state.ClusterStatus.UP,
@@ -1353,13 +1402,13 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-
-    query_cmd = textwrap.dedent(f"""\
-            az vm show -d --ids \
-            $(az vm list --query \
-            "[?tags.\\"ray-cluster-name\\" == '{cluster}'].id" \
-            -o tsv) --query "powerState" -o tsv
-        """)
+    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
+    query_cmd = (
+        'az vm show -d --ids $(az vm list --query '
+        f'"[?tags.\\"ray-cluster-name\\" == \'{cluster}\' && '
+        f'contains(\'[{hash_filter_str}]\', tags.\\"ray-launch-config\\")].id" '
+        '-o tsv) --query "powerState" -o tsv')
     # NOTE: Azure cli should be handled carefully. The query command above
     # takes about 1 second to run.
     # An alternative is the following command, but it will take more than
@@ -1385,9 +1434,8 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_provider_config = read_yaml(handle.cluster_yaml)['provider']
-    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name,
-                                           ray_provider_config)
+    ray_config = read_yaml(handle.cluster_yaml)
+    return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
 def _update_cluster_status_no_lock(
@@ -1424,12 +1472,12 @@ def _update_cluster_status_no_lock(
         handle.head_ip = ips[0]
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
-                                                ready=True)
+                                                ready=True,
+                                                is_launch=False)
         return record
     except exceptions.FetchIPError:
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
-
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
@@ -1564,38 +1612,28 @@ def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
+    terminated_clusters = []
+
     def _refresh_cluster(cluster_name):
         record = _update_cluster_status(cluster_name,
                                         acquire_per_cluster_status_lock=True)
+        if record is None:
+            terminated_clusters.append(cluster_name)
         progress.update(task, advance=1)
         return record
 
     cluster_names = [record['name'] for record in records]
     with progress:
         updated_records = run_in_parallel(_refresh_cluster, cluster_names)
+    if terminated_clusters:
+        plural = 's were' if len(terminated_clusters) > 1 else ' was'
+        cluster_str = ', '.join(repr(name) for name in terminated_clusters)
+        logger.warning(f'The following cluster{plural} terminated on the cloud '
+                       f'and removed from Sky\'s cluster table:\n{cluster_str}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
     return updated_records
-
-
-def query_head_ip_with_retries(cluster_yaml: str, retry_count: int = 1) -> str:
-    """Returns the ip of the head node from yaml file."""
-    for i in range(retry_count):
-        try:
-            out = run(f'ray get-head-ip {cluster_yaml}',
-                      stdout=subprocess.PIPE).stdout.decode().strip()
-            head_ip = re.findall(IP_ADDR_REGEX, out)
-            assert 1 == len(head_ip), out
-            head_ip = head_ip[0]
-            break
-        except subprocess.CalledProcessError as e:
-            if i == retry_count - 1:
-                raise RuntimeError('Failed to get head ip') from e
-            # Retry if the cluster is not up yet.
-            logger.debug('Retrying to get head ip.')
-            time.sleep(5)
-    return head_ip
 
 
 def get_backend_from_handle(
@@ -1697,6 +1735,37 @@ def check_cluster_name_not_reserved(
         raise ValueError(msg)
 
 
+def check_gcp_cli_include_tpu_vm() -> None:
+    # TPU VM API available with gcloud version >= 382.0.0
+    version_cmd = 'gcloud version --format=json'
+    rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
+                                                 '/dev/null',
+                                                 shell=True,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
+
+    if rcode != 0:
+        failure_massage = ('Failed to run "gcloud version".\n'
+                           '**** STDOUT ****\n'
+                           '{stdout}\n'
+                           '**** STDERR ****\n'
+                           '{stderr}')
+        raise RuntimeError(failure_massage.format(stdout=stdout, stderr=stderr))
+
+    sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
+
+    if sdk_ver is None:
+        raise RuntimeError('Failed to get Google Cloud SDK version from'
+                           f' "gcloud version": {stdout}')
+    else:
+        major_ver = sdk_ver.split('.')[0]
+        major_ver = int(major_ver)
+        if major_ver < 382:
+            raise RuntimeError(
+                'Google Cloud SDK version must be >= 382.0.0 to use'
+                ' TPU VM APIs, check "gcloud version" for details.')
+
+
 def kill_children_processes():
     # We need to kill the children, so that the underlying subprocess
     # will not print the logs to the terminal, after this program
@@ -1716,7 +1785,7 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    sys.exit(exceptions.KEYBOARD_INTERRUPT_CODE)
+    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1725,7 +1794,7 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    sys.exit(exceptions.SIGTSTP_CODE)
+    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 class Backoff:
@@ -1755,41 +1824,23 @@ class Backoff:
         return self._backoff
 
 
-def check_fields(provided_fields, known_fields):
-    known_fields = set(known_fields)
-    unknown_fields = []
-    for field in provided_fields:
-        if field not in known_fields:
-            unknown_fields.append(field)
+@ux_utils.print_exception_no_traceback_decorator
+def validate_schema(obj, schema, err_msg_prefix=''):
+    err_msg = None
+    try:
+        validator.SchemaValidator(schema).validate(obj)
+    except jsonschema.ValidationError as e:
+        if e.validator == 'additionalProperties':
+            err_msg = err_msg_prefix + 'The following fields are invalid:'
+            known_fields = set(e.schema.get('properties', {}).keys())
+            for field in e.instance:
+                if field not in known_fields:
+                    most_similar_field = difflib.get_close_matches(
+                        field, known_fields, 1)
+                    if most_similar_field:
+                        err_msg += f'\nInstead of \'{field}\', did you mean \'{most_similar_field[0]}\'?'
+        else:
+            err_msg = err_msg_prefix + e.message
 
-    if len(unknown_fields) > 0:
-        invalid_keys = 'The following fields are invalid:\n'
-        for unknown_key in unknown_fields:
-            similar_keys = difflib.get_close_matches(unknown_key, known_fields)
-            key_invalid = f'    Unknown field \'{unknown_key}\'.'
-            if len(similar_keys) == 1:
-                key_invalid += f' Did you mean \'{similar_keys[0]}\'?'
-            if len(similar_keys) > 1:
-                key_invalid += f' Did you mean one of {similar_keys}?'
-            key_invalid += '\n'
-            invalid_keys += key_invalid
-        with print_exception_no_traceback():
-            raise ValueError(invalid_keys)
-
-
-@contextlib.contextmanager
-def print_exception_no_traceback():
-    """A context manager that prints out an exception without traceback.
-
-    Mainly for UX: user-facing errors, e.g., ValueError, should suppress long
-    tracebacks.
-
-    Example usage:
-
-        with print_exception_no_traceback():
-            if error():
-                raise ValueError('...')
-    """
-    sys.tracebacklimit = 0
-    yield
-    sys.tracebacklimit = 1000
+    if err_msg:
+        raise ValueError(err_msg)

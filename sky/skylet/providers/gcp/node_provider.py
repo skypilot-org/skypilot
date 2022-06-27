@@ -164,8 +164,6 @@ class GCPNodeProvider(NodeProvider):
 
             # Try to reuse previously stopped nodes with compatible configs
             if self.cache_stopped_nodes:
-                if not isinstance(resource, GCPCompute):
-                    raise NotImplementedError("Starting cached TPU nodes is not supported.")
                 filters = {
                     TAG_RAY_NODE_KIND: labels[TAG_RAY_NODE_KIND],
                     TAG_RAY_LAUNCH_CONFIG: labels[TAG_RAY_LAUNCH_CONFIG]
@@ -173,7 +171,13 @@ class GCPNodeProvider(NodeProvider):
                 # This tag may not always be present.
                 if TAG_RAY_USER_NODE_TYPE in labels:
                     filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
-                reuse_nodes = resource._list_instances(filters, ["TERMINATED"])[:count]
+                # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
+                if isinstance(resource, GCPCompute):
+                    STOPPED_STATUS = ["TERMINATED"]
+                else:
+                    STOPPED_STATUS = ["STOPPED"]
+                reuse_nodes = resource._list_instances(
+                    filters, STOPPED_STATUS)[:count]
                 reuse_node_ids = [n.id for n in reuse_nodes]
                 if reuse_nodes:
                     # TODO(suquark): Some instances could still be stopping.
