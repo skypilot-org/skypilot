@@ -2,7 +2,8 @@ name: resnet-app
 
 resources:
   cloud: aws
-  accelerators: V100
+  accelerators:
+    V100: 1
 
 inputs: {
   gs://cloud-tpu-test-dataset/fake_imagenet: 70,
