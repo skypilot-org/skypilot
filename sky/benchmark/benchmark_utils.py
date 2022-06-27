@@ -15,6 +15,7 @@ import uuid
 
 import colorama
 import prettytable
+from rich import console as rich_console
 from rich import progress as rich_progress
 
 import sky
@@ -32,6 +33,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 logger = sky_logging.init_logger(__name__)
+console = rich_console.Console()
 
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
@@ -287,6 +289,10 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
             last_time = summary['last_step_time']
         else:
             last_time = end_time
+        if last_time is None:
+            raise ValueError('No duration information found.'
+                'Check if sky_callback.on_step_end has been called.')
+
         record = benchmark_state.BenchmarkRecord(
             start_time=start_time,
             last_time=last_time,
@@ -444,7 +450,8 @@ def update_benchmark_state(benchmark: str) -> None:
     remote_dir = os.path.join(bucket_name, benchmark)
     local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
     os.makedirs(local_dir, exist_ok=True)
-    _download_remote_dir(remote_dir, local_dir, bucket_type)
+    with console.status('[bold cyan]Downloading benchmark logs[/]'):
+        _download_remote_dir(remote_dir, local_dir, bucket_type)
 
     # Update the benchmark results in parallel.
     num_candidates = len(benchmark_results)
