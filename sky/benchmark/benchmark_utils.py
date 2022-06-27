@@ -290,7 +290,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
         else:
             last_time = end_time
         if last_time is None:
-            raise ValueError('No duration information found.'
+            raise ValueError(
+                'No duration information found. '
                 'Check if sky_callback.on_step_end has been called.')
 
         record = benchmark_state.BenchmarkRecord(
