@@ -6,6 +6,8 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.utils import schemas
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -49,14 +51,9 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 3
+    _VERSION = 4
 
-    # Update the key list when a new field is added.
-    _YAML_KEYS = [
-        'cloud', 'instance_type', 'accelerators', 'accelerator_args',
-        'use_spot', 'spot_recovery', 'disk_size', 'region'
-    ]
-
+    @ux_utils.print_exception_no_traceback_decorator
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
@@ -67,6 +64,7 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -92,12 +90,15 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
+        self._image_id = image_id
+
         self._try_validate_local()
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_instance_type()
         self._try_validate_accelerators()
         self._try_validate_spot()
+        self._try_validate_image_id()
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -110,9 +111,14 @@ class Resources:
         if self.use_spot:
             use_spot = '[Spot]'
         if isinstance(self.cloud, clouds.Local):
-            return f'Local({self.cloud}{accelerators}{accelerator_args})'
+            return f'{self.cloud}({accelerators}{accelerator_args})'
+
+        image_id = ''
+        if self.image_id is not None:
+            image_id = f', image_id={self.image_id!r}'
+
         return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args})')
+                f'{accelerators}{accelerator_args}{image_id})')
 
     @property
     def cloud(self):
@@ -161,6 +167,10 @@ class Resources:
     def disk_size(self) -> int:
         return self._disk_size
 
+    @property
+    def image_id(self) -> Optional[str]:
+        return self._image_id
+
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, int]],
@@ -199,10 +209,22 @@ class Resources:
                     clouds.GCP()), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
-                if 'tf_version' not in accelerator_args:
-                    logger.info('Missing tf_version in accelerator_args, using'
-                                ' default (2.5.0)')
-                    accelerator_args['tf_version'] = '2.5.0'
+                use_tpu_vm = accelerator_args.get('tpu_vm', False)
+                if use_tpu_vm:
+                    backend_utils.check_gcp_cli_include_tpu_vm()
+                if self.instance_type is not None and use_tpu_vm:
+                    if self.instance_type != 'TPU-VM':
+                        raise ValueError(
+                            'Cannot specify instance type'
+                            f' (got "{self.instance_type}") for TPU VM.')
+                if 'runtime_version' not in accelerator_args:
+                    if use_tpu_vm:
+                        accelerator_args['runtime_version'] = 'tpu-vm-base'
+                    else:
+                        accelerator_args['runtime_version'] = '2.5.0'
+                    logger.info(
+                        'Missing runtime_version in accelerator_args, using'
+                        f' default ({accelerator_args["runtime_version"]})')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
@@ -322,6 +344,23 @@ class Resources:
                 raise ValueError('Local/On-prem mode does not support spot '
                                  'instances.')
 
+    def _try_validate_image_id(self) -> None:
+        if self._image_id is None:
+            return
+
+        if self.cloud is None:
+            raise ValueError('Cloud must be specified when image_id provided.')
+
+        if not self._cloud.is_same_cloud(
+                clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
+            raise ValueError(
+                'image_id is only supported for AWS and GCP, please '
+                'explicitly specify the cloud.')
+
+        if self._cloud.is_same_cloud(clouds.AWS()) and self._region is None:
+            raise ValueError('image_id is only supported for AWS in a specific '
+                             'region, please explicitly specify the region.')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -354,6 +393,13 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if (self.image_id is None) != (other.image_id is None):
+            # self and other's image id should be both None or both not None
+            return False
+
+        if (self.image_id is not None and self.image_id != other.image_id):
+            return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
@@ -397,6 +443,9 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if (self.image_id is not None and self.image_id != other.image_id):
+            return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
@@ -472,16 +521,19 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
         return resources
 
     @classmethod
+    @ux_utils.print_exception_no_traceback_decorator
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()
 
-        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
+        backend_utils.validate_schema(config, schemas.get_resources_schema(),
+                                      'Invalid resources YAML: ')
 
         resources_fields = dict()
         if config.get('cloud') is not None:
@@ -501,6 +553,10 @@ class Resources:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
+        if config.get('image_id') is not None:
+            logger.warning('image_id in resources is experimental. It only '
+                           'supports AWS/GCP.')
+            resources_fields['image_id'] = config.pop('image_id')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -523,6 +579,7 @@ class Resources:
         config['spot_recovery'] = self.spot_recovery
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
+        add_if_not_none('image_id', self.image_id)
         return config
 
     def __setstate__(self, state):
@@ -556,4 +613,7 @@ class Resources:
 
         if version < 3:
             self._spot_recovery = None
+
+        if version < 4:
+            self._image_id = None
         self.__dict__.update(state)

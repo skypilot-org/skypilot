@@ -224,7 +224,7 @@ def make_task_bash_script(codegen: str,
             #!/bin/bash
             source ~/.bashrc
             set -a
-            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+            . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             cd {SKY_REMOTE_WORKDIR}"""),
     ]
@@ -247,7 +247,8 @@ def run_bash_command_with_log(bash_command: str,
                               stream_logs: bool = False,
                               with_ray: bool = False,
                               use_sudo: bool = False):
-    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
+                                     delete=False) as fp:
         if env_vars is not None:
             export_env_vars = '\n'.join(
                 [f'export {k}="{v}"' for k, v in env_vars.items()])

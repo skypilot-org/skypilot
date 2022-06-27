@@ -1,6 +1,5 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
-import contextlib
 import enum
 import getpass
 import hashlib
@@ -10,7 +9,6 @@ import os
 import pathlib
 import signal
 import subprocess
-import sys
 import tempfile
 import textwrap
 import time
@@ -76,6 +74,9 @@ _RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
+
+# The maximum retry count for fetching head IP address.
+_HEAD_IP_MAX_ATTEMPTS = 3
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -481,14 +482,21 @@ class RetryingVmProvisioner(object):
         zone = zones[0]
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
+        httperror_str = [
+            s for s in splits
+            if s.startswith('googleapiclient.errors.HttpError: ')
+        ]
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
             exception_dict = ast.literal_eval(exception_str)
+            # TPU VM returns a different structured response.
+            if 'errors' not in exception_dict:
+                exception_dict = {'errors': [exception_dict]}
             for error in exception_dict['errors']:
                 code = error['code']
                 message = error['message']
-                logger.warning(f'Got {code} in {zone.name} '
+                logger.warning(f'Got return code {code} in {zone.name} '
                                f'{style.DIM}(message: {message})'
                                f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':
@@ -514,8 +522,18 @@ class RetryingVmProvisioner(object):
                     # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
                     # This seems to be not documented by GCP.
                     self._blocked_zones.add(zone.name)
+                elif code == 8:
+                    # Error code 8 means TPU resources is out of capacity. Example:
+                    # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
+                    self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
+        elif len(httperror_str) >= 1:
+            # Parse HttpError for unauthorized regions. Example:
+            # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
+            # Details: "Location us-east1-d is not found or access is unauthorized.">
+            logger.info(f'Got {httperror_str[0]}')
+            self._blocked_zones.add(zone.name)
         else:
             # No such structured error response found.
             assert not exception_str, stderr
@@ -1032,6 +1050,16 @@ class RetryingVmProvisioner(object):
         # clusters.
         os.makedirs('/tmp/ray', exist_ok=True)
         returncode, stdout, stderr = ray_up()
+        if (returncode != 0 and 'Processing file mounts' in stdout and
+                'Running setup commands' not in stdout):
+            # Retry ray up if it failed due to file mounts, because it is
+            # probably due to too many ssh connections issue and can be fixed
+            # by retrying.
+            # This is required when using custom image for GCP.
+            logger.info(
+                'Retrying sky runtime setup due to ssh connection issue.')
+            returncode, stdout, stderr = ray_up()
+
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
@@ -1189,13 +1217,10 @@ class RetryingVmProvisioner(object):
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
-                # raise_error has to be True to make sure remove_cluster
-                # is called if provisioning fails.
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
-                                         _blocked_launchable_resources,
-                                         raise_error=True)
+                                         _blocked_launchable_resources)
                 to_provision = task.best_resources
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
@@ -1335,6 +1360,7 @@ class CloudVmRayBackend(backends.Backend):
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
+
         # Special handling for local cloud case.
         # ResourcesHandle is saved into ~/.sky/ when the first task is run on
         # the cluster. For subsequent tasks,Resources.less_demanding_than takes
@@ -1344,24 +1370,22 @@ class CloudVmRayBackend(backends.Backend):
         if handle.local_handle:
             launched_resources = handle.local_handle['cluster_resources']
         # requested_resources <= actual_resources.
-        with backend_utils.print_exception_no_traceback():
-            # requested_resources <= actual_resources.
-            if not (task.num_nodes <= handle.launched_nodes and
-                    task_resources.less_demanding_than(
-                        launched_resources, requested_num_nodes=num_nodes)):
-                if (task_resources.region is not None and
-                        task_resources.region != launched_resources.region):
-                    raise exceptions.ResourcesMismatchError(
-                        'Task requested the resources in region '
-                        f'{task_resources.region!r}, but the existed cluster '
-                        f'is in region {launched_resources.region!r}.')
+        if not (task.num_nodes <= handle.launched_nodes and
+                task_resources.less_demanding_than(
+                    launched_resources, requested_num_nodes=num_nodes)):
+            if (task_resources.region is not None and
+                    task_resources.region != launched_resources.region):
                 raise exceptions.ResourcesMismatchError(
-                    'Requested resources do not match the existing cluster.\n'
-                    f'  Requested:\t{task.num_nodes}x {task_resources} \n'
-                    f'  Existing:\t{handle.launched_nodes}x '
-                    f'{handle.launched_resources}\n'
-                    f'To fix: specify a new cluster name, or down the '
-                    f'existing cluster first: sky down {cluster_name}')
+                    'Task requested resources in region '
+                    f'{task_resources.region!r}, but the existing cluster '
+                    f'is in region {launched_resources.region!r}.')
+            raise exceptions.ResourcesMismatchError(
+                'Requested resources do not match the existing cluster.\n'
+                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                f'  Existing:\t{handle.launched_nodes}x '
+                f'{handle.launched_resources}\n'
+                f'To fix: specify a new cluster name, or down the '
+                f'existing cluster first: sky down {cluster_name}')
 
     @timeline.event
     def _check_existing_cluster(
@@ -1508,7 +1532,7 @@ class CloudVmRayBackend(backends.Backend):
                     logger.info(
                         'To keep retrying until the cluster is up, use the '
                         '`--retry-until-up` flag.')
-                    sys.exit(1)
+                    raise exceptions.ResourcesUnavailableError() from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1520,7 +1544,9 @@ class CloudVmRayBackend(backends.Backend):
 
             with timeline.Event('backend.provision.get_node_ips'):
                 ip_list = backend_utils.get_node_ips(
-                    cluster_config_file, config_dict['launched_nodes'])
+                    cluster_config_file,
+                    config_dict['launched_nodes'],
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
@@ -1637,8 +1663,7 @@ class CloudVmRayBackend(backends.Backend):
                            source=workdir,
                            target=SKY_REMOTE_WORKDIR,
                            log_path=log_path,
-                           stream_logs=False,
-                           raise_error=True)
+                           stream_logs=False)
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
@@ -1773,8 +1798,7 @@ class CloudVmRayBackend(backends.Backend):
                     rc,
                     command,
                     f'Failed to sync {src} to {dst}.',
-                    stderr=stdout + stderr,
-                    raise_error=True)
+                    stderr=stdout + stderr)
 
             if run_rsync:
                 # TODO(zhwu): Optimize for large amount of files.
@@ -1784,8 +1808,7 @@ class CloudVmRayBackend(backends.Backend):
                                source=src,
                                target=dst,
                                log_path=log_path,
-                               stream_logs=False,
-                               raise_error=True)
+                               stream_logs=False)
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
@@ -1922,11 +1945,9 @@ class CloudVmRayBackend(backends.Backend):
                     log_path=log_path,
                     ssh_control_name=self._ssh_control_name(handle))
                 backend_utils.handle_returncode(
-                    returncode,
-                    symlink_command,
+                    returncode, symlink_command,
                     'Failed to create symlinks. The target destination '
-                    'may already exist',
-                    raise_error=True)
+                    'may already exist')
 
             backend_utils.run_in_parallel(_symlink_node, ip_list)
         end = time.time()
@@ -1974,8 +1995,7 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.handle_returncode(
                     returncode=returncode,
                     command=cmd,
-                    error_msg=f'Failed to setup with return code {returncode}',
-                    raise_error=True)
+                    error_msg=f'Failed to setup with return code {returncode}')
 
             num_nodes = handle.launched_nodes
             plural = 's' if num_nodes > 1 else ''
@@ -2067,9 +2087,7 @@ class CloudVmRayBackend(backends.Backend):
             for i, ip in enumerate(ips):
                 try:
                     # Disable the output of rsync.
-                    with open('/dev/null',
-                              'a') as f, contextlib.redirect_stdout(
-                                  f), contextlib.redirect_stderr(f):
+                    with backend_utils.subpress_output():
                         rsync_down(ip, local_log_dir, remote_log_dir)
                     logger.info(
                         f'{fore.CYAN}Job {job_id} logs: downloaded from '
@@ -2453,7 +2471,8 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_no_lock(self,
                          handle: ResourceHandle,
                          terminate: bool,
-                         purge: bool = False) -> bool:
+                         purge: bool = False,
+                         post_teardown_cleanup: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2467,6 +2486,7 @@ class CloudVmRayBackend(backends.Backend):
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
+        use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2481,7 +2501,9 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              prev_status == global_user_state.ClusterStatus.STOPPED):
+              (prev_status == global_user_state.ClusterStatus.STOPPED or
+               use_tpu_vm)):
+            # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
@@ -2498,13 +2520,27 @@ class CloudVmRayBackend(backends.Backend):
                     f'--instance-ids $({query_cmd})')
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
-                query_cmd = (
-                    f'gcloud compute instances list '
-                    f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
-                    f'--zones={zone} --format=value\\(name\\)')
-                terminate_cmd = (
-                    f'gcloud compute instances delete --zone={zone} --quiet '
-                    f'$({query_cmd})')
+                # TODO(wei-lin): refactor by calling functions of node provider
+                # that uses Python API rather than CLI
+                if use_tpu_vm:
+                    # check if gcloud includes TPU VM API
+                    backend_utils.check_gcp_cli_include_tpu_vm()
+
+                    query_cmd = (
+                        f'gcloud compute tpus tpu-vm list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zone={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
+                else:
+                    query_cmd = (
+                        f'gcloud compute instances list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zones={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute instances delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
             else:
                 raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                  f'cluster {cluster_name!r}.')
@@ -2544,7 +2580,11 @@ class CloudVmRayBackend(backends.Backend):
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
                         reason='stopping/terminating cluster nodes'))
-            else:
+            # This error returns when we call "gcloud delete" with an empty VM
+            # list where no instance exists. Safe to ignore it and do cleanup
+            # locally.
+            # TODO(wei-lin): refactor error handling mechanism.
+            elif 'TPU must be specified.' not in stderr:
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
@@ -2553,7 +2593,10 @@ class CloudVmRayBackend(backends.Backend):
                         stderr=stderr))
                 return False
 
-        return self.post_teardown_cleanup(handle, terminate, purge)
+        if post_teardown_cleanup:
+            return self.post_teardown_cleanup(handle, terminate, purge)
+        else:
+            return True
 
     def post_teardown_cleanup(self,
                               handle: ResourceHandle,
@@ -2582,7 +2625,7 @@ class CloudVmRayBackend(backends.Backend):
                     require_outputs=True)
             if tpu_rc != 0:
                 if _TPU_NOT_FOUND_ERROR in tpu_stderr:
-                    logger.info(f'TPU {handle.tpu_name} not found. '
+                    logger.info('TPU not found. '
                                 'It should have been deleted already.')
                 elif purge:
                     logger.warning(
@@ -2620,17 +2663,13 @@ class CloudVmRayBackend(backends.Backend):
             os.remove(handle.cluster_yaml)
         return True
 
-    # TODO(mluo): Move function to `backend_utils.py`
-    def _rsync_up(
-        self,
-        handle: ResourceHandle,
-        source: str,
-        target: str,
-        stream_logs: bool = True,
-        log_path: str = '/dev/null',
-        ip: Optional[str] = None,
-        raise_error: bool = True,
-    ) -> None:
+    def _rsync_up(self,
+                  handle: ResourceHandle,
+                  source: str,
+                  target: str,
+                  stream_logs: bool = True,
+                  log_path: str = '/dev/null',
+                  ip: Optional[str] = None) -> None:
         """Runs rsync from 'source' to the cluster's node 'target'."""
         # Attempt to use 'rsync user@ip' directly, which is much faster than
         # going through ray (either 'ray rsync_*' or sdk.rsync()).
@@ -2676,10 +2715,8 @@ class CloudVmRayBackend(backends.Backend):
                                           stream_logs=stream_logs,
                                           shell=True)
         backend_utils.handle_returncode(
-            returncode,
-            command, f'Failed to rsync up {source} -> {target}, '
-            f'see {log_path} for details.',
-            raise_error=raise_error)
+            returncode, command, f'Failed to rsync up {source} -> {target}, '
+            f'see {log_path} for details.')
 
     def _ssh_control_name(self, handle: ResourceHandle) -> str:
         return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
@@ -2703,7 +2740,9 @@ class CloudVmRayBackend(backends.Backend):
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
-        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip)
+        max_attempts = 1 if use_cached_head_ip else _HEAD_IP_MAX_ATTEMPTS
+        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
+                                            max_attempts)
         ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         if under_remote_workdir:

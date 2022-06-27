@@ -125,6 +125,7 @@ def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
 
         def _wrapper(f):
 
+            @functools.wraps(f)
             def _record(*args, **kwargs):
                 nonlocal name_or_fn
                 with Event(name=name_or_fn, message=message):
@@ -138,6 +139,7 @@ def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
             raise ValueError(
                 'Should directly apply the decorator to a function.')
 
+        @functools.wraps(name_or_fn)
         def _record(*args, **kwargs):
             nonlocal name_or_fn
             f = name_or_fn
