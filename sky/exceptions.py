@@ -62,6 +62,11 @@ class StorageBucketGetError(StorageInitError):
     pass
 
 
+class StorageBucketDownloadError(StorageInitError):
+    # Error raised if attempt to download from an existing bucket fails.
+    pass
+
+
 class StorageBucketDeleteError(StorageError):
     # Error raised if attempt to delete an existing bucket fails.
     pass
