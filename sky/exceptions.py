@@ -67,6 +67,11 @@ class StorageBucketDeleteError(StorageError):
     pass
 
 
+class StorageBucketDownloadError(StorageError):
+    # Error raised if an attempt to download from an existing bucket fails.
+    pass
+
+
 class StorageUploadError(StorageError):
     # Error raised when bucket is successfully initialized, but upload fails,
     # either due to permissions, ctrl-c, or other reasons.

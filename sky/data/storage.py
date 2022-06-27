@@ -176,20 +176,9 @@ class AbstractStore:
         Args:
           local_path: Local path on user's device
         """
-        assert local_path is not None
-        local_path = os.path.expanduser(local_path)
-        iterator = self._remote_filepath_iterator()
-        for remote_path in iterator:
-            remote_path = next(iterator)
-            if remote_path[-1] == '/':
-                continue
-            path = os.path.join(local_path, remote_path)
-            if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
-            logger.info(f'Downloading {remote_path} to {path}')
-            self._download_file(remote_path, path)
+        raise NotImplementedError
 
-    def _download_file(self, remote_path: str, local_path: str) -> None:
+    def download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on Store
 
         Args:
@@ -841,7 +830,25 @@ class S3Store(AbstractStore):
         bucket = self._create_s3_bucket(self.name)
         return bucket, True
 
-    def _download_file(self, remote_path: str, local_path: str) -> None:
+    def download_remote_dir(self, local_path: str) -> None:
+        """Downloads directory from S3 bucket to the specified
+        local_path
+
+        Args:
+          local_path: Local path on user's device
+        """
+        local_path = os.path.expanduser(local_path)
+        try:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Downloading [green]bucket {self.name}'):
+                sync_command = f'aws s3 sync s3://{self.name}/ {local_path}'
+                subprocess.check_output(sync_command.split(' '))
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            raise exceptions.StorageBucketDownloadError(
+                f'Failed to download S3 bucket {self.name} to {local_path}.')
+
+    def download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
         using the boto3 API
 
@@ -1107,7 +1114,25 @@ class GcsStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-    def _download_file(self, remote_path: str, local_path: str) -> None:
+    def download_remote_dir(self, local_path: str) -> None:
+        """Downloads directory from GS bucket to the specified
+        local_path
+
+        Args:
+          local_path: Local path on user's device
+        """
+        local_path = os.path.expanduser(local_path)
+        try:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Downloading [green]bucket {self.name}'):
+                sync_cmd = f'gsutil -m rsync -r gs://{self.name}/ {local_path}'
+                subprocess.check_output(sync_cmd.split(' '))
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            raise exceptions.StorageBucketDownloadError(
+                f'Failed to download GCS bucket {self.name} to {local_path}.')
+
+    def download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
 
         Args:
