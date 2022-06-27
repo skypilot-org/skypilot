@@ -1,8 +1,12 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -110,7 +114,12 @@ class Cloud:
     def is_same_cloud(self, other):
         raise NotImplementedError
 
-    def make_deploy_resources_variables(self, resources):
+    def make_deploy_resources_variables(
+        self,
+        resources: 'resources.Resources',
+        region: Optional['Region'],
+        zones: Optional[List['Zone']],
+    ) -> Dict[str, str]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -139,7 +148,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_region(cls) -> Region:
+    def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
     def get_feasible_launchable_resources(self, resources):

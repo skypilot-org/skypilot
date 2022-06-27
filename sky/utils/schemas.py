@@ -52,6 +52,9 @@ def get_resources_schema():
                         'type': 'boolean',
                     }
                 }
+            },
+            'image_id': {
+                'type': 'string',
             }
         }
     }

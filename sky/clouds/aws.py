@@ -178,8 +178,22 @@ class AWS(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources'):
+    def make_deploy_resources_variables(
+            self, resources: 'resources_lib.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+            zones = region.zones
+        else:
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
+
+        region_name = region.name
+        zones = [zone.name for zone in zones]
+
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -187,10 +201,19 @@ class AWS(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
+
+        if r.image_id is not None:
+            image_id = r.image_id
+        else:
+            image_id = self.get_default_ami(region_name, r.instance_type)
+
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
+            'region': region_name,
+            'zones': ','.join(zones),
+            'image_id': image_id,
         }
 
     def get_feasible_launchable_resources(self,
