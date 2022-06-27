@@ -787,8 +787,8 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
     return ssh_user, ssh_private_key
 
 
-def parallel_cmd_with_rsync(
-    runners: List['command_runner.SSHCommandRunner'],
+def parallel_data_transfer(
+    runners: List[command_runner.SSHCommandRunner],
     source: str,
     target: str,
     cmd: Optional[str],

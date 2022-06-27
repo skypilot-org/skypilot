@@ -1610,7 +1610,7 @@ class CloudVmRayBackend(backends.Backend):
             mount_cmd = store.mount_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
-            backend_utils.parallel_cmd_with_rsync(
+            backend_utils.parallel_data_transfer(
                 runners,
                 source=src_print,
                 target=dst,
@@ -1640,11 +1640,8 @@ class CloudVmRayBackend(backends.Backend):
                                              handle.launched_nodes)
         ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runners = [
-            command_runner.SSHCommandRunner(ip, ssh_user, ssh_key,
-                                            self._ssh_control_name(handle))
-            for ip in ip_list
-        ]
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, ssh_user, ssh_key, self._ssh_control_name(handle))
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -1696,7 +1693,7 @@ class CloudVmRayBackend(backends.Backend):
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
-                backend_utils.parallel_cmd_with_rsync(
+                backend_utils.parallel_data_transfer(
                     runners,
                     source=src,
                     target=wrapped_dst,
@@ -1729,7 +1726,7 @@ class CloudVmRayBackend(backends.Backend):
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.
-            backend_utils.parallel_cmd_with_rsync(
+            backend_utils.parallel_data_transfer(
                 runners,
                 source=src,
                 target=dst,
