@@ -1,14 +1,16 @@
 """Benchmark utils: Utility functions to manage benchmarking process."""
 import copy
 import getpass
+import glob
 import json
 from multiprocessing import pool
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import typing
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 import uuid
 
 import colorama
@@ -16,11 +18,13 @@ import prettytable
 from rich import progress as rich_progress
 
 import sky
+from sky import backends
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
+from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
 
@@ -34,9 +38,12 @@ _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 # NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR
 # in sky/callbacks/sky_callback/base.py.
 _SKY_REMOTE_BENCHMARK_DIR_SYMLINK = '~/sky_benchmark_dir'
+
 # NOTE: This must be the same as _BENCHMARK_SUMMARY
 # in sky/callbacks/sky_callback/base.py.
-_BENCHMARK_SUMMARY = 'benchmark_summary.json'
+_BENCHMARK_SUMMARY = 'summary.json'
+_RUN_START = 'run_start.txt'
+_RUN_END = 'run_end.txt'
 
 _Config = Dict[str, Any]
 
@@ -52,6 +59,12 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
                 raise ValueError(f'Cluster name {name} is taken. '
                                  'Try using a different benchmark name.')
     return names
+
+
+def _generate_script_with_timelogs(script: str, start_path: str,
+                                   end_path: str) -> str:
+    return (f'echo $(date +%s.%N) > {start_path}\n' + script +
+            f'\necho $(date +%s.%N) > {end_path}\n')
 
 
 def _get_optimized_resources(
@@ -76,12 +89,13 @@ def _print_candidate_resources(
         candidate_resources: List['resources_lib.Resources']) -> None:
     task_str = config.get('name', 'a task')
     num_nodes = config.get('num_nodes', 1)
-    plural = 's' if num_nodes > 1 else ''
     logger.info(f'{colorama.Style.BRIGHT}Benchmarking {task_str} '
-                f'on candidate resources ({num_nodes} node{plural}):'
-                f'{colorama.Style.RESET_ALL}')
+                f'on candidate resources:{colorama.Style.RESET_ALL}')
 
-    columns = ['CLUSTER', 'CLOUD', 'INSTANCE', 'ACCELERATORS', 'PRICE ($/hr)']
+    columns = [
+        'CLUSTER', 'CLOUD', '# NODES', 'INSTANCE', 'ACCELERATORS',
+        'PRICE ($/hr)'
+    ]
     table_kwargs = {
         'hrules': prettytable.FRAME,
         'vrules': prettytable.NONE,
@@ -97,8 +111,8 @@ def _print_candidate_resources(
             accelerators = f'{accelerator}:{count}'
         cost = num_nodes * resources.get_cost(3600)
         row = [
-            cluster, resources.cloud, resources.instance_type, accelerators,
-            f'{cost:.2f}'
+            cluster, resources.cloud, num_nodes, resources.instance_type,
+            accelerators, f'{cost:.2f}'
         ]
         candidate_table.add_row(row)
     logger.info(f'{candidate_table}\n')
@@ -140,54 +154,167 @@ def _get_benchmark_bucket() -> Tuple[str, str]:
     return bucket_name, bucket_type
 
 
-def _launch_in_parallel(clusters: List[str], cmds: List[List[str]]) -> None:
-    """Launches clusters in parallel."""
+def _format_err_msg(msg: str):
+    return f'{colorama.Fore.RED}{msg}{colorama.Style.RESET_ALL}'
 
-    def _format_err_msg(msg: str):
-        return f'{colorama.Fore.RED}{msg}{colorama.Style.RESET_ALL}'
 
-    def _launch_with_log(cluster: str, cmd: List[str]) -> None:
-        """Executes `sky launch` in a subprocess and returns normally.
-
-        This function does not propagate any error so that failures in a
-        launch thread do not disrupt the other parallel launch threads.
-        """
-        prefix_color = colorama.Fore.MAGENTA
-        prefix = f'{prefix_color}({cluster}){colorama.Style.RESET_ALL} '
+def _parallel_run_with_interrupt_handling(func: Callable,
+                                          args: List[Any]) -> None:
+    with pool.ThreadPool(processes=len(args)) as p:
         try:
-            returncode, _, stderr = log_lib.run_with_log(
-                cmd,
-                log_path='/dev/null',
-                stream_logs=True,
-                prefix=prefix,
-                skip_lines=[
-                    'optimizer.py',
-                    'Tip: ',
-                ],  # FIXME: Use regex
-                end_streaming_at='Job submitted with Job ID:',
-                require_outputs=True,
-            )
-            # Report any error from the `sky launch` subprocess.
-            if returncode != 0:
-                logger.error(
-                    f'Launching {cluster} failed with code {returncode}')
-                logger.error(_format_err_msg(stderr))
-        except Exception as e:  # pylint: disable=broad-except
-            # FIXME(woosuk): Avoid using general Exception.
-            # Report any error in executing and processing the outputs of
-            # the `sky launch` subprocess.
-            logger.error(f'Launching {cluster} failed.')
-            logger.error(_format_err_msg(e))
-
-    with pool.ThreadPool(processes=len(clusters)) as p:
-        try:
-            list(
-                p.imap(lambda args: _launch_with_log(*args),
-                       list(zip(clusters, cmds))))
+            list(p.imap(func, args))
         except KeyboardInterrupt:
             print()
             logger.error(_format_err_msg('Interrupted by user.'))
             sys.exit(1)
+
+
+def _launch_with_log(cluster: str, cmd: List[str]) -> None:
+    """Executes `sky launch` in a subprocess and returns normally.
+
+    This function does not propagate any error so that failures in a
+    launch thread do not disrupt the other parallel launch threads.
+    """
+    prefix_color = colorama.Fore.MAGENTA
+    prefix = f'{prefix_color}({cluster}){colorama.Style.RESET_ALL} '
+    try:
+        # FIXME(woosuk): CONSIDER when SKY_MINIMIZE_LOGGING=1
+        returncode, _, stderr = log_lib.run_with_log(
+            cmd,
+            log_path='/dev/null',
+            stream_logs=True,
+            prefix=prefix,
+            skip_lines=[
+                'optimizer.py',
+                'Tip: ',
+            ],  # FIXME: Use regex
+            end_streaming_at='Job submitted with Job ID:',
+            require_outputs=True,
+        )
+        # Report any error from the `sky launch` subprocess.
+        if returncode != 0:
+            logger.error(f'Launching {cluster} failed with code {returncode}')
+            logger.error(_format_err_msg(stderr))
+    except Exception as e:  # pylint: disable=broad-except
+        # FIXME(woosuk): Avoid using general Exception.
+        # Report any error in executing and processing the outputs of
+        # the `sky launch` subprocess.
+        logger.error(f'Launching {cluster} failed.')
+        logger.error(_format_err_msg(e))
+
+
+def _download_remote_dir(remote_dir: str, local_dir: str,
+                         bucket_type: data.StoreType) -> None:
+    # FIXME(woosuk): Replace this function with bucket.download_remote_dir.
+    if bucket_type == data.StoreType.S3:
+        remote_dir = f's3://{remote_dir}'
+        subprocess.run(
+            ['aws', 's3', 'cp', '--recursive', remote_dir, local_dir],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True)
+    elif bucket_type == data.StoreType.GCS:
+        remote_dir = f'gs://{remote_dir}'
+        subprocess.run(['gsutil', '-m', 'cp', '-r', remote_dir, local_dir],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    else:
+        assert False
+
+
+def _read_timestamp(path: str) -> float:
+    with open(path, 'r') as f:
+        timestamp = f.readlines()
+    assert len(timestamp) == 1
+    return float(timestamp[0].strip())
+
+
+def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
+    benchmark = benchmark_result['benchmark']
+    benchmark_status = benchmark_result['status']
+    if benchmark_status == benchmark_state.BenchmarkStatus.FINISHED:
+        # No need to update.
+        return
+
+    # Get the status of the benchmarking cluster and job.
+    cluster = benchmark_result['cluster']
+    record = global_user_state.get_cluster_from_name(cluster)
+    cluster_status = None
+    if record is not None:
+        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+            cluster)
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+    job_status = None
+    if cluster_status == global_user_state.ClusterStatus.UP:
+        # NOTE: The id of the benchmarking job must be 1.
+        # TODO(woosuk): Handle exceptions.
+        job_status = backend.get_job_status(handle, job_id=1, stream_logs=False)
+
+    # Update the benchmark status.
+    if (cluster_status in [None, global_user_state.ClusterStatus.STOPPED] or
+        (job_status is not None and job_status.is_terminal())):
+        # FIXME(woosuk): Benchmark logs can be stale.
+        benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+
+    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
+
+    run_start_path = os.path.join(local_dir, _RUN_START)
+    assert os.path.exists(run_start_path)
+    start_time = _read_timestamp(run_start_path)
+
+    run_end_path = os.path.join(local_dir, _RUN_END)
+    end_time = None
+    if os.path.exists(run_end_path):
+        end_time = _read_timestamp(run_end_path)
+
+    log_dirs = glob.glob(os.path.join(local_dir, 'sky-callback-*'))
+    if log_dirs:
+        # There can be multiple logs if the cluster has executed multiple jobs.
+        # Here, we consider the first log as the log of the benchmarking job.
+        log_dir = sorted(log_dirs)[0]
+        summary_path = os.path.join(log_dir, _BENCHMARK_SUMMARY)
+    else:
+        summary_path = None
+
+    record = None
+    if summary_path is not None and os.path.exists(summary_path):
+        # (1) SkyCallback has saved the summary.
+        with open(summary_path, 'r') as f:
+            summary = json.load(f)
+        if end_time is None:
+            last_time = summary['last_step_time']
+        else:
+            last_time = end_time
+        record = benchmark_state.BenchmarkRecord(
+            start_time=start_time,
+            last_time=last_time,
+            num_steps=summary['num_steps'],
+            seconds_per_step=summary['time_per_step'],
+            estimated_total_seconds=summary['estimated_total_time'],
+        )
+    elif os.path.exists(run_end_path):
+        # (2) The benchmarking job has run without SkyCallback.
+        benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+        record = benchmark_state.BenchmarkRecord(
+            start_time=start_time,
+            last_time=end_time,
+        )
+    elif job_status == job_lib.JobStatus.RUNNING:
+        # (3) SkyCallback is not initialized yet or not used.
+        record = benchmark_state.BenchmarkRecord(
+            start_time=start_time,
+            last_time=time.time(),
+        )
+    elif benchmark_status == benchmark_state.BenchmarkStatus.FINISHED:
+        # (4) The benchmarking job has finished without the end timestamp.
+        logger.error(f'Benchmarking on {cluster} terminated abnormally.')
+    else:
+        logger.error(f'No benchmark logs found for {cluster}.')
+
+    benchmark_state.update_benchmark_result(benchmark, cluster,
+                                            benchmark_status, record)
 
 
 def generate_benchmark_configs(
@@ -217,15 +344,23 @@ def generate_benchmark_configs(
             'store': None,
         }
 
-        # Create a symbolic link to a directory in the benchmark bucket.
         benchmark_dir = os.path.join(_SKY_REMOTE_BENCHMARK_DIR, benchmark,
                                      cluster)
         if 'setup' not in candidate_config:
             candidate_config['setup'] = ''
+        # Create a symbolic link to a directory in the benchmark bucket.
         candidate_config['setup'] = (
             f'mkdir -p {benchmark_dir}\n'
             f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}\n' +
             candidate_config['setup'])
+
+        # Log the start and end time of the benchmarking task.
+        if 'run' not in candidate_config:
+            candidate_config['run'] = ''
+        candidate_config['run'] = _generate_script_with_timelogs(
+            candidate_config['run'], os.path.join(benchmark_dir, _RUN_START),
+            os.path.join(benchmark_dir, _RUN_END))
+
         candidate_configs.append(candidate_config)
     return clusters, candidate_configs
 
@@ -272,7 +407,8 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
                    for yaml_fd, cluster in zip(yaml_fds, clusters)]
 
     # Launch the benchmarking clusters in parallel.
-    _launch_in_parallel(clusters, launch_cmds)
+    _parallel_run_with_interrupt_handling(lambda args: _launch_with_log(*args),
+                                          list(zip(clusters, launch_cmds)))
 
     # Delete the temporary yaml files.
     for f in yaml_fds:
@@ -293,56 +429,45 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
     return benchmark_created
 
 
-def update_benchmark_state(benchmark: str, clusters: List[str]):
-    plural = 's' if len(clusters) > 1 else ''
+def update_benchmark_state(benchmark: str) -> None:
+    benchmark_results = benchmark_state.get_benchmark_results(benchmark)
+    if all(result['status'] == benchmark_state.BenchmarkStatus.FINISHED
+           for result in benchmark_results):
+        return
+
+    bucket_name = benchmark_state.get_benchmark_from_name(benchmark)['bucket']
+    storage = data.Storage(bucket_name, source=None, persistent=True)
+    bucket_type = list(storage.stores.keys())[0]
+
+    # Download the benchmark logs from the benchmark bucket.
+    # FIXME(woosuk): Do not download the logs if not necessary.
+    remote_dir = os.path.join(bucket_name, benchmark)
+    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
+    os.makedirs(local_dir, exist_ok=True)
+    _download_remote_dir(remote_dir, local_dir, bucket_type)
+
+    # Update the benchmark results in parallel.
+    num_candidates = len(benchmark_results)
+    plural = 's' if num_candidates > 1 else ''
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
     task = progress.add_task(
-        f'[bold cyan]Downloading {len(clusters)} benchmark log{plural}[/]',
-        total=len(clusters))
+        f'[bold cyan]Processing {num_candidates} benchmark result{plural}[/]',
+        total=num_candidates)
 
-    bucket_name = benchmark_state.get_benchmark_from_name(benchmark)['bucket']
-    storage = data.Storage(bucket_name, source=None, persistent=True)
-    bucket = list(storage.stores.values())[0]
-
-    # TODO(woosuk): Replace this function with bucket.download_remote_dir.
-    def _download_log(cluster: str):
-        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
-        os.makedirs(local_dir, exist_ok=True)
-        # TODO(woosuk): Handle possible exceptions.
-        # pylint: disable=protected-access
-        bucket._download_file(
-            f'{benchmark}/{cluster}/{_BENCHMARK_SUMMARY}',
-            f'{local_dir}/{_BENCHMARK_SUMMARY}',
-        )
+    def _update_with_progress_bar(arg: Any) -> None:
+        _update_benchmark_result(arg)
         progress.update(task, advance=1)
 
     with progress:
-        backend_utils.run_in_parallel(_download_log, clusters)
+        _parallel_run_with_interrupt_handling(_update_with_progress_bar,
+                                              benchmark_results)
         progress.live.transient = False
         progress.refresh()
 
-    for cluster in clusters:
-        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
-        summary = os.path.join(local_dir, _BENCHMARK_SUMMARY)
-        with open(summary, 'r') as f:
-            summary = json.load(f)
 
-        prep_time = summary['first_step_time'] - summary['create_time']
-        run_time = summary['last_step_time'] - summary['first_step_time']
-        record = benchmark_state.BenchmarkRecord(
-            prep_time=prep_time,
-            run_time=run_time,
-            num_steps=summary['num_steps'],
-            step_time=summary['time_per_step'],
-            total_steps=summary['total_steps'],
-            estimated_total_time=summary['estimated_total_time'],
-        )
-        benchmark_state.update_benchmark_result(benchmark, cluster, record)
-
-
-def remove_benchmark_logs(benchmark: str):
+def remove_benchmark_logs(benchmark: str) -> None:
     log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
     subprocess.run(['rm', '-rf', log_dir], check=False)
     # TODO(woosuk): remove the logs in the bucket.

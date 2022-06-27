@@ -2561,6 +2561,10 @@ def benchmark_launch(
                                              use_spot=use_spot,
                                              disk_size=disk_size)
     config['resources'].update(override_params)
+    if 'cloud' in config['resources']:
+        cloud = config['resources'].pop('cloud')
+        if cloud is not None:
+            config['resources']['cloud'] = str(cloud)
 
     # Fully generate the benchmark candidate configs.
     clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
@@ -2613,7 +2617,6 @@ def benchmark_ls() -> None:
         'BENCHMARK',
         'TASK',
         'LAUNCHED',
-        'STATUS',
     ]
 
     max_num_candidates = 1
@@ -2642,8 +2645,6 @@ def benchmark_ls() -> None:
             task,
             # LAUNCHED
             datetime.datetime.fromtimestamp(benchmark['launched_at']),
-            # STATUS
-            benchmark['status'].value,
         ]
 
         benchmark_results = benchmark_state.get_benchmark_results(
@@ -2671,73 +2672,97 @@ def benchmark_ls() -> None:
 
 @bench.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
-@click.option('--force-download',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Force downloading benchmark logs in the benchmark bucket.')
-def benchmark_show(benchmark: str, force_download: bool) -> None:
+def benchmark_show(benchmark: str) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+    benchmark_utils.update_benchmark_state(benchmark)
 
-    if (record['status'] == benchmark_state.BenchmarkStatus.RUNNING or
-            force_download):
-        clusters = benchmark_state.get_benchmark_clusters(benchmark)
-        benchmark_utils.update_benchmark_state(benchmark, clusters)
-
-    # Generate a report.
+    # TODO: Add explanations.
     columns = [
-        'NAME',
+        'CLUSTER',
         'RESOURCES',
-        'PREP_TIME (min)',
-        'RUN_TIME (min)',
+        'STATUS',
+        'DURATION',
+        'SPENT($)',
         '#STEPS',
         'SEC/STEP',
         '$/STEP',
-        'TOTAL_TIME (hr)',
-        'TOTAL_COST ($)',
+        'EST(hr)',
+        'EST($)',
     ]
 
     cluster_table = log_utils.create_table(columns)
+    rows = []
     benchmark_results = benchmark_state.get_benchmark_results(benchmark)
     for result in benchmark_results:
         num_nodes = result['num_nodes']
         resources = result['resources']
+        row = [
+            # CLUSTER
+            result['cluster'],
+            # RESOURCES
+            f'{num_nodes}x {resources}',
+            # STATUS
+            result['status'].value,
+        ]
 
         record = result['record']
-        cost_per_step = num_nodes * resources.get_cost(record.step_time)
-        total_time = record.estimated_total_time
+        if record is None:
+            row += ['-'] * (len(columns) - len(row))
+            cluster_table.add_row(row)
+            continue
+
+        duration_str = log_utils.readable_time_duration(record.start_time,
+                                                        record.last_time,
+                                                        absolute=True)
+        duration = record.last_time - record.start_time
+        spent = num_nodes * resources.get_cost(duration)
+        spent_str = f'{spent:.4f}'
+
+        num_steps = record.num_steps
+        if num_steps is None:
+            num_steps = '-'
+
+        seconds_per_step = record.seconds_per_step
+        if seconds_per_step is None:
+            seconds_per_step_str = '-'
+            cost_per_step_str = '-'
+        else:
+            seconds_per_step_str = f'{seconds_per_step:.4f}'
+            cost_per_step = num_nodes * resources.get_cost(seconds_per_step)
+            cost_per_step_str = f'{cost_per_step:.6f}'
+
+        total_time = record.estimated_total_seconds
         if total_time is None:
             total_time_str = '-'
             total_cost_str = '-'
         else:
-            total_cost = num_nodes * resources.get_cost(total_time)
             total_time_str = f'{total_time / 3600:.2f}'
+            total_cost = num_nodes * resources.get_cost(total_time)
             total_cost_str = f'{total_cost:.2f}'
 
-        row = [
-            # NAME
-            result['cluster'],
-            # RESOURCES
-            f'{num_nodes}x {resources}',
-            # PREP_TIME (min)
-            f'{record.prep_time / 60:.2f}',
-            # RUN_TIME (min)
-            f'{record.run_time / 60:.2f}',
+        row += [
+            # DURATION
+            duration_str,
+            # SPENT($)
+            spent_str,
             # STEPS
-            record.num_steps,
-            # SEC/ITER
-            f'{record.step_time:.2f}',
-            # $/ITER
-            f'{cost_per_step:.6f}',
-            # TOTAL_TIME (hr)
+            num_steps,
+            # SEC/STEP
+            seconds_per_step_str,
+            # $/STEP
+            cost_per_step_str,
+            # EST(hr)
             total_time_str,
-            # TOTAL_COST ($)
+            # EST($)
             total_cost_str,
         ]
-        cluster_table.add_row(row)
+        rows.append(row)
+
+    # TODO(woosuk): Add comments on SkyCallback.
+    cluster_table.add_rows(rows)
     click.echo(cluster_table)
 
 
@@ -2760,7 +2785,6 @@ def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
                                 apply_to_all=False,
                                 terminate=terminate,
                                 no_confirm=yes)
-    benchmark_state.finish_benchmark(benchmark)
 
 
 @bench.command('stop', cls=_DocumentedCodeCommand)

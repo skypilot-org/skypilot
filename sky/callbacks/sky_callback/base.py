@@ -1,5 +1,6 @@
 """Generic SkyCallback class used to build framework-specific callbacks."""
 import atexit
+import datetime
 import json
 import os
 import threading
@@ -9,7 +10,7 @@ from typing import List, Optional
 import psutil
 
 _SKY_REMOTE_BENCHMARK_DIR = '~/sky_benchmark_dir'
-_BENCHMARK_SUMMARY = 'benchmark_summary.json'
+_BENCHMARK_SUMMARY = 'summary.json'
 
 
 class BaseCallback:
@@ -29,20 +30,20 @@ class BaseCallback:
 
         # Create a log directory.
         if log_dir is None:
-            self._log_dir = _SKY_REMOTE_BENCHMARK_DIR
-        else:
-            self._log_dir = log_dir
-        self._log_dir = os.path.expanduser(self._log_dir)
-        os.makedirs(self._log_dir, exist_ok=True)
+            log_dir = _SKY_REMOTE_BENCHMARK_DIR
+        log_dir = os.path.join(
+            log_dir, 'sky-callback-' +
+            datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f'))
+        log_dir = os.path.expanduser(log_dir)
+        os.makedirs(log_dir, exist_ok=True)
 
         # TODO(woosuk): Do not store the entire timestamps.
         self._step_begins = []
         self._step_ends = []
 
         # Create a writer thread.
-        self._worker = _AsyncSummaryWriter(self._log_dir, total_steps,
-                                           warmup_steps, self._step_begins,
-                                           self._step_ends)
+        self._worker = _AsyncSummaryWriter(log_dir, total_steps, warmup_steps,
+                                           self._step_begins, self._step_ends)
         self._worker.start()
         atexit.register(self._worker.stop)
 

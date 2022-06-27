@@ -44,8 +44,7 @@ class _BenchmarkSQLiteConn(threading.local):
             name TEXT PRIMARY KEY,
             task TEXT,
             bucket TEXT,
-            launched_at INTEGER,
-            status TEXT)""")
+            launched_at INTEGER)""")
         # Table for Benchmark Config (e.g., benchmark bucket name)
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS benchmark_config (
@@ -54,6 +53,7 @@ class _BenchmarkSQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS benchmark_results (
             cluster TEXT PRIMARY KEY,
+            status TEXT,
             num_nodes INTEGER,
             resources BLOB,
             record BLOB,
@@ -69,39 +69,27 @@ _BENCHMARK_DB = _BenchmarkSQLiteConn()
 
 
 class BenchmarkStatus(enum.Enum):
-    """Benchmark status as recorded in table 'benchmark'."""
-
     RUNNING = 'RUNNING'
     FINISHED = 'FINISHED'
 
 
 class BenchmarkRecord(NamedTuple):
-    prep_time: float
-    run_time: float
-    num_steps: int
-    step_time: float
-    total_steps: Optional[int] = None
-    estimated_total_time: Optional[float] = None
+    start_time: float
+    last_time: float
+    num_steps: Optional[int] = None
+    seconds_per_step: Optional[float] = None
+    estimated_total_seconds: Optional[float] = None
 
 
 def add_benchmark(benchmark_name: str, task_name: Optional[str],
                   bucket_name: str) -> None:
     """Add a new benchmark."""
     launched_at = int(time.time())
-    if task_name is None:
-        _BENCHMARK_DB.cursor.execute(
-            'INSERT INTO benchmark'
-            '(name, task, bucket, launched_at, status) '
-            'VALUES (?, NULL, ?, ?, ?)',
-            (benchmark_name, bucket_name, launched_at,
-             BenchmarkStatus.RUNNING.value))
-    else:
-        _BENCHMARK_DB.cursor.execute(
-            'INSERT INTO benchmark'
-            '(name, task, bucket, launched_at, status) '
-            'VALUES (?, ?, ?, ?, ?)',
-            (benchmark_name, task_name, bucket_name, launched_at,
-             BenchmarkStatus.RUNNING.value))
+    _BENCHMARK_DB.cursor.execute(
+        'INSERT INTO benchmark'
+        '(name, task, bucket, launched_at) '
+        'VALUES (?, ?, ?, ?)',
+        (benchmark_name, task_name, bucket_name, launched_at))
     _BENCHMARK_DB.conn.commit()
 
 
@@ -113,33 +101,28 @@ def add_benchmark_result(
     resources = pickle.dumps(cluster_handle.launched_resources)
     _BENCHMARK_DB.cursor.execute(
         'INSERT INTO benchmark_results'
-        '(cluster, num_nodes, resources, record, benchmark) '
-        'VALUES (?, ?, ?, NULL, ?)',
-        (name, num_nodes, resources, benchmark_name))
+        '(cluster, status, num_nodes, resources, record, benchmark) '
+        'VALUES (?, ?, ?, ?, NULL, ?)', (name, BenchmarkStatus.RUNNING.value,
+                                         num_nodes, resources, benchmark_name))
     _BENCHMARK_DB.conn.commit()
 
 
-def update_benchmark_result(benchmark_name: str, cluster_name: str,
-                            benchmark_record: BenchmarkRecord) -> None:
+def update_benchmark_result(
+        benchmark_name: str, cluster_name: str,
+        benchmark_status: BenchmarkStatus,
+        benchmark_record: Optional[BenchmarkRecord]) -> None:
     _BENCHMARK_DB.cursor.execute(
         'UPDATE benchmark_results SET '
-        'record=(?) WHERE benchmark=(?) AND cluster=(?)',
-        (pickle.dumps(benchmark_record), benchmark_name, cluster_name))
-    _BENCHMARK_DB.conn.commit()
-
-
-def finish_benchmark(benchmark_name: str):
-    """Mark a benchmark state as finished."""
-    _BENCHMARK_DB.cursor.execute(
-        'UPDATE benchmark SET status=(?) WHERE name=(?)',
-        (BenchmarkStatus.FINISHED.value, benchmark_name))
+        'status=(?), record=(?) WHERE benchmark=(?) AND cluster=(?)',
+        (benchmark_status.value, pickle.dumps(benchmark_record), benchmark_name,
+         cluster_name))
     _BENCHMARK_DB.conn.commit()
 
 
 def delete_benchmark(benchmark_name: str) -> None:
     """Delete a benchmark result."""
     _BENCHMARK_DB.cursor.execute(
-        'DELETE FROM benchmark_results where benchmark=(?)', (benchmark_name,))
+        'DELETE FROM benchmark_results WHERE benchmark=(?)', (benchmark_name,))
     _BENCHMARK_DB.cursor.execute('DELETE FROM benchmark WHERE name=(?)',
                                  (benchmark_name,))
     _BENCHMARK_DB.conn.commit()
@@ -149,28 +132,26 @@ def get_benchmark_from_name(benchmark_name: str) -> Optional[Dict[str, Any]]:
     """Get a benchmark from its name."""
     rows = _BENCHMARK_DB.cursor.execute(
         'SELECT * FROM benchmark WHERE name=(?)', (benchmark_name,))
-    for name, task, bucket, launched_at, status in rows:
+    for name, task, bucket, launched_at in rows:
         record = {
             'name': name,
             'task': task,
             'bucket': bucket,
             'launched_at': launched_at,
-            'status': BenchmarkStatus[status],
         }
         return record
 
 
 def get_benchmarks() -> List[Dict[str, Any]]:
     """Get all benchmarks."""
-    rows = _BENCHMARK_DB.cursor.execute('select * from benchmark')
+    rows = _BENCHMARK_DB.cursor.execute('SELECT * FROM benchmark')
     records = []
-    for name, task, bucket, launched_at, status in rows:
+    for name, task, bucket, launched_at in rows:
         record = {
             'name': name,
             'task': task,
             'bucket': bucket,
             'launched_at': launched_at,
-            'status': BenchmarkStatus[status],
         }
         records.append(record)
     return records
@@ -217,14 +198,16 @@ def get_benchmark_clusters(benchmark_name: str) -> List[str]:
 
 def get_benchmark_results(benchmark_name: str) -> List[Dict[str, Any]]:
     rows = _BENCHMARK_DB.cursor.execute(
-        'select * from benchmark_results where benchmark=(?)',
+        'SELECT * FROM benchmark_results WHERE benchmark=(?)',
         (benchmark_name,))
     records = []
-    for cluster, num_nodes, resources, benchmark_record, benchmark in rows:
+    for (cluster, status, num_nodes, resources, benchmark_record,
+         benchmark) in rows:
         if benchmark_record is not None:
             benchmark_record = pickle.loads(benchmark_record)
         record = {
             'cluster': cluster,
+            'status': BenchmarkStatus[status],
             'num_nodes': num_nodes,
             'resources': pickle.loads(resources),
             'record': benchmark_record,
