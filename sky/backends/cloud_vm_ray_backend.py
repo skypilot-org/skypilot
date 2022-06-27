@@ -1026,14 +1026,14 @@ class RetryingVmProvisioner(object):
             # This is required when using custom image for GCP.
             # 2. Failed due to timeout when fetching head node for Azure.
             if ('Processing file mounts' in stdout and
-                    'Running setup commands' not in stdout):
+                    'Running setup commands' not in stdout and
+                    'Failed to setup head node.' in stderr):
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
                 returncode, stdout, stderr = ray_up()
 
             if ('Head node fetch timed out. Failed to create head node.'
-                    in stderr and
-                    to_provision_cloud.is_same_cloud(clouds.Azure())):
+                    in stderr and isinstance(to_provision_cloud, clouds.Azure)):
                 logger.info(
                     'Retrying head node provisioning due to head fetching '
                     'timeout.')
