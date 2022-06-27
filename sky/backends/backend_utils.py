@@ -787,7 +787,7 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
     return ssh_user, ssh_private_key
 
 
-def parallel_data_transfer(
+def parallel_mounts_on_nodes(
     runners: List[command_runner.SSHCommandRunner],
     source: str,
     target: str,
