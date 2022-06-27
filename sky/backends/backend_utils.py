@@ -1150,8 +1150,7 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError('Failed to get head ip') from e
+                raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
             time.sleep(5)
@@ -1495,9 +1494,8 @@ def _update_cluster_status_no_lock(
                                                    ssh_private_key=ssh_key,
                                                    stream_logs=False)
             if returncode:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.FetchIPError(
-                        reason=exceptions.FetchIPError.Reason.HEAD)
+                raise exceptions.FetchIPError(
+                    reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
