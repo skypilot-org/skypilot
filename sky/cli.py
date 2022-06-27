@@ -2740,7 +2740,7 @@ def benchmark_show(benchmark: str) -> None:
         record = result['record']
         if record is None:
             row += ['-'] * (len(columns) - len(row))
-            cluster_table.add_row(row)
+            rows.append(row)
             continue
 
         duration_str = log_utils.readable_time_duration(record.start_time,
