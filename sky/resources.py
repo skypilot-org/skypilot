@@ -43,7 +43,7 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 3
+    _VERSION = 4
 
     @ux_utils.print_exception_no_traceback_decorator
     def __init__(
@@ -56,6 +56,7 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -82,11 +83,14 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
+        self._image_id = image_id
+
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_instance_type()
         self._try_validate_accelerators()
         self._try_validate_spot()
+        self._try_validate_image_id()
 
     def __repr__(self) -> str:
         accelerators = ''
@@ -99,8 +103,12 @@ class Resources:
         if self.use_spot:
             use_spot = '[Spot]'
 
+        image_id = ''
+        if self.image_id is not None:
+            image_id = f', image_id={self.image_id!r}'
+
         return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args})')
+                f'{accelerators}{accelerator_args}{image_id})')
 
     @property
     def cloud(self):
@@ -148,6 +156,10 @@ class Resources:
     @property
     def disk_size(self) -> int:
         return self._disk_size
+
+    @property
+    def image_id(self) -> Optional[str]:
+        return self._image_id
 
     def _set_accelerators(
         self,
@@ -313,6 +325,23 @@ class Resources:
                              'is not supported. The strategy should be among '
                              f'{list(spot.SPOT_STRATEGIES.keys())}')
 
+    def _try_validate_image_id(self) -> None:
+        if self._image_id is None:
+            return
+
+        if self.cloud is None:
+            raise ValueError('Cloud must be specified when image_id provided.')
+
+        if not self._cloud.is_same_cloud(
+                clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
+            raise ValueError(
+                'image_id is only supported for AWS and GCP, please '
+                'explicitly specify the cloud.')
+
+        if self._cloud.is_same_cloud(clouds.AWS()) and self._region is None:
+            raise ValueError('image_id is only supported for AWS in a specific '
+                             'region, please explicitly specify the region.')
+
     def get_cost(self, seconds: float):
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
@@ -346,6 +375,13 @@ class Resources:
             return False
         # self.region <= other.region
 
+        if (self.image_id is None) != (other.image_id is None):
+            # self and other's image id should be both None or both not None
+            return False
+
+        if (self.image_id is not None and self.image_id != other.image_id):
+            return False
+
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
             return False
@@ -376,6 +412,9 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if (self.image_id is not None and self.image_id != other.image_id):
+            return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
@@ -447,6 +486,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
         return resources
@@ -479,6 +519,10 @@ class Resources:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
+        if config.get('image_id') is not None:
+            logger.warning('image_id in resources is experimental. It only '
+                           'supports AWS/GCP.')
+            resources_fields['image_id'] = config.pop('image_id')
 
         assert not config, f'Invalid resource args: {config.keys()}'
         return Resources(**resources_fields)
@@ -501,6 +545,7 @@ class Resources:
         config['spot_recovery'] = self.spot_recovery
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
+        add_if_not_none('image_id', self.image_id)
         return config
 
     def __setstate__(self, state):
@@ -534,4 +579,7 @@ class Resources:
 
         if version < 3:
             self._spot_recovery = None
+
+        if version < 4:
+            self._image_id = None
         self.__dict__.update(state)

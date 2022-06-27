@@ -249,6 +249,11 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, overrides the '
               '"resources.use_spot" config.')),
+    click.option('--image-id',
+                 required=False,
+                 default=None,
+                 help=('Custom image id for launching the instances. '
+                       'Passing "none" resets the config.')),
     click.option(
         '--env',
         required=False,
@@ -301,6 +306,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            gpus: Optional[str] = None,
                            use_spot: Optional[int] = None,
+                           image_id: Optional[str] = None,
                            disk_size: Optional[int] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params = {}
@@ -321,6 +327,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['accelerators'] = gpus
     if use_spot is not None:
         override_params['use_spot'] = use_spot
+    if image_id is not None:
+        if image_id.lower() == 'none':
+            override_params['image_id'] = None
+        else:
+            override_params['image_id'] = image_id
     if disk_size is not None:
         override_params['disk_size'] = disk_size
     return override_params
@@ -583,6 +594,7 @@ def _make_dag_from_entrypoint_with_overrides(
     gpus: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
+    image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     env: List[Dict[str, str]] = None,
     # spot launch specific
@@ -594,6 +606,7 @@ def _make_dag_from_entrypoint_with_overrides(
         if _check_yaml(entrypoint):
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
             task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
@@ -601,9 +614,9 @@ def _make_dag_from_entrypoint_with_overrides(
             else:
                 # Treat entrypoint as a bash command.
                 click.secho('Task from command: ', fg='yellow', nl=False)
+                click.secho(entrypoint, bold=True)
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
-        click.secho(entrypoint, bold=True)
         # Override.
         if workdir is not None:
             task.workdir = workdir
@@ -612,6 +625,7 @@ def _make_dag_from_entrypoint_with_overrides(
                                                  region=region,
                                                  gpus=gpus,
                                                  use_spot=use_spot,
+                                                 image_id=image_id,
                                                  disk_size=disk_size)
 
         # Spot launch specific.
@@ -750,6 +764,7 @@ def launch(
     region: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     env: List[Dict[str, str]],
     gpus: Optional[str],
     disk_size: Optional[int],
@@ -779,6 +794,7 @@ def launch(
         gpus=gpus,
         num_nodes=num_nodes,
         use_spot=use_spot,
+        image_id=image_id,
         env=env,
         disk_size=disk_size,
     )
@@ -823,6 +839,7 @@ def exec(
     workdir: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     env: List[Dict[str, str]],
     gpus: Optional[str],
 ):
@@ -898,6 +915,7 @@ def exec(
         region=region,
         gpus=gpus,
         use_spot=use_spot,
+        image_id=image_id,
         num_nodes=num_nodes,
         env=env,
     )
@@ -2082,6 +2100,7 @@ def spot_launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     spot_recovery: Optional[str],
     env: List[Dict[str, str]],
     disk_size: Optional[int],
@@ -2103,6 +2122,7 @@ def spot_launch(
         gpus=gpus,
         num_nodes=num_nodes,
         use_spot=use_spot,
+        image_id=image_id,
         env=env,
         disk_size=disk_size,
         spot_recovery=spot_recovery,
@@ -2474,6 +2494,7 @@ def benchmark_launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
@@ -2559,6 +2580,7 @@ def benchmark_launch(
                                              region=region,
                                              gpus=gpus,
                                              use_spot=use_spot,
+                                             image_id=image_id,
                                              disk_size=disk_size)
     config['resources'].update(override_params)
     if 'cloud' in config['resources']:
