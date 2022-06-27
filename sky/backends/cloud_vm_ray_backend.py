@@ -1148,6 +1148,8 @@ class RetryingVmProvisioner(object):
                         'To fix, call backend.register_info(dag=dag, '
                         'optimize_target=sky.OptimizeTarget.COST)')
                     raise e
+
+                logger.info(e)
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
