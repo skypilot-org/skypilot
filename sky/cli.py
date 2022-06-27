@@ -2568,6 +2568,7 @@ def benchmark_launch(
         config = {}
     if 'resources' not in config:
         config['resources'] = {}
+    resources_config = config['resources']
 
     # Override the yaml config with the command line arguments.
     if name is not None:
@@ -2582,11 +2583,17 @@ def benchmark_launch(
                                              use_spot=use_spot,
                                              image_id=image_id,
                                              disk_size=disk_size)
-    config['resources'].update(override_params)
-    if 'cloud' in config['resources']:
-        cloud = config['resources'].pop('cloud')
+    resources_config.update(override_params)
+    if 'cloud' in resources_config:
+        cloud = resources_config.pop('cloud')
         if cloud is not None:
-            config['resources']['cloud'] = str(cloud)
+            resources_config['cloud'] = str(cloud)
+    if 'accelerators' in resources_config:
+        if resources_config['accelerators'] is None:
+            resources_config.pop('accelerators')
+    if 'image_id' in resources_config:
+        if resources_config['image_id'] is None:
+            resources_config.pop('image_id')
 
     # Fully generate the benchmark candidate configs.
     clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
