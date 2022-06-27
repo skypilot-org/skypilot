@@ -67,3 +67,12 @@ class SkyTransformersCallback(transformers.TrainerCallback):
             return
         if self._sky_callback is not None:
             self._sky_callback.on_step_end()
+
+    def on_step_end(self, args: transformers.TrainingArguments,
+                    state: transformers.TrainerState,
+                    control: transformers.TrainerControl, **kwargs) -> None:
+        del args, state, control, kwargs  # Unused.
+        if _DISABLE_CALLBACK:
+            return
+        if self._sky_callback is not None:
+            self._sky_callback.on_step_end()
