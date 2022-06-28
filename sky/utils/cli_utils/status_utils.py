@@ -113,10 +113,13 @@ def show_local_status_table():
         if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             if (handle.launched_nodes is not None and
                     handle.launched_resources is not None):
-                local_cluster_resources = [
-                    r.accelerators
-                    for r in handle.local_handle['cluster_resources']
-                ]
+                if handle.local_handle:
+                    local_cluster_resources = [
+                        r.accelerators
+                        for r in handle.local_handle['cluster_resources']
+                    ]
+                else:
+                    local_cluster_resources = []
                 for idx, resource in enumerate(local_cluster_resources):
                     if not bool(resource):
                         local_cluster_resources[idx] = None

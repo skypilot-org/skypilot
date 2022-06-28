@@ -1256,11 +1256,11 @@ class CloudVmRayBackend(backends.Backend):
             return self.cluster_name
 
         def _generate_local_handle(self):
-            self.launched_resources = resources_lib.Resources(
-                cloud=clouds.Local(), region='Local')
             self.local_handle = {}
             config = backend_utils.get_local_cluster_config(self.cluster_name)
             if config is not None:
+                self.launched_resources = resources_lib.Resources(
+                    cloud=clouds.Local(), region='Local')
                 cluster_config = config['cluster']
                 auth_config = config['auth']
                 ips = cluster_config['ips']
