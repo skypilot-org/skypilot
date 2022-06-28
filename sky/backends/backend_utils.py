@@ -8,12 +8,10 @@ import enum
 import getpass
 import hashlib
 import json
-from multiprocessing import pool
 import os
 import pathlib
 import random
 import re
-import shlex
 import socket
 import subprocess
 import tempfile
@@ -21,7 +19,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -49,6 +47,8 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
@@ -139,6 +139,23 @@ def fill_template(template_name: str,
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
+
+
+def path_size_megabytes(path: str) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes."""
+    resolved_path = pathlib.Path(path).expanduser().resolve()
+    git_exclude_filter = ''
+    if (resolved_path / command_runner.GIT_EXCLUDE).exists():
+        # Ensure file exists; otherwise, rsync will error out.
+        git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
+            str(resolved_path / command_runner.GIT_EXCLUDE))
+    rsync_output = str(
+        subprocess.check_output(
+            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} {command_runner.RSYNC_FILTER_OPTION}'
+            f' {git_exclude_filter} --dry-run {path}',
+            shell=True).splitlines()[-1])
+    total_bytes = rsync_output.split(' ')[3].replace(',', '')
+    return int(total_bytes) // 10**6
 
 
 class FileMountHelper(object):
@@ -723,25 +740,24 @@ def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
 
 
 def run_command_and_handle_ssh_failure(
-        ip: str,
+        runner: command_runner.SSHCommandRunner,
         command: str,
-        ssh_user: str,
-        ssh_key: str,
         failure_message: Optional[str] = None) -> str:
     """Runs command remote and returns the output with proper error handling."""
-    rc, stdout, stderr = run_command_on_ip_via_ssh(ip,
-                                                   command,
-                                                   require_outputs=True,
-                                                   ssh_user=ssh_user,
-                                                   ssh_private_key=ssh_key,
-                                                   stream_logs=False)
+
+    rc, stdout, stderr = runner.run(command,
+                                    require_outputs=True,
+                                    stream_logs=False)
     if rc == 255:
         # SSH failed
-        raise ValueError(f'SSH with user {ssh_user} and key {ssh_key} '
-                         f'to {ip} failed. Check your credentials and try '
-                         f'again.')
-    handle_returncode(rc, command, failure_message, stderr=stderr)
-
+        raise ValueError(
+            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
+            f'to {runner.ip} failed. Check your credentials and try '
+            f'again.')
+    subprocess_utils.handle_returncode(rc,
+                                       command,
+                                       failure_message,
+                                       stderr=stderr)
     return stdout
 
 
@@ -755,14 +771,19 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)
 
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+
     ssh_user = config['auth']['ssh_user']
     ssh_key = config['auth']['ssh_private_key']
     worker_ips = config['provider']['worker_ips']
     file_mounts = config['file_mounts']
+
     setup_cmds = config['setup_commands']
-    rsync_exclude = 'virtenv'
-    setup_command = '\n'.join(setup_cmds)
-    setup_script = log_lib.make_task_bash_script(setup_command)
+    setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
+
+    ssh_credentials = (ssh_user, ssh_key, config['cluster_name'])
+    worker_runners = command_runner.SSHCommandRunner.make_runner_list(
+        worker_ips, *ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
@@ -774,60 +795,23 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
 
         # Ray Autoscaler Bug: Filemounting + Ray Setup
         # does not happen on workers.
-        def _ray_up_local_worker(ip):
-            # Unable to access methods in CloudVMRayBackend class,
-            # hence there is some replication in code below.
+        def _ray_up_local_worker(runner: command_runner.SSHCommandRunner):
             for dst, src in file_mounts.items():
-                if not os.path.isabs(dst) and \
-                not dst.startswith('~/'):
-                    dst = f'~/{dst}'
-                wrapped_dst = dst
-                if not dst.startswith('~/') and not dst.startswith('/tmp/'):
-                    wrapped_dst = \
-                    FileMountHelper.wrap_file_mount(
-                        dst)
-                full_src = os.path.abspath(os.path.expanduser(src))
-                if os.path.isfile(full_src):
-                    mkdir_for_wrapped_dst = \
-                        f'mkdir -p {os.path.dirname(wrapped_dst)}'
-                else:
-                    full_src = f'{full_src}/'
-                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-
+                mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
                 run_command_and_handle_ssh_failure(
-                    ip,
-                    mkdir_for_wrapped_dst,
-                    ssh_user=ssh_user,
-                    ssh_key=ssh_key,
-                    failure_message=
-                    f'Failed to run {mkdir_for_wrapped_dst} on remote.')
+                    runner,
+                    mkdir_dst,
+                    failure_message=f'Failed to run {mkdir_dst} on remote.')
+                runner.rsync_up(source=src, target=dst, stream_logs=False)
 
-                rsync_command = [
-                    'rsync', '-Pavz', '--filter=\'dir-merge,- .gitignore\'',
-                    f'--exclude=\'{rsync_exclude}\''
-                ]
-                ssh_options = ' '.join(ssh_options_list(ssh_key, None))
-                rsync_command.append(f'-e "ssh {ssh_options}"')
-                rsync_command.extend([
-                    full_src,
-                    f'{ssh_user}@{ip}:{wrapped_dst}',
-                ])
-                command = ' '.join(rsync_command)
-                log_lib.run_with_log(command,
-                                     stream_logs=False,
-                                     log_path='/dev/null',
-                                     shell=True)
-
-            cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
             run_command_and_handle_ssh_failure(
-                ip,
-                cmd,
-                ssh_user=ssh_user,
-                ssh_key=ssh_key,
+                runner,
+                setup_cmd,
                 failure_message=
                 'Failed to setup Ray autoscaler commands on remote.')
 
-        run_in_parallel(_ray_up_local_worker, worker_ips)
+        subprocess_utils.run_in_parallel(_ray_up_local_worker, worker_runners)
 
 
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
@@ -845,88 +829,50 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
     get_python_cmd = 'python3 --version | awk \'{{print $2}}\''
+    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+    runners = command_runner.SSHCommandRunner.make_runner_list(
+        ips, *ssh_credentials)
 
-    for ip in ips:
+    def _check_dependencies(runner: command_runner.SSHCommandRunner) -> None:
         # Checks for python3 installation.
         run_command_and_handle_ssh_failure(
-            ip,
+            runner,
             'sudo python3 --version',
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=f'Python3 is not installed on {ip}')
+            failure_message=f'Python3 is not installed on {runner.ip}.')
 
         # Checks if base python and the root user (sudo) base python are the
         # same version.
         base_python = run_command_and_handle_ssh_failure(
-            ip,
+            runner,
             get_python_cmd,
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=f'Check python installation on {ip}')
+            failure_message=f'Check python installation on {runner.ip}.')
 
         sudo_python = run_command_and_handle_ssh_failure(
-            ip,
+            runner,
             f'sudo {get_python_cmd}',
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=f'Check python installation on {ip}')
+            failure_message=f'Check python installation on {runner.ip}.')
 
         base_python = base_python.strip()
         sudo_python = sudo_python.strip()
-
         if base_python != sudo_python:
             raise ValueError(
                 f'User\'s base python version {base_python} differs '
-                f'from that of the root user\'s python version {sudo_python}.')
+                f'from that of the root user\'s python version {sudo_python} '
+                f'(on node: {runner.ip}).')
 
         # Checks for Ray installation.
         run_command_and_handle_ssh_failure(
-            ip,
+            runner,
             'sudo ray --version',
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=f'Ray is not installed on {ip}')
+            failure_message=f'Ray is not installed on {runner.ip}.')
 
         # Checks for Sky installation.
         run_command_and_handle_ssh_failure(
-            ip,
+            runner,
             'sky --help',
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=f'Sky is not installed on {ip}')
+            failure_message=f'Sky is not installed on {runner.ip}.')
 
-
-# TODO(mluo): Make this function compatible with CloudVMRayBackend's rsync
-def rsync_to_ip(ip: str, source: str, target: str, ssh_user: str,
-                ssh_key: str) -> None:
-    """Rsyncs files to a remote ip."""
-    rsync_command = [
-        'rsync',
-        '-Pavz',
-        '--filter=\'dir-merge,- .gitignore\'',
-    ]
-    directory_name = os.path.dirname(target)
-    run_command_and_handle_ssh_failure(
-        ip,
-        f'mkdir -p {directory_name}',
-        ssh_user=ssh_user,
-        ssh_key=ssh_key,
-        failure_message=f'Failed to create directory {directory_name}.')
-    ssh_options = ' '.join(ssh_options_list(ssh_key, None))
-    rsync_command.append(f'-e "ssh {ssh_options}"')
-    rsync_command.extend([
-        source,
-        f'{ssh_user}@{ip}:{target}',
-    ])
-    command = ' '.join(rsync_command)
-    rc = log_lib.run_with_log(command,
-                              stream_logs=False,
-                              log_path='/dev/null',
-                              shell=True)
-    handle_returncode(
-        rc, command, 'Failed to rsync files to local cluster. '
-        'Tip: run this command to test connectivity: '
-        f'ssh -i {ssh_key} {ssh_user}@{ip}')
+    subprocess_utils.run_in_parallel(_check_dependencies, runners)
 
 
 def get_local_cluster_accelerators(
@@ -953,6 +899,7 @@ def get_local_cluster_accelerators(
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
     remote_resource_path = '~/.sky/resource_group.py'
+    remote_resource_dir = os.path.dirname(remote_resource_path)
     custom_resources = []
 
     # Ran on the remote cluster node to identify accelerator resources.
@@ -978,25 +925,27 @@ def get_local_cluster_accelerators(
         print(accelerators_dict)
         """)
 
-    for ip in ips:
-        # Upload code to the cluster node.
+    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+    runners = command_runner.SSHCommandRunner.make_runner_list(
+        ips, *ssh_credentials)
+
+    def _gather_cluster_accelerators(
+            runner: command_runner.SSHCommandRunner):  # -> Dict[str, int]:
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(code)
             fp.flush()
-            rsync_to_ip(ip, fp.name, remote_resource_path, ssh_user, ssh_key)
+            runner.run(f'mkdir -p {remote_resource_dir}', stream_logs=False)
+            runner.rsync_up(source=fp.name,
+                            target=remote_resource_path,
+                            stream_logs=False)
+            _, output, _ = runner.run(f'python3 {remote_resource_path}',
+                                      require_outputs=True,
+                                      stream_logs=False)
+        node_accs = ast.literal_eval(output)
+        return node_accs
 
-        # Run code on the node to get cluster node accelerators.
-        output = run_command_and_handle_ssh_failure(
-            ip,
-            f'python3 {remote_resource_path}',
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=('Failed to execute resource group detector. '
-                             'Check if Python3 is installed correctly.'))
-
-        # Convert output into a custom resources dict
-        ip_resources = ast.literal_eval(output)
-        custom_resources.append(ip_resources)
+    custom_resources = subprocess_utils.run_in_parallel(
+        _gather_cluster_accelerators, runners)
     return custom_resources
 
 
@@ -1023,32 +972,37 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
     ip_list = [socket.gethostbyname(ip) for ip in ip_list]
     yaml_config['cluster']['ips'] = ip_list
     auth_config = yaml_config['auth']
-    ssh_user = auth_config['ssh_user']
-    ssh_key = auth_config['ssh_private_key']
     assert len(ip_list) >= 1, 'Must specify at least one Local IP'
 
     head_ip = ip_list[0]
-    total_workers = len(ip_list[1:])
     worker_ips = ip_list[1:]
+
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
+    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+    head_runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+    worker_runners = None
+    if worker_ips:
+        worker_runners = command_runner.SSHCommandRunner.make_runner_list(
+            worker_ips, *ssh_credentials)
 
     # Stops all running Ray instances on all nodes
     head_display = rich_status.Status('[bold cyan]Stopping Ray Cluster')
     head_display.start()
 
     run_command_and_handle_ssh_failure(
-        head_ip,
+        head_runner,
         'sudo ray stop -f',
-        ssh_user=ssh_user,
-        ssh_key=ssh_key,
         failure_message=f'Failed to stop Ray on {head_ip}.')
-    # TODO: Parallelize local cluster launching
-    for idx, ip in enumerate(worker_ips):
+
+    def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
         run_command_and_handle_ssh_failure(
-            ip,
+            runner,
             'sudo ray stop -f',
-            ssh_user=ssh_user,
-            ssh_key=ssh_key,
-            failure_message=f'Failed to stop Ray on {ip}.')
+            failure_message=f'Failed to stop Ray on {runner.ip}.')
+
+    if worker_runners:
+        subprocess_utils.run_in_parallel(_stop_ray_workers, worker_runners)
 
     head_display.stop()
 
@@ -1061,64 +1015,71 @@ def launch_local_cluster(yaml_config: Dict[str, Dict[str, object]],
         '[bold cyan]Launching Ray Cluster on Head')
     head_display.start()
     run_command_and_handle_ssh_failure(
-        head_ip,
+        head_runner,
         head_cmd,
-        ssh_user=ssh_user,
-        ssh_key=ssh_key,
         failure_message='Failed to launch Ray on Head node.')
     head_display.stop()
+
+    if not worker_runners:
+        return
 
     # Launches Ray on the worker nodes and links Ray dashboard from the head
     # to worker node.
     remote_ssh_key = f'~/.ssh/{os.path.basename(ssh_key)}'
     dashboard_remote_path = '~/.sky/dashboard_portforward.sh'
+    worker_runners = [(runner, idx) for idx, runner in enumerate(worker_runners)
+                     ]
+    # Connect head node's Ray dashboard to worker nodes
+    # Worker nodes need access to Ray dashboard to poll the
+    # JobSubmissionClient (in subprocess_daemon.py) for completed,
+    # failed, or cancelled jobs.
+    port_cmd = (
+        f'ssh -tt -L 8265:localhost:8265 -i {remote_ssh_key} -o '
+        'StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o '
+        'IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o '
+        'ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ControlMaster=auto '
+        f'-o ControlPersist=10s -o ConnectTimeout=120s {ssh_user}@{head_ip} '
+        '\'while true; do sleep 86400; done\'')
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
-        for idx, ip in enumerate(worker_ips):
-            worker_status.update(
-                f'[bold cyan]Workers {idx}/{total_workers} Ready')
+
+        def _start_ray_workers(
+                runner_tuple: Tuple[command_runner.SSHCommandRunner, int]):
+            runner, idx = runner_tuple
+            run_command_and_handle_ssh_failure(
+                runner,
+                'sudo ray stop -f',
+                failure_message=f'Failed to stop Ray on {runner.ip}.')
 
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
             worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
                           '--object-manager-port=8076 --dashboard-port 8265 '
                           f'--resources={worker_resources!r}')
-
             run_command_and_handle_ssh_failure(
-                ip,
+                runner,
                 worker_cmd,
-                ssh_user=ssh_user,
-                ssh_key=ssh_key,
-                failure_message='Failed to launch Ray on Worker node.')
+                failure_message=
+                f'Failed to launch Ray on Worker node {runner.ip}.')
 
-            # Connect head node's Ray dashboard to worker nodes
-            # Worker nodes need access to Ray dashboard to poll the
-            # JobSubmissionClient (in subprocess_daemon.py) for completed,
-            # failed, or cancelled jobs.
-            port_cmd = (
-                f'ssh -tt -L 8265:localhost:8265 -i {remote_ssh_key} -o '
-                'StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o '
-                'IdentitiesOnly=yes -o ExitOnForwardFailure=yes -o '
-                'ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ControlMaster=auto '
-                f'-o ControlPersist=10s -o ConnectTimeout=120s {ssh_user}@{head_ip} '
-                '\'while true; do sleep 86400; done\'')
-            rsync_to_ip(ip, ssh_key, remote_ssh_key, ssh_user, ssh_key)
+            # Comnecting Ray Dashboard with worker node.
+            runner.rsync_up(source=ssh_key,
+                            target=remote_ssh_key,
+                            stream_logs=False)
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(port_cmd)
                 fp.flush()
-                rsync_to_ip(ip, fp.name, dashboard_remote_path, ssh_user,
-                            ssh_key)
+                runner.rsync_up(source=fp.name,
+                                target=dashboard_remote_path,
+                                stream_logs=False)
+            # Kill existing dashboard connection and launch new one
             run_command_and_handle_ssh_failure(
-                ip, f'chmod a+rwx {dashboard_remote_path};'
+                runner, f'chmod a+rwx {dashboard_remote_path};'
                 'screen -S ray-dashboard -X quit;'
                 f'screen -S ray-dashboard -dm {dashboard_remote_path}',
-                ssh_user=ssh_user,
-                ssh_key=ssh_key,
                 failure_message=
-                f'Failed to connect Ray dashboard to worker node {ip}.')
+                f'Failed to connect Ray dashboard to worker node {runner.ip}.')
 
-        if total_workers > 0:
-            worker_status.update(
-                f'[bold cyan]Workers {total_workers}/{total_workers} Ready')
+        subprocess_utils.run_in_parallel(_start_ray_workers, worker_runners)
         worker_status.stop()
 
 
@@ -1215,21 +1176,19 @@ def wait_until_ray_cluster_ready(
         logger.error(e)
         return False  # failed
 
-    ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
+    runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         while True:
-            rc, output, stderr = run_command_on_ip_via_ssh(
-                head_ip,
-                'ray status',
-                ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                log_path=log_path,
-                stream_logs=False,
-                require_outputs=True)
-            handle_returncode(rc, 'ray status',
-                              'Failed to run ray status on head node.', stderr)
+            rc, output, stderr = runner.run('ray status',
+                                            log_path=log_path,
+                                            stream_logs=False,
+                                            require_outputs=True)
+            subprocess_utils.handle_returncode(
+                rc, 'ray status', 'Failed to run ray status on head node.',
+                stderr)
             logger.debug(output)
 
             # Workers that are ready
@@ -1309,273 +1268,80 @@ def wait_until_ray_cluster_ready(
     return True  # success
 
 
-def ssh_options_list(ssh_private_key: Optional[str],
-                     ssh_control_name: Optional[str],
-                     *,
-                     timeout=30) -> List[str]:
-    """Returns a list of sane options for 'ssh'."""
-    # Forked from Ray SSHOptions:
-    # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
-    arg_dict = {
-        # Supresses initial fingerprint verification.
-        'StrictHostKeyChecking': 'no',
-        # SSH IP and fingerprint pairs no longer added to known_hosts.
-        # This is to remove a 'REMOTE HOST IDENTIFICATION HAS CHANGED'
-        # warning if a new node has the same IP as a previously
-        # deleted node, because the fingerprints will not match in
-        # that case.
-        'UserKnownHostsFile': os.devnull,
-        # Try fewer extraneous key pairs.
-        'IdentitiesOnly': 'yes',
-        # Abort if port forwarding fails (instead of just printing to
-        # stderr).
-        'ExitOnForwardFailure': 'yes',
-        # Quickly kill the connection if network connection breaks (as
-        # opposed to hanging/blocking).
-        'ServerAliveInterval': 5,
-        'ServerAliveCountMax': 3,
-        # ConnectTimeout.
-        'ConnectTimeout': f'{timeout}s',
-        # Agent forwarding for git.
-        'ForwardAgent': 'yes',
-    }
-    if ssh_control_name is not None:
-        arg_dict.update({
-            # Control path: important optimization as we do multiple ssh in one
-            # sky.launch().
-            'ControlMaster': 'auto',
-            'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
-            'ControlPersist': '120s',
-        })
-    ssh_key_option = [
-        '-i',
-        ssh_private_key,
-    ] if ssh_private_key is not None else []
-    return ssh_key_option + [
-        x for y in (['-o', f'{k}={v}']
-                    for k, v in arg_dict.items()
-                    if v is not None) for x in y
-    ]
-
-
-def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
-    """Returns a temporary path to be used as the ssh control path."""
-    if ssh_control_filename is None:
-        return None
-    username = getpass.getuser()
-    path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
-def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
-    """Returns ssh_user and ssh_private_key."""
+def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
+    """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
-    return ssh_user, ssh_private_key
+    ssh_control_name = config.get('cluster_name', '__default__')
+    return ssh_user, ssh_private_key, ssh_control_name
 
 
-class SshMode(enum.Enum):
-    """Enum for SSH mode."""
-    # Do not allocating pseudo-tty to avoid user input corrupting the output.
-    NON_INTERACTIVE = 0
-    # Allocate a pseudo-tty, quit the ssh session after the cmd finishes.
-    # Be careful of this mode, as ctrl-c will be passed to the remote process.
-    INTERACTIVE = 1
-    # Allocate a pseudo-tty and log into the ssh session.
-    LOGIN = 2
-
-
-def _ssh_base_command(ip: str, ssh_private_key: str, ssh_user: str, *,
-                      ssh_mode: SshMode, port_forward: Optional[List[int]],
-                      ssh_control_name: Optional[str]) -> List[str]:
-    ssh = ['ssh']
-    if ssh_mode == SshMode.NON_INTERACTIVE:
-        # Disable pseudo-terminal allocation. Otherwise, the output of
-        # ssh will be corrupted by the user's input.
-        ssh += ['-T']
-    else:
-        # Force pseudo-terminal allocation for interactive/login mode.
-        ssh += ['-tt']
-    if port_forward is not None:
-        for port in port_forward:
-            local = remote = port
-            logger.info(
-                f'Forwarding port {local} to port {remote} on localhost.')
-            ssh += ['-L', f'{remote}:localhost:{local}']
-    return ssh + ssh_options_list(ssh_private_key,
-                                  ssh_control_name) + [f'{ssh_user}@{ip}']
-
-
-def run_command_on_ip_via_ssh(
-        ip: str,
-        cmd: Union[str, List[str]],
-        *,
-        ssh_user: str,
-        ssh_private_key: str,
-        port_forward: Optional[List[int]] = None,
-        # Advanced options.
-        require_outputs: bool = False,
-        log_path: str = '/dev/null',
-        # If False, do not redirect stdout/stderr to optimize performance.
-        process_stream: bool = True,
-        stream_logs: bool = True,
-        ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
-        ssh_control_name: Optional[str] = None,
-        **kwargs) -> Union[int, Tuple[int, str, str]]:
-    """Uses 'ssh' to run 'cmd' on a node with ip.
+def parallel_data_transfer_to_nodes(
+    runners: List[command_runner.SSHCommandRunner],
+    source: str,
+    target: str,
+    cmd: Optional[str],
+    run_rsync: bool,
+    *,
+    action_message: str,
+    # Advanced options.
+    log_path: str = os.devnull,
+    stream_logs: bool = False,
+):
+    """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
-        ip: The IP address of the node.
-        cmd: The command to run.
-        ssh_private_key: The path to the private key to use for ssh.
-        ssh_user: The user to use for ssh.
-        port_forward: A list of ports to forward from the localhost to the
-        remote host.
-
-        Advanced options:
-
-        require_outputs: Whether to return the stdout/stderr of the command.
-        log_path: Redirect stdout/stderr to the log_path.
-        stream_logs: Stream logs to the stdout/stderr.
-        check: Check the success of the command.
-        ssh_mode: The mode to use for ssh.
-            See SSHMode for more details.
-        ssh_control_name: The files name of the ssh_control to use. This is used
-            for optimizing the ssh speed.
-
-    Returns:
-        returncode
-        or
-        A tuple of (returncode, stdout, stderr).
+        runners: A list of SSHCommandRunner objects that represent multiple nodes.
+        source_target: Tuple[str, str]; Source for rsync on local node and
+            Destination on remote node for rsync
+        cmd: str; Command to be executed on all nodes
+        action_message: str; Message to be printed while the command runs
+        log_path: str; Path to the log file
+        stream_logs: bool; Whether to stream logs to stdout
     """
-    base_ssh_command = _ssh_base_command(ip,
-                                         ssh_private_key,
-                                         ssh_user=ssh_user,
-                                         ssh_mode=ssh_mode,
-                                         port_forward=port_forward,
-                                         ssh_control_name=ssh_control_name)
-    if ssh_mode == SshMode.LOGIN:
-        assert isinstance(cmd, list), 'cmd must be a list for login mode.'
-        command = base_ssh_command + cmd
-        proc = run(command, shell=False, check=False)
-        return proc.returncode, '', ''
-    if isinstance(cmd, list):
-        cmd = ' '.join(cmd)
+    fore = colorama.Fore
+    style = colorama.Style
 
-    log_dir = os.path.expanduser(os.path.dirname(log_path))
-    os.makedirs(log_dir, exist_ok=True)
-    # We need this to correctly run the cmd, and get the output.
-    command = [
-        'bash',
-        '--login',
-        '-c',
-        # Need this `-i` option to make sure `source ~/.bashrc` work.
-        '-i',
-    ]
+    origin_source = source
+    if run_rsync:
+        # Do this for local src paths, not for cloud store URIs
+        # (otherwise we have '<abs path to cwd>/gs://.../object/').
+        full_src = os.path.abspath(os.path.expanduser(origin_source))
+        if not os.path.islink(full_src) and not os.path.isfile(full_src):
+            source = os.path.join(full_src, '')
 
-    command += [
-        shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
-                    f'PYTHONWARNINGS=ignore && ({cmd})'),
-        '2>&1',
-    ]
-    if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
-        command += [
-            # A hack to remove the following bash warnings (twice):
-            #  bash: cannot set terminal process group
-            #  bash: no job control in this shell
-            '| stdbuf -o0 tail -n +5',
-            # This is required to make sure the executor of the command can get the
-            # correct returncode, since linux pipe is used.
-            '; exit ${PIPESTATUS[0]}'
-        ]
+    def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
+        if cmd is not None:
+            rc, stdout, stderr = runner.run(cmd,
+                                            log_path=log_path,
+                                            stream_logs=stream_logs,
+                                            require_outputs=True)
+            subprocess_utils.handle_returncode(
+                rc,
+                cmd,
+                f'Failed to run command before rsync {origin_source} -> {target}.',
+                stderr=stdout + stderr)
 
-    command = ' '.join(command)
-    command = base_ssh_command + [shlex.quote(command)]
+        if run_rsync:
+            # TODO(zhwu): Optimize for large amount of files.
+            # zip / transfer/ unzip
+            runner.rsync_up(
+                source=source,
+                target=target,
+                log_path=log_path,
+                stream_logs=stream_logs,
+            )
 
-    executable = None
-    if not process_stream:
-        if stream_logs:
-            command += [
-                f'| tee {log_path}',
-                # This also requires the executor to be '/bin/bash' instead
-                # of the default '/bin/sh'.
-                '; exit ${PIPESTATUS[0]}'
-            ]
-        else:
-            command += [f'> {log_path}']
-        executable = '/bin/bash'
-
-    return log_lib.run_with_log(' '.join(command),
-                                log_path,
-                                stream_logs,
-                                process_stream=process_stream,
-                                require_outputs=require_outputs,
-                                shell=True,
-                                executable=executable,
-                                **kwargs)
-
-
-@ux_utils.print_exception_no_traceback_decorator
-def handle_returncode(returncode: int,
-                      command: str,
-                      error_msg: str,
-                      stderr: Optional[str] = None,
-                      stream_logs: bool = True) -> None:
-    """Handle the returncode of a command.
-
-    Args:
-        returncode: The returncode of the command.
-        command: The command that was run.
-        error_msg: The error message to print.
-        stderr: The stderr of the command.
-    """
-    echo = logger.error if stream_logs else lambda _: None
-    if returncode != 0:
-        if stderr is not None:
-            echo(stderr)
-        format_err_msg = (
-            f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        raise exceptions.CommandError(returncode, command, format_err_msg)
-
-
-def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
-    """Run a function in parallel on a list of arguments.
-
-    The function should raise a CommandError if the command fails.
-    Returns a list of the return values of the function func, in the same order
-    as the arguments.
-    """
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    with pool.ThreadPool() as p:
-        # Run the function in parallel on the arguments, keeping the order.
-        return list(p.imap(func, args))
-
-
-@timeline.event
-def run(cmd, **kwargs):
-    # Should be careful to use this function, as the child process cmd spawn may
-    # keep running in the background after the current program is killed. To get
-    # rid of this problem, use `log_lib.run_with_log`.
-    shell = kwargs.pop('shell', True)
-    check = kwargs.pop('check', True)
-    executable = kwargs.pop('executable', '/bin/bash')
-    if not shell:
-        executable = None
-    return subprocess.run(cmd,
-                          shell=shell,
-                          check=check,
-                          executable=executable,
-                          **kwargs)
-
-
-def run_no_outputs(cmd, **kwargs):
-    return run(cmd,
-               stdout=subprocess.DEVNULL,
-               stderr=subprocess.DEVNULL,
-               **kwargs)
+    num_nodes = len(runners)
+    plural = 's' if num_nodes > 1 else ''
+    message = (f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
+               f': {style.BRIGHT}{origin_source}{style.RESET_ALL} -> '
+               f'{style.BRIGHT}{target}{style.RESET_ALL}')
+    logger.info(message)
+    with safe_console_status(f'[bold cyan]{action_message}[/]'):
+        subprocess_utils.run_in_parallel(_sync_node, runners)
 
 
 def check_local_gpus() -> bool:
@@ -1641,9 +1407,10 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
     for i in range(max_attempts):
         try:
-            out = run(f'ray get-head-ip {cluster_yaml}',
-                      stdout=subprocess.PIPE,
-                      stderr=subprocess.DEVNULL).stdout.decode().strip()
+            out = subprocess_utils.run(
+                f'ray get-head-ip {cluster_yaml}',
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
             assert 1 == len(head_ip), out
             head_ip = head_ip[0]
@@ -1682,9 +1449,9 @@ def get_node_ips(cluster_yaml: str,
 
     if expected_num_nodes > 1:
         try:
-            proc = run(f'ray get-worker-ips {cluster_yaml}',
-                       stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE)
+            proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
             # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
@@ -1995,12 +1762,9 @@ def _update_cluster_status_no_lock(
             # Check the ray cluster status. We have to check it for single node
             # case, since the get_node_ips() does not require ray cluster to be
             # running.
-            ssh_user, ssh_key = ssh_credential_from_yaml(handle.cluster_yaml)
-            returncode = run_command_on_ip_via_ssh(ips[0],
-                                                   'ray status',
-                                                   ssh_user=ssh_user,
-                                                   ssh_private_key=ssh_key,
-                                                   stream_logs=False)
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            runner = command_runner.SSHCommandRunner(ips[0], *ssh_credentials)
+            returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
@@ -2119,7 +1883,7 @@ def refresh_cluster_status_handle(
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
             if record is None:
                 return None, None
-    return record['status'], handle
+    return record['status'], record['handle']
 
 
 class CloudFilterType(enum.Enum):
@@ -2196,7 +1960,8 @@ def get_clusters(
 
     cluster_names = [record['name'] for record in records]
     with progress:
-        updated_records = run_in_parallel(_refresh_cluster, cluster_names)
+        updated_records = subprocess_utils.run_in_parallel(
+            _refresh_cluster, cluster_names)
     if terminated_clusters:
         plural = 's were' if len(terminated_clusters) > 1 else ' was'
         cluster_str = ', '.join(repr(name) for name in terminated_clusters)
