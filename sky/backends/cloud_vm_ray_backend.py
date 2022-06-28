@@ -1608,7 +1608,7 @@ class CloudVmRayBackend(backends.Backend):
             mount_cmd = store.mount_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
-            backend_utils.parallel_mounts_on_nodes(
+            backend_utils.parallel_data_transfer_to_nodes(
                 runners,
                 source=src_print,
                 target=dst,
@@ -1691,7 +1691,7 @@ class CloudVmRayBackend(backends.Backend):
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
-                backend_utils.parallel_mounts_on_nodes(
+                backend_utils.parallel_data_transfer_to_nodes(
                     runners,
                     source=src,
                     target=wrapped_dst,
@@ -1724,7 +1724,7 @@ class CloudVmRayBackend(backends.Backend):
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.
-            backend_utils.parallel_mounts_on_nodes(
+            backend_utils.parallel_data_transfer_to_nodes(
                 runners,
                 source=src,
                 target=dst,
