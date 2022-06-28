@@ -3,14 +3,12 @@ import contextlib
 import copy
 import datetime
 import difflib
-import hashlib
 import json
 import getpass
 import os
 import pathlib
 import random
 import re
-import socket
 import subprocess
 import textwrap
 import threading
@@ -44,6 +42,7 @@ from sky import sky_logging
 from sky.utils import usage_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
+from sky.utils import base_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -604,7 +603,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account cloud providers. Using uuid.getnode()
                 # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{user_and_hostname_hash()}',
+                'security_group': f'sky-sg-{base_utils.user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region_name}',

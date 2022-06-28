@@ -6,7 +6,6 @@ import os
 import socket
 import sys
 import time
-import uuid
 
 transaction_id = time.time()
 
@@ -58,5 +57,5 @@ def user_and_hostname_hash() -> str:
 
 
 def get_user():
-    hash = user_and_hostname_hash()
-    return f'{uuid.getnode()[-4:]}-{hash}'
+    hash_str = user_and_hostname_hash()
+    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
