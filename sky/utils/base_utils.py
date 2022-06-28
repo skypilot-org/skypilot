@@ -10,6 +10,7 @@ transaction_id = time.time()
 
 def get_pretty_entry_point() -> str:
     """Returns the prettified entry point of this process (sys.argv).
+
     Example return values:
         $ sky launch app.yaml  # 'sky launch app.yaml'
         $ sky gpunode  # 'sky gpunode'
