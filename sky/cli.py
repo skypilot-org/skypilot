@@ -48,8 +48,6 @@ from sky import clouds
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
-from sky.utils import usage_logging
-from sky.utils import metrics
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
@@ -61,6 +59,8 @@ from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
+from sky.utils.user_stats import metrics
+from sky.utils.user_stats import usage_logging
 
 _PRIVACY_POLICY_PATH = os.path.expanduser('~/.sky/privacy_policy')
 

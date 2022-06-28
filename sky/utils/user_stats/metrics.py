@@ -5,8 +5,11 @@ import functools
 
 import prometheus_client
 
+from sky import sky_logging
 from sky.utils import base_utils
-from sky.utils import usage_logging
+from sky.utils.user_stats import usage_logging
+
+logger = sky_logging.init_logger(__name__)
 
 PROM_PUSHGATEWAY_URL = '3.216.190.117:9091'
 current_cluster_name = 'NONE'
@@ -129,10 +132,10 @@ class MetricLogger:
                         PROM_PUSHGATEWAY_URL,
                         job=f'{base_utils.transaction_id}',
                         registry=self.registry)
-                except:  # pylint: disable=bare-except
-                    # TODO(mraheja): Print error ONLY for devs here
-                    pass
-                if saved_ex:
+                except (SystemExit, Exception) as e:  # pylint: disable=broad-except
+                    logger.debug(f'Error pushing metrics to prometheus: {e}')
+
+                if saved_ex is not None:
                     raise saved_ex
 
             return wrapper_logging
@@ -151,26 +154,20 @@ class MetricLogger:
         self.add_metrics({self.return_code_metric: value})
 
 
-#### USER METRICS ###
-### Labels: User ID, Cluster ID
-
-
 class TimerLogger(MetricLogger):
 
     def __init__(self, func_name):
+        # Labels: User ID, Cluster ID, Transaction ID
         super().__init__(func_name, with_cluster_name=True, with_runtime=True)
 
     def __call__(self, func):
         return self.decorator(func)
 
 
-#### USER METRICS ###
-### Labels: User ID
-
-
 class ReturnCodeLogger(MetricLogger):
 
     def __init__(self, func_name):
+        # Labels: User ID, Transaction ID
         super().__init__(func_name, with_return_code=True)
 
     def __call__(self, func):

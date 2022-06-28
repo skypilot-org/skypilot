@@ -28,7 +28,6 @@ from sky import sky_logging
 from sky import optimizer
 from sky import spot as spot_lib
 from sky import task as task_lib
-from sky.utils import metrics
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
@@ -40,6 +39,7 @@ from sky.skylet.utils import log_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils.user_stats import metrics
 
 if typing.TYPE_CHECKING:
     from sky import dag

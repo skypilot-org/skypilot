@@ -39,7 +39,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
-from sky.utils import usage_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
 from sky.utils import base_utils
@@ -48,6 +47,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.utils.user_stats import usage_logging
 
 if typing.TYPE_CHECKING:
     from sky import resources
