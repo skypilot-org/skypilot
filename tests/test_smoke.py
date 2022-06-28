@@ -1,5 +1,4 @@
 import inspect
-import os
 import pathlib
 import subprocess
 import sys
