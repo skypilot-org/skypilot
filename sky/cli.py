@@ -628,6 +628,11 @@ def _make_dag_from_entrypoint_with_overrides(
         if name is not None:
             task.name = name
         task.envs = env
+        if new_resources.accelerators is not None:
+            acc, _ = list(new_resources.accelerators.items())[0]
+            if acc.startswith('tpu-') and task.num_nodes > 1:
+                raise ValueError('Multi-node TPU cluster not supported. '
+                                 f'Got num_nodes={task.num_nodes}')
     return dag
 
 

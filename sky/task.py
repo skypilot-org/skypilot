@@ -273,11 +273,6 @@ class Task:
 
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
-        if resources.accelerators is not None:
-            acc, _ = list(resources.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster not supported. '
-                                 f'Got num_nodes={task.num_nodes}')
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
