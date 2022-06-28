@@ -13,10 +13,11 @@ import sky
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
+from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
-_user_and_host = backend_utils.user_and_hostname_hash()
+_smoke_test_hash = backend_utils.user_and_hostname_hash()
 
 
 class Test(NamedTuple):
@@ -44,7 +45,7 @@ def _get_cluster_name():
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    return f'{test_name}-{_user_and_host}'
+    return f'{test_name}-{_smoke_test_hash}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -84,7 +85,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(msg)
     log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
-        backend_utils.run(
+        subprocess_utils.run(
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -372,7 +373,7 @@ def test_autostop():
     run_one_test(test)
 
 
-def _get_cancel_task_with_cloud(name, cloud):
+def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',
         [
@@ -388,6 +389,7 @@ def _get_cancel_task_with_cloud(name, cloud):
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=timeout,
     )
     return test
 
@@ -402,7 +404,7 @@ def test_cancel_aws():
 # ---------- Testing `sky cancel` on Azure ----------
 def test_cancel_azure():
     name = _get_cluster_name()
-    test = _get_cancel_task_with_cloud(name, 'azure')
+    test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
     run_one_test(test)
 
 

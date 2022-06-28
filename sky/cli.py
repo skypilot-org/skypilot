@@ -55,6 +55,8 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
@@ -476,7 +478,7 @@ def _create_and_ssh_into_node(
     backend.run_on_head(handle,
                         commands,
                         port_forward=port_forward,
-                        ssh_mode=backend_utils.SshMode.LOGIN)
+                        ssh_mode=command_runner.SshMode.LOGIN)
     cluster_name = handle.cluster_name
 
     click.echo('To attach to it again:  ', nl=False)
@@ -1508,6 +1510,9 @@ def _terminate_or_stop_clusters(
             default=True,
             abort=True,
             show_default=True)
+        # Add a blank line to separate the confirmation prompt from the
+        # progress bar.
+        click.echo()
 
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -1587,7 +1592,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        backend_utils.run_in_parallel(_terminate_or_stop, clusters)
+        subprocess_utils.run_in_parallel(_terminate_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
@@ -2265,9 +2270,9 @@ def spot_status(all: bool, refresh: bool):
     code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
     returncode, job_table_str, stderr = backend.run_on_head(
         handle, code, require_outputs=True, stream_logs=False)
-    backend_utils.handle_returncode(returncode, code,
-                                    'Failed to fetch managed job statuses',
-                                    job_table_str + stderr)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to fetch managed job statuses',
+                                       job_table_str + stderr)
 
     spot_lib.dump_job_table_cache(job_table_str)
     click.echo(f'Managed spot jobs:\n{job_table_str}')
@@ -2348,8 +2353,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                                                 code,
                                                 require_outputs=True,
                                                 stream_logs=False)
-    backend_utils.handle_returncode(returncode, code,
-                                    'Failed to cancel managed spot job', stdout)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to cancel managed spot job',
+                                       stdout)
 
     click.echo(stdout)
     if 'Multiple jobs found with name' in stdout:
