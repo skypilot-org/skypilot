@@ -772,16 +772,12 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
         config = yaml.safe_load(f)
 
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
-
-    ssh_user = config['auth']['ssh_user']
-    ssh_key = config['auth']['ssh_private_key']
     worker_ips = config['provider']['worker_ips']
     file_mounts = config['file_mounts']
 
     setup_cmds = config['setup_commands']
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
-    ssh_credentials = (ssh_user, ssh_key, config['cluster_name'])
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
         worker_ips, *ssh_credentials)
 

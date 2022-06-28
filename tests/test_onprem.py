@@ -11,6 +11,8 @@ import yaml
 
 from sky import cli
 from sky.backends import backend_utils
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
 
 
 class Test(NamedTuple):
@@ -68,7 +70,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(msg)
     log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
-        backend_utils.run(
+        subprocess_utils.run(
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -150,22 +152,17 @@ class TestOnprem:
         ssh_user = admin_cluster_config['auth']['ssh_user']
         ssh_key = admin_cluster_config['auth']['ssh_private_key']
 
+        ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+        runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+
         # Removing /tmp/ray and ~/.sky to reset jobs id to index 0
-        rc = backend_utils.run_command_on_ip_via_ssh(
-            head_ip,
-            f'sudo rm -rf /tmp/ray; sudo rm -rf /home/test/.sky',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-            stream_logs=False)
+        rc = runner.run(f'sudo rm -rf /tmp/ray; sudo rm -rf /home/test/.sky',
+                        stream_logs=False)
 
     @pytest.fixture
     def admin_setup(self, jobs_reset, admin_cluster_config):
         # Sets up Ray cluster on the onprem node.
-        head_ip = admin_cluster_config['cluster']['ips'][0]
-        ssh_user = admin_cluster_config['auth']['ssh_user']
-        ssh_key = admin_cluster_config['auth']['ssh_private_key']
         cluster_name = admin_cluster_config['cluster']['name']
-
         with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
             yaml.dump(admin_cluster_config, f)
             file_path = f.name
@@ -263,6 +260,6 @@ class TestOnprem:
         cli_runner.invoke(cli.launch, ['-c', name, '--', ''])
         result = cli_runner.invoke(cli.launch,
                                    ['-c', name, '--gpus', 'V100:256', '--', ''])
-        assert 'sky.exceptions.ResourcesMismatchError' in result.output
+        assert 'sky.exceptions.ResourcesMismatchError' in result.exception
         subprocess.check_output(
             f'sky down -p -y {name}; rm -f ~/.sky/local/{name}.yml', shell=True)
