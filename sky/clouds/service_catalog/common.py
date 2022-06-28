@@ -4,8 +4,9 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
-from sky.clouds import cloud as cloud_lib
 from sky import sky_logging
+from sky.clouds import cloud as cloud_lib
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -87,7 +88,8 @@ def get_accelerators_from_instance_type_impl(
 ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
-        raise ValueError(f'No instance type {instance_type} found.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
