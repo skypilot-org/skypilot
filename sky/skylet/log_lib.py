@@ -209,7 +209,7 @@ def make_task_bash_script(codegen: str,
     ]
     if env_vars is not None:
         for k, v in env_vars.items():
-            script.append(f'export {k}={v!r}')
+            script.append(f'export {k}="{v}"')
     script += [
         codegen,
         '',  # New line at EOF.
