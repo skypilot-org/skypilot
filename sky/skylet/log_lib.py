@@ -209,7 +209,7 @@ def make_task_bash_script(codegen: str,
     ]
     if env_vars is not None:
         for k, v in env_vars.items():
-            script.append(f'export {k}={v!r}')
+            script.append(f'export {k}="{v}"')
     script += [
         codegen,
         '',  # New line at EOF.
@@ -225,11 +225,7 @@ def run_bash_command_with_log(bash_command: str,
                               with_ray: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
-        if env_vars is not None:
-            export_env_vars = '\n'.join(
-                [f'export {k}="{v}"' for k, v in env_vars.items()])
-            bash_command = export_env_vars + '\n' + bash_command
-        bash_command = make_task_bash_script(bash_command)
+        bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name

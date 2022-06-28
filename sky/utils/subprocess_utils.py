@@ -50,7 +50,6 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
         return list(p.imap(func, args))
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,
@@ -70,4 +69,5 @@ def handle_returncode(returncode: int,
             echo(stderr)
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
-        raise exceptions.CommandError(returncode, command, format_err_msg)
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.CommandError(returncode, command, format_err_msg)
