@@ -1,4 +1,5 @@
 import inspect
+import os
 import pathlib
 import subprocess
 import sys
@@ -17,7 +18,8 @@ from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
-_user_and_host = backend_utils.user_and_hostname_hash()
+_smoke_test_hash = os.environ.get('SKY_SMOKE_TEST_HASH',
+                                  backend_utils.user_and_hostname_hash())
 
 
 class Test(NamedTuple):
@@ -45,7 +47,7 @@ def _get_cluster_name():
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    return f'{test_name}-{_user_and_host}'
+    return f'{test_name}-{_smoke_test_hash}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
