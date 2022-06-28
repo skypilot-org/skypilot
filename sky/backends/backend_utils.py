@@ -897,35 +897,6 @@ def check_local_gpus() -> bool:
     return is_functional
 
 
-def user_and_hostname_hash() -> str:
-    """Returns a string containing <user>-<hostname hash last 4 chars>.
-
-    For uniquefying user clusters on shared-account cloud providers. Also used
-    for AWS security group.
-
-    Using uuid.getnode() instead of gethostname() is incorrect; observed to
-    collide on Macs.
-
-    NOTE: BACKWARD INCOMPATIBILITY NOTES
-
-    Changing this string will render AWS clusters shown in `sky status`
-    unreusable and potentially cause leakage:
-
-    - If a cluster is STOPPED, any command restarting it (`sky launch`, `sky
-      start`) will launch a NEW cluster.
-    - If a cluster is UP, a `sky launch` command reusing it will launch a NEW
-      cluster. The original cluster will be stopped and thus leaked from Sky's
-      perspective.
-    - `sky down/stop/exec` on these pre-change clusters still works, if no new
-      clusters with the same name have been launched.
-
-    The reason is AWS security group names are derived from this string, and
-    thus changing the SG name makes these clusters unrecognizable.
-    """
-    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    return f'{getpass.getuser()}-{hostname_hash}'
-
-
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
