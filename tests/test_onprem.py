@@ -260,6 +260,7 @@ class TestOnprem:
         cli_runner.invoke(cli.launch, ['-c', name, '--', ''])
         result = cli_runner.invoke(cli.launch,
                                    ['-c', name, '--gpus', 'V100:256', '--', ''])
-        assert 'sky.exceptions.ResourcesMismatchError' in result.exception
+        assert 'sky.exceptions.ResourcesMismatchError' in str(
+            type(result.exception))
         subprocess.check_output(
             f'sky down -p -y {name}; rm -f ~/.sky/local/{name}.yml', shell=True)
