@@ -1,0 +1,20 @@
+version: "3.9"
+services:
+  sky:
+    container_name: skylocal
+    image: "public.ecr.aws/a9w6z7w5/sky:local"
+    command: /bin/bash -c '
+      set -ex;
+      echo Adding SSH Keys;
+      mkdir -p ~/.ssh;
+      chmod 700 ~/.ssh;
+      echo ${PUBSSHKEY} > ~/.ssh/authorized_keys;
+      chmod 600 ~/.ssh/authorized_keys;
+      sudo service ssh restart;
+      mkdir -p /home/sky/sky_workdir;
+      mkdir -p /home/sky/.sky/sky_app;
+      sleep 365d'
+    ports:
+      - "22:22"
+      - "8265:8265"
+    shm_size: '1gb'

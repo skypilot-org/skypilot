@@ -1,0 +1,8 @@
+cluster:
+  ips:
+  - localhost
+  name: docker
+
+auth:
+  ssh_user: sky
+  ssh_private_key: ~/.ssh/romilb.pem # Private key for the public key in .env

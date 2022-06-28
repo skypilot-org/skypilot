@@ -2210,7 +2210,7 @@ class CloudVmRayBackend(backends.Backend):
         job_submit_cmd = (
             'ray job submit -v '
             f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-            f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
+            f'-- sudo -H -u {ssh_user} -s /bin/bash -c \"{remote_run_file}\"')
         return job_submit_cmd
 
     def tail_logs(self,

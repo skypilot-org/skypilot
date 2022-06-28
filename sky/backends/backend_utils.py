@@ -1518,7 +1518,6 @@ def run_command_on_ip_via_ssh(
                                 **kwargs)
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def handle_returncode(returncode: int,
                       command: str,
                       error_msg: str,

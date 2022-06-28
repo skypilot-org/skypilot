@@ -8,9 +8,6 @@
 
 name: minimal
 
-resources:
-  cloud: aws
-
 setup: |
   echo "running setup"
 
