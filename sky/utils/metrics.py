@@ -101,7 +101,7 @@ class MetricLogger:
 
             @functools.wraps(func)
             def wrapper_logging(*args, **kwargs):
-                self.set_labels({
+                self.add_labels({
                     'user': base_utils.get_user(),
                     'transaction_id': base_utils.transaction_id
                 })
@@ -110,10 +110,10 @@ class MetricLogger:
                     start = time.time()
                     func(*args, **kwargs)
                     if self.with_runtime:
-                        self.set_metrics(
+                        self.add_metrics(
                             {self.runtime_metric: time.time() - start})
                     if self.with_cluster_name:
-                        self.set_labels({'cluster_name': current_cluster_name})
+                        self.add_labels({'cluster_name': current_cluster_name})
                 except (SystemExit, Exception) as ex:  # pylint: disable=broad-except
                     if with_return_code:
                         self.set_return_code(-1)
@@ -139,16 +139,16 @@ class MetricLogger:
 
         self.decorator = decorator
 
-    def set_labels(self, labels_dict):
+    def add_labels(self, labels_dict):
         for label_name in labels_dict:
             self.label_dict[label_name].set_value(labels_dict[label_name])
 
-    def set_metrics(self, metrics_dict):
+    def add_metrics(self, metrics_dict):
         for metric_name in metrics_dict:
             self.metric_dict[metric_name].set_value(metrics_dict[metric_name])
 
     def set_return_code(self, value):
-        self.set_metrics({self.return_code_metric: value})
+        self.add_metrics({self.return_code_metric: value})
 
 
 #### USER METRICS ###
