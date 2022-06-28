@@ -128,7 +128,8 @@ class SSHCommandRunner:
         self.ip = ip
         self.ssh_user = ssh_user
         self.ssh_private_key = ssh_private_key
-        self.ssh_control_name = hashlib.md5(ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH]
+        self.ssh_control_name = hashlib.md5(
+            ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH]
 
     @staticmethod
     def make_runner_list(

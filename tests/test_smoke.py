@@ -18,8 +18,7 @@ from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
-_smoke_test_hash = os.environ.get('SKY_SMOKE_TEST_HASH',
-                                  backend_utils.user_and_hostname_hash())
+_smoke_test_hash = backend_utils.user_and_hostname_hash()
 
 
 class Test(NamedTuple):
