@@ -1120,7 +1120,7 @@ class RetryingVmProvisioner(object):
                         'optimize_target=sky.OptimizeTarget.COST)')
                     raise e
 
-                logger.info(e)
+                logger.warning(e)
                 provision_failed = True
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
