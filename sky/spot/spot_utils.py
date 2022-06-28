@@ -18,6 +18,7 @@ from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import constants
 from sky.spot import spot_state
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -68,8 +69,9 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                                                      code,
                                                      stream_logs=False,
                                                      require_outputs=True)
-    backend_utils.handle_returncode(returncode, code, 'Failed to get job time.',
-                                    stdout + stderr)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to get job time.',
+                                       stdout + stderr)
     return float(stdout)
 
 
