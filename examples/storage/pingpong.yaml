@@ -11,15 +11,16 @@
 
 name: pingpong
 
-num_nodes: 5
+num_nodes: 2
 
 resources:
-  cloud: aws
+  cloud: gcp
 
 file_mounts:
     /sharedfs:
-        name: sky-sharedfs-romilb2
+        name: sky-sharedfs-romilbgcs
         mode: MOUNT
+        store: gcs
 
 setup: |
   rm -rf sharedfs-pingpong

@@ -1,17 +1,14 @@
 """Backend: runs on cloud virtual machines, managed by Ray."""
 import ast
 import click
-import contextlib
 import enum
 import getpass
-import hashlib
 import inspect
 import json
 import os
 import pathlib
 import signal
 import subprocess
-import sys
 import tempfile
 import textwrap
 import time
@@ -40,6 +37,8 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
@@ -61,25 +60,31 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 # Timeout for provision a cluster and wait for it to be ready in seconds.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
-_LOCK_FILENAME = '~/.sky/.{}.lock'
-_FILELOCK_TIMEOUT_SECONDS = 10
-
-# The git exclude file to support.
-_GIT_EXCLUDE = '.git/info/exclude'
-
-_RSYNC_DISPLAY_OPTION = '-Pavz'
-# Legend
-#   dir-merge: ignore file can appear in any subdir, applies to that
-#     subdir downwards
-# Note that "-" is mandatory for rsync and means all patterns in the ignore
-# files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
-# do_not_exclude" doesn't work, even though git allows it.
-_RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
-_RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
-
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
+
+# The maximum retry count for fetching head IP address.
+_HEAD_IP_MAX_ATTEMPTS = 3
+
+_TEARDOWN_FAILURE_MESSAGE = (
+    f'{colorama.Fore.RED}Failed to terminate '
+    '{cluster_name}. {extra_reason}'
+    'If you want to ignore this error and remove the cluster '
+    'from from Sky\'s status table, use `sky down --purge`.'
+    f'{colorama.Style.RESET_ALL}\n'
+    '**** STDOUT ****\n'
+    '{stdout}\n'
+    '**** STDERR ****\n'
+    '{stderr}')
+
+_TEARDOWN_PURGE_WARNING = (
+    f'{colorama.Fore.YELLOW}'
+    'WARNING: Received non-zero exit code from {reason}. '
+    'Make sure resources are manually deleted.'
+    f'{colorama.Style.RESET_ALL}')
+
+_TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
 
 def _get_cluster_config_template(cloud):
@@ -89,23 +94,6 @@ def _get_cluster_config_template(cloud):
         clouds.GCP: 'gcp-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
-
-
-def _path_size_megabytes(path: str) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes."""
-    resolved_path = pathlib.Path(path).expanduser().resolve()
-    git_exclude_filter = ''
-    if (resolved_path / _GIT_EXCLUDE).exists():
-        # Ensure file exists; otherwise, rsync will error out.
-        git_exclude_filter = _RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / _GIT_EXCLUDE))
-    rsync_output = str(
-        subprocess.check_output(
-            f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
-            f' {git_exclude_filter} --dry-run {path}',
-            shell=True).splitlines()[-1])
-    total_bytes = rsync_output.split(' ')[3].replace(',', '')
-    return int(total_bytes) // 10**6
 
 
 class RayCodeGen:
@@ -236,14 +224,16 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node' + plural + '.'
-                print('SKY INFO: Reserving task slots on ' + node_str,
+                print('SKY INFO: Waiting for task resources on ' + node_str + 
+                      ' This will block if the cluster is full.\\n'
+                      'SKY INFO: Use Ctrl-C to exit log streaming (task will not be killed).',
                       file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print('SKY INFO: All task slots reserved.',
+                print('SKY INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
@@ -453,14 +443,21 @@ class RetryingVmProvisioner(object):
         zone = zones[0]
         splits = stderr.split('\n')
         exception_str = [s for s in splits if s.startswith('Exception: ')]
+        httperror_str = [
+            s for s in splits
+            if s.startswith('googleapiclient.errors.HttpError: ')
+        ]
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
             exception_dict = ast.literal_eval(exception_str)
+            # TPU VM returns a different structured response.
+            if 'errors' not in exception_dict:
+                exception_dict = {'errors': [exception_dict]}
             for error in exception_dict['errors']:
                 code = error['code']
                 message = error['message']
-                logger.warning(f'Got {code} in {zone.name} '
+                logger.warning(f'Got return code {code} in {zone.name} '
                                f'{style.DIM}(message: {message})'
                                f'{style.RESET_ALL}')
                 if code == 'QUOTA_EXCEEDED':
@@ -486,8 +483,18 @@ class RetryingVmProvisioner(object):
                     # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
                     # This seems to be not documented by GCP.
                     self._blocked_zones.add(zone.name)
+                elif code == 8:
+                    # Error code 8 means TPU resources is out of capacity. Example:
+                    # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
+                    self._blocked_zones.add(zone.name)
                 else:
                     assert False, error
+        elif len(httperror_str) >= 1:
+            # Parse HttpError for unauthorized regions. Example:
+            # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
+            # Details: "Location us-east1-d is not found or access is unauthorized.">
+            logger.info(f'Got {httperror_str[0]}')
+            self._blocked_zones.add(zone.name)
         else:
             # No such structured error response found.
             assert not exception_str, stderr
@@ -612,7 +619,7 @@ class RetryingVmProvisioner(object):
         # because we may have an existing cluster there.
         # Get the *previous* cluster status and handle.
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster_name)
+            cluster_name, acquire_per_cluster_status_lock=False)
         if handle is not None:
             try:
                 config = backend_utils.read_yaml(handle.cluster_yaml)
@@ -743,9 +750,9 @@ class RetryingVmProvisioner(object):
             with backend_utils.safe_console_status(
                     '[bold cyan]Provisioning TPU '
                     f'[green]{tpu_name}[/]'):
-                backend_utils.run(f'bash {config_dict["tpu-create-script"]}',
-                                  stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE)
+                subprocess_utils.run(f'bash {config_dict["tpu-create-script"]}',
+                                     stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE)
             return True
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('ascii')
@@ -804,7 +811,7 @@ class RetryingVmProvisioner(object):
 
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
-            cluster_name)[0]
+            cluster_name, acquire_per_cluster_status_lock=False)[0]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -984,6 +991,16 @@ class RetryingVmProvisioner(object):
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
         returncode, stdout, stderr = ray_up()
+        if (returncode != 0 and 'Processing file mounts' in stdout and
+                'Running setup commands' not in stdout):
+            # Retry ray up if it failed due to file mounts, because it is
+            # probably due to too many ssh connections issue and can be fixed
+            # by retrying.
+            # This is required when using custom image for GCP.
+            logger.info(
+                'Retrying sky runtime setup due to ssh connection issue.')
+            returncode, stdout, stderr = ray_up()
+
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
         # Only 1 node or head node provisioning failure.
@@ -1123,13 +1140,10 @@ class RetryingVmProvisioner(object):
                 # (otherwise will skip re-optimizing this task).
                 # TODO: set all remaining tasks' best_resources to None.
                 task.best_resources = None
-                # raise_error has to be True to make sure remove_cluster
-                # is called if provisioning fails.
                 self._dag = sky.optimize(self._dag,
                                          minimize=self._optimize_target,
                                          blocked_launchable_resources=self.
-                                         _blocked_launchable_resources,
-                                         raise_error=True)
+                                         _blocked_launchable_resources)
                 to_provision = task.best_resources
                 assert task in self._dag.tasks, 'Internal logic error.'
                 assert to_provision is not None, task
@@ -1248,23 +1262,22 @@ class CloudVmRayBackend(backends.Backend):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
-        with backend_utils.print_exception_no_traceback():
-            # requested_resources <= actual_resources.
-            if not (task.num_nodes <= handle.launched_nodes and
-                    task_resources.less_demanding_than(launched_resources)):
-                if (task_resources.region is not None and
-                        task_resources.region != launched_resources.region):
-                    raise exceptions.ResourcesMismatchError(
-                        'Task requested the resources in region '
-                        f'{task_resources.region!r}, but the existed cluster '
-                        f'is in region {launched_resources.region!r}.')
+        # requested_resources <= actual_resources.
+        if not (task.num_nodes <= handle.launched_nodes and
+                task_resources.less_demanding_than(launched_resources)):
+            if (task_resources.region is not None and
+                    task_resources.region != launched_resources.region):
                 raise exceptions.ResourcesMismatchError(
-                    'Requested resources do not match the existing cluster.\n'
-                    f'  Requested:\t{task.num_nodes}x {task_resources} \n'
-                    f'  Existing:\t{handle.launched_nodes}x '
-                    f'{handle.launched_resources}\n'
-                    f'To fix: specify a new cluster name, or down the '
-                    f'existing cluster first: sky down {cluster_name}')
+                    'Task requested resources in region '
+                    f'{task_resources.region!r}, but the existing cluster '
+                    f'is in region {launched_resources.region!r}.')
+            raise exceptions.ResourcesMismatchError(
+                'Requested resources do not match the existing cluster.\n'
+                f'  Requested:\t{task.num_nodes}x {task_resources} \n'
+                f'  Existing:\t{handle.launched_nodes}x '
+                f'{handle.launched_resources}\n'
+                f'To fix: specify a new cluster name, or down the '
+                f'existing cluster first: sky down {cluster_name}')
 
     @timeline.event
     def _check_existing_cluster(
@@ -1293,20 +1306,23 @@ class CloudVmRayBackend(backends.Backend):
                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_config_file)
 
-        for ip in ip_list:
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
+
+        def _setup_tpu_name_on_node(
+                runner: command_runner.SSHCommandRunner) -> None:
             cmd = (f'[[ -z $TPU_NAME ]] && echo "export TPU_NAME={tpu_name}" '
                    '>> ~/.bashrc || echo "TPU_NAME already set"')
-            returncode = backend_utils.run_command_on_ip_via_ssh(
-                ip,
-                cmd,
-                ssh_user=ssh_user,
-                ssh_private_key=ssh_key,
-                log_path=os.path.join(self.log_dir, 'tpu_setup.log'))
-            backend_utils.handle_returncode(returncode, cmd,
-                                            'Failed to set TPU_NAME on node.')
+            returncode = runner.run(cmd,
+                                    log_path=os.path.join(
+                                        self.log_dir, 'tpu_setup.log'))
+            subprocess_utils.handle_returncode(
+                returncode, cmd, 'Failed to set TPU_NAME on node.')
+
+        subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
     @metrics.TimerLogger('provision')
     @timeline.event
@@ -1327,7 +1343,8 @@ class CloudVmRayBackend(backends.Backend):
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
 
-        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        lock_path = os.path.expanduser(
+            backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
             to_provision_config = RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, to_provision, task.num_nodes)
@@ -1336,7 +1353,8 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
-                    backend_utils.refresh_cluster_status_handle(cluster_name))
+                    backend_utils.refresh_cluster_status_handle(
+                        cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly
@@ -1393,7 +1411,7 @@ class CloudVmRayBackend(backends.Backend):
                     logger.info(
                         'To keep retrying until the cluster is up, use the '
                         '`--retry-until-up` flag.')
-                    sys.exit(1)
+                    raise exceptions.ResourcesUnavailableError() from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1405,7 +1423,9 @@ class CloudVmRayBackend(backends.Backend):
 
             with timeline.Event('backend.provision.get_node_ips'):
                 ip_list = backend_utils.get_node_ips(
-                    cluster_config_file, config_dict['launched_nodes'])
+                    cluster_config_file,
+                    config_dict['launched_nodes'],
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
@@ -1430,9 +1450,8 @@ class CloudVmRayBackend(backends.Backend):
                         '[bold cyan]Preparing Job Queue'):
                     returncode, _, stderr = self.run_on_head(
                         handle, cmd, require_outputs=True)
-                backend_utils.handle_returncode(returncode, cmd,
-                                                'Failed to update job status.',
-                                                stderr)
+                subprocess_utils.handle_returncode(
+                    returncode, cmd, 'Failed to update job status.', stderr)
             if prev_cluster_status == global_user_state.ClusterStatus.STOPPED:
                 # Safely set all the previous jobs to FAILED since the cluster
                 # is restarted
@@ -1444,7 +1463,7 @@ class CloudVmRayBackend(backends.Backend):
                 returncode, _, stderr = self.run_on_head(handle,
                                                          cmd,
                                                          require_outputs=True)
-                backend_utils.handle_returncode(
+                subprocess_utils.handle_returncode(
                     returncode, cmd,
                     'Failed to set previously in-progress jobs to FAILED',
                     stderr)
@@ -1461,18 +1480,22 @@ class CloudVmRayBackend(backends.Backend):
                 os.remove(lock_path)
                 return handle
 
-    def set_autostop(self, handle: ResourceHandle,
-                     idle_minutes_to_autostop: Optional[int]) -> None:
+    def set_autostop(self,
+                     handle: ResourceHandle,
+                     idle_minutes_to_autostop: Optional[int],
+                     stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME)
             returncode, _, stderr = self.run_on_head(handle,
                                                      code,
-                                                     require_outputs=True)
-            backend_utils.handle_returncode(returncode,
-                                            code,
-                                            'Failed to set autostop',
-                                            stderr=stderr)
+                                                     require_outputs=True,
+                                                     stream_logs=stream_logs)
+            subprocess_utils.handle_returncode(returncode,
+                                               code,
+                                               'Failed to set autostop',
+                                               stderr=stderr,
+                                               stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
@@ -1501,7 +1524,7 @@ class CloudVmRayBackend(backends.Backend):
             workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
-        dir_size = _path_size_megabytes(full_workdir)
+        dir_size = backend_utils.path_size_megabytes(full_workdir)
         if dir_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
             logger.warning(
                 f'{fore.YELLOW}The size of workdir {workdir!r} '
@@ -1511,14 +1534,20 @@ class CloudVmRayBackend(backends.Backend):
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
-        def _sync_workdir_node(ip):
-            self._rsync_up(handle,
-                           ip=ip,
-                           source=workdir,
-                           target=SKY_REMOTE_WORKDIR,
-                           log_path=log_path,
-                           stream_logs=False,
-                           raise_error=True)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+
+        # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
+
+        def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
+            runner.rsync_up(
+                source=workdir,
+                target=SKY_REMOTE_WORKDIR,
+                log_path=log_path,
+                stream_logs=False,
+            )
 
         num_nodes = handle.launched_nodes
         plural = 's' if num_nodes > 1 else ''
@@ -1531,7 +1560,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info('To view detailed progress: '
                     f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
         with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
-            backend_utils.run_in_parallel(_sync_workdir_node, ip_list)
+            subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
     @metrics.TimerLogger('mounting')
     @timeline.event
@@ -1570,8 +1599,10 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                              handle.launched_nodes,
                                              handle=handle)
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():
@@ -1582,92 +1613,17 @@ class CloudVmRayBackend(backends.Backend):
             mount_cmd = store.mount_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
-            self._run_and_rsync_on_all(src=src_print,
-                                       dst=dst,
-                                       ssh_user=ssh_user,
-                                       ssh_key=ssh_key,
-                                       ip_list=ip_list,
-                                       handle=handle,
-                                       action_message='Mounting',
-                                       log_path=log_path,
-                                       command=mount_cmd,
-                                       run_rsync=False)
+            backend_utils.parallel_data_transfer_to_nodes(
+                runners,
+                source=src_print,
+                target=dst,
+                cmd=mount_cmd,
+                run_rsync=False,
+                action_message='Mounting',
+                log_path=log_path,
+            )
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
-
-    def _run_and_rsync_on_all(self,
-                              src: str,
-                              dst: str,
-                              ssh_user: str,
-                              ssh_key: str,
-                              ip_list: List[str],
-                              handle: ResourceHandle,
-                              action_message: str,
-                              log_path: str,
-                              command: Optional[str] = None,
-                              run_rsync: Optional[bool] = False) -> None:
-        """Runs a command on all nodes and optionally runs rsync from src->dst.
-
-        Args:
-            src: str; Source for rsync on local node
-            dst: str; Destination on remote node for rsync
-            ssh_user: str; SSH username
-            ssh_key: str; SSH key
-            ip_list: List[str]; IP addresses of nodes to run and rsync on
-            handle: ResourceHandle; Resource handle to the cluster
-            action_message: str; Message to be printed while the command runs
-            log_path: str; Path to the log file
-            command: str; Command to be executed on all nodes
-            run_rsync: bool;
-        """
-        # TODO: This needs a cleaner refactor into run command + rsync.
-        fore = colorama.Fore
-        style = colorama.Style
-        if run_rsync:
-            # Do this for local src paths, not for cloud store URIs
-            # (otherwise we have '<abs path to cwd>/gs://.../object/').
-            full_src = os.path.abspath(os.path.expanduser(src))
-            if not os.path.islink(full_src) and not os.path.isfile(full_src):
-                # FIXME(zongheng): audit; why not give users control to add '/'?
-                src = os.path.join(src, '')  # Adds trailing / if needed.
-
-        def _sync_node(ip):
-            if command is not None:
-                rc, stdout, stderr = backend_utils.run_command_on_ip_via_ssh(
-                    ip,
-                    command,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
-                    log_path=log_path,
-                    stream_logs=False,
-                    require_outputs=True,
-                    ssh_control_name=self._ssh_control_name(handle))
-                backend_utils.handle_returncode(
-                    rc,
-                    command,
-                    f'Failed to sync {src} to {dst}.',
-                    stderr=stdout + stderr,
-                    raise_error=True)
-
-            if run_rsync:
-                # TODO(zhwu): Optimize for large amount of files.
-                # zip / transfer/ unzip
-                self._rsync_up(handle,
-                               ip=ip,
-                               source=src,
-                               target=dst,
-                               log_path=log_path,
-                               stream_logs=False,
-                               raise_error=True)
-
-        num_nodes = handle.launched_nodes
-        plural = 's' if num_nodes > 1 else ''
-        logger.info(f'{fore.CYAN}{action_message} (to {num_nodes} node{plural})'
-                    f': {style.BRIGHT}{src}{style.RESET_ALL} -> '
-                    f'{style.BRIGHT}{dst}{style.RESET_ALL}')
-        with backend_utils.safe_console_status(
-                f'[bold cyan]{action_message}[/]'):
-            backend_utils.run_in_parallel(_sync_node, ip_list)
 
     def _execute_file_mounts(self, handle: ResourceHandle,
                              file_mounts: Dict[Path, Path]):
@@ -1685,8 +1641,10 @@ class CloudVmRayBackend(backends.Backend):
         start = time.time()
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                              handle.launched_nodes)
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -1695,7 +1653,7 @@ class CloudVmRayBackend(backends.Backend):
                 full_src = os.path.abspath(os.path.expanduser(src))
                 # Checked during Task.set_file_mounts().
                 assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = _path_size_megabytes(full_src)
+                src_size = backend_utils.path_size_megabytes(full_src)
                 if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
                     logger.warning(
                         f'{fore.YELLOW}The size of file mount src {src!r} '
@@ -1732,22 +1690,22 @@ class CloudVmRayBackend(backends.Backend):
                 full_src = os.path.abspath(os.path.expanduser(src))
 
                 if os.path.isfile(full_src):
-                    mkdir_for_wrapped_dst = \
-                        f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                    mkdir_for_wrapped_dst = (
+                        f'mkdir -p {os.path.dirname(wrapped_dst)}')
                 else:
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
-                self._run_and_rsync_on_all(src=src,
-                                           dst=wrapped_dst,
-                                           ssh_user=ssh_user,
-                                           ssh_key=ssh_key,
-                                           ip_list=ip_list,
-                                           handle=handle,
-                                           action_message='Syncing',
-                                           log_path=log_path,
-                                           command=mkdir_for_wrapped_dst,
-                                           run_rsync=True)
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src,
+                    target=wrapped_dst,
+                    cmd=mkdir_for_wrapped_dst,
+                    run_rsync=True,
+                    action_message='Syncing',
+                    log_path=log_path,
+                    stream_logs=False,
+                )
                 continue
 
             storage = cloud_stores.get_storage_from_path(src)
@@ -1771,36 +1729,28 @@ class CloudVmRayBackend(backends.Backend):
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.
-            self._run_and_rsync_on_all(src=src,
-                                       dst=dst,
-                                       ssh_user=ssh_user,
-                                       ssh_key=ssh_key,
-                                       ip_list=ip_list,
-                                       handle=handle,
-                                       action_message='Syncing',
-                                       log_path=log_path,
-                                       command=command,
-                                       run_rsync=False)
+            backend_utils.parallel_data_transfer_to_nodes(
+                runners,
+                source=src,
+                target=dst,
+                cmd=command,
+                run_rsync=False,
+                action_message='Syncing',
+                log_path=log_path,
+                stream_logs=False,
+            )
         # (2) Run the commands to create symlinks on all the nodes.
         symlink_command = ' && '.join(symlink_commands)
         if symlink_command:
 
-            def _symlink_node(ip):
-                returncode = backend_utils.run_command_on_ip_via_ssh(
-                    ip,
-                    symlink_command,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
-                    log_path=log_path,
-                    ssh_control_name=self._ssh_control_name(handle))
-                backend_utils.handle_returncode(
-                    returncode,
-                    symlink_command,
+            def _symlink_node(runner: command_runner.SSHCommandRunner):
+                returncode = runner.run(symlink_command, log_path=log_path)
+                subprocess_utils.handle_returncode(
+                    returncode, symlink_command,
                     'Failed to create symlinks. The target destination '
-                    'may already exist',
-                    raise_error=True)
+                    'may already exist')
 
-            backend_utils.run_in_parallel(_symlink_node, ip_list)
+            subprocess_utils.run_in_parallel(_symlink_node, runners)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
@@ -1824,36 +1774,32 @@ class CloudVmRayBackend(backends.Backend):
             ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                                  handle.launched_nodes,
                                                  handle=handle)
-            ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
+            runners = command_runner.SSHCommandRunner.make_runner_list(
+                ip_list, *ssh_credentials)
 
-            def _setup_node(ip: int) -> int:
-                self._rsync_up(handle,
-                               ip=ip,
-                               source=setup_sh_path,
-                               target=f'/tmp/{setup_file}',
-                               stream_logs=False)
+            def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
+                runner.rsync_up(source=setup_sh_path,
+                                target=f'/tmp/{setup_file}',
+                                stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-                returncode = backend_utils.run_command_on_ip_via_ssh(
-                    ip,
+                returncode = runner.run(
                     cmd,
-                    ssh_user=ssh_user,
-                    ssh_private_key=ssh_key,
                     log_path=os.path.join(self.log_dir, 'setup.log'),
                     process_stream=False,
-                    ssh_control_name=self._ssh_control_name(handle))
-                backend_utils.handle_returncode(
+                )
+                subprocess_utils.handle_returncode(
                     returncode=returncode,
                     command=cmd,
-                    error_msg=f'Failed to setup with return code {returncode}',
-                    raise_error=True)
+                    error_msg=f'Failed to setup with return code {returncode}')
 
             num_nodes = handle.launched_nodes
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
-            backend_utils.run_in_parallel(_setup_node, ip_list)
+            subprocess_utils.run_in_parallel(_setup_node, runners)
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -1868,8 +1814,8 @@ class CloudVmRayBackend(backends.Backend):
                                                  code,
                                                  stream_logs=stream_logs,
                                                  require_outputs=True)
-        backend_utils.handle_returncode(returncode, code,
-                                        'Failed to get job status.', stdout)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to get job status.', stdout)
         result = stdout.strip()
         if result == 'None':
             return None
@@ -1883,7 +1829,7 @@ class CloudVmRayBackend(backends.Backend):
                                                  code,
                                                  stream_logs=False,
                                                  require_outputs=True)
-        backend_utils.handle_returncode(
+        subprocess_utils.handle_returncode(
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
@@ -1894,8 +1840,8 @@ class CloudVmRayBackend(backends.Backend):
                                                         code,
                                                         stream_logs=False,
                                                         require_outputs=True)
-        backend_utils.handle_returncode(returncode, code,
-                                        'Failed to sync logs.', stderr)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to sync logs.', stderr)
         log_dirs = ast.literal_eval(log_dirs)
         if not log_dirs or len(log_dirs) == 0:
             logger.info(f'{colorama.Fore.YELLOW}'
@@ -1938,9 +1884,7 @@ class CloudVmRayBackend(backends.Backend):
             for i, ip in enumerate(ips):
                 try:
                     # Disable the output of rsync.
-                    with open('/dev/null',
-                              'a') as f, contextlib.redirect_stdout(
-                                  f), contextlib.redirect_stderr(f):
+                    with backend_utils.subpress_output():
                         rsync_down(ip, local_log_dir, remote_log_dir)
                     logger.info(
                         f'{fore.CYAN}Job {job_id} logs: downloaded from '
@@ -1966,6 +1910,10 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(handle.head_ip,
+                                                 *ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -1973,10 +1921,9 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            self._rsync_up(handle,
-                           source=fp.name,
-                           target=script_path,
-                           stream_logs=False)
+            runner.rsync_up(source=fp.name,
+                            target=script_path,
+                            stream_logs=False)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
@@ -1991,8 +1938,8 @@ class CloudVmRayBackend(backends.Backend):
         returncode = self.run_on_head(handle,
                                       f'{cd} && {job_submit_cmd}',
                                       stream_logs=False)
-        backend_utils.handle_returncode(returncode, job_submit_cmd,
-                                        f'Failed to submit job {job_id}.')
+        subprocess_utils.handle_returncode(returncode, job_submit_cmd,
+                                           f'Failed to submit job {job_id}.')
 
         logger.info('Job submitted with Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
@@ -2041,7 +1988,7 @@ class CloudVmRayBackend(backends.Backend):
                 process_stream=False,
                 # Allocate a pseudo-terminal to disable output buffering.
                 # Otherwise, there may be 5 minutes delay in logging.
-                ssh_mode=backend_utils.SshMode.INTERACTIVE,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output in multithreading/multiprocessing.
                 # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
@@ -2073,7 +2020,7 @@ class CloudVmRayBackend(backends.Backend):
             code,
             stream_logs=True,
             process_stream=False,
-            ssh_mode=backend_utils.SshMode.INTERACTIVE,
+            ssh_mode=command_runner.SshMode.INTERACTIVE,
             stdin=subprocess.DEVNULL,
         )
 
@@ -2088,9 +2035,9 @@ class CloudVmRayBackend(backends.Backend):
                                                           require_outputs=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
-        backend_utils.handle_returncode(returncode, code,
-                                        'Failed to fetch job id.',
-                                        job_id_str + stderr)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to fetch job id.',
+                                           job_id_str + stderr)
         try:
             job_id = int(job_id_str)
         except ValueError as e:
@@ -2252,13 +2199,16 @@ class CloudVmRayBackend(backends.Backend):
                  purge: bool = False) -> bool:
         cluster_name = handle.cluster_name
         metrics.current_cluster_name = cluster_name
-        lock_path = os.path.expanduser(_LOCK_FILENAME.format(cluster_name))
+        lock_path = os.path.expanduser(
+            backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 
         try:
             # TODO(mraheja): remove pylint disabling when filelock
             # version updated
             # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(lock_path, _FILELOCK_TIMEOUT_SECONDS):
+            with filelock.FileLock(
+                    lock_path,
+                    backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
@@ -2271,16 +2221,22 @@ class CloudVmRayBackend(backends.Backend):
     def teardown_no_lock(self,
                          handle: ResourceHandle,
                          terminate: bool,
-                         purge: bool = False) -> bool:
+                         purge: bool = False,
+                         post_teardown_cleanup: bool = True) -> bool:
+        """Teardown the cluster without acquiring the cluster status lock.
+
+        NOTE: This method should not be called without holding the cluster
+        status lock already.
+        """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = backend_utils.read_yaml(handle.cluster_yaml)
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
-            handle.cluster_name)
+            handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
-        tpu_rc = 0
+        use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -2295,7 +2251,9 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              prev_status == global_user_state.ClusterStatus.STOPPED):
+              (prev_status == global_user_state.ClusterStatus.STOPPED or
+               use_tpu_vm)):
+            # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
@@ -2310,36 +2268,40 @@ class CloudVmRayBackend(backends.Backend):
                 terminate_cmd = (
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Terminating '
-                        f'[green]{cluster_name}'):
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
-                query_cmd = (
-                    f'gcloud compute instances list '
-                    f'--filter=\\(labels.ray-cluster-name={cluster_name}\\) '
-                    f'--zones={zone} --format=value\\(name\\)')
-                terminate_cmd = (
-                    f'gcloud compute instances delete --zone={zone} --quiet '
-                    f'$({query_cmd})')
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Terminating '
-                        f'[green]{cluster_name}'):
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
+                # TODO(wei-lin): refactor by calling functions of node provider
+                # that uses Python API rather than CLI
+                if use_tpu_vm:
+                    # check if gcloud includes TPU VM API
+                    backend_utils.check_gcp_cli_include_tpu_vm()
+
+                    query_cmd = (
+                        f'gcloud compute tpus tpu-vm list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zone={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
+                else:
+                    query_cmd = (
+                        f'gcloud compute instances list --filter='
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'--zones={zone} --format=value\\(name\\)')
+                    terminate_cmd = (
+                        f'gcloud compute instances delete --zone={zone}'
+                        f' --quiet $({query_cmd})')
             else:
                 raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                  f'cluster {cluster_name!r}.')
+            with backend_utils.safe_console_status(f'[bold cyan]Terminating '
+                                                   f'[green]{cluster_name}'):
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    terminate_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
@@ -2363,123 +2325,93 @@ class CloudVmRayBackend(backends.Backend):
                         # multiprocessing are used.
                         # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
                         stdin=subprocess.DEVNULL)
-
-            if handle.tpu_delete_script is not None:
-                with backend_utils.safe_console_status(
-                        '[bold cyan]Terminating TPU...'):
-                    tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
-                        ['bash', handle.tpu_delete_script],
-                        log_abs_path,
-                        stream_logs=False,
-                        require_outputs=True)
-                if tpu_rc != 0:
-                    logger.error(f'{colorama.Fore.RED}Failed to delete TPU.\n'
-                                 f'**** STDOUT ****\n'
-                                 f'{tpu_stdout}\n'
-                                 f'**** STDERR ****\n'
-                                 f'{tpu_stderr}{colorama.Style.RESET_ALL}')
-
-        if returncode != 0 or tpu_rc != 0:
+        if returncode != 0:
             if purge:
                 logger.warning(
-                    f'{colorama.Fore.YELLOW}'
-                    'WARNING: Received non-zero exit code from cloud provider. '
-                    'Make sure resources are manually deleted.'
-                    f'{colorama.Style.RESET_ALL}')
-            else:
+                    _TEARDOWN_PURGE_WARNING.format(
+                        reason='stopping/terminating cluster nodes'))
+            # This error returns when we call "gcloud delete" with an empty VM
+            # list where no instance exists. Safe to ignore it and do cleanup
+            # locally.
+            # TODO(wei-lin): refactor error handling mechanism.
+            elif 'TPU must be specified.' not in stderr:
                 logger.error(
-                    f'{colorama.Fore.RED}Failed to terminate {cluster_name}. '
-                    f'If you want to ignore this error and remove the cluster '
-                    f'from from Sky\'s status table, use `sky down --purge`.'
-                    f'{colorama.Style.RESET_ALL}\n'
-                    f'**** STDOUT ****\n'
-                    f'{stdout}\n'
-                    f'**** STDERR ****\n'
-                    f'{stderr}')
+                    _TEARDOWN_FAILURE_MESSAGE.format(
+                        extra_reason='',
+                        cluster_name=handle.cluster_name,
+                        stdout=stdout,
+                        stderr=stderr))
                 return False
 
-        auth_config = backend_utils.read_yaml(handle.cluster_yaml)['auth']
-        backend_utils.SSHConfigHelper.remove_cluster(cluster_name,
+        if post_teardown_cleanup:
+            return self.post_teardown_cleanup(handle, terminate, purge)
+        else:
+            return True
+
+    def post_teardown_cleanup(self,
+                              handle: ResourceHandle,
+                              terminate: bool,
+                              purge: bool = False) -> bool:
+        """Cleanup local configs/caches and delete TPUs after teardown.
+
+        This method will handle the following cleanup steps:
+        * Deleting the TPUs;
+        * Removing ssh configs for the cluster;
+        * Updating the local state of the cluster;
+        * Removing the terminated cluster's scripts and ray yaml files.
+        """
+        log_path = os.path.join(os.path.expanduser(self.log_dir),
+                                'teardown.log')
+        log_abs_path = os.path.abspath(log_path)
+
+        if (handle.tpu_delete_script is not None and
+                os.path.exists(handle.tpu_delete_script)):
+            with backend_utils.safe_console_status(
+                    '[bold cyan]Terminating TPU...'):
+                tpu_rc, tpu_stdout, tpu_stderr = log_lib.run_with_log(
+                    ['bash', handle.tpu_delete_script],
+                    log_abs_path,
+                    stream_logs=False,
+                    require_outputs=True)
+            if tpu_rc != 0:
+                if _TPU_NOT_FOUND_ERROR in tpu_stderr:
+                    logger.info('TPU not found. '
+                                'It should have been deleted already.')
+                elif purge:
+                    logger.warning(
+                        _TEARDOWN_PURGE_WARNING.format(
+                            reason='stopping/terminating TPU'))
+                else:
+                    logger.error(
+                        _TEARDOWN_FAILURE_MESSAGE.format(
+                            extra_reason='It is caused by TPU failure.',
+                            cluster_name=handle.cluster_name,
+                            stdout=tpu_stdout,
+                            stderr=tpu_stderr))
+                    return False
+
+        # The cluster file must exist because the cluster_yaml will only
+        # be removed after the cluster entry in the database is removed.
+        config = backend_utils.read_yaml(handle.cluster_yaml)
+        auth_config = config['auth']
+        backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
 
         if terminate:
-            # Clean up generated config
-            # No try-except is needed since Ray will fail to teardown the
-            # cluster if the cluster_yaml is missing.
-            os.remove(handle.cluster_yaml)
-
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None
                 os.remove(handle.tpu_create_script)
                 os.remove(handle.tpu_delete_script)
+
+            # Clean up generated config
+            # No try-except is needed since Ray will fail to teardown the
+            # cluster if the cluster_yaml is missing.
+            os.remove(handle.cluster_yaml)
         return True
-
-    def _rsync_up(
-        self,
-        handle: ResourceHandle,
-        source: str,
-        target: str,
-        stream_logs: bool = True,
-        log_path: str = '/dev/null',
-        ip: Optional[str] = None,
-        raise_error: bool = True,
-    ) -> None:
-        """Runs rsync from 'source' to the cluster's node 'target'."""
-        # Attempt to use 'rsync user@ip' directly, which is much faster than
-        # going through ray (either 'ray rsync_*' or sdk.rsync()).
-        if ip is None:
-            ip = handle.head_ip
-        if handle.head_ip is None:
-            raise ValueError(
-                f'The cluster "{handle.cluster_name}" appears to be down. '
-                'Run a re-provisioning command (e.g., sky launch) and retry.')
-
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
-        # Build command.
-        # TODO(zhwu): This will print a per-file progress bar (with -P),
-        # shooting a lot of messages to the output. --info=progress2 is used
-        # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
-        # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
-
-        # --filter
-        rsync_command.append(_RSYNC_FILTER_OPTION)
-
-        # --exclude-from
-        resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / _GIT_EXCLUDE).exists():
-            # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append(
-                _RSYNC_EXCLUDE_OPTION.format(str(resolved_source /
-                                                 _GIT_EXCLUDE)))
-
-        ssh_options = ' '.join(
-            backend_utils.ssh_options_list(ssh_key,
-                                           self._ssh_control_name(handle)))
-        rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{ssh_user}@{ip}:{target}',
-        ])
-        command = ' '.join(rsync_command)
-
-        returncode = log_lib.run_with_log(command,
-                                          log_path=log_path,
-                                          stream_logs=stream_logs,
-                                          shell=True)
-        backend_utils.handle_returncode(
-            returncode,
-            command, f'Failed to rsync up {source} -> {target}, '
-            f'see {log_path} for details.',
-            raise_error=raise_error)
-
-    def _ssh_control_name(self, handle: ResourceHandle) -> str:
-        return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
@@ -2494,29 +2426,29 @@ class CloudVmRayBackend(backends.Backend):
         process_stream: bool = True,
         stream_logs: bool = False,
         use_cached_head_ip: bool = True,
-        ssh_mode: backend_utils.SshMode = backend_utils.SshMode.NON_INTERACTIVE,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
-        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip)
-        ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
+        max_attempts = 1 if use_cached_head_ip else _HEAD_IP_MAX_ATTEMPTS
+        head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
+                                            max_attempts)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
+        runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
-        return backend_utils.run_command_on_ip_via_ssh(
-            head_ip,
+        return runner.run(
             cmd,
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_private_key,
             port_forward=port_forward,
             log_path=log_path,
             process_stream=process_stream,
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
-            ssh_control_name=self._ssh_control_name(handle),
             require_outputs=require_outputs,
             **kwargs,
         )

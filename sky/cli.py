@@ -57,6 +57,9 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
+from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
 _PRIVACY_POLICY_PATH = os.path.expanduser('~/.sky/privacy_policy')
@@ -94,7 +97,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
                              accelerators={'tpu-v3-8': 1},
-                             accelerator_args={'tf_version': '2.5.0'},
+                             accelerator_args={'runtime_version': '2.5.0'},
                              use_spot=False),
 }
 
@@ -277,6 +280,11 @@ _TASK_OPTIONS = [
         default=None,
         help=('Whether to request spot instances. If specified, overrides the '
               '"resources.use_spot" config.')),
+    click.option('--image-id',
+                 required=False,
+                 default=None,
+                 help=('Custom image id for launching the instances. '
+                       'Passing "none" resets the config.')),
     click.option(
         '--env',
         required=False,
@@ -369,6 +377,7 @@ def _check_resources_match(backend: backends.Backend,
     backend.check_resources_fit_cluster(handle, task)
 
 
+@ux_utils.print_exception_no_traceback_decorator
 def _launch_with_confirm(
     dag: sky.Dag,
     backend: backends.Backend,
@@ -497,7 +506,7 @@ def _create_and_ssh_into_node(
     backend.run_on_head(handle,
                         commands,
                         port_forward=port_forward,
-                        ssh_mode=backend_utils.SshMode.LOGIN)
+                        ssh_mode=command_runner.SshMode.LOGIN)
     cluster_name = handle.cluster_name
 
     click.echo('To attach to it again:  ', nl=False)
@@ -555,6 +564,90 @@ def _check_yaml(entrypoint: str) -> bool:
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
     return is_yaml
+
+
+def _make_dag_from_entrypoint_with_overrides(
+    entrypoint: List[str],
+    *,
+    name: Optional[str] = None,
+    workdir: Optional[str] = None,
+    cloud: Optional[str] = None,
+    region: Optional[str] = None,
+    gpus: Optional[str] = None,
+    num_nodes: Optional[int] = None,
+    use_spot: Optional[bool] = None,
+    image_id: Optional[str] = None,
+    disk_size: Optional[int] = None,
+    env: List[Dict[str, str]] = None,
+    # spot launch specific
+    spot_recovery: Optional[str] = None,
+) -> sky.Dag:
+    entrypoint = ' '.join(entrypoint)
+
+    with sky.Dag() as dag:
+        if _check_yaml(entrypoint):
+            # Treat entrypoint as a yaml.
+            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+            click.secho(entrypoint, bold=True)
+            task = sky.Task.from_yaml(entrypoint)
+        else:
+            if not entrypoint:
+                entrypoint = None
+            else:
+                # Treat entrypoint as a bash command.
+                click.secho('Task from command: ', fg='yellow', nl=False)
+                click.secho(entrypoint, bold=True)
+            task = sky.Task(name='sky-cmd', run=entrypoint)
+            task.set_resources({sky.Resources()})
+        # Override.
+        if workdir is not None:
+            task.workdir = workdir
+
+        override_params = {}
+        if cloud is not None:
+            if cloud.lower() == 'none':
+                override_params['cloud'] = None
+            else:
+                override_params['cloud'] = _get_cloud(cloud)
+        if region is not None:
+            if region.lower() == 'none':
+                override_params['region'] = None
+            else:
+                override_params['region'] = region
+        if gpus is not None:
+            if gpus.lower() == 'none':
+                override_params['accelerators'] = None
+            else:
+                override_params['accelerators'] = gpus
+        if use_spot is not None:
+            override_params['use_spot'] = use_spot
+        if disk_size is not None:
+            override_params['disk_size'] = disk_size
+        if image_id is not None:
+            if image_id.lower() == 'none':
+                override_params['image_id'] = None
+            else:
+                override_params['image_id'] = image_id
+
+        # Spot launch specific.
+        if spot_recovery is not None:
+            if spot_recovery.lower() == 'none':
+                override_params['spot_recovery'] = None
+            else:
+                override_params['spot_recovery'] = spot_recovery
+
+        assert len(task.resources) == 1
+        old_resources = list(task.resources)[0]
+        new_resources = old_resources.copy(**override_params)
+
+        task.set_resources({new_resources})
+
+        if num_nodes is not None:
+            task.num_nodes = num_nodes
+        if name is not None:
+            task.name = name
+        task.envs = env
+    return dag
 
 
 def _start_cluster(cluster_name: str,
@@ -674,6 +767,7 @@ def launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
@@ -693,62 +787,19 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
-    entrypoint = ' '.join(entrypoint)
-    if entrypoint:
-        is_yaml = _check_yaml(entrypoint)
-        if is_yaml:
-            # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
-            usage_logging.send_yaml(entrypoint)
-        else:
-            # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
-        click.secho(entrypoint, bold=True)
-    else:
-        entrypoint = None
-        is_yaml = False
-
-    with sky.Dag() as dag:
-        if is_yaml:
-            task = sky.Task.from_yaml(entrypoint)
-        else:
-            task = sky.Task(name='sky-cmd', run=entrypoint)
-            task.set_resources({sky.Resources()})
-        # Override.
-        if workdir is not None:
-            task.workdir = workdir
-
-        override_params = {}
-        if cloud is not None:
-            if cloud.lower() == 'none':
-                override_params['cloud'] = None
-            else:
-                override_params['cloud'] = _get_cloud(cloud)
-        if region is not None:
-            if region.lower() == 'none':
-                override_params['region'] = None
-            else:
-                override_params['region'] = region
-        if gpus is not None:
-            if gpus.lower() == 'none':
-                override_params['accelerators'] = None
-            else:
-                override_params['accelerators'] = gpus
-        if use_spot is not None:
-            override_params['use_spot'] = use_spot
-        if disk_size is not None:
-            override_params['disk_size'] = disk_size
-
-        assert len(task.resources) == 1
-        old_resources = list(task.resources)[0]
-        new_resources = old_resources.copy(**override_params)
-        task.set_resources({new_resources})
-
-        if num_nodes is not None:
-            task.num_nodes = num_nodes
-        if name is not None:
-            task.name = name
-        task.envs = env
+    dag = _make_dag_from_entrypoint_with_overrides(
+        entrypoint=entrypoint,
+        name=name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        gpus=gpus,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=env,
+        disk_size=disk_size,
+    )
 
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
@@ -792,6 +843,7 @@ def exec(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     env: List[Dict[str, str]],
 ):
     """Execute a task or a command on a cluster (skip setup).
@@ -852,59 +904,24 @@ def exec(
     """
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Executing task on it')
-    entrypoint = ' '.join(entrypoint)
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    with sky.Dag() as dag:
-        if _check_yaml(entrypoint):
-            # Treat entrypoint as a yaml file
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
-            click.secho(entrypoint, bold=True)
-            task = sky.Task.from_yaml(entrypoint)
-        else:
-            # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
-            click.secho(entrypoint, bold=True)
-            task = sky.Task(name='sky-cmd', run=entrypoint)
-            task.set_resources({sky.Resources()})
-
-        # Override.
-        if workdir is not None:
-            task.workdir = workdir
-
-        override_params = {}
-        if cloud is not None:
-            if cloud.lower() == 'none':
-                override_params['cloud'] = None
-            else:
-                override_params['cloud'] = _get_cloud(cloud)
-        if region is not None:
-            if region.lower() == 'none':
-                override_params['region'] = None
-            else:
-                override_params['region'] = region
-        if gpus is not None:
-            if gpus.lower() == 'none':
-                override_params['accelerators'] = None
-            else:
-                override_params['accelerators'] = gpus
-        if use_spot is not None:
-            override_params['use_spot'] = use_spot
-
-        assert len(task.resources) == 1
-        old_resources = list(task.resources)[0]
-        new_resources = old_resources.copy(**override_params)
-        task.set_resources({new_resources})
-
-        if num_nodes is not None:
-            task.num_nodes = num_nodes
-        if name is not None:
-            task.name = name
-        task.envs = env
+    dag = _make_dag_from_entrypoint_with_overrides(
+        entrypoint=entrypoint,
+        name=name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        gpus=gpus,
+        use_spot=use_spot,
+        image_id=image_id,
+        num_nodes=num_nodes,
+        env=env,
+    )
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
     sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
@@ -922,7 +939,7 @@ def exec(
               default=False,
               is_flag=True,
               required=False,
-              help='Query remote clusters for their latest autostop settings.')
+              help='Query cluster status from the cloud provider.')
 @metrics.ReturnCodeLogger('status')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
@@ -935,9 +952,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     Each cluster can have one of the following statuses:
 
     \b
-    - INIT: Undergoing provisioning or runtime setup and may be live or
-      down. (In other words, a ``sky launch`` has started but has not
-      completed.)
+    - INIT: The cluster may be live or down. It can happen in following cases:
+      (1) undergoing provisioning or runtime setup. (In other words, a
+      ``sky launch`` has started but has not completed.)
+      (2) Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+      down, or the sky runtime has crashed.
     - UP: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
     - STOPPED: The cluster is stopped and the storage is persisted. Use
@@ -1524,6 +1543,9 @@ def _terminate_or_stop_clusters(
             default=True,
             abort=True,
             show_default=True)
+        # Add a blank line to separate the confirmation prompt from the
+        # progress bar.
+        click.echo()
 
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -1603,7 +1625,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        backend_utils.run_in_parallel(_terminate_or_stop, clusters)
+        subprocess_utils.run_in_parallel(_terminate_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
@@ -2086,6 +2108,7 @@ def spot_launch(
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
+    image_id: Optional[str],
     spot_recovery: Optional[str],
     env: List[Dict[str, str]],
     disk_size: Optional[int],
@@ -2093,81 +2116,46 @@ def spot_launch(
     yes: bool,
 ):
     """Launch a managed spot job."""
-    # TODO(zhwu): Refactor this function with sky launch, extracting common
-    # code.
-    entrypoint = ' '.join(entrypoint)
-    if entrypoint:
-        is_yaml = _check_yaml(entrypoint)
-        if is_yaml:
-            # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
-        else:
-            # Treat entrypoint as a bash command.
-            click.secho('Task from command: ', fg='yellow', nl=False)
-        click.secho(entrypoint, bold=True)
-    else:
-        entrypoint = None
-        is_yaml = False
-
     if name is None:
         name = backend_utils.generate_cluster_name()
     else:
         backend_utils.check_cluster_name_is_valid(name)
+
+    dag = _make_dag_from_entrypoint_with_overrides(
+        entrypoint,
+        name=name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        gpus=gpus,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=env,
+        disk_size=disk_size,
+        spot_recovery=spot_recovery,
+    )
 
     if not yes:
         prompt = f'Launching a new spot task {name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    if is_yaml:
-        task = sky.Task.from_yaml(entrypoint)
-    else:
-        task = sky.Task(name=name, run=entrypoint)
-        task.set_resources({sky.Resources()})
-    # Override.
-    if workdir is not None:
-        task.workdir = workdir
-
-    override_params = {}
-    if cloud is not None:
-        if cloud.lower() == 'none':
-            override_params['cloud'] = None
-        else:
-            override_params['cloud'] = _get_cloud(cloud)
-    if region is not None:
-        if region.lower() == 'none':
-            override_params['region'] = None
-        else:
-            override_params['region'] = region
-    if gpus is not None:
-        if gpus.lower() == 'none':
-            override_params['accelerators'] = None
-        else:
-            override_params['accelerators'] = gpus
-    if spot_recovery is not None:
-        if spot_recovery.lower() == 'none':
-            override_params['spot_recovery'] = None
-        else:
-            override_params['spot_recovery'] = spot_recovery
-    if use_spot is not None:
-        override_params['use_spot'] = use_spot
-    if disk_size is not None:
-        override_params['disk_size'] = disk_size
-
-    assert len(task.resources) == 1
-    old_resources = list(task.resources)[0]
-    new_resources = old_resources.copy(**override_params)
+    assert len(dag.tasks) == 1, dag
+    task = dag.tasks[0]
+    assert len(task.resources) == 1, task
+    resources = list(task.resources)[0]
 
     change_default_value = dict()
-    if not new_resources.use_spot_specified:
+    if not resources.use_spot_specified:
         logger.info('Field use_spot not specified; defaulting to True.')
         change_default_value['use_spot'] = True
-    if new_resources.spot_recovery is None:
+    if resources.spot_recovery is None:
         logger.info('No spot recovery strategy specified; defaulting to '
                     f'{spot_lib.SPOT_DEFAULT_STRATEGY}.')
         change_default_value['spot_recovery'] = spot_lib.SPOT_DEFAULT_STRATEGY
 
-    new_resources = new_resources.copy(**change_default_value)
+    new_resources = resources.copy(**change_default_value)
     task.set_resources({new_resources})
 
     if task.run is None:
@@ -2175,12 +2163,6 @@ def spot_launch(
             'Skipping the managed spot task as the run section is not set.',
             fg='green')
         return
-
-    if num_nodes is not None:
-        task.num_nodes = num_nodes
-    if name is not None:
-        task.name = name
-    task.envs = env
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
     # following validations.
@@ -2320,9 +2302,9 @@ def spot_status(all: bool, refresh: bool):
     code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
     returncode, job_table_str, stderr = backend.run_on_head(
         handle, code, require_outputs=True, stream_logs=False)
-    backend_utils.handle_returncode(returncode, code,
-                                    'Failed to fetch managed job statuses',
-                                    job_table_str + stderr)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to fetch managed job statuses',
+                                       job_table_str + stderr)
 
     spot_lib.dump_job_table_cache(job_table_str)
     click.echo(f'Managed spot jobs:\n{job_table_str}')
@@ -2403,8 +2385,9 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                                                 code,
                                                 require_outputs=True,
                                                 stream_logs=False)
-    backend_utils.handle_returncode(returncode, code,
-                                    'Failed to cancel managed spot job', stdout)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to cancel managed spot job',
+                                       stdout)
 
     click.echo(stdout)
     if 'Multiple jobs found with name' in stdout:
