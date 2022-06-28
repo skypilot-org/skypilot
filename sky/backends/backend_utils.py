@@ -1099,27 +1099,25 @@ def save_distributable_yaml(yaml_config: Dict[str, Dict[str, object]]) -> None:
         yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
 
 
-def _add_auth_to_cluster_config(cloud_type, cluster_config_file):
+def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     """Adds SSH key info to the cluster config.
 
     This function's output removes comments included in the jinja2 template.
     """
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)
-    cloud_type = str(cloud_type)
-    if cloud_type == 'AWS':
+    # Check the availability of the cloud type.
+    if isinstance(cloud, clouds.AWS):
         config = auth.setup_aws_authentication(config)
-    elif cloud_type == 'GCP':
+    elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    elif cloud_type == 'Azure':
+    elif isinstance(cloud, clouds.Azure):
         config = auth.setup_azure_authentication(config)
-    elif cloud_type == 'Local':
+    elif isinstance(cloud, clouds.Local):
         # Local cluster case, authentication is already filled by the user
         # in the local cluster config (in ~/.sky/local/...). There is no need
         # for Sky to generate authentication.
         pass
-    else:
-        raise ValueError('Cloud type not supported, must be [AWS, GCP, Azure]')
     dump_yaml(cluster_config_file, config)
 
 
@@ -1483,10 +1481,11 @@ def get_head_ip(
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
-            raise ValueError(
-                'Cluster\'s head IP not found; is it up? To fix: '
-                'run a successful launch first (`sky launch`) to ensure'
-                ' the cluster status is UP (`sky status`).')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cluster\'s head IP not found; is it up? To fix: '
+                    'run a successful launch first (`sky launch`) to ensure'
+                    ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
         head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
@@ -1542,9 +1541,10 @@ def _process_cli_query(
         return []
 
     if returncode != 0:
-        raise exceptions.ClusterStatusFetchingError(
-            f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
-        )
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterStatusFetchingError(
+                f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
+            )
 
     cluster_status = stdout.strip()
     if cluster_status == '':
@@ -1961,8 +1961,11 @@ def get_clusters(
     if terminated_clusters:
         plural = 's were' if len(terminated_clusters) > 1 else ' was'
         cluster_str = ', '.join(repr(name) for name in terminated_clusters)
-        logger.warning(f'The following cluster{plural} terminated on the cloud '
-                       f'and removed from Sky\'s cluster table:\n{cluster_str}')
+        yellow = colorama.Fore.YELLOW
+        reset = colorama.Style.RESET_ALL
+        logger.warning(f'{yellow}The following cluster{plural} terminated on '
+                       'the cloud and removed from Sky\'s cluster table: '
+                       f'{cluster_str}{reset}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
@@ -2042,12 +2045,15 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
-        raise ValueError(f'Cluster name "{cluster_name}" is invalid; '
-                         f'ensure it is fully matched by regex: {valid_regex}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cluster name "{cluster_name}" is invalid; '
+                f'ensure it is fully matched by regex: {valid_regex}')
     if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
-        raise ValueError(
-            f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-            f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+                f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
 
 
 def check_cluster_name_not_reserved(
@@ -2065,7 +2071,8 @@ def check_cluster_name_not_reserved(
     if operation_str is not None:
         msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        raise ValueError(msg)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(msg)
 
 
 def check_gcp_cli_include_tpu_vm() -> None:
@@ -2083,20 +2090,24 @@ def check_gcp_cli_include_tpu_vm() -> None:
                            '{stdout}\n'
                            '**** STDERR ****\n'
                            '{stderr}')
-        raise RuntimeError(failure_massage.format(stdout=stdout, stderr=stderr))
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                failure_massage.format(stdout=stdout, stderr=stderr))
 
     sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
 
     if sdk_ver is None:
-        raise RuntimeError('Failed to get Google Cloud SDK version from'
-                           f' "gcloud version": {stdout}')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Failed to get Google Cloud SDK version from'
+                               f' "gcloud version": {stdout}')
     else:
         major_ver = sdk_ver.split('.')[0]
         major_ver = int(major_ver)
         if major_ver < 382:
-            raise RuntimeError(
-                'Google Cloud SDK version must be >= 382.0.0 to use'
-                ' TPU VM APIs, check "gcloud version" for details.')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Google Cloud SDK version must be >= 382.0.0 to use'
+                    ' TPU VM APIs, check "gcloud version" for details.')
 
 
 def kill_children_processes():
@@ -2157,7 +2168,6 @@ class Backoff:
         return self._backoff
 
 
-@ux_utils.print_exception_no_traceback_decorator
 def validate_schema(obj, schema, err_msg_prefix=''):
     err_msg = None
     try:
@@ -2176,4 +2186,5 @@ def validate_schema(obj, schema, err_msg_prefix=''):
             err_msg = err_msg_prefix + e.message
 
     if err_msg:
-        raise ValueError(err_msg)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(err_msg)

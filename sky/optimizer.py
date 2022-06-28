@@ -87,7 +87,6 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    @ux_utils.print_exception_no_traceback_decorator
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
@@ -252,7 +251,8 @@ class Optimizer:
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
-                    raise exceptions.ResourcesUnavailableError(error_msg)
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -831,10 +831,11 @@ def _fill_in_launchable_resources(
                 check.check(quiet=True)
                 return _fill_in_launchable_resources(
                     task, blocked_launchable_resources, False)
-            raise exceptions.ResourcesUnavailableError(
-                f'Task {task} requires {resources.cloud} which is not '
-                'enabled. Run `sky check` to enable access to it, '
-                'or change the cloud requirement.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    f'Task {task} requires {resources.cloud} which is not '
+                    'enabled. Run `sky check` to enable access to it, '
+                    'or change the cloud requirement.')
         elif resources.is_launchable():
             launchable[resources] = [resources]
         else:
