@@ -373,7 +373,7 @@ def test_autostop():
     run_one_test(test)
 
 
-def _get_cancel_task_with_cloud(name, cloud):
+def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',
         [
@@ -389,6 +389,7 @@ def _get_cancel_task_with_cloud(name, cloud):
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=timeout,
     )
     return test
 
@@ -403,7 +404,7 @@ def test_cancel_aws():
 # ---------- Testing `sky cancel` on Azure ----------
 def test_cancel_azure():
     name = _get_cluster_name()
-    test = _get_cancel_task_with_cloud(name, 'azure')
+    test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
     run_one_test(test)
 
 

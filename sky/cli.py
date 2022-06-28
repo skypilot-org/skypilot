@@ -1520,6 +1520,9 @@ def _terminate_or_stop_clusters(
             default=True,
             abort=True,
             show_default=True)
+        # Add a blank line to separate the confirmation prompt from the
+        # progress bar.
+        click.echo()
 
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,

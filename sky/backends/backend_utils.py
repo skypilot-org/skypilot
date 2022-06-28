@@ -1399,7 +1399,7 @@ def refresh_cluster_status_handle(
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
             if record is None:
                 return None, None
-    return record['status'], handle
+    return record['status'], record['handle']
 
 
 def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
