@@ -45,7 +45,6 @@ class Resources:
     # 3. Modify the to_config method to handle the new fields.
     _VERSION = 4
 
-    @ux_utils.print_exception_no_traceback_decorator
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
@@ -74,11 +73,14 @@ class Resources:
 
         if disk_size is not None:
             if disk_size < 50:
-                raise ValueError(
-                    f'OS disk size must be larger than 50GB. Got: {disk_size}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'OS disk size must be larger than 50GB. Got: '
+                        f'{disk_size}.')
             if round(disk_size) != disk_size:
-                raise ValueError(
-                    f'OS disk size must be an integer. Got: {disk_size}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'OS disk size must be an integer. Got: {disk_size}.')
             self._disk_size = int(disk_size)
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
@@ -182,13 +184,15 @@ class Resources:
                                    'should be <name> or <name>:<cnt>. '
                                    f'Found: {accelerators!r}')
                     if len(splits) != 2:
-                        raise ValueError(parse_error)
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(parse_error)
                     try:
                         num = float(splits[1])
                         num = int(num) if num.is_integer() else num
                         accelerators = {splits[0]: num}
                     except ValueError:
-                        raise ValueError(parse_error) from None
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(parse_error) from None
             assert len(accelerators) == 1, accelerators
 
             acc, _ = list(accelerators.items())[0]
@@ -204,9 +208,10 @@ class Resources:
                     backend_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
-                        raise ValueError(
-                            'Cannot specify instance type'
-                            f' (got "{self.instance_type}") for TPU VM.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Cannot specify instance type'
+                                f' (got "{self.instance_type}") for TPU VM.')
                 if 'runtime_version' not in accelerator_args:
                     if use_tpu_vm:
                         accelerator_args['runtime_version'] = 'tpu-vm-base'
@@ -230,8 +235,9 @@ class Resources:
         # Validate region.
         if self._cloud is not None:
             if not self._cloud.region_exists(region):
-                raise ValueError(f'Invalid region {region!r} '
-                                 f'for cloud {self.cloud}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid region {region!r} '
+                                     f'for cloud {self.cloud}.')
         else:
             # If cloud not specified
             valid_clouds = []
@@ -244,12 +250,15 @@ class Resources:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
                     cloud_str = f'for any cloud among {enabled_clouds}'
-                raise ValueError(f'Invalid region {region!r} '
-                                 f'{cloud_str}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Invalid region {region!r} '
+                                     f'{cloud_str}.')
             if len(valid_clouds) > 1:
-                raise ValueError(
-                    f'Ambiguous region {region!r} '
-                    f'Please specify cloud explicitly among {valid_clouds}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Ambiguous region {region!r}. '
+                        f'Please specify cloud explicitly among {valid_clouds}.'
+                    )
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
                          f'inferred from the region {region!r}.')
             self._cloud = valid_clouds[0]
@@ -263,9 +272,10 @@ class Resources:
         if self.cloud is not None:
             valid = self.cloud.instance_type_exists(self._instance_type)
             if not valid:
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'for cloud {self.cloud}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid instance type {self._instance_type!r} '
+                        f'for cloud {self.cloud}.')
         else:
             # If cloud not specified
             valid_clouds = []
@@ -278,13 +288,16 @@ class Resources:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
                     cloud_str = f'for any cloud among {enabled_clouds}'
-                raise ValueError(
-                    f'Invalid instance type {self._instance_type!r} '
-                    f'{cloud_str}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid instance type {self._instance_type!r} '
+                        f'{cloud_str}.')
             if len(valid_clouds) > 1:
-                raise ValueError(
-                    f'Ambiguous instance type {self._instance_type!r}. '
-                    f'Please specify cloud explicitly among {valid_clouds}.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Ambiguous instance type {self._instance_type!r}. '
+                        f'Please specify cloud explicitly among {valid_clouds}.'
+                    )
             logger.debug(
                 f'Cloud is not specified, using {valid_clouds[0]} '
                 f'inferred from the instance_type {self.instance_type!r}.')
@@ -302,14 +315,15 @@ class Resources:
                     self._instance_type))
             if not Resources(accelerators=acc_requested).less_demanding_than(
                     Resources(accelerators=acc_from_instance_type)):
-                raise ValueError(
-                    'Infeasible resource demands found:\n'
-                    f'  Instance type requested: {self._instance_type}\n'
-                    f'  Accelerators for {self._instance_type}: '
-                    f'{acc_from_instance_type}\n'
-                    f'  Accelerators requested: {acc_requested}\n'
-                    f'To fix: either only specify instance_type, or change '
-                    'the accelerators field to be consistent.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Infeasible resource demands found:\n'
+                        f'  Instance type requested: {self._instance_type}\n'
+                        f'  Accelerators for {self._instance_type}: '
+                        f'{acc_from_instance_type}\n'
+                        f'  Accelerators requested: {acc_requested}\n'
+                        f'To fix: either only specify instance_type, or change '
+                        'the accelerators field to be consistent.')
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
@@ -318,12 +332,16 @@ class Resources:
         if self._spot_recovery is None:
             return
         if not self._use_spot:
-            raise ValueError(
-                'Cannot specify spot_recovery without use_spot set to True.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify spot_recovery without use_spot set to True.'
+                )
         if self._spot_recovery not in spot.SPOT_STRATEGIES:
-            raise ValueError(f'Spot recovery strategy {self._spot_recovery} '
-                             'is not supported. The strategy should be among '
-                             f'{list(spot.SPOT_STRATEGIES.keys())}')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Spot recovery strategy {self._spot_recovery} '
+                    'is not supported. The strategy should be among '
+                    f'{list(spot.SPOT_STRATEGIES.keys())}')
 
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
@@ -492,7 +510,6 @@ class Resources:
         return resources
 
     @classmethod
-    @ux_utils.print_exception_no_traceback_decorator
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
         if config is None:
             return Resources()
