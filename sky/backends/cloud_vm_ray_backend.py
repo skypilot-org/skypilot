@@ -3,7 +3,6 @@ import ast
 import click
 import enum
 import getpass
-import hashlib
 import inspect
 import json
 import os
@@ -1306,11 +1305,11 @@ class CloudVmRayBackend(backends.Backend):
                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_config_file)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, ssh_user, ssh_key)
+            ip_list, *ssh_credentials)
 
         def _setup_tpu_name_on_node(
                 runner: command_runner.SSHCommandRunner) -> None:
@@ -1532,13 +1531,12 @@ class CloudVmRayBackend(backends.Backend):
 
         log_path = os.path.join(self.log_dir, 'workdir_sync.log')
 
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        ssh_control_name = self._ssh_control_name(handle)
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, ssh_user, ssh_key, ssh_control_name)
+            ip_list, *ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync_up(
@@ -1596,10 +1594,10 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                              handle.launched_nodes,
                                              handle=handle)
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, ssh_user, ssh_key, self._ssh_control_name(handle))
+            ip_list, *ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():
@@ -1638,10 +1636,10 @@ class CloudVmRayBackend(backends.Backend):
         start = time.time()
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                              handle.launched_nodes)
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, ssh_user, ssh_key, self._ssh_control_name(handle))
+            ip_list, *ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -1771,10 +1769,10 @@ class CloudVmRayBackend(backends.Backend):
             ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                                  handle.launched_nodes,
                                                  handle=handle)
-            ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+            ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, ssh_user, ssh_key, self._ssh_control_name(handle))
+                ip_list, *ssh_credentials)
 
             def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
                 runner.rsync_up(source=setup_sh_path,
@@ -1907,11 +1905,10 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         style = colorama.Style
         fore = colorama.Fore
-        ssh_user, ssh_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(handle.head_ip, ssh_user,
-                                                 ssh_key,
-                                                 self._ssh_control_name(handle))
+        runner = command_runner.SSHCommandRunner(handle.head_ip,
+                                                 *ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -2409,9 +2406,6 @@ class CloudVmRayBackend(backends.Backend):
             os.remove(handle.cluster_yaml)
         return True
 
-    def _ssh_control_name(self, handle: ResourceHandle) -> str:
-        return f'{hashlib.md5(handle.cluster_yaml.encode()).hexdigest()[:10]}'
-
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     @timeline.event
@@ -2435,11 +2429,9 @@ class CloudVmRayBackend(backends.Backend):
         max_attempts = 1 if use_cached_head_ip else _HEAD_IP_MAX_ATTEMPTS
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
                                             max_attempts)
-        ssh_user, ssh_private_key = backend_utils.ssh_credential_from_yaml(
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(head_ip, ssh_user,
-                                                 ssh_private_key,
-                                                 self._ssh_control_name(handle))
+        runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 

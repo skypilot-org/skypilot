@@ -4,7 +4,6 @@ import enum
 import os
 import pathlib
 import shlex
-import subprocess
 from typing import List, Optional, Tuple, Union
 
 from sky import sky_logging
@@ -14,17 +13,19 @@ from sky.skylet import log_lib
 logger = sky_logging.init_logger(__name__)
 
 # The git exclude file to support.
-_GIT_EXCLUDE = '.git/info/exclude'
+GIT_EXCLUDE = '.git/info/exclude'
 # Rsync options
-_RSYNC_DISPLAY_OPTION = '-Pavz'
+RSYNC_DISPLAY_OPTION = '-Pavz'
 # Legend
 #   dir-merge: ignore file can appear in any subdir, applies to that
 #     subdir downwards
 # Note that "-" is mandatory for rsync and means all patterns in the ignore
 # files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
 # do_not_exclude" doesn't work, even though git allows it.
-_RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
-_RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
+RSYNC_FILTER_OPTION = '--filter=\'dir-merge,- .gitignore\''
+RSYNC_EXCLUDE_OPTION = '--exclude-from={}'
+
+_HASH_MAX_LENGTH = 10
 
 
 def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
@@ -86,23 +87,6 @@ def _ssh_options_list(ssh_private_key: Optional[str],
     ]
 
 
-def path_size_megabytes(path: str) -> int:
-    """Returns the size of 'path' (directory or file) in megabytes."""
-    resolved_path = pathlib.Path(path).expanduser().resolve()
-    git_exclude_filter = ''
-    if (resolved_path / _GIT_EXCLUDE).exists():
-        # Ensure file exists; otherwise, rsync will error out.
-        git_exclude_filter = _RSYNC_EXCLUDE_OPTION.format(
-            str(resolved_path / _GIT_EXCLUDE))
-    rsync_output = str(
-        subprocess.check_output(
-            f'rsync {_RSYNC_DISPLAY_OPTION} {_RSYNC_FILTER_OPTION}'
-            f' {git_exclude_filter} --dry-run {path}',
-            shell=True).splitlines()[-1])
-    total_bytes = rsync_output.split(' ')[3].replace(',', '')
-    return int(total_bytes) // 10**6
-
-
 class SshMode(enum.Enum):
     """Enum for SSH mode."""
     # Do not allocating pseudo-tty to avoid user input corrupting outputs.
@@ -122,7 +106,7 @@ class SSHCommandRunner:
         ip: str,
         ssh_user: str,
         ssh_private_key: str,
-        ssh_control_name: Optional[str] = None,
+        ssh_control_name: str = '__default__',
     ):
         """Initialize SSHCommandRunner.
 
@@ -136,7 +120,9 @@ class SSHCommandRunner:
             ssh_private_key: The path to the private key to use for ssh.
             ssh_user: The user to use for ssh.
             ssh_control_name: The files name of the ssh_control to use. This is
-                used for optimizing the ssh speed.
+                used to avoid confliction between clusters for creating ssh
+                control files. It can simply be the cluster_name or any name
+                that can distinguish between clusters.
         """
         self.ip = ip
         self.ssh_user = ssh_user
@@ -288,18 +274,17 @@ class SSHCommandRunner:
         # shooting a lot of messages to the output. --info=progress2 is used
         # to get a total progress bar, but it requires rsync>=3.1.0 and Mac
         # OS has a default rsync==2.6.9 (16 years old).
-        rsync_command = ['rsync', _RSYNC_DISPLAY_OPTION]
+        rsync_command = ['rsync', RSYNC_DISPLAY_OPTION]
 
         # --filter
-        rsync_command.append(_RSYNC_FILTER_OPTION)
+        rsync_command.append(RSYNC_FILTER_OPTION)
 
         # --exclude-from
         resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / _GIT_EXCLUDE).exists():
+        if (resolved_source / GIT_EXCLUDE).exists():
             # Ensure file exists; otherwise, rsync will error out.
             rsync_command.append(
-                _RSYNC_EXCLUDE_OPTION.format(str(resolved_source /
-                                                 _GIT_EXCLUDE)))
+                RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
             _ssh_options_list(self.ssh_private_key, self.ssh_control_name))

@@ -132,6 +132,23 @@ def fill_template(template_name: str,
     return output_path
 
 
+def path_size_megabytes(path: str) -> int:
+    """Returns the size of 'path' (directory or file) in megabytes."""
+    resolved_path = pathlib.Path(path).expanduser().resolve()
+    git_exclude_filter = ''
+    if (resolved_path / command_runner.GIT_EXCLUDE).exists():
+        # Ensure file exists; otherwise, rsync will error out.
+        git_exclude_filter = command_runner.RSYNC_EXCLUDE_OPTION.format(
+            str(resolved_path / command_runner.GIT_EXCLUDE))
+    rsync_output = str(
+        subprocess.check_output(
+            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} {command_runner.RSYNC_FILTER_OPTION}'
+            f' {git_exclude_filter} --dry-run {path}',
+            shell=True).splitlines()[-1])
+    total_bytes = rsync_output.split(' ')[3].replace(',', '')
+    return int(total_bytes) // 10**6
+
+
 class FileMountHelper(object):
     """Helper for handling file mounts."""
 
@@ -700,10 +717,10 @@ def wait_until_ray_cluster_ready(
         logger.error(e)
         return False  # failed
 
-    ssh_user, ssh_key = ssh_credential_from_yaml(cluster_config_file)
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, ssh_user, ssh_key)
+    runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run('ray status',
@@ -778,13 +795,14 @@ def wait_until_ray_cluster_ready(
     return True  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str]:
-    """Returns ssh_user and ssh_private_key."""
+def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
+    """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
-    return ssh_user, ssh_private_key
+    ssh_control_name = config.get('cluster_name', '__default__')
+    return ssh_user, ssh_private_key, ssh_control_name
 
 
 def parallel_mounts_on_nodes(
@@ -1260,8 +1278,8 @@ def _update_cluster_status_no_lock(
             # Check the ray cluster status. We have to check it for single node
             # case, since the get_node_ips() does not require ray cluster to be
             # running.
-            ssh_user, ssh_key = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(ips[0], ssh_user, ssh_key)
+            ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
+            runner = command_runner.SSHCommandRunner(ips[0], *ssh_credentials)
             returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
