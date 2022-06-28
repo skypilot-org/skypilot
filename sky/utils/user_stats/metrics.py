@@ -109,9 +109,10 @@ class MetricLogger:
                     'transaction_id': base_utils.transaction_id
                 })
                 saved_ex = None
+                res = None
                 try:
                     start = time.time()
-                    func(*args, **kwargs)
+                    res = func(*args, **kwargs)
                     if self.with_runtime:
                         self.add_metrics(
                             {self.runtime_metric: time.time() - start})
@@ -137,6 +138,8 @@ class MetricLogger:
 
                 if saved_ex is not None:
                     raise saved_ex
+
+                return res
 
             return wrapper_logging
 
