@@ -3,18 +3,40 @@
 SkyCallback measures averaged time taken by each 'step', and extrapolates it to
 the makespan of the task. The APIs provide:
 - `init` function to initialize the callback.
-- 3 equivalent ways to measure the time taken by each step (see doc).
+- Three equivalent ways to measure the time taken by each step.
 
 Example:
+    1. Use `sky_callback.init` to initialize the callback.
+       Optionally, specify the total number of steps that the task will take.
     ```python
-    import sky_callback
+        sky_callback.init(total_steps=num_epochs * len(train_dataloader))
+    ```
+
+    2. Mark the start and end of each step with SkyCallback APIs.
+       Select one of the three equivalent methods.
+
+    1) Wrap your iterable (e.g., dataloader) with `timer`.
+    ```python
     from sky_callback import timer
 
-    ...
-    sky_callback.init(total_steps=num_epochs * len(dataloader))
-    for epoch in range(num_epochs):
-        for batch in timer(dataloader):
+    for batch in timer(train_dataloader):
+        ...
+    ```
+
+    2) Wrap your loop body with `sky_callback.step`.
+    ```python
+    for i in range(num_steps):
+        with sky_callback.step():
             ...
+    ```
+
+    3) Call `sky_callback.step_begin` and `sky_callback.step_end`
+       at the beginning and end of each step.
+    ```python
+    for i in range(num_steps):
+        sky_callback.step_begin()
+        ...
+        sky_callback.step_end()
     ```
 """
 import collections
@@ -47,7 +69,7 @@ def init(global_rank: int = 0,
     _initialized = True
 
 
-def on_step_begin() -> None:
+def step_begin() -> None:
     if _DISABLE_CALLBACK:
         return
     if not _initialized:
@@ -59,7 +81,7 @@ def on_step_begin() -> None:
         _sky_callback.on_step_begin()
 
 
-def on_step_end() -> None:
+def step_end() -> None:
     if _DISABLE_CALLBACK:
         return
     if not _initialized:
@@ -73,9 +95,9 @@ def on_step_end() -> None:
 
 @contextlib.contextmanager
 def step():
-    on_step_begin()
+    step_begin()
     yield
-    on_step_end()
+    step_end()
 
 
 class timer:
