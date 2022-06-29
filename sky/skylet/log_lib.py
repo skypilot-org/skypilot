@@ -136,6 +136,8 @@ def run_with_log(
             f'sudo chmod a+rwx {log_path}',
             shell=True)
         # Hack: Subprocess Popen does not accept sudo.
+        # subprocess.Popen in local mode with shell=True does not work,
+        # as it does not understand what -H means for sudo.
         shell = False
     else:
         os.makedirs(dirname, exist_ok=True)

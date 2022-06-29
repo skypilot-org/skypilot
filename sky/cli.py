@@ -103,8 +103,8 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     return list(set(glob_clusters))
 
 
-def _error_if_local_cluster(cluster: str, local_clusters: List[str],
-                            error_msg: str) -> bool:
+def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
+                           error_msg: str) -> bool:
     """Raises error if the cluster name is not a local cluster."""
     if cluster in local_clusters:
         click.echo(error_msg)
@@ -396,7 +396,7 @@ def _launch_with_confirm(
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
             if is_local_cloud:
-                prompt = f'Connecting to local cluster{cluster_str}. Proceed?'
+                prompt = f'Initializing local cluster{cluster_str}. Proceed?'
             else:
                 prompt = f'Launching a new cluster{cluster_str}. Proceed?'
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
@@ -1402,8 +1402,12 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
-        clusters = [c for c in clusters if _error_if_local_cluster(c, \
-            local_clusters, f'Local cluster {c} does not support `sky start`.')]
+        clusters = [
+            c for c in clusters
+            if _warn_if_local_cluster(c, local_clusters, (
+                f'Skipping local cluster {c}, as it does not support '
+                '`sky start`.'))
+        ]
 
         for name in clusters:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -1563,12 +1567,16 @@ def _terminate_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
-        if not terminate:
+        if not terminate and idle_minutes_to_autostop is None:
             # Local clusters are allowed to `sky down`, but not
             # `sky start/stop`. `sky down` unregisters the local cluster
             # from sky.
-            names = [c for c in names if _error_if_local_cluster(c, \
-                local_clusters, f'Sky stop does not support local cluster {c}')]
+            names = [
+                c for c in names
+                if _warn_if_local_cluster(c, local_clusters, (
+                    f'Skipping local cluster {c}, as it does not support '
+                    '`sky stop`.'))
+            ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:

@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from sky import cli
-from sky.backends import backend_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 

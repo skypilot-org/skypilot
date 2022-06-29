@@ -745,8 +745,8 @@ def run_command_and_handle_ssh_failure(
         # SSH failed
         raise ValueError(
             f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
-            f'to {runner.ip} failed. Check your credentials and try '
-            f'again.')
+            f'to {runner.ip} failed. This is most likely due to incorrect '
+            ' credentials. Check your credentials and try again.')
     subprocess_utils.handle_returncode(rc,
                                        command,
                                        failure_message,
@@ -794,10 +794,9 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
                 runner.rsync_up(source=src, target=dst, stream_logs=False)
 
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-            run_command_and_handle_ssh_failure(
-                runner,
-                setup_cmd,
-                failure_message=
+            rc = runner.run(setup_cmd, stream_logs=False)
+            subprocess_utils.handle_returncode(
+                rc, setup_cmd,
                 'Failed to setup Ray autoscaler commands on remote.')
 
         subprocess_utils.run_in_parallel(_ray_up_local_worker, worker_runners)
@@ -971,17 +970,13 @@ def launch_ray_on_local_cluster(
     ssh_key = auth_config['ssh_private_key']
     ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
     head_runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
-    worker_runners = None
+    worker_runners = []
     if worker_ips:
         worker_runners = command_runner.SSHCommandRunner.make_runner_list(
             worker_ips, *ssh_credentials)
 
     # Stops all running Ray instances on all nodes
     with console.status('[bold cyan]Stopping Ray Cluster'):
-        run_command_and_handle_ssh_failure(
-            head_runner,
-            'sudo ray stop -f',
-            failure_message=f'Failed to stop Ray on {head_ip}.')
 
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             run_command_and_handle_ssh_failure(
@@ -989,8 +984,8 @@ def launch_ray_on_local_cluster(
                 'sudo ray stop -f',
                 failure_message=f'Failed to stop Ray on {runner.ip}.')
 
-        if worker_runners:
-            subprocess_utils.run_in_parallel(_stop_ray_workers, worker_runners)
+        subprocess_utils.run_in_parallel(_stop_ray_workers,
+                                         [head_runner] + worker_runners)
 
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
