@@ -1,9 +1,9 @@
 """Logging events to Grafana Loki"""
 
 import datetime
+import functools
 import json
 import re
-import time
 import traceback
 from typing import Dict, Union
 
@@ -12,6 +12,7 @@ import requests
 from sky import sky_logging
 from sky.utils import base_utils
 from sky.utils import env_options
+from sky.user_stats import utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -24,15 +25,13 @@ def _make_labels_str(d):
     return dict_str
 
 
-def _send_message(labels, msg):
+def _send_message(labels: Dict[str, str], msg):
     if env_options.DISABLE_LOGGING:
         return
     curr_datetime = datetime.datetime.now(datetime.timezone.utc)
     curr_datetime = curr_datetime.isoformat('T')
 
-    labels['user'] = base_utils.get_user()
-    labels['transaction_id'] = base_utils.transaction_id()
-    labels['time'] = time.time()
+    labels.update(utils.get_base_labels())
     labels_str = _make_labels_str(labels)
 
     headers = {'Content-type': 'application/json'}
@@ -103,8 +102,22 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: str):
     _send_message(labels, yaml_info)
 
 
-def send_trace():
-    """Upload stack trace for an exception."""
-    trace = traceback.format_exc()
-    labels = {'type': 'stack-trace'}
-    _send_message(labels, trace)
+def send_exception(name: str):
+
+    def _send_exception(func):
+        """Decorator to catch exceptions and upload to usage logging."""
+        if env_options.DISABLE_LOGGING:
+            return func
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except (Exception, SystemExit):
+                trace = traceback.format_exc()
+                _send_message({'name': name, 'type': 'stack-trace'}, trace)
+                raise
+
+        return wrapper
+
+    return _send_exception

@@ -47,7 +47,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
-from sky.utils.user_stats import usage_logging
+from sky.user_stats import usage_logging
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -554,7 +554,7 @@ class SSHConfigHelper(object):
 
 
 # TODO: too many things happening here - leaky abstraction. Refactor.
-@timeline.event
+@timeline.Event.decorator
 def write_cluster_config(to_provision: 'resources.Resources',
                          num_nodes: int,
                          cluster_config_template: str,
@@ -674,7 +674,7 @@ def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
-@timeline.event
+@timeline.Event.decorator
 def wait_until_ray_cluster_ready(
         cluster_config_file: str,
         num_nodes: int,
@@ -899,7 +899,7 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     return head_ip
 
 
-@timeline.event
+@timeline.Event.decorator
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
                  handle: Optional[backends.Backend.ResourceHandle] = None,
@@ -939,7 +939,7 @@ def get_node_ips(cluster_yaml: str,
     return head_ip + worker_ips
 
 
-@timeline.event
+@timeline.Event.decorator
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
@@ -1327,7 +1327,7 @@ def _update_cluster_status(
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
-@timeline.event
+@timeline.Event.decorator
 def refresh_cluster_status_handle(
     cluster_name: str,
     *,

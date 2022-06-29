@@ -13,7 +13,7 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-@timeline.event
+@timeline.Event.decorator
 def run(cmd, **kwargs):
     # Should be careful to use this function, as the child process cmd spawn may
     # keep running in the background after the current program is killed. To get

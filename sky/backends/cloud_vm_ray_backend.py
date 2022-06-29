@@ -41,7 +41,7 @@ from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.utils.user_stats import metrics
+from sky.user_stats import metrics
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -941,7 +941,7 @@ class RetryingVmProvisioner(object):
                    'Try changing resource requirements or use another cloud.')
         raise exceptions.ResourcesUnavailableError(message)
 
-    @timeline.event
+    @timeline.Event.decorator
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, num_nodes: int,
             cluster_config_file: str, log_abs_path: str, stream_logs: bool,
@@ -1080,7 +1080,7 @@ class RetryingVmProvisioner(object):
             # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
             stdin=subprocess.DEVNULL)
 
-    @timeline.event
+    @timeline.Event.decorator
     def provision_with_retries(
         self,
         task: task_lib.Task,
@@ -1289,7 +1289,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'To fix: specify a new cluster name, or down the '
                     f'existing cluster first: sky down {cluster_name}')
 
-    @timeline.event
+    @timeline.Event.decorator
     def _check_existing_cluster(
             self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
@@ -1334,8 +1334,8 @@ class CloudVmRayBackend(backends.Backend):
 
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
-    @metrics.TimerLogger('provision')
-    @timeline.event
+    @metrics.MetricLogger.decorator
+    @timeline.Event.decorator
     def provision(self,
                   task: task_lib.Task,
                   to_provision: Optional['resources_lib.Resources'],
@@ -1511,7 +1511,7 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop)
 
-    @timeline.event
+    @timeline.Event.decorator
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
@@ -1574,8 +1574,8 @@ class CloudVmRayBackend(backends.Backend):
         with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
-    @metrics.TimerLogger('mounting')
-    @timeline.event
+    @metrics.MetricLogger.decorator
+    @timeline.Event.decorator
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -1766,7 +1766,7 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
-    @timeline.event
+    @timeline.Event.decorator
     def setup(self, handle: ResourceHandle, task: task_lib.Task) -> None:
         start = time.time()
         style = colorama.Style
@@ -2058,7 +2058,7 @@ class CloudVmRayBackend(backends.Backend):
                              f'Returncode: {returncode}') from e
         return job_id
 
-    @timeline.event
+    @timeline.Event.decorator
     def execute(
         self,
         handle: ResourceHandle,
@@ -2172,7 +2172,7 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
-    @timeline.event
+    @timeline.Event.decorator
     def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
         fore = colorama.Fore
@@ -2203,8 +2203,8 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-    @metrics.TimerLogger('teardown')
-    @timeline.event
+    @metrics.MetricLogger.decorator
+    @timeline.Event.decorator
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
@@ -2428,7 +2428,7 @@ class CloudVmRayBackend(backends.Backend):
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
-    @timeline.event
+    @timeline.Event.decorator
     def run_on_head(
         self,
         handle: ResourceHandle,

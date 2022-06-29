@@ -58,10 +58,10 @@ from sky.skylet.utils import log_utils
 from sky.utils import base_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky.utils.user_stats import metrics
-from sky.utils.user_stats import usage_logging
+from sky.user_stats import usage_logging
 
 _PRIVACY_POLICY_PATH = os.path.expanduser('~/.sky/privacy_policy')
 
@@ -744,7 +744,7 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@metrics.ReturnCodeLogger('launch')
+@usage_logging.send_exception('launch')
 def launch(
     entrypoint: str,
     cluster: Optional[str],
@@ -822,7 +822,7 @@ def launch(
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @_add_click_options(_TASK_OPTIONS)
-@metrics.ReturnCodeLogger('exec')
+@usage_logging.send_exception('exec')
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -932,7 +932,7 @@ def exec(
               is_flag=True,
               required=False,
               help='Query cluster status from the cloud provider.')
-@metrics.ReturnCodeLogger('status')
+@usage_logging.send_exception('status')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
@@ -1162,7 +1162,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@metrics.ReturnCodeLogger('stop')
+@usage_logging.send_exception('stop')
 def stop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1289,7 +1289,7 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if sky fails to start the cluster due to unavailability errors.'))
-@metrics.ReturnCodeLogger('start')
+@usage_logging.send_exception('start')
 def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
@@ -1401,7 +1401,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
               required=False,
               help='Ignore cloud provider errors (if any). '
               'Useful for cleaning up manually deleted cluster(s).')
-@metrics.ReturnCodeLogger('down')
+@usage_logging.send_exception('down')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -2088,9 +2088,7 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# FIXME(suquark): adding the following @timeline.event decorator makes docs
-# unable to show the docstring for this CLI command.
-# @timeline.event
+@timeline.Event.decorator
 def spot_launch(
     entrypoint: str,
     name: Optional[str],

@@ -1,6 +1,8 @@
 """Utils shared between all of sky"""
 
+import functools
 import getpass
+import inspect
 import hashlib
 import os
 import socket
@@ -93,3 +95,52 @@ def dump_yaml_str(config):
                      Dumper=LineBreakDumper,
                      sort_keys=False,
                      default_flow_style=False)
+
+
+def make_decorator(cls, name_or_fn, **cls_kwargs):
+    """Make the cls a decorator.
+
+    class cls:
+        def __init__(self, name, **kwargs):
+            pass
+        def __enter__(self):
+            pass
+        def __exit__(self, exc_type, exc_value, traceback):
+            pass
+
+    Args:
+        name_or_fn: The name of the event or the function to be wrapped.
+        message: The message attached to the event.
+    """
+    if isinstance(name_or_fn, str):
+
+        def _wrapper(f):
+
+            @functools.wraps(f)
+            def _record(*args, **kwargs):
+                nonlocal name_or_fn
+                with cls(name_or_fn, **cls_kwargs):
+                    return f(*args, **kwargs)
+
+            return _record
+
+        return _wrapper
+    else:
+        if not inspect.isfunction(name_or_fn):
+            raise ValueError(
+                'Should directly apply the decorator to a function.')
+
+        @functools.wraps(name_or_fn)
+        def _record(*args, **kwargs):
+            nonlocal name_or_fn
+            f = name_or_fn
+            func_name = getattr(f, '__qualname__', f.__name__)
+            module_name = getattr(f, '__module__', '')
+            if module_name:
+                full_name = f'{module_name}.{func_name}'
+            else:
+                full_name = func_name
+            with cls(full_name, **cls_kwargs):
+                return f(*args, **kwargs)
+
+        return _record

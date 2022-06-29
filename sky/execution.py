@@ -186,7 +186,7 @@ def _execute(
         print('\x1b[?25h', end='')  # Show cursor.
 
 
-@timeline.event
+@timeline.Event.decorator
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,

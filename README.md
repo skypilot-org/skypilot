@@ -40,12 +40,12 @@ from utils import timeline
 
 
 # record a function in the timeline with the function path name
-@timeline.event
+@timeline.Event.decorator
 def f(): ...
 
 
 # record a function in the timeline using name='my_name'
-@timeline.event(name='event_name')
+@timeline.Event.decorator(name='event_name')
 def f(): ...
 
 
