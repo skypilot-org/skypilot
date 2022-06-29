@@ -54,6 +54,22 @@ _initialized = False
 def init(global_rank: int = 0,
          log_dir: Optional[str] = None,
          total_steps: Optional[int] = None) -> None:
+    """Initializes SkyCallback.
+
+    NOTE: This function is not thread-safe. Only one thread per process should
+        call this function.
+    NOTE: Do not use this function when using framework-integrated SkyCallback
+        APIs (e.g., SkyKerasCallback).
+
+    Args:
+        global_rank: global rank of the calling process. In non-distributed tasks,
+            the rank should be 0. In distributed tasks, only one process should
+            have rank 0. Check your framework API to query the global rank
+            (e.g., torch.distributed.get_rank()).
+        log_dir: A directory to store the logs.
+        total_steps: A total number of steps. If None, SkyCallback will not
+            estimate the total time to complete the task.
+    """
     if _DISABLE_CALLBACK:
         return
 
