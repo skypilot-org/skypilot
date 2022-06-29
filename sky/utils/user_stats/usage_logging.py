@@ -5,6 +5,7 @@ import json
 import re
 import time
 import traceback
+from typing import Dict, Union
 
 import requests
 
@@ -29,7 +30,7 @@ def _send_message(labels, msg):
     curr_datetime = datetime.datetime.now(datetime.timezone.utc)
     curr_datetime = curr_datetime.isoformat('T')
 
-    labels['host'] = base_utils.get_user()
+    labels['user'] = base_utils.get_user()
     labels['transaction_id'] = base_utils.transaction_id()
     labels['time'] = time.time()
     labels_str = _make_labels_str(labels)
@@ -66,29 +67,40 @@ def _clean_yaml(yaml_info):
     for line in yaml_info:
         if len(line) > 1 and line[0].strip() == line[0]:
             redact = False
-        if line[0:5] == 'setup:':
+        line_prefix = ''
+        if line.startswith('setup:'):
             redact = True
             redact_type = 'SETUP'
-        if line[0:3] == 'run:':
+            line_prefix = 'setup: '
+        if line.startswith('run:'):
             redact = True
             redact_type = 'RUN'
+            line_prefix = 'run: '
+        if line.startswith('envs: ') and line != 'envs: {}':
+            redact = True
+            redact_type = 'ENVS'
+            line_prefix = 'envs: '
 
         if redact:
-            line = f'REDACTED {redact_type} CODE\n'
+            line = f'{line_prefix}REDACTED {redact_type} CODE\n'
         line = re.sub('#.*', '# REDACTED COMMENT', line)
+        print(line)
         cleaned_yaml_info.append(line)
     return cleaned_yaml_info
 
 
-def send_yaml(yaml_path, determined=False):
+def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: str):
     """Upload safe contents of YAML file to Loki."""
-    with open(yaml_path, 'r') as f:
-        yaml_info = f.readlines()
-        yaml_info = _clean_yaml(yaml_info)
-        yaml_info = ''.join(yaml_info)
-        type_label = 'user-yaml' if not determined else 'determined-yaml'
-        labels = {'type': type_label}
-        _send_message(labels, yaml_info)
+    if isinstance(yaml_config_or_path, dict):
+        yaml_info = base_utils.dump_yaml_str(yaml_config_or_path).split('\n')
+    else:
+        with open(yaml_config_or_path, 'r') as f:
+            yaml_info = f.readlines()
+    yaml_info = _clean_yaml(yaml_info)
+    yaml_info = ''.join(yaml_info)
+    type_label = yaml_type
+    labels = {'type': type_label}
+    _send_message(labels, yaml_info)
 
 
 def send_trace():

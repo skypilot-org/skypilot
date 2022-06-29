@@ -11,6 +11,7 @@ import yaml
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
+from sky.utils import base_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -133,5 +134,5 @@ class AutostopEvent(SkyletEvent):
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # Empty the file_mounts.
         config['file_mounts'] = dict()
-        backend_utils.dump_yaml(yaml_path, config)
+        base_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced worker num and upscaling speed to 0.')

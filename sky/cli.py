@@ -55,6 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
+from sky.utils import base_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -576,6 +577,7 @@ def _make_dag_from_entrypoint_with_overrides(
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
+            usage_logging.send_yaml(entrypoint, 'task-yaml')
             task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
@@ -634,6 +636,7 @@ def _make_dag_from_entrypoint_with_overrides(
         if name is not None:
             task.name = name
         task.set_envs(env)
+        usage_logging.send_yaml(task.to_yaml_config(), 'task-override-yaml')
     return dag
 
 
@@ -2195,7 +2198,7 @@ def spot_launch(
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
-        backend_utils.dump_yaml(f.name, task_config)
+        base_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(

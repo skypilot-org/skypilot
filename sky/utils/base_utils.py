@@ -6,6 +6,7 @@ import os
 import socket
 import sys
 import uuid
+import yaml
 
 _transaction_id = None
 
@@ -66,3 +67,29 @@ def user_and_hostname_hash() -> str:
 def get_user():
     hash_str = user_and_hostname_hash()
     return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+
+
+def read_yaml(path):
+    with open(path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def dump_yaml(path, config):
+    with open(path, 'w') as f:
+        f.write(dump_yaml_str(config))
+
+
+def dump_yaml_str(config):
+    # https://github.com/yaml/pyyaml/issues/127
+    class LineBreakDumper(yaml.SafeDumper):
+
+        def write_line_break(self, data=None):
+            super().write_line_break(data)
+            if len(self.indents) == 1:
+                super().write_line_break()
+
+    return yaml.dump(config,
+                     Dumper=LineBreakDumper,
+                     sort_keys=False,
+                     default_flow_style=False)

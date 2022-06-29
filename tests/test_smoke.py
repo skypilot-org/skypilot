@@ -786,7 +786,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = backend_utils.read_yaml(yaml_path)
+        origin_task_config = base_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()

@@ -617,12 +617,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
             }))
-    usage_logging.send_yaml(yaml_path, determined=True)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    usage_logging.send_yaml(yaml_path, 'ray-yaml')
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -667,30 +667,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     else:
         assert isinstance(cloud, clouds.Azure), cloud
         config = auth.setup_azure_authentication(config)
-    dump_yaml(cluster_config_file, config)
-
-
-def read_yaml(path):
-    with open(path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def dump_yaml(path, config):
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    with open(path, 'w') as f:
-        yaml.dump(config,
-                  f,
-                  Dumper=LineBreakDumper,
-                  sort_keys=False,
-                  default_flow_style=False)
+    base_utils.dump_yaml(cluster_config_file, config)
 
 
 def get_run_timestamp() -> str:
@@ -797,7 +774,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
-    config = read_yaml(cluster_yaml)
+    config = base_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
@@ -1229,7 +1206,7 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_config = read_yaml(handle.cluster_yaml)
+    ray_config = base_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
