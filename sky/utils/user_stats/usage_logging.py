@@ -84,7 +84,6 @@ def _clean_yaml(yaml_info):
         if redact:
             line = f'{line_prefix}REDACTED {redact_type} CODE\n'
         line = re.sub('#.*', '# REDACTED COMMENT', line)
-        print(line)
         cleaned_yaml_info.append(line)
     return cleaned_yaml_info
 
