@@ -84,7 +84,8 @@ class MetricLogger:
 
         if self.add_runtime:
             end_time = time.time()
-            self.add_metric('function_runtime', f'Runtime of {self.labels["name"]}',
+            self.add_metric('function_runtime',
+                            f'Runtime of {self.labels["name"]}',
                             end_time - self.start_time)
         if self.add_cluster_name:
             self.add_labels({'cluster_name': current_cluster_name})
@@ -99,7 +100,10 @@ class MetricLogger:
                 timeout=5)
             print(f'uploaded metric for {self.labels["name"]}')
         except (SystemExit, Exception) as e:  # pylint: disable=broad-except
-            logger.debug(f'Error pushing metrics to prometheus: \n{traceback.format_exc()}\n{e}')
+            logger.debug(
+                'Error pushing metrics to prometheus: \n'
+                f'{traceback.format_exc()}\n{e}'
+            )
 
     def __enter__(self):
         return self.open()
