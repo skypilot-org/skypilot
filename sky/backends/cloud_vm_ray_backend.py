@@ -1387,7 +1387,7 @@ class CloudVmRayBackend(backends.Backend):
         if isinstance(cloud, clouds.Local):
             # The field ssh_user is specified in the cluster config file.
             ssh_user = backend_utils.get_local_cluster_config(
-                cluster_name)['cluster']['name']
+                cluster_name)['auth']['ssh_user']
             logger.info(
                 f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
                 f'"{cluster_name}" [Username: {ssh_user}].'
