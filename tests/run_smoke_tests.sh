@@ -16,7 +16,7 @@ else
     test_spec=tests/test_smoke.py::"$test"
 fi
 
-export SKY_DEV=1
+export SKY_DISABLE_STATS_COLLECTION=1
 pytest -s -n 16 -q --tb=short --disable-warnings "$test_spec"
 
 # To run all tests including the slow ones, add the --runslow flag:
