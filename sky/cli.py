@@ -34,6 +34,7 @@ import os
 import shlex
 import sys
 import tempfile
+import textwrap
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -2708,7 +2709,12 @@ def benchmark_show(benchmark: str) -> None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
     benchmark_utils.update_benchmark_state(benchmark)
 
-    # TODO: Add explanations.
+    click.echo(
+        textwrap.dedent("""\
+        * #STEPS: Number of steps taken.
+        * SEC/STEP, $/STEP: Average time (cost) per step.
+        * EST(hr), EST($): Estimated total time (cost) to complete the benchmark.
+    """))
     columns = [
         'CLUSTER',
         'RESOURCES',
@@ -2790,9 +2796,28 @@ def benchmark_show(benchmark: str) -> None:
         ]
         rows.append(row)
 
-    # TODO(woosuk): Add comments on SkyCallback.
     cluster_table.add_rows(rows)
     click.echo(cluster_table)
+
+    if all(row[2] == benchmark_state.BenchmarkStatus.STOPPED.value
+           for row in rows):
+        return
+
+    if all(row[5] == '-' for row in rows):
+        # No #STEPS. SkyCallback has not been initialized or was unused.
+        click.secho(
+            'SkyCallback is not detected in this benchmark. '
+            'Consider using SkyCallback to get more detailed information '
+            'in real time.',
+            fg='yellow')
+    elif all(row[-1] == '-' for row in rows):
+        # No EST($). total_steps is not specified and cannot be inferred.
+        click.secho(
+            'Cannot estimate total time and cost because '
+            'the total number of steps cannot be inferred. '
+            'To get the estimation, specify the total number of steps in '
+            '`sky_callback.init` or `Sky*Callback`.',
+            fg='yellow')
 
 
 def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
