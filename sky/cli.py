@@ -70,7 +70,7 @@ if not os.path.exists(_PRIVACY_POLICY_PATH):
     with open(_PRIVACY_POLICY_PATH, 'x'):
         click.secho(
             'Sky collects usage data to improve our services. '
-            'User-input setup and run commands are omit from '
+            'User-input setup and run commands are omitted from '
             'usage to ensure privacy. '
             'Usage logging can also be disabled by setting '
             'environment variable SKY_DISABLE_USAGE_COLLECTION=1.',
