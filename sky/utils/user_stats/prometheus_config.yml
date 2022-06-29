@@ -8,10 +8,11 @@ remote_write:
   - url: https://prometheus-prod-10-prod-us-central-0.grafana.net/api/prom/push
     basic_auth:
       username: 359584
-      password: eyJrIjoiZjRhNmIyYjE4MGNkZjJiMGFiMjFjOGI3MzQyYWU1YTE3NGUyYzEwNyIsIm4iOiJkc2ZsYWpsa2Zhc2RqZCIsImlkIjo2MTUwNDZ9
+      password: eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ==
 
 scrape_configs:
   - job_name: "prometheus"
 
     static_configs:
-      - targets: ["http://[INSTANCE IP]:9091"]
+      - targets: ["[public ip]:9091"]
+

@@ -3,6 +3,8 @@ import logging
 import os
 import sys
 
+is_developing = os.getenv('SKY_DEVELOPING', False)
+
 # If the SKY_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
 MINIMIZE_LOGGING = os.environ.get('SKY_MINIMIZE_LOGGING',
@@ -35,5 +37,8 @@ def init_logger(name: str):
 
     logger = logging.getLogger(name)
     logger.addHandler(h)
-    logger.setLevel(logging.INFO)
+    if is_developing:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
     return logger

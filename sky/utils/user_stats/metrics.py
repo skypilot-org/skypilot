@@ -11,14 +11,12 @@ from sky.utils.user_stats import usage_logging
 
 logger = sky_logging.init_logger(__name__)
 
-PROM_PUSHGATEWAY_URL = '3.216.190.117:9091'
+PROM_PUSHGATEWAY_URL = '34.226.138.119:9091'
 current_cluster_name = 'NONE'
 
 
 class Label:
-    """
-    Label for prometheus metric
-    """
+    """Label for prometheus metric."""
 
     def __init__(self, name):
         self.name = name
@@ -29,9 +27,7 @@ class Label:
 
 
 class Metric:
-    """
-    Single prometheus prometheus_client.Gauge metric
-    """
+    """Single prometheus prometheus_client.Gauge metric."""
 
     def __init__(self, name, desc):
         self.name = name
@@ -51,9 +47,7 @@ class Metric:
 
 
 class MetricLogger:
-    """
-    Provides decorator to wrap functions that need to be logged
-    """
+    """Provides decorator to wrap functions that need to be logged."""
 
     def __init__(self,
                  func_name,
@@ -132,7 +126,8 @@ class MetricLogger:
                     prometheus_client.push_to_gateway(
                         PROM_PUSHGATEWAY_URL,
                         job=f'{base_utils.transaction_id}',
-                        registry=self.registry)
+                        registry=self.registry,
+                        timeout=5)
                 except (SystemExit, Exception) as e:  # pylint: disable=broad-except
                     logger.debug(f'Error pushing metrics to prometheus: {e}')
 
