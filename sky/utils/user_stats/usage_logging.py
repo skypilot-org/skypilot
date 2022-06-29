@@ -76,7 +76,7 @@ def _clean_yaml(yaml_info):
             redact = True
             redact_type = 'RUN'
             line_prefix = 'run: '
-        if line.startswith('envs: ') and line != 'envs: {}':
+        if line.startswith('envs: ') and line != 'envs: {}\n':
             redact = True
             redact_type = 'ENVS'
             line_prefix = 'envs: '
