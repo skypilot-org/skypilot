@@ -14,6 +14,7 @@ from sky.utils import command_runner
 from sky.utils import subprocess_utils
 
 
+# TODO(mluo): Refactor smoke test methods
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
