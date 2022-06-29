@@ -2066,7 +2066,7 @@ def spot():
 @spot.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + [_GPUS_OPTION])
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -2738,7 +2738,7 @@ def benchmark_show(benchmark: str) -> None:
         ]
 
         record = result['record']
-        if record is None:
+        if record is None or record.last_time is None:
             row += ['-'] * (len(columns) - len(row))
             rows.append(row)
             continue
@@ -2921,8 +2921,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                       show_default=True)
 
     for benchmark in to_delete:
-        benchmark_state.delete_benchmark(benchmark['name'])
         benchmark_utils.remove_benchmark_logs(benchmark['name'])
+        benchmark_state.delete_benchmark(benchmark['name'])
     click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
 
 
