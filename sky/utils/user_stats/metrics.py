@@ -15,6 +15,7 @@ logger = sky_logging.init_logger(__name__)
 PROM_PUSHGATEWAY_URL = '34.226.138.119:9091'
 current_cluster_name = 'NONE'
 
+
 class Label:
     """Label for prometheus metric."""
 
@@ -88,7 +89,7 @@ class MetricLogger:
 
         self.label_dict = {e.name: e for e in self.labels}
         self.metric_dict = {e.name: e for e in self.metrics}
-    
+
         self.registry = prometheus_client.CollectorRegistry()
 
         labels_list = [e.name for e in labels]
