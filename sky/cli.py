@@ -680,7 +680,6 @@ class _DocumentedCodeCommand(click.Command):
 
 @click.group(cls=_NaturalOrderGroup)
 def cli():
-    print('send')
     usage_logging.send_cli_cmd()
     pass
 
