@@ -69,13 +69,26 @@ _BENCHMARK_DB = _BenchmarkSQLiteConn()
 
 
 class BenchmarkStatus(enum.Enum):
+    """Benchmark job status."""
+    # Job status: INIT, PENDING, RUNNING.
     RUNNING = 'RUNNING'
+
+    # Job status: CANCELLED, FAILED.
+    # TODO(woosuk): Add KILLED state to distinguish whether the benchmarking
+    # job is killed by the user or by its own error.
+    STOPPED = 'STOPPED'
+
+    # Job status: SUCCEEDED.
+    # Jobs terminated with zero exit code.
     FINISHED = 'FINISHED'
+
+    def is_terminal(self):
+        return self in (BenchmarkStatus.STOPPED, BenchmarkStatus.FINISHED)
 
 
 class BenchmarkRecord(NamedTuple):
-    start_time: float
-    last_time: float
+    start_time: Optional[float] = None
+    last_time: Optional[float] = None
     num_steps: Optional[int] = None
     seconds_per_step: Optional[float] = None
     estimated_total_seconds: Optional[float] = None

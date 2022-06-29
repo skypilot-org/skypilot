@@ -2909,21 +2909,61 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             print('Both --all and benchmark(s) specified '
                   'for sky bench delete. Letting --all take effect.')
 
+    to_delete = [r['name'] for r in to_delete]
     if not to_delete:
         return
 
-    benchmark_list = ', '.join([r['name'] for r in to_delete])
+    benchmark_list = ', '.join(to_delete)
     plural = 's' if len(to_delete) > 1 else ''
     if not yes:
-        click.confirm(f'Deleting benchmark{plural}: {benchmark_list}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
+        click.confirm(
+            f'Deleting the benchmark{plural}: {benchmark_list}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
 
-    for benchmark in to_delete:
-        benchmark_utils.remove_benchmark_logs(benchmark['name'])
-        benchmark_state.delete_benchmark(benchmark['name'])
-    click.secho(f'Benchmark{plural} {benchmark_list} deleted.', fg='green')
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
+        total=len(to_delete))
+
+    def _delete_benchmark(benchmark: str) -> None:
+        message = ''
+        clusters = benchmark_state.get_benchmark_clusters(benchmark)
+        records = []
+        for cluster in clusters:
+            record = global_user_state.get_cluster_from_name(cluster)
+            records.append(record)
+
+        num_clusters = len(record for record in records if record is not None)
+        if num_clusters > 0:
+            plural = 's' if num_clusters > 1 else ''
+            message += (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
+                        f'has {num_clusters} un-terminated cluster{plural}. '
+                        f'To terminate the cluster{plural}, use `sky down`. '
+                        f'{colorama.Style.RESET_ALL}')
+
+        bucket_name = benchmark_state.get_benchmark_from_name(
+            benchmark)['bucket']
+        handle = global_user_state.get_handle_from_storage_name(bucket_name)
+        bucket_type = list(handle.sky_stores.keys())[0]
+        benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
+                                              bucket_type)
+        benchmark_state.delete_benchmark(benchmark)
+
+        message += (f'{colorama.Fore.GREEN}Benchmark {benchmark} deleted.'
+                    f'{colorama.Style.RESET_ALL}')
+        progress.stop()
+        click.secho(message)
+        progress.update(task, advance=1)
+        progress.start()
+
+    with progress:
+        backend_utils.run_in_parallel(_delete_benchmark, to_delete)
+        progress.live.transient = False
+        progress.refresh()
 
 
 def main():

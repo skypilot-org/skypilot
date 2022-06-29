@@ -28,6 +28,7 @@ from sky.benchmark import benchmark_state
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -65,8 +66,11 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
 
 def _generate_script_with_timelogs(script: str, start_path: str,
                                    end_path: str) -> str:
-    return (f'echo $(date +%s.%N) > {start_path}\n' + script +
-            f'\necho $(date +%s.%N) > {end_path}\n')
+    return (f'echo $(date +%s.%N) > {start_path}\n'  # prologue
+            f'{script}\n_EXIT_CODE=$?\n'
+            'if [ $_EXIT_CODE -eq 0 ]; then\n'  # epilogue
+            f'echo $(date +%s.%N) > {end_path}\nfi\n'
+            'exit $_EXIT_CODE\n')
 
 
 def _get_optimized_resources(
@@ -120,14 +124,7 @@ def _print_candidate_resources(
     logger.info(f'{candidate_table}\n')
 
 
-def _get_benchmark_bucket() -> Tuple[str, str]:
-    bucket_name, bucket_type = benchmark_state.get_benchmark_bucket()
-    if bucket_name is not None:
-        handle = global_user_state.get_handle_from_storage_name(bucket_name)
-        if handle is not None:
-            assert bucket_type is not None
-            return bucket_name, bucket_type
-
+def _create_benchmark_bucket() -> Tuple[str, str]:
     # Generate a bucket name.
     # TODO(woosuk): Use a more pleasant naming scheme.
     # TODO(woosuk): Ensure that the bucket name is globally unique.
@@ -225,6 +222,24 @@ def _download_remote_dir(remote_dir: str, local_dir: str,
         assert False
 
 
+def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
+    # FIXME(woosuk): Replace this function with bucket.delete_remote_dir.
+    if bucket_type == data.StoreType.S3:
+        remote_dir = f's3://{remote_dir}'
+        subprocess.run(['aws', 's3', 'rm', '--recursive', remote_dir],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    elif bucket_type == data.StoreType.GCS:
+        remote_dir = f'gs://{remote_dir}'
+        subprocess.run(['gsutil', '-m', 'rm', '-r', remote_dir],
+                       stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL,
+                       check=True)
+    else:
+        assert False
+
+
 def _read_timestamp(path: str) -> float:
     with open(path, 'r') as f:
         timestamp = f.readlines()
@@ -235,12 +250,25 @@ def _read_timestamp(path: str) -> float:
 def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
     benchmark = benchmark_result['benchmark']
     benchmark_status = benchmark_result['status']
-    if benchmark_status == benchmark_state.BenchmarkStatus.FINISHED:
+    cluster = benchmark_result['cluster']
+    if benchmark_status.is_terminal():
         # No need to update.
         return
 
+    # Get the start and end timestamps if exist.
+    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
+    run_start_path = os.path.join(local_dir, _RUN_START)
+    if not os.path.exists(run_start_path):
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Benchmarking task on {cluster} has not started.')
+    start_time = _read_timestamp(run_start_path)
+    run_end_path = os.path.join(local_dir, _RUN_END)
+    end_time = None
+    if os.path.exists(run_end_path):
+        end_time = _read_timestamp(run_end_path)
+
     # Get the status of the benchmarking cluster and job.
-    cluster = benchmark_result['cluster']
     record = global_user_state.get_cluster_from_name(cluster)
     cluster_status = None
     if record is not None:
@@ -255,32 +283,25 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
         job_status = backend.get_job_status(handle, job_id=1, stream_logs=False)
 
     # Update the benchmark status.
-    if (cluster_status in [None, global_user_state.ClusterStatus.STOPPED] or
+    if (cluster_status is None or
+            cluster_status == global_user_state.ClusterStatus.STOPPED or
         (job_status is not None and job_status.is_terminal())):
-        # FIXME(woosuk): Benchmark logs can be stale.
-        benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+        # The cluster has terminated or stopped, or
+        # the cluster is UP and the job has terminated.
+        if end_time is None:
+            benchmark_status = benchmark_state.BenchmarkStatus.STOPPED
+        else:
+            benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
 
-    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
-
-    run_start_path = os.path.join(local_dir, _RUN_START)
-    assert os.path.exists(run_start_path)
-    start_time = _read_timestamp(run_start_path)
-
-    run_end_path = os.path.join(local_dir, _RUN_END)
-    end_time = None
-    if os.path.exists(run_end_path):
-        end_time = _read_timestamp(run_end_path)
-
-    log_dirs = glob.glob(os.path.join(local_dir, 'sky-callback-*'))
-    if log_dirs:
+    callback_log_dirs = glob.glob(os.path.join(local_dir, 'sky-callback-*'))
+    if callback_log_dirs:
         # There can be multiple logs if the cluster has executed multiple jobs.
         # Here, we consider the first log as the log of the benchmarking job.
-        log_dir = sorted(log_dirs)[0]
+        log_dir = sorted(callback_log_dirs)[0]
         summary_path = os.path.join(log_dir, _BENCHMARK_SUMMARY)
     else:
         summary_path = None
 
-    record = None
     if summary_path is not None and os.path.exists(summary_path):
         # (1) SkyCallback has saved the summary.
         with open(summary_path, 'r') as f:
@@ -290,9 +311,10 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
         else:
             last_time = end_time
         if last_time is None:
-            raise ValueError(
-                'No duration information found. '
-                'Check if sky_callback.on_step_end has been called.')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'No duration information found. '
+                    'Check if sky_callback.on_step_end has been called.')
 
         record = benchmark_state.BenchmarkRecord(
             start_time=start_time,
@@ -301,25 +323,26 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
             seconds_per_step=summary['time_per_step'],
             estimated_total_seconds=summary['estimated_total_time'],
         )
-    elif os.path.exists(run_end_path):
-        # (2) The benchmarking job has run without SkyCallback.
-        benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
-        record = benchmark_state.BenchmarkRecord(
-            start_time=start_time,
-            last_time=end_time,
-        )
+    elif end_time is not None:
+        # (2) The benchmarking job has terminated normally
+        # without SkyCallback logs.
+        assert benchmark_status == benchmark_state.BenchmarkStatus.FINISHED
+        record = benchmark_state.BenchmarkRecord(start_time=start_time,
+                                                 last_time=end_time)
     elif job_status == job_lib.JobStatus.RUNNING:
         # (3) SkyCallback is not initialized yet or not used.
-        record = benchmark_state.BenchmarkRecord(
-            start_time=start_time,
-            last_time=time.time(),
-        )
-    elif benchmark_status == benchmark_state.BenchmarkStatus.FINISHED:
-        # (4) The benchmarking job has finished without the end timestamp.
-        logger.error(f'Benchmarking on {cluster} terminated abnormally.')
+        record = benchmark_state.BenchmarkRecord(start_time=start_time,
+                                                 last_time=time.time())
+    elif benchmark_status == benchmark_state.BenchmarkStatus.STOPPED:
+        # (4) The benchmarking job has terminated abnormally.
+        logger.error(f'Benchmarking on {cluster} has terminated abnormally.')
+        record = benchmark_state.BenchmarkRecord(start_time=start_time,
+                                                 last_time=None)
     else:
+        # (5) Otherwise (e.g., cluster_status is INIT).
         logger.error(f'No benchmark logs found for {cluster}.')
-
+        record = benchmark_state.BenchmarkRecord(start_time=None,
+                                                 last_time=None)
     benchmark_state.update_benchmark_result(benchmark, cluster,
                                             benchmark_status, record)
 
@@ -382,7 +405,20 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
                               candidate_configs: List[_Config],
                               commandline_args: List[Dict[str, Any]]) -> bool:
     # Use a Sky storage to save the benchmark logs.
-    bucket_name, bucket_type = _get_benchmark_bucket()
+    bucket_name, bucket_type = benchmark_state.get_benchmark_bucket()
+    if bucket_name is not None:
+        handle = global_user_state.get_handle_from_storage_name(bucket_name)
+        if handle is not None:
+            assert bucket_type is not None
+
+    # If the bucket does not exist, create one.
+    if bucket_name is None or handle is None:
+        bucket_name, bucket_type = _create_benchmark_bucket()
+
+    # Remove the previous benchmark logs if exist.
+    remove_benchmark_logs(benchmark, bucket_name, data.StoreType[bucket_type])
+
+    # The benchmark bucket is mounted to _SKY_REMOTE_BENCHMARK_DIR.
     for candidate_config in candidate_configs:
         bucket_config = candidate_config['file_mounts'][
             _SKY_REMOTE_BENCHMARK_DIR]
@@ -438,13 +474,15 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 
 def update_benchmark_state(benchmark: str) -> None:
     benchmark_results = benchmark_state.get_benchmark_results(benchmark)
-    if all(result['status'] == benchmark_state.BenchmarkStatus.FINISHED
-           for result in benchmark_results):
+    if all(result['status'] in [
+            benchmark_state.BenchmarkStatus.STOPPED,
+            benchmark_state.BenchmarkStatus.FINISHED,
+    ] for result in benchmark_results):
         return
 
     bucket_name = benchmark_state.get_benchmark_from_name(benchmark)['bucket']
-    storage = data.Storage(bucket_name, source=None, persistent=True)
-    bucket_type = list(storage.stores.keys())[0]
+    handle = global_user_state.get_handle_from_storage_name(bucket_name)
+    bucket_type = list(handle.sky_stores.keys())[0]
 
     # Download the benchmark logs from the benchmark bucket.
     # FIXME(woosuk): Do not download the logs if not necessary.
@@ -475,7 +513,11 @@ def update_benchmark_state(benchmark: str) -> None:
         progress.refresh()
 
 
-def remove_benchmark_logs(benchmark: str) -> None:
-    log_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
-    subprocess.run(['rm', '-rf', log_dir], check=False)
-    # TODO(woosuk): remove the logs in the bucket.
+def remove_benchmark_logs(benchmark: str, bucket_name: str,
+                          bucket_type: data.StoreType) -> None:
+    # Delete logs in the benchmark bucket.
+    remote_dir = os.path.join(bucket_name, benchmark)
+    _delete_remote_dir(remote_dir, bucket_type)
+    # Delete logs in the local storage.
+    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
+    subprocess.run(['rm', '-rf', local_dir], check=False)
