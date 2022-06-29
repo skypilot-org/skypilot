@@ -100,7 +100,7 @@ class MetricLogger:
             def wrapper_logging(*args, **kwargs):
                 self.add_labels({
                     'user': base_utils.get_user(),
-                    'transaction_id': base_utils.transaction_id
+                    'transaction_id': base_utils.transaction_id()
                 })
                 saved_ex = None
                 res = None
@@ -125,7 +125,7 @@ class MetricLogger:
                 try:
                     prometheus_client.push_to_gateway(
                         PROM_PUSHGATEWAY_URL,
-                        job=f'{base_utils.transaction_id}',
+                        job=f'{base_utils.transaction_id()}',
                         registry=self.registry,
                         timeout=5)
                 except (SystemExit, Exception) as e:  # pylint: disable=broad-except

@@ -13,7 +13,7 @@ from sky.utils import base_utils
 
 logger = sky_logging.init_logger(__name__)
 
-LOG_URL = 'https://178762:eyJrIjoiNzhlODNmOGQ1ZjUwOGJmYjE4NDI3YTMzNzFmMWMxZDc0YzA3ZmVlZiIsIm4iOiJhZHNmZHNhIiwiaWQiOjYxNTA0Nn0=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
+LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
 
 
 def _make_labels_str(d):
@@ -29,7 +29,7 @@ def _send_message(labels, msg):
     curr_datetime = curr_datetime.isoformat('T')
 
     labels['host'] = base_utils.get_user()
-    labels['transaction_id'] = base_utils.transaction_id
+    labels['transaction_id'] = base_utils.transaction_id()
     labels_str = _make_labels_str(labels)
 
     headers = {'Content-type': 'application/json'}
@@ -45,7 +45,7 @@ def _send_message(labels, msg):
     payload = json.dumps(payload)
     response = requests.post(LOG_URL, data=payload, headers=headers)
     if response.status_code != 204:
-        logger.warning('GRAFANA LOKI LOGGING FAILED')
+        logger.debug(f'Grafana Loki failed with response: {response.text}')
 
 
 def send_cli_cmd():

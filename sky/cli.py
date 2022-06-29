@@ -101,8 +101,6 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
 }
 
-usage_logging.send_cli_cmd()
-
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -682,6 +680,8 @@ class _DocumentedCodeCommand(click.Command):
 
 @click.group(cls=_NaturalOrderGroup)
 def cli():
+    print('send')
+    usage_logging.send_cli_cmd()
     pass
 
 

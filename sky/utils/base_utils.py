@@ -5,9 +5,16 @@ import hashlib
 import os
 import socket
 import sys
-import time
+import uuid
 
-transaction_id = time.time()
+_transaction_id = None
+
+
+def transaction_id():
+    global _transaction_id
+    if _transaction_id is None:
+        _transaction_id = str(uuid.uuid4())
+    return _transaction_id
 
 
 def get_pretty_entry_point() -> str:

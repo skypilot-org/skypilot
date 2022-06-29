@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 
-is_developing = os.getenv('SKY_DEVELOPING', False)
+is_developing = os.getenv('SKY_DEV', '0') == '1'
 
 # If the SKY_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
