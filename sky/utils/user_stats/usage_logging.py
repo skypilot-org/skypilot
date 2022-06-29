@@ -92,6 +92,7 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: str):
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
         yaml_info = base_utils.dump_yaml_str(yaml_config_or_path).split('\n')
+        yaml_info = [info + '\n' for info in yaml_info]
     else:
         with open(yaml_config_or_path, 'r') as f:
             yaml_info = f.readlines()
