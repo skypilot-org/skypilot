@@ -94,6 +94,7 @@ def step_begin() -> None:
             'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
+        # Only rank-0 process will execute below.
         _sky_callback.on_step_begin()
 
 
@@ -106,17 +107,20 @@ def step_end() -> None:
             'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
+        # Only rank-0 process will execute below.
         _sky_callback.on_step_end()
 
 
 @contextlib.contextmanager
 def step():
+    """Marks the beginning and end of a step."""
     step_begin()
     yield
     step_end()
 
 
 class timer:
+    """Wraps an iterable with timer."""
 
     def __init__(self, iterable: collections.Iterable) -> None:
         self._iterable = iterable
@@ -134,7 +138,7 @@ class timer:
             for obj in iterable:
                 yield obj
         else:
-            # Only rank-0 process should execute below.
+            # Only rank-0 process will execute below.
             for obj in iterable:
                 _sky_callback.on_step_begin()
                 yield obj
