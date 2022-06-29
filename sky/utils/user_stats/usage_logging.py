@@ -2,14 +2,15 @@
 
 import datetime
 import json
-import os
 import re
+import time
 import traceback
 
 import requests
 
 from sky import sky_logging
 from sky.utils import base_utils
+from sky.utils import env_options
 
 logger = sky_logging.init_logger(__name__)
 
@@ -23,13 +24,14 @@ def _make_labels_str(d):
 
 
 def _send_message(labels, msg):
-    if os.environ.get('SKY_DISABLE_USAGE_COLLECTION') == '1':
+    if env_options.DISABLE_LOGGING:
         return
     curr_datetime = datetime.datetime.now(datetime.timezone.utc)
     curr_datetime = curr_datetime.isoformat('T')
 
     labels['host'] = base_utils.get_user()
     labels['transaction_id'] = base_utils.transaction_id()
+    labels['time'] = time.time()
     labels_str = _make_labels_str(labels)
 
     headers = {'Content-type': 'application/json'}

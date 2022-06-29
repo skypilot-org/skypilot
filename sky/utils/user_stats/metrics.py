@@ -7,13 +7,13 @@ import prometheus_client
 
 from sky import sky_logging
 from sky.utils import base_utils
+from sky.utils import env_options
 from sky.utils.user_stats import usage_logging
 
 logger = sky_logging.init_logger(__name__)
 
 PROM_PUSHGATEWAY_URL = '34.226.138.119:9091'
 current_cluster_name = 'NONE'
-
 
 class Label:
     """Label for prometheus metric."""
@@ -70,6 +70,7 @@ class MetricLogger:
 
         self.labels.append(Label('user'))
         self.labels.append(Label('transaction_id'))
+        self.labels.append(Label('time'))
 
         if with_cluster_name:
             self.labels.append(Label('cluster_name'))
@@ -87,7 +88,7 @@ class MetricLogger:
 
         self.label_dict = {e.name: e for e in self.labels}
         self.metric_dict = {e.name: e for e in self.metrics}
-
+    
         self.registry = prometheus_client.CollectorRegistry()
 
         labels_list = [e.name for e in labels]
@@ -95,12 +96,15 @@ class MetricLogger:
             metric.make_prom(labels_list, self.registry)
 
         def decorator(func):
+            if env_options.DISABLE_LOGGING:
+                return func
 
             @functools.wraps(func)
             def wrapper_logging(*args, **kwargs):
                 self.add_labels({
                     'user': base_utils.get_user(),
-                    'transaction_id': base_utils.transaction_id()
+                    'transaction_id': base_utils.transaction_id(),
+                    'time': time.time()
                 })
                 saved_ex = None
                 res = None
