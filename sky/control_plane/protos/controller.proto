@@ -1,0 +1,40 @@
+syntax = "proto3";
+package controller;
+
+message LaunchRequest {
+  string yaml_text = 1;
+}
+
+message LaunchResult {
+  bool ok = 1;
+  int32 job_id = 2;
+}
+
+// Here are some default logging level integers.
+// https://docs.python.org/3/library/logging.html#levels
+// CRITICAL = 50
+// ERROR = 40
+// WARNING = 30
+// INFO = 20
+// DEBUG = 10
+// NOTSET = 0
+
+// Log messages
+message Log {
+  uint64 timestamp = 1;
+  int32 log_level = 2;
+  string text = 3;
+}
+
+message GetLogsRequest {
+  int32 job_id = 1;
+  // The starting timestamp.
+  uint64 start = 2;
+  // The lowest logging level.
+  int32 log_level = 3;
+}
+
+service Controller {
+  rpc Launch (LaunchRequest) returns (LaunchResult);
+  rpc GetLogs (GetLogsRequest) returns (stream Log);
+}

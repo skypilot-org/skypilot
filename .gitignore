@@ -8,3 +8,5 @@ docs/build/
 docs/_build/
 build/
 sky_logs/
+
+sky/control_plane/generated/controller_pb2*.py

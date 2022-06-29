@@ -9,3 +9,4 @@ include sky/templates/*
 include sky/setup_files/*
 include sky/utils/*
 include sky/skylet/LICENCE
+include sky/control_plane/scripts/*
