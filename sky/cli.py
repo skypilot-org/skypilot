@@ -2814,9 +2814,9 @@ def benchmark_show(benchmark: str) -> None:
         # No EST($). total_steps is not specified and cannot be inferred.
         click.secho(
             'Cannot estimate total time and cost because '
-            'the total number of steps cannot be inferred. '
+            'the total number of steps cannot be inferred by SkyCallback. '
             'To get the estimation, specify the total number of steps in '
-            '`sky_callback.init` or `Sky*Callback`.',
+            'either `sky_callback.init` or `Sky*Callback`.',
             fg='yellow')
 
 
