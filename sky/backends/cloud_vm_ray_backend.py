@@ -1334,7 +1334,6 @@ class CloudVmRayBackend(backends.Backend):
 
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
-    @metrics.MetricLogger.decorator
     @timeline.Event.decorator
     def provision(self,
                   task: task_lib.Task,
@@ -1574,7 +1573,6 @@ class CloudVmRayBackend(backends.Backend):
         with backend_utils.safe_console_status('[bold cyan]Syncing[/]'):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
-    @metrics.MetricLogger.decorator
     @timeline.Event.decorator
     def sync_file_mounts(
         self,
@@ -2203,7 +2201,6 @@ class CloudVmRayBackend(backends.Backend):
                 if not storage.persistent:
                     storage.delete()
 
-    @metrics.MetricLogger.decorator
     @timeline.Event.decorator
     def teardown(self,
                  handle: ResourceHandle,

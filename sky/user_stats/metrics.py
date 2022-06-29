@@ -16,7 +16,7 @@ logger = sky_logging.init_logger(__name__)
 PROM_PUSHGATEWAY_URL = '34.226.138.119:9091'
 current_cluster_name = 'NONE'
 
-_Metric = namedtuple('_Metric', ['name', 'desc', 'val'])
+_Metric = namedtuple('_Metric', ['name', 'desc', 'val', 'unit'])
 
 
 class MetricLogger:
@@ -32,11 +32,11 @@ class MetricLogger:
         pass
     OR
     with MetricLogger('my_metric') as metric_logger:
-        metric_logger.add_metric('my_metric', 'my_metric_desc', 1)
+        metric_logger.add_metric('my_metric', 'my_metric_desc', 1, 'unit')
     OR
     metric_logger = MetricLogger('my_metric')
     metric_logger.open()
-    metric_logger.add_metric('my_metric', 'my_metric_desc', 1)
+    metric_logger.add_metric('my_metric', 'my_metric_desc', 1, 'unit')
     ...
     metric_logger.close()
     """
@@ -46,9 +46,9 @@ class MetricLogger:
                  extra_labels: Optional[Dict[str, str]] = None,
                  add_runtime: bool = False,
                  add_cluster_name: bool = False):
+        self.name = name
         self.labels = utils.get_base_labels()
-        self.labels['name'] = name
-        self.metrics = []
+        self.metrics = dict()
 
         if extra_labels is not None:
             self.labels.update(extra_labels)
@@ -59,23 +59,26 @@ class MetricLogger:
         self.add_runtime = add_runtime
         self.add_cluster_name = add_cluster_name
 
-    def add_metric(self, name: str, desc: str, val: float):
-        self.metrics.append(_Metric(name, desc, val))
+    def add_metric(self, name: str, desc: str, val: float, unit: str):
+        name = name.replace('.', '_')
+        self.metrics[name] = _Metric(name, desc, val, unit)
 
     def add_labels(self, labels: Dict[str, str]):
         self.labels.update(labels)
 
     def _create_metrics(self):
-        for metric in self.metrics:
+        for metric in self.metrics.values():
             prom_metric = prometheus_client.Gauge(metric.name,
                                                   metric.desc,
                                                   self.labels,
+                                                  unit=metric.unit,
                                                   registry=self.registry)
             prom_metric.labels(**self.labels).set(metric.val)
 
     def open(self):
         self.start_time = time.time()
-        print(f'start metric for {self.labels["name"]}')
+        logger.debug(f'Start metric for {self.name} with transaction id: '
+                     f'{base_utils.transaction_id()}')
         return self
 
     def close(self):
@@ -84,26 +87,24 @@ class MetricLogger:
 
         if self.add_runtime:
             end_time = time.time()
-            self.add_metric('function_runtime',
-                            f'Runtime of {self.labels["name"]}',
-                            end_time - self.start_time)
+            self.add_metric(f'{self.name}_runtime',
+                            f'Runtime of {self.name}',
+                            end_time - self.start_time,
+                            unit='seconds')
         if self.add_cluster_name:
             self.add_labels({'cluster_name': current_cluster_name})
 
         try:
-            self._create_metrics()
-            print(f'uploading metric for {self.labels["name"]}')
-            prometheus_client.push_to_gateway(
-                PROM_PUSHGATEWAY_URL,
-                job=f'{base_utils.transaction_id()}',
-                registry=self.registry,
-                timeout=5)
-            print(f'uploaded metric for {self.labels["name"]}')
-        except (SystemExit, Exception) as e:  # pylint: disable=broad-except
             logger.debug(
-                'Error pushing metrics to prometheus: \n'
-                f'{traceback.format_exc()}\n{e}'
-            )
+                f'Sending metrics for {self.name} with metrics: {self.metrics}')
+            self._create_metrics()
+            prometheus_client.push_to_gateway(PROM_PUSHGATEWAY_URL,
+                                              job=f'{self.name}',
+                                              registry=self.registry,
+                                              timeout=5)
+        except (SystemExit, Exception) as e:  # pylint: disable=broad-except
+            logger.debug('Error pushing metrics to prometheus: \n'
+                         f'{traceback.format_exc()}\n{e}')
 
     def __enter__(self):
         return self.open()
