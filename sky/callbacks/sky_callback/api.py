@@ -86,6 +86,7 @@ def init(global_rank: int = 0,
 
 
 def step_begin() -> None:
+    """Marks the beginning of a step."""
     if _DISABLE_CALLBACK:
         return
     if not _initialized:
@@ -93,11 +94,11 @@ def step_begin() -> None:
             'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
-        # Only rank-0 process should call this function.
         _sky_callback.on_step_begin()
 
 
 def step_end() -> None:
+    """Marks the end of a step."""
     if _DISABLE_CALLBACK:
         return
     if not _initialized:
@@ -105,7 +106,6 @@ def step_end() -> None:
             'sky_callback is not initialized. '
             'Please call `sky_callback.init` before using sky_callback.')
     if _sky_callback is not None:
-        # Only rank-0 process should call this function.
         _sky_callback.on_step_end()
 
 
