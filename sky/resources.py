@@ -14,14 +14,6 @@ logger = sky_logging.init_logger(__name__)
 _DEFAULT_DISK_SIZE_GB = 256
 
 
-def _get_cloud(cloud: str) -> clouds.Cloud:
-    cloud_obj = clouds.CLOUD_REGISTRY.from_str(cloud)
-    if cloud is not None and cloud_obj is None:
-        # Overwritten later in launch() in cli.py
-        return clouds.Local()
-    return cloud_obj
-
-
 class Resources:
     """A cloud resource bundle.
 
@@ -109,11 +101,13 @@ class Resources:
             accelerators = f', {self.accelerators}'
             if self.accelerator_args is not None:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
+
+        if isinstance(self.cloud, clouds.Local):
+            return f'{self.cloud}({accelerators}{accelerator_args})'
+
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
-        if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({accelerators}{accelerator_args})'
 
         image_id = ''
         if self.image_id is not None:
@@ -184,7 +178,7 @@ class Resources:
             accelerators: A string or a dict of accelerator types to counts.
             accelerator_args: A dict of accelerator types to args.
         """
-        if accelerators:
+        if accelerators is not None and accelerators:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
@@ -554,7 +548,8 @@ class Resources:
 
         resources_fields = dict()
         if config.get('cloud') is not None:
-            resources_fields['cloud'] = _get_cloud(config.pop('cloud'))
+            resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
+                config.pop('cloud'))
         if config.get('instance_type') is not None:
             resources_fields['instance_type'] = config.pop('instance_type')
         if config.get('accelerators') is not None:

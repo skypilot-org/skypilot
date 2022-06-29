@@ -90,11 +90,10 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
     glob_clusters = []
-    local_clusters = backend_utils.list_local_clusters()
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            if cluster in local_clusters:
+            if cluster in backend_utils.list_local_clusters():
                 click.echo(f'Local Cluster {cluster} is not initialized.\n'
                            f'Run a task with `sky launch -c {cluster} ...` to '
                            f'initialize the cluster.')
@@ -450,6 +449,9 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
+    if cluster_name in backend_utils.list_local_clusters():
+        raise click.BadParameter(
+            f'Local cluster {cluster_name!r} conflicts with {node_type}.')
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -565,6 +567,7 @@ def _check_yaml(entrypoint: str, with_outputs=False):
     return is_yaml
 
 
+# TODO(mluo): Refactor out of cli.py.
 def _check_cluster_config(yaml_config: dict):
     """Checks if the cluster config has filled-in user credentials."""
     auth = yaml_config['auth']
@@ -579,12 +582,13 @@ def _check_cluster_config(yaml_config: dict):
             f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
+# TODO(mluo): Refactor out of cli.py.
 def _check_local_cloud_args(cloud: Optional[str] = None,
                             cluster_name: Optional[str] = None,
                             yaml_config: Optional[dict] = None) -> bool:
     """Checks if user-provided arguments satisfies local cloud specs."""
     yaml_cloud = None
-    if yaml_config and yaml_config.get('resources'):
+    if yaml_config is not None and yaml_config.get('resources'):
         yaml_cloud = yaml_config['resources'].get('cloud')
 
     if cluster_name in backend_utils.list_local_clusters():
@@ -868,15 +872,16 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{backend_name} backend is not supported.')
 
-    _launch_with_confirm(dag,
-                         backend,
-                         cluster,
-                         dryrun=dryrun,
-                         detach_run=detach_run,
-                         no_confirm=yes,
-                         idle_minutes_to_autostop=idle_minutes_to_autostop,
-                         retry_until_up=retry_until_up,
-                         is_local_cloud=(cloud == 'local'))
+    _launch_with_confirm(
+        dag,
+        backend,
+        cluster,
+        dryrun=dryrun,
+        detach_run=detach_run,
+        no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        retry_until_up=retry_until_up,
+        is_local_cloud=(cluster in backend_utils.list_local_clusters()))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1559,9 +1564,11 @@ def _terminate_or_stop_clusters(
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
         if not terminate:
+            # Local clusters are allowed to `sky down`, but not
+            # `sky start/stop`. `sky down` unregisters the local cluster
+            # from sky.
             names = [c for c in names if _error_if_local_cluster(c, \
-                local_clusters, f'Local cluster {c} does not support '
-                '`sky stop`.')]
+                local_clusters, f'Sky stop does not support local cluster {c}')]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
@@ -1748,9 +1755,6 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in backend_utils.list_local_clusters():
-        raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with gpunode.')
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
@@ -1819,9 +1823,6 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in backend_utils.list_local_clusters():
-        raise click.BadParameter(
-            f'Local cluster {cluster!r} conflicts with cpunode.')
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
@@ -1887,9 +1888,6 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if screen or tmux:
         session_manager = 'tmux' if tmux else 'screen'
     name = cluster
-    if name in backend_utils.list_local_clusters():
-        raise click.BadParameter(
-            f'Local cluster name {cluster!r} conflicts with tpunode.')
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
@@ -2182,7 +2180,7 @@ def admin_deploy(clusterspec_yaml: str):
 
     # Launching Ray Autoscaler service
     click.secho(f'[{steps}/4] Launching sky service\n', fg='green', nl=False)
-    backend_utils.launch_local_cluster(yaml_config, custom_resources)
+    backend_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
     steps += 1
 
     # Generate sanitized yaml file to be sent to non-admin users

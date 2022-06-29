@@ -22,7 +22,7 @@ from sky.skylet.utils import log_utils
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
-_SKY_LOG_TAILING_GAP_SECONDS = 0.02
+_SKY_LOG_TAILING_GAP_SECONDS = 0.2
 
 logger = sky_logging.init_logger(__name__)
 
@@ -135,7 +135,7 @@ def run_with_log(
             f'sudo mkdir -p {dirname};sudo touch {log_path}; '
             f'sudo chmod a+rwx {log_path}',
             shell=True)
-        # Hack: Subprocess shell does not accept sudo.
+        # Hack: Subprocess Popen does not accept sudo.
         shell = False
     else:
         os.makedirs(dirname, exist_ok=True)

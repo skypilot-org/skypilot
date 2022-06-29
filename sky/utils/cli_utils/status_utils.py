@@ -3,7 +3,6 @@ from typing import Callable
 
 import click
 import colorama
-import yaml
 
 from sky import backends
 from sky.backends import backend_utils
@@ -106,26 +105,26 @@ def show_local_status_table():
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
         config_path = handle.cluster_yaml
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            username = config['auth']['ssh_user']
+        config = backend_utils.read_yaml(config_path)
+        username = config['auth']['ssh_user']
 
-        if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-            if (handle.launched_nodes is not None and
-                    handle.launched_resources is not None):
-                if handle.local_handle:
-                    local_cluster_resources = [
-                        r.accelerators
-                        for r in handle.local_handle['cluster_resources']
-                    ]
-                else:
-                    local_cluster_resources = []
-                for idx, resource in enumerate(local_cluster_resources):
-                    if not bool(resource):
-                        local_cluster_resources[idx] = None
-                resources_str = (f'{local_cluster_resources}')
-        else:
+        if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
             raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+
+        if (handle.launched_nodes is not None and
+                handle.launched_resources is not None):
+            if handle.local_handle is not None:
+                local_cluster_resources = [
+                    r.accelerators
+                    for r in handle.local_handle['cluster_resources']
+                ]
+            else:
+                local_cluster_resources = []
+            for idx, resource in enumerate(local_cluster_resources):
+                if not bool(resource):
+                    local_cluster_resources[idx] = None
+            resources_str = (f'{local_cluster_resources}')
+
         cluster_name = handle.cluster_name
         row = [
             # NAME

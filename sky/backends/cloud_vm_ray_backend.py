@@ -1116,7 +1116,7 @@ class RetryingVmProvisioner(object):
             # should already be running if the system admin has setup Ray.
             if isinstance(launched_resources.cloud, clouds.Local):
                 raise ValueError('Ray status errored out on On-premise machine.'
-                                 'Check if Ray==1.10.0 is installed correctly.')
+                                 'Check if ray==1.10.0 is installed correctly.')
             backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
             log_lib.run_with_log(
                 ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
@@ -1263,9 +1263,10 @@ class CloudVmRayBackend(backends.Backend):
             return self.cluster_name
 
         def _generate_local_handle(self):
-            self.local_handle = {}
+            self.local_handle = None
             config = backend_utils.get_local_cluster_config(self.cluster_name)
             if config is not None:
+                self.local_handle = {}
                 self.launched_resources = resources_lib.Resources(
                     cloud=clouds.Local(), region='Local')
                 cluster_config = config['cluster']
@@ -1345,7 +1346,7 @@ class CloudVmRayBackend(backends.Backend):
         # in the Resources object of first task that was ran on the cluster.
         # In the local cloud case, resources.accelerators means the task
         # resources.
-        if handle.local_handle:
+        if handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
@@ -1377,18 +1378,14 @@ class CloudVmRayBackend(backends.Backend):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            # Special handling for local cloud case: number of nodes provisioned
-            # is not what the task specifies, but refers to the size of the
-            # local cluster.
             num_nodes = handle.launched_nodes
-            if isinstance(handle.launched_resources.cloud, clouds.Local):
-                num_nodes = len(backend_utils.get_local_ips(cluster_name))
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, num_nodes, True)
         cloud = to_provision.cloud
         # Alternative logging for local clusters, as opposed to public cloud
         # clusters.
         if isinstance(cloud, clouds.Local):
+            # The field ssh_user is specified in the cluster config file.
             ssh_user = backend_utils.get_local_cluster_config(
                 cluster_name)['cluster']['name']
             logger.info(
@@ -1552,7 +1549,7 @@ class CloudVmRayBackend(backends.Backend):
                 # update_status will query the ray job status for all INIT /
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
-                job_owner = backend_utils.get_job_owner(handle)
+                job_owner = backend_utils.get_job_owner(handle.cluster_yaml)
                 cmd = job_lib.JobLibCodeGen.update_status(job_owner)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
@@ -1937,7 +1934,7 @@ class CloudVmRayBackend(backends.Backend):
         return job_lib.JobStatus(result.split(' ')[-1])
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
-        job_owner = backend_utils.get_job_owner(handle)
+        job_owner = backend_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
         # All error messages should have been redirected to stdout.
@@ -2127,7 +2124,7 @@ class CloudVmRayBackend(backends.Backend):
                   handle: ResourceHandle,
                   job_id: Optional[int],
                   spot_job_id: Optional[int] = None) -> int:
-        job_owner = backend_utils.get_job_owner(handle)
+        job_owner = backend_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id)
