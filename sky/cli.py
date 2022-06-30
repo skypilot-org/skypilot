@@ -2966,7 +2966,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             record = global_user_state.get_cluster_from_name(cluster)
             records.append(record)
 
-        num_clusters = len(record for record in records if record is not None)
+        num_clusters = len([record for record in records if record is not None])
         if num_clusters > 0:
             plural = 's' if num_clusters > 1 else ''
             message += (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
