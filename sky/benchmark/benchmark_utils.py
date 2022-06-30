@@ -122,8 +122,9 @@ def _print_candidate_resources(
             accelerator, count = list(resources.accelerators.items())[0]
             accelerators = f'{accelerator}:{count}'
         cost = num_nodes * resources.get_cost(3600)
+        spot = '[Spot]' if resources.use_spot else ''
         row = [
-            cluster, resources.cloud, num_nodes, resources.instance_type,
+            cluster, resources.cloud, num_nodes, resources.instance_type + spot,
             accelerators, f'{cost:.2f}'
         ]
         candidate_table.add_row(row)

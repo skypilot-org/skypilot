@@ -2685,7 +2685,8 @@ def benchmark_ls() -> None:
         for b in benchmark_results:
             num_nodes = b['num_nodes']
             resources = b['resources']
-            instance_type = resources.instance_type
+            spot = '[Spot]' if resources.use_spot else ''
+            instance_type = resources.instance_type + spot
             if resources.accelerators is None:
                 accelerators = ''
             else:
