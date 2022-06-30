@@ -2635,10 +2635,10 @@ def benchmark_launch(
             '\nTo teardown the clusters: '
             f'{backend_utils.BOLD}sky bench down '
             f'{benchmark}{backend_utils.RESET_BOLD}')
-        backend_utils.run('sky bench ls')
+        subprocess_utils.run('sky bench ls')
     else:
         logger.error('No benchmarking clusters are created.')
-        backend_utils.run('sky status')
+        subprocess_utils.run('sky status')
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)
