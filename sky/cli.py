@@ -2505,9 +2505,6 @@ def benchmark_launch(
 ) -> None:
     """Benchmark a task on different resources.
 
-    NOTE: Modify your program (as in doc) before using this API. Your program
-    is expected to periodically call sky_callback APIs to log its progress.
-
     Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
     will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
     Alternatively, specify the benchmarking resources in your YAML (see doc),
@@ -2749,7 +2746,8 @@ def benchmark_show(benchmark: str) -> None:
         ]
 
         record = result['record']
-        if record is None or record.last_time is None:
+        if (record is None or record.start_time is None or
+                record.last_time is None):
             row += ['-'] * (len(columns) - len(row))
             rows.append(row)
             continue
@@ -2804,18 +2802,18 @@ def benchmark_show(benchmark: str) -> None:
     cluster_table.add_rows(rows)
     click.echo(cluster_table)
 
-    if all(row[2] == benchmark_state.BenchmarkStatus.STOPPED.value
-           for row in rows):
-        return
-
-    if all(row[5] == '-' for row in rows):
-        # No #STEPS. SkyCallback has not been initialized or was unused.
+    finished = [
+        row for row in rows
+        if row[2] == benchmark_state.BenchmarkStatus.FINISHED.value
+    ]
+    if any(row[5] == '-' for row in finished):
+        # No #STEPS. SkyCallback was unused.
         click.secho(
             'SkyCallback logs are not found in this benchmark. '
             'Consider using SkyCallback to get more detailed information '
             'in real time.',
             fg='yellow')
-    elif all(row[-1] == '-' for row in rows):
+    elif any(row[5] != '-' and row[-1] == '-' for row in rows):
         # No EST($). total_steps is not specified and cannot be inferred.
         click.secho(
             'Cannot estimate total time and cost because '

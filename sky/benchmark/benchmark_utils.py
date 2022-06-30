@@ -331,7 +331,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
                                                  last_time=end_time)
     elif job_status == job_lib.JobStatus.RUNNING:
         # (3) SkyCallback is not initialized yet or not used.
-        message = f'Benchmarking task on {cluster} has not started.'
+        message = ('SkyCallback is not initialized yet '
+                   f'or not used for {cluster}.')
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=time.time())
     elif benchmark_status == benchmark_state.BenchmarkStatus.STOPPED:
@@ -458,7 +459,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
     logger.info(
         f'{colorama.Fore.YELLOW}To view stdout/stderr from individual '
         f'cluster launches, check the logs in{colorama.Style.RESET_ALL} '
-        f'{colorama.Style.BRIGHT}{log_dir}{colorama.Style.RESET_ALL}.')
+        f'{colorama.Style.BRIGHT}{log_dir}/{colorama.Style.RESET_ALL}')
 
     # Launch the benchmarking clusters in parallel.
     outputs = _parallel_run_with_interrupt_handling(
