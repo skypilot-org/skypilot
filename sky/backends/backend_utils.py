@@ -864,6 +864,12 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
             'sky --help',
             failure_message=f'Sky is not installed on {runner.ip}.')
 
+        # Patches Ray.
+        run_command_and_handle_ssh_failure(
+            runner,
+            'sudo python3 -c "from sky.skylet.ray_patches import patch; patch()"',
+            failure_message=f'Failed to patch ray on {runner.ip}.')
+
     subprocess_utils.run_in_parallel(_check_dependencies, runners)
 
 
