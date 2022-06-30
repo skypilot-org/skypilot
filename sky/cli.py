@@ -577,7 +577,8 @@ def _make_dag_from_entrypoint_with_overrides(
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            usage_logging.send_yaml(entrypoint, 'task-yaml')
+            usage_logging.send_yaml(entrypoint,
+                                    usage_logging.MessageType.TASK_YAML)
             task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
@@ -636,7 +637,8 @@ def _make_dag_from_entrypoint_with_overrides(
         if name is not None:
             task.name = name
         task.set_envs(env)
-        usage_logging.send_yaml(task.to_yaml_config(), 'task-override-yaml')
+        usage_logging.send_yaml(task.to_yaml_config(),
+                                usage_logging.MessageType.TASK_OVERRIDE_YAML)
         # TODO(wei-lin): move this validation into Python API.
         if new_resources.accelerators is not None:
             acc, _ = list(new_resources.accelerators.items())[0]

@@ -1,9 +1,9 @@
 """Logging events to Grafana Loki"""
 
 import datetime
+import enum
 import functools
 import json
-import re
 import traceback
 from typing import Dict, Union
 
@@ -20,30 +20,47 @@ _LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5Z
 log_timestamp = None
 
 
+class MessageType(enum.Enum):
+    CLI_CMD = 'cli-cmd'
+    STACK_TRACE = 'stack-trace'
+    TASK_YAML = 'task-yaml'
+    TASK_OVERRIDE_YAML = 'task-override-yaml'
+    RAY_YAML = 'ray-yaml'
+
+
 def _make_labels_str(d):
     dict_str = ','.join(f'{k}="{v}"' for k, v in d.items())
     dict_str = '{' + dict_str + '}'
     return dict_str
 
 
-def _send_message(labels: Dict[str, str], msg):
+def _send_message(msg_type: MessageType,
+                  msg,
+                  custom_labels: Dict[str, str] = None):
     if env_options.DISABLE_LOGGING:
         return
     global log_timestamp
     if log_timestamp is None:
-        log_timestamp = datetime.datetime.now(datetime.timezone.utc)
-        log_timestamp = log_timestamp.isoformat('T')
+        log_timestamp = datetime.datetime.now(
+            datetime.timezone.utc).isoformat('T')
 
-    labels.update(utils.get_base_labels())
-    labels_str = _make_labels_str(labels)
+    if custom_labels is None:
+        custom_labels = dict()
+    custom_labels.update(utils.get_base_labels())
+
+    prom_labels = {'type': msg_type.value}
+    msg = {
+        'labels': custom_labels,
+        'message': msg,
+    }
 
     headers = {'Content-type': 'application/json'}
     payload = {
         'streams': [{
-            'labels': labels_str,
+            'labels': _make_labels_str(prom_labels),
             'entries': [{
                 'ts': log_timestamp,
-                'line': msg
+                'line': json.dumps(msg),
             }]
         }]
     }
@@ -56,53 +73,40 @@ def _send_message(labels: Dict[str, str], msg):
 def send_cli_cmd():
     """Upload current CLI command to Loki."""
     cmd = base_utils.get_pretty_entry_point()
-    labels = {'type': 'cli-cmd'}
-    _send_message(labels, cmd)
+    _send_message(MessageType.CLI_CMD, cmd)
 
 
-def _clean_yaml(yaml_info):
+def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
     """Remove sensitive information from user YAML."""
-    cleaned_yaml_info = []
+    cleaned_yaml_info = yaml_info.copy()
+    for redact_type in ['setup', 'run', 'envs']:
+        if redact_type in cleaned_yaml_info:
+            contents = cleaned_yaml_info[redact_type]
+            lines = base_utils.dump_yaml_str({
+                redact_type: contents
+            }).split('\n')
+            cleaned_yaml_info[redact_type] = (
+                f'{len(lines)} lines {redact_type.upper()}'
+                ' redacted')
 
-    redact = False
-    redact_type = 'None'
-    for line in yaml_info:
-        if len(line) > 1 and line[0].strip() == line[0]:
-            redact = False
-        line_prefix = ''
-        if line.startswith('setup:'):
-            redact = True
-            redact_type = 'SETUP'
-            line_prefix = 'setup: '
-        if line.startswith('run:'):
-            redact = True
-            redact_type = 'RUN'
-            line_prefix = 'run: '
-        if line.startswith('envs: ') and line != 'envs: {}\n':
-            redact = True
-            redact_type = 'ENVS'
-            line_prefix = 'envs: '
+    cleaned_yaml_info['__redacted_comment_lines'] = num_comment_lines
 
-        if redact:
-            line = f'{line_prefix}REDACTED {redact_type} CODE\n'
-        line = re.sub('#.*', '# REDACTED COMMENT', line)
-        cleaned_yaml_info.append(line)
     return cleaned_yaml_info
 
 
-def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: str):
+def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
-        yaml_info = base_utils.dump_yaml_str(yaml_config_or_path).split('\n')
-        yaml_info = [info + '\n' for info in yaml_info]
+        yaml_info = yaml_config_or_path
+        comment_lines = []
     else:
         with open(yaml_config_or_path, 'r') as f:
-            yaml_info = f.readlines()
-    yaml_info = _clean_yaml(yaml_info)
-    yaml_info = ''.join(yaml_info)
-    type_label = yaml_type
-    labels = {'type': type_label}
-    _send_message(labels, yaml_info)
+            lines = f.readlines()
+            comment_lines = [line for line in lines if line.startswith('#')]
+        yaml_info = base_utils.read_yaml(yaml_config_or_path)
+    yaml_info = _clean_yaml(yaml_info, len(comment_lines))
+    message = json.dumps(yaml_info)
+    _send_message(yaml_type, message)
 
 
 def send_exception(name: str):
@@ -118,7 +122,7 @@ def send_exception(name: str):
                 return func(*args, **kwargs)
             except (Exception, SystemExit):
                 trace = traceback.format_exc()
-                _send_message({'name': name, 'type': 'stack-trace'}, trace)
+                _send_message(MessageType.STACK_TRACE, trace, {'name': name})
                 raise
 
         return wrapper
