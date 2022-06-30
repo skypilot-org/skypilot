@@ -473,8 +473,9 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
         else:
             returncode, stderr = output
             if returncode != 0:
-                logger.error(
-                    _format_err_msg(f'Launching {cluster} failed with code {returncode}.'))
+                message = _format_err_msg(
+                    f'Launching {cluster} failed with code {returncode}.')
+                logger.error(message)
                 logger.error(stderr)
 
     # Delete the temporary yaml files.
