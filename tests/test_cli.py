@@ -1,13 +1,11 @@
-import pytest
 import tempfile
 import textwrap
 
-import click
 from click import testing as cli_testing
 
 import sky
-import sky.cli as cli
 from sky import clouds
+import sky.cli as cli
 
 
 def test_infer_gpunode_type():
@@ -45,6 +43,13 @@ def test_infer_tpunode_type():
 
 def test_accelerator_mismatch(monkeypatch):
     """Test the specified accelerator does not match the instance_type."""
+    # Monkey-patching is required because in the test environment, no cloud is
+    # enabled. The optimizer checks the environment to find enabled clouds, and
+    # only generates plans within these clouds. The tests assume that all three
+    # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
+    # to return all three clouds. We also monkeypatch `sky.check.check` so that
+    # when the optimizer tries calling it to update enabled_clouds, it does not
+    # raise exceptions.
     enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
         'sky.global_user_state.get_enabled_clouds',
