@@ -16,8 +16,9 @@ from sky.user_stats import utils
 
 logger = sky_logging.init_logger(__name__)
 
-LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
+_LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
 log_timestamp = None
+
 
 def _make_labels_str(d):
     dict_str = ','.join(f'{k}="{v}"' for k, v in d.items())
@@ -47,7 +48,7 @@ def _send_message(labels: Dict[str, str], msg):
         }]
     }
     payload = json.dumps(payload)
-    response = requests.post(LOG_URL, data=payload, headers=headers)
+    response = requests.post(_LOG_URL, data=payload, headers=headers)
     if response.status_code != 204:
         logger.debug(f'Grafana Loki failed with response: {response.text}')
 
