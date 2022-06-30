@@ -297,11 +297,10 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for name, launched_at, handle, last_use, status, autostop, metadata in rows:
         # TODO: use namedtuple instead of dict
-        handle = pickle.loads(handle)
         record = {
             'name': name,
             'launched_at': launched_at,
-            'handle': handle,
+            'handle': pickle.loads(handle),
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
