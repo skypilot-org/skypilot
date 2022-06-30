@@ -86,9 +86,9 @@ class Resources:
 
         self._image_id = image_id
 
-        self._try_validate_local()
         self._set_accelerators(accelerators, accelerator_args)
 
+        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_accelerators()
         self._try_validate_spot()
@@ -170,7 +170,7 @@ class Resources:
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, int]],
-        accelerator_args: Optional[Dict[str, str]] = None,
+        accelerator_args: Optional[Dict[str, str]],
     ) -> None:
         """Sets accelerators.
 
@@ -178,7 +178,7 @@ class Resources:
             accelerators: A string or a dict of accelerator types to counts.
             accelerator_args: A dict of accelerator types to args.
         """
-        if accelerators is not None and accelerators:
+        if accelerators is not None:
             if isinstance(accelerators, str):  # Convert to Dict[str, int].
                 if ':' not in accelerators:
                     accelerators = {accelerators: 1}
@@ -349,12 +349,10 @@ class Resources:
 
     def _try_validate_local(self) -> None:
         if isinstance(self._cloud, clouds.Local):
-            if self._instance_type is not None:
-                raise ValueError('Local/On-prem mode does not support instance '
-                                 f'type {self._instance_type}')
             if self._use_spot:
-                raise ValueError('Local/On-prem mode does not support spot '
-                                 'instances.')
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Local/On-prem mode does not support spot '
+                                     'instances.')
 
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
@@ -436,7 +434,7 @@ class Resources:
 
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
-                            requested_num_nodes: Optional[int] = 1) -> bool:
+                            requested_num_nodes: int = 1) -> bool:
         """Returns whether this resources is less demanding than the other.
 
         Args:

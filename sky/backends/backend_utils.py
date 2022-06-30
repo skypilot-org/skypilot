@@ -794,7 +794,9 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
                 runner.rsync_up(source=src, target=dst, stream_logs=False)
 
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-            rc, stdout, _ = runner.run(setup_cmd, stream_logs=False)
+            rc, stdout, _ = runner.run(setup_cmd,
+                                       stream_logs=False,
+                                       require_outputs=True)
             subprocess_utils.handle_returncode(
                 rc,
                 setup_cmd,

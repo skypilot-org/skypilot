@@ -1278,7 +1278,9 @@ class CloudVmRayBackend(backends.Backend):
                     ips, auth_config)
                 self.local_handle['cluster_resources'] = \
                     [resources_lib.Resources(
-                cloud=clouds.Local(), accelerators=acc_dict, region='Local') \
+                        cloud=clouds.Local(),
+                        accelerators=acc_dict if acc_dict else None,
+                        region='Local')
                     for acc_dict in cluster_accs ]
 
         def _update_cluster_region(self):

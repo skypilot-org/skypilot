@@ -640,10 +640,8 @@ class Optimizer:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
-            instance_type = ('' if resources.instance_type is None else
-                             resources.instance_type)
             return [
-                str(resources.cloud), instance_type + spot,
+                str(resources.cloud), resources.instance_type + spot,
                 str(accelerators)
             ]
 
