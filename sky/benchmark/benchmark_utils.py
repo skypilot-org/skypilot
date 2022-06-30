@@ -261,11 +261,9 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
     # Get the start and end timestamps if exist.
     local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
     run_start_path = os.path.join(local_dir, _RUN_START)
-    if not os.path.exists(run_start_path):
-        logger.info(f'Benchmarking task on {cluster} has not started.')
-        return
-
-    start_time = _read_timestamp(run_start_path)
+    start_time = None
+    if os.path.exists(run_start_path):
+        start_time = _read_timestamp(run_start_path)
     run_end_path = os.path.join(local_dir, _RUN_END)
     end_time = None
     if os.path.exists(run_end_path):
@@ -334,16 +332,17 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
                                                  last_time=end_time)
     elif job_status == job_lib.JobStatus.RUNNING:
         # (3) SkyCallback is not initialized yet or not used.
+        logger.info(f'Benchmarking task on {cluster} has not started.')
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=time.time())
     elif benchmark_status == benchmark_state.BenchmarkStatus.STOPPED:
         # (4) The benchmarking job has terminated abnormally.
-        logger.error(f'Benchmarking on {cluster} has terminated abnormally.')
+        logger.info(f'Benchmarking on {cluster} has terminated abnormally.')
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=None)
     else:
         # (5) Otherwise (e.g., cluster_status is INIT).
-        logger.error(f'No benchmark logs found for {cluster}.')
+        logger.info(f'No benchmark logs found for {cluster}.')
         record = benchmark_state.BenchmarkRecord(start_time=None,
                                                  last_time=None)
     benchmark_state.update_benchmark_result(benchmark, cluster,
