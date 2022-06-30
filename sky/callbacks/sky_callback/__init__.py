@@ -1,7 +1,7 @@
 from sky_callback.api import (
     init,
-    on_step_begin,
-    on_step_end,
+    step_begin,
+    step_end,
     step,
     timer,
 )
@@ -15,8 +15,8 @@ SkyTransformersCallback = _CallbackLoader.transformers
 __all__ = [
     # APIs
     'init',
-    'on_step_begin',
-    'on_step_end',
+    'step_begin',
+    'step_end',
     'step',
     'timer',
     # Callbacks
