@@ -464,7 +464,7 @@ class Resources:
             return False
         # self.accelerator_args == other.accelerator_args
 
-        if self._use_spot_specified and self.use_spot != other.use_spot:
+        if self.use_spot_specified and self.use_spot != other.use_spot:
             return False
 
         # self <= other
