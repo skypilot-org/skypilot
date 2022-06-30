@@ -17,7 +17,7 @@ from sky.user_stats import utils
 logger = sky_logging.init_logger(__name__)
 
 LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
-
+log_timestamp = None
 
 def _make_labels_str(d):
     dict_str = ','.join(f'{k}="{v}"' for k, v in d.items())
@@ -28,8 +28,10 @@ def _make_labels_str(d):
 def _send_message(labels: Dict[str, str], msg):
     if env_options.DISABLE_LOGGING:
         return
-    curr_datetime = datetime.datetime.now(datetime.timezone.utc)
-    curr_datetime = curr_datetime.isoformat('T')
+    global log_timestamp
+    if log_timestamp is None:
+        log_timestamp = datetime.datetime.now(datetime.timezone.utc)
+        log_timestamp = log_timestamp.isoformat('T')
 
     labels.update(utils.get_base_labels())
     labels_str = _make_labels_str(labels)
@@ -39,7 +41,7 @@ def _send_message(labels: Dict[str, str], msg):
         'streams': [{
             'labels': labels_str,
             'entries': [{
-                'ts': curr_datetime,
+                'ts': log_timestamp,
                 'line': msg
             }]
         }]

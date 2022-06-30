@@ -23,8 +23,9 @@ from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
-from sky.utils import subprocess_utils
+from sky.utils.cli_utils import status_utils
 from sky.utils import timeline
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -181,7 +182,7 @@ def _execute(
             time.sleep(0.5)
             subprocess_utils.run('sky spot status')
         else:
-            subprocess_utils.run('sky status')
+            status_utils.show_status_table()
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 

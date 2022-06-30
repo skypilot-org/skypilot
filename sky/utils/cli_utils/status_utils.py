@@ -28,7 +28,7 @@ class StatusColumn:
         return val
 
 
-def show_status_table(show_all: bool, refresh: bool):
+def show_status_table(show_all: bool = False, refresh: bool = False):
     """Compute cluster table values and display."""
     # TODO(zhwu): Update the information for auto-stop clusters.
     cluster_records = backend_utils.get_clusters(show_all, refresh)
