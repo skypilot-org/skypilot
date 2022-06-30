@@ -7,6 +7,7 @@ from click import testing as cli_testing
 
 import sky
 import sky.cli as cli
+from sky import clouds
 
 
 def test_infer_gpunode_type():
@@ -42,8 +43,15 @@ def test_infer_tpunode_type():
         assert cli._infer_interactive_node_type(spec) == 'tpunode', spec
 
 
-def test_accelerator_mismatch():
+def test_accelerator_mismatch(monkeypatch):
     """Test the specified accelerator does not match the instance_type."""
+    enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
+    monkeypatch.setattr(
+        'sky.global_user_state.get_enabled_clouds',
+        lambda: enabled_clouds,
+    )
+    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
+
     spec = textwrap.dedent("""\
         resources:
           cloud: aws
