@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import time
 import typing
 from typing import Any, Callable, Dict, List, Tuple
@@ -66,11 +67,15 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
 
 def _generate_script_with_timelogs(script: str, start_path: str,
                                    end_path: str) -> str:
-    return (f'echo $(date +%s.%N) > {start_path}\n'  # prologue
-            f'{script}\n_EXIT_CODE=$?\n'
-            'if [ $_EXIT_CODE -eq 0 ]; then\n'  # epilogue
-            f'echo $(date +%s.%N) > {end_path}\nfi\n'
-            'exit $_EXIT_CODE\n')
+    return textwrap.dedent(f"""\
+        echo echo $(date +%s.%N) > {start_path}
+        {script}
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 0 ]; then
+            echo $(date +%s.%N) > {end_path}
+        fi
+        exit $EXIT_CODE
+        """)
 
 
 def _get_optimized_resources(
@@ -379,10 +384,10 @@ def generate_benchmark_configs(
         if 'setup' not in candidate_config:
             candidate_config['setup'] = ''
         # Create a symbolic link to a directory in the benchmark bucket.
-        candidate_config['setup'] = (
-            f'mkdir -p {benchmark_dir}\n'
-            f'ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}\n' +
-            candidate_config['setup'])
+        candidate_config['setup'] = textwrap.dedent(f"""\
+            mkdir -p {benchmark_dir}
+            ln -s {benchmark_dir} {_SKY_REMOTE_BENCHMARK_DIR_SYMLINK}
+            {candidate_config['setup']}""")
 
         # Log the start and end time of the benchmarking task.
         if 'run' not in candidate_config:
