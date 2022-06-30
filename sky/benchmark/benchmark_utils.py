@@ -11,7 +11,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -251,7 +251,7 @@ def _read_timestamp(path: str) -> float:
     return float(timestamp[0].strip())
 
 
-def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
+def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     benchmark = benchmark_result['benchmark']
     benchmark_status = benchmark_result['status']
     cluster = benchmark_result['cluster']
@@ -304,6 +304,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
     else:
         summary_path = None
 
+    message = None
     if summary_path is not None and os.path.exists(summary_path):
         # (1) SkyCallback has saved the summary.
         with open(summary_path, 'r') as f:
@@ -313,10 +314,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
         else:
             last_time = end_time
         if last_time is None:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'No duration information found. '
-                    'Check if sky_callback.on_step_end has been called.')
+            message = (f'No duration information found for {cluster}. '
+                       'Check if sky_callback.on_step_end has been called.')
 
         record = benchmark_state.BenchmarkRecord(
             start_time=start_time,
@@ -328,26 +327,26 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
     elif end_time is not None:
         # (2) The benchmarking job has terminated normally
         # without SkyCallback logs.
-        assert benchmark_status == benchmark_state.BenchmarkStatus.FINISHED
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=end_time)
     elif job_status == job_lib.JobStatus.RUNNING:
         # (3) SkyCallback is not initialized yet or not used.
-        logger.info(f'Benchmarking task on {cluster} has not started.')
+        message = f'Benchmarking task on {cluster} has not started.'
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=time.time())
     elif benchmark_status == benchmark_state.BenchmarkStatus.STOPPED:
         # (4) The benchmarking job has terminated abnormally.
-        logger.info(f'Benchmarking on {cluster} has terminated abnormally.')
+        message = f'Benchmarking on {cluster} has terminated abnormally.'
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=None)
     else:
         # (5) Otherwise (e.g., cluster_status is INIT).
-        logger.info(f'No benchmark logs found for {cluster}.')
+        message = f'No benchmark logs found for {cluster}.'
         record = benchmark_state.BenchmarkRecord(start_time=None,
                                                  last_time=None)
     benchmark_state.update_benchmark_result(benchmark, cluster,
                                             benchmark_status, record)
+    return message
 
 
 def generate_benchmark_configs(
@@ -469,14 +468,14 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
     # Handle the errors raised during the cluster launch.
     for cluster, output in zip(clusters, outputs):
         if isinstance(output, Exception):
-            logger.error(f'Launching {cluster} failed.')
-            logger.error(_format_err_msg(output))
+            logger.error(_format_err_msg(f'Launching {cluster} failed.'))
+            logger.error(output)
         else:
             returncode, stderr = output
             if returncode != 0:
                 logger.error(
-                    f'Launching {cluster} failed with code {returncode}.')
-                logger.error(_format_err_msg(stderr))
+                    _format_err_msg(f'Launching {cluster} failed with code {returncode}.'))
+                logger.error(stderr)
 
     # Delete the temporary yaml files.
     for f in yaml_fds:
@@ -528,8 +527,14 @@ def update_benchmark_state(benchmark: str) -> None:
         total=num_candidates)
 
     def _update_with_progress_bar(arg: Any) -> None:
-        _update_benchmark_result(arg)
-        progress.update(task, advance=1)
+        message = _update_benchmark_result(arg)
+        if message is None:
+            progress.update(task, advance=1)
+        else:
+            progress.stop()
+            logger.info(
+                f'{colorama.Fore.YELLOW}{message}{colorama.Style.RESET_ALL}')
+            progress.start()
 
     with progress:
         _parallel_run_with_interrupt_handling(_update_with_progress_bar,
