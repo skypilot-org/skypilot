@@ -35,7 +35,7 @@ def process_subprocess_stream(
     skip_lines: Optional[List[str]] = None,
     replace_crlf: bool = False,
     line_processor: Optional[log_utils.LineProcessor] = None,
-    prefix: Optional[str] = None,
+    streaming_prefix: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
 
@@ -57,6 +57,9 @@ def process_subprocess_stream(
 
     stdout = ''
     stderr = ''
+
+    if streaming_prefix is None:
+        streaming_prefix = ''
 
     start_streaming_flag = False
     end_streaming_flag = False
@@ -84,8 +87,6 @@ def process_subprocess_stream(
                     if (end_streaming_at is not None and
                             end_streaming_at in line):
                         end_streaming_flag = True
-                    if prefix is not None:
-                        line = prefix + line
                     if key.fileobj is out_io:
                         stdout += line
                         out_stream = sys.stdout
@@ -94,7 +95,10 @@ def process_subprocess_stream(
                         out_stream = sys.stderr
                     if (stream_logs and start_streaming_flag and
                             not end_streaming_flag):
-                        out_stream.write(line)
+                        if streaming_prefix is None:
+                            out_stream.write(line)
+                        else:
+                            out_stream.write(streaming_prefix + line)
                         out_stream.flush()
                     if log_path != '/dev/null':
                         fout.write(line)
@@ -115,7 +119,7 @@ def run_with_log(
     with_ray: bool = False,
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
-    prefix: Optional[str] = None,
+    streaming_prefix: Optional[str] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
@@ -181,6 +185,10 @@ def run_with_log(
         if process_stream:
             if skip_lines is None:
                 skip_lines = []
+            # Skip these lines caused by `-i` option of bash. Failed to
+            # find other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            # `ssh -T -i -tt` still cause the problem.
             skip_lines += [
                 'bash: cannot set terminal process group',
                 'bash: no job control in this shell',
@@ -194,15 +202,11 @@ def run_with_log(
                 stream_logs,
                 start_streaming_at=start_streaming_at,
                 end_streaming_at=end_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to
-                # find other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # `ssh -T -i -tt` still cause the problem.
                 skip_lines=skip_lines,
                 line_processor=line_processor,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
-                prefix=prefix,
+                streaming_prefix=streaming_prefix,
             )
         proc.wait()
         if require_outputs:
