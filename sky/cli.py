@@ -2704,6 +2704,8 @@ def benchmark_ls() -> None:
 
 @bench.command('show', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
+# TODO(woosuk): Add --all option to show all the collected information
+# (e.g., setup time, warmup steps, total steps, etc.).
 def benchmark_show(benchmark: str) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
