@@ -111,29 +111,41 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
     _send_message(yaml_type, message)
 
 
-def send_method_info(name: str):
+def send_exception(name: str):
+    """Decorator to catch exceptions and upload to usage logging."""
+    if env_options.DISABLE_LOGGING:
+        return lambda func: func
 
-    def _send_method_info(func):
-        """Decorator to catch exceptions and upload to usage logging."""
-        if env_options.DISABLE_LOGGING:
-            return func
+    def _send_exception(func):
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
-                start = time.time()
                 return func(*args, **kwargs)
-            except (Exception, SystemExit):
+            except (Exception, SystemExit, KeyboardInterrupt):
                 trace = traceback.format_exc()
                 _send_message(MessageType.STACK_TRACE,
                               trace,
                               custom_labels={'name': name})
                 raise
+        return wrapper
+
+    return _send_exception
+
+def send_runtime(name: str):
+    """Decorator to log runtime of function."""
+    if env_options.DISABLE_LOGGING:
+        return lambda func: func
+
+    def _send_runtime(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                start = time.time()
+                return func(*args, **kwargs)
             finally:
                 _send_message(MessageType.RUNTIME,
                               f'{time.time() - start}',
                               custom_labels={'name': name})
-
         return wrapper
-
-    return _send_method_info
+    return _send_runtime

@@ -41,6 +41,7 @@ from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.user_stats import usage_logging
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1334,6 +1335,7 @@ class CloudVmRayBackend(backends.Backend):
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
     @timeline.Event.decorator
+    @usage_logging.send_runtime('provision')
     def provision(self,
                   task: task_lib.Task,
                   to_provision: Optional['resources_lib.Resources'],
@@ -1509,6 +1511,7 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_name, idle_minutes_to_autostop)
 
     @timeline.Event.decorator
+    @usage_logging.send_runtime('sync_workdir')
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         # Even though provision() takes care of it, there may be cases where
         # this function is called in isolation, without calling provision(),
@@ -1572,6 +1575,7 @@ class CloudVmRayBackend(backends.Backend):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners)
 
     @timeline.Event.decorator
+    @usage_logging.send_runtime('sync_file_mounts')
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -2199,6 +2203,7 @@ class CloudVmRayBackend(backends.Backend):
                     storage.delete()
 
     @timeline.Event.decorator
+    @usage_logging.send_runtime('teardown')
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
