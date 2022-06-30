@@ -794,10 +794,12 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
                 runner.rsync_up(source=src, target=dst, stream_logs=False)
 
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
-            rc = runner.run(setup_cmd, stream_logs=False)
+            rc, stdout, _ = runner.run(setup_cmd, stream_logs=False)
             subprocess_utils.handle_returncode(
-                rc, setup_cmd,
-                'Failed to setup Ray autoscaler commands on remote.')
+                rc,
+                setup_cmd,
+                'Failed to setup Ray autoscaler commands on remote.',
+                stderr=stdout)
 
         subprocess_utils.run_in_parallel(_ray_up_local_worker, worker_runners)
 
