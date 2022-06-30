@@ -11,7 +11,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple, Union
 import uuid
 
 import colorama
@@ -37,6 +37,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
+_SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 # NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR
@@ -59,7 +60,7 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
         names = [f'sky-bench-{benchmark}-{i}' for i in range(num_clusters)]
     for name in names:
         if global_user_state.get_cluster_from_name(name) is not None:
-            with backend_utils.print_exception_no_traceback():
+            with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Cluster name {name} is taken. '
                                  'Try using a different benchmark name.')
     return names
@@ -68,7 +69,7 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
 def _generate_script_with_timelogs(script: str, start_path: str,
                                    end_path: str) -> str:
     return textwrap.dedent(f"""\
-        echo echo $(date +%s.%N) > {start_path}
+        echo $(date +%s.%N) > {start_path}
         {script}
         EXIT_CODE=$?
         if [ $EXIT_CODE -eq 0 ]; then
@@ -163,17 +164,18 @@ def _format_err_msg(msg: str):
 
 
 def _parallel_run_with_interrupt_handling(func: Callable,
-                                          args: List[Any]) -> None:
+                                          args: List[Any]) -> List[Any]:
     with pool.ThreadPool(processes=len(args)) as p:
         try:
-            list(p.imap(func, args))
+            return list(p.imap(func, args))
         except KeyboardInterrupt:
             print()
             logger.error(_format_err_msg('Interrupted by user.'))
             sys.exit(1)
 
 
-def _launch_with_log(cluster: str, cmd: List[str]) -> None:
+def _launch_with_log(cluster: str, cmd: List[str],
+                     log_dir: str) -> Union[Tuple[int, str], Exception]:
     """Executes `sky launch` in a subprocess and returns normally.
 
     This function does not propagate any error so that failures in a
@@ -182,29 +184,25 @@ def _launch_with_log(cluster: str, cmd: List[str]) -> None:
     prefix_color = colorama.Fore.MAGENTA
     prefix = f'{prefix_color}({cluster}){colorama.Style.RESET_ALL} '
     try:
-        # FIXME(woosuk): CONSIDER when SKY_MINIMIZE_LOGGING=1
         returncode, _, stderr = log_lib.run_with_log(
             cmd,
-            log_path='/dev/null',
+            log_path=os.path.join(log_dir, f'{cluster}.log'),
             stream_logs=True,
-            prefix=prefix,
+            streaming_prefix=prefix,
+            start_streaming_at='Creating a new cluster: "',
             skip_lines=[
-                'optimizer.py',
-                'Tip: ',
-            ],  # FIXME: Use regex
-            end_streaming_at='Job submitted with Job ID:',
+                'Tip: to reuse an existing cluster, specify --cluster (-c).',
+            ],
+            end_streaming_at='Job submitted with Job ID: ',
             require_outputs=True,
         )
         # Report any error from the `sky launch` subprocess.
-        if returncode != 0:
-            logger.error(f'Launching {cluster} failed with code {returncode}')
-            logger.error(_format_err_msg(stderr))
+        return returncode, stderr
     except Exception as e:  # pylint: disable=broad-except
         # FIXME(woosuk): Avoid using general Exception.
         # Report any error in executing and processing the outputs of
         # the `sky launch` subprocess.
-        logger.error(f'Launching {cluster} failed.')
-        logger.error(_format_err_msg(e))
+        return e
 
 
 def _download_remote_dir(remote_dir: str, local_dir: str,
@@ -264,9 +262,9 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> None:
     local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark, cluster)
     run_start_path = os.path.join(local_dir, _RUN_START)
     if not os.path.exists(run_start_path):
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                f'Benchmarking task on {cluster} has not started.')
+        logger.info(f'Benchmarking task on {cluster} has not started.')
+        return
+
     start_time = _read_timestamp(run_start_path)
     run_end_path = os.path.join(local_dir, _RUN_END)
     end_time = None
@@ -454,9 +452,31 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
     launch_cmds = [['sky', 'launch', yaml_fd.name, '-c', cluster] + cmd
                    for yaml_fd, cluster in zip(yaml_fds, clusters)]
 
+    # Save stdout/stderr from cluster launches.
+    run_timestamp = backend_utils.get_run_timestamp()
+    log_dir = os.path.join(_SKY_LOGS_DIRECTORY, run_timestamp)
+    log_dir = os.path.expanduser(log_dir)
+    logger.info(
+        f'{colorama.Fore.YELLOW}To view stdout/stderr from individual '
+        f'cluster launches, check the logs in{colorama.Style.RESET_ALL} '
+        f'{colorama.Style.BRIGHT}{log_dir}{colorama.Style.RESET_ALL}.')
+
     # Launch the benchmarking clusters in parallel.
-    _parallel_run_with_interrupt_handling(lambda args: _launch_with_log(*args),
-                                          list(zip(clusters, launch_cmds)))
+    outputs = _parallel_run_with_interrupt_handling(
+        lambda args: _launch_with_log(*args, log_dir=log_dir),
+        list(zip(clusters, launch_cmds)))
+
+    # Handle the errors raised during the cluster launch.
+    for cluster, output in zip(clusters, outputs):
+        if isinstance(output, Exception):
+            logger.error(f'Launching {cluster} failed.')
+            logger.error(_format_err_msg(output))
+        else:
+            returncode, stderr = output
+            if returncode != 0:
+                logger.error(
+                    f'Launching {cluster} failed with code {returncode}.')
+                logger.error(_format_err_msg(stderr))
 
     # Delete the temporary yaml files.
     for f in yaml_fds:
