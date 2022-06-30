@@ -752,7 +752,7 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@usage_logging.send_exception('launch')
+@usage_logging.send_method_info('launch')
 def launch(
     entrypoint: str,
     cluster: Optional[str],
@@ -830,7 +830,7 @@ def launch(
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @_add_click_options(_TASK_OPTIONS)
-@usage_logging.send_exception('exec')
+@usage_logging.send_method_info('exec')
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -940,7 +940,7 @@ def exec(
               is_flag=True,
               required=False,
               help='Query cluster status from the cloud provider.')
-@usage_logging.send_exception('status')
+@usage_logging.send_method_info('status')
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
@@ -1170,7 +1170,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@usage_logging.send_exception('stop')
+@usage_logging.send_method_info('stop')
 def stop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1297,7 +1297,7 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if sky fails to start the cluster due to unavailability errors.'))
-@usage_logging.send_exception('start')
+@usage_logging.send_method_info('start')
 def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
@@ -1409,7 +1409,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
               required=False,
               help='Ignore cloud provider errors (if any). '
               'Useful for cleaning up manually deleted cluster(s).')
-@usage_logging.send_exception('down')
+@usage_logging.send_method_info('down')
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin

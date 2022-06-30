@@ -4,6 +4,7 @@ import datetime
 import enum
 import functools
 import json
+import time
 import traceback
 from typing import Dict, Union
 
@@ -26,6 +27,7 @@ class MessageType(enum.Enum):
     TASK_YAML = 'task-yaml'
     TASK_OVERRIDE_YAML = 'task-override-yaml'
     RAY_YAML = 'ray-yaml'
+    RUNTIME = 'runtime'
 
 
 def _make_labels_str(d):
@@ -35,7 +37,7 @@ def _make_labels_str(d):
 
 
 def _send_message(msg_type: MessageType,
-                  msg,
+                  message: str,
                   custom_labels: Dict[str, str] = None):
     if env_options.DISABLE_LOGGING:
         return
@@ -49,9 +51,9 @@ def _send_message(msg_type: MessageType,
     custom_labels.update(utils.get_base_labels())
 
     prom_labels = {'type': msg_type.value}
-    msg = {
+    message = {
         'labels': custom_labels,
-        'message': msg,
+        'message': message,
     }
 
     headers = {'Content-type': 'application/json'}
@@ -60,7 +62,7 @@ def _send_message(msg_type: MessageType,
             'labels': _make_labels_str(prom_labels),
             'entries': [{
                 'ts': log_timestamp,
-                'line': json.dumps(msg),
+                'line': json.dumps(message),
             }]
         }]
     }
@@ -68,12 +70,6 @@ def _send_message(msg_type: MessageType,
     response = requests.post(_LOG_URL, data=payload, headers=headers)
     if response.status_code != 204:
         logger.debug(f'Grafana Loki failed with response: {response.text}')
-
-
-def send_cli_cmd():
-    """Upload current CLI command to Loki."""
-    cmd = base_utils.get_pretty_entry_point()
-    _send_message(MessageType.CLI_CMD, cmd)
 
 
 def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
@@ -94,6 +90,12 @@ def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
     return cleaned_yaml_info
 
 
+def send_cli_cmd():
+    """Upload current CLI command to Loki."""
+    cmd = base_utils.get_pretty_entry_point()
+    _send_message(MessageType.CLI_CMD, cmd)
+
+
 def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
@@ -109,9 +111,9 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
     _send_message(yaml_type, message)
 
 
-def send_exception(name: str):
+def send_method_info(name: str):
 
-    def _send_exception(func):
+    def _send_method_info(func):
         """Decorator to catch exceptions and upload to usage logging."""
         if env_options.DISABLE_LOGGING:
             return func
@@ -119,12 +121,19 @@ def send_exception(name: str):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
+                start = time.time()
                 return func(*args, **kwargs)
             except (Exception, SystemExit):
                 trace = traceback.format_exc()
-                _send_message(MessageType.STACK_TRACE, trace, {'name': name})
+                _send_message(MessageType.STACK_TRACE,
+                              trace,
+                              custom_labels={'name': name})
                 raise
+            finally:
+                _send_message(MessageType.RUNTIME,
+                              f'{time.time() - start}',
+                              custom_labels={'name': name})
 
         return wrapper
 
-    return _send_exception
+    return _send_method_info
