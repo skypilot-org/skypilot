@@ -2990,7 +2990,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         progress.start()
 
     with progress:
-        backend_utils.run_in_parallel(_delete_benchmark, to_delete)
+        subprocess_utils.run_in_parallel(_delete_benchmark, to_delete)
         progress.live.transient = False
         progress.refresh()
 
