@@ -114,7 +114,8 @@ def show_local_status_table():
 
         if (handle.launched_nodes is not None and
                 handle.launched_resources is not None):
-            if handle.local_handle is not None:
+            if hasattr(handle,
+                       'local_handle') and handle.local_handle is not None:
                 local_cluster_resources = [
                     r.accelerators
                     for r in handle.local_handle['cluster_resources']

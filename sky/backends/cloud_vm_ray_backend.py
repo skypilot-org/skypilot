@@ -1348,7 +1348,7 @@ class CloudVmRayBackend(backends.Backend):
         # in the Resources object of first task that was ran on the cluster.
         # In the local cloud case, resources.accelerators means the task
         # resources.
-        if handle.local_handle is not None:
+        if hasattr(handle, 'local_handle') and handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
