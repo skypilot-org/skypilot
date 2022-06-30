@@ -2808,7 +2808,7 @@ def benchmark_show(benchmark: str) -> None:
     if all(row[5] == '-' for row in rows):
         # No #STEPS. SkyCallback has not been initialized or was unused.
         click.secho(
-            'SkyCallback is not detected in this benchmark. '
+            'SkyCallback logs are not found in this benchmark. '
             'Consider using SkyCallback to get more detailed information '
             'in real time.',
             fg='yellow')
