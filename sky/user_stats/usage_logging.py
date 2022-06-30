@@ -128,9 +128,11 @@ def send_exception(name: str):
                               trace,
                               custom_labels={'name': name})
                 raise
+
         return wrapper
 
     return _send_exception
+
 
 def send_runtime(name: str):
     """Decorator to log runtime of function."""
@@ -138,6 +140,7 @@ def send_runtime(name: str):
         return lambda func: func
 
     def _send_runtime(func):
+
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             try:
@@ -147,5 +150,7 @@ def send_runtime(name: str):
                 _send_message(MessageType.RUNTIME,
                               f'{time.time() - start}',
                               custom_labels={'name': name})
+
         return wrapper
+
     return _send_runtime
