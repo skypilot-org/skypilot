@@ -1869,11 +1869,11 @@ def refresh_cluster_status_handle(
     return record['status'], record['handle']
 
 
-class CloudFilterType(enum.Enum):
+class CloudFilter(enum.Enum):
     # Filter for all types of clouds.
     ALL = 'all'
     # Filter for Sky's main clouds (aws, gcp, azure, docker).
-    MAIN = 'main'
+    CLOUDS_AND_DOCKER = 'clouds-and-docker'
     # Filter for only local clouds.
     LOCAL = 'local'
 
@@ -1881,7 +1881,8 @@ class CloudFilterType(enum.Enum):
 def get_clusters(
         include_reserved: bool,
         refresh: bool,
-        filter_clouds: str = CloudFilterType.MAIN) -> List[Dict[str, Any]]:
+        cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER
+) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
     Combs through the Sky database (in ~/.sky/state.db) to get a list of records
@@ -1892,7 +1893,7 @@ def get_clusters(
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
-        filter_clouds: Sets which clouds to filer through from the global user
+        cloud_filter: Sets which clouds to filer through from the global user
             state. Supports three values, 'all' for all clouds, 'public' for public
             clouds only, and 'local' for only local clouds.
 
@@ -1911,14 +1912,14 @@ def get_clusters(
         cluster_resources = record['handle'].launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
 
-    if filter_clouds == CloudFilterType.LOCAL:
+    if cloud_filter == CloudFilter.LOCAL:
         records = [record for record in records if _is_local_cluster(record)]
-    elif filter_clouds == CloudFilterType.MAIN:
+    elif cloud_filter == CloudFilter.CLOUDS_AND_DOCKER:
         records = [
             record for record in records if not _is_local_cluster(record)
         ]
-    elif filter_clouds not in CloudFilterType:
-        raise ValueError(f'{filter_clouds} is not part of CloudFilterType.')
+    elif cloud_filter not in CloudFilter:
+        raise ValueError(f'{cloud_filter} is not part of CloudFilter.')
 
     if not refresh:
         return records

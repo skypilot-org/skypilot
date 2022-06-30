@@ -80,18 +80,19 @@ def show_status_table(show_all: bool, refresh: bool):
 def show_local_status_table():
     """Lists all local clusters.
 
-    Lists both uninitialized and initialized local clusters. Uninitialized local
-    clusters are clusters that have their cluster configs in ~/.sky/local.
-    Sky does not know if the cluster is valid yet and does not know what
-    resources the cluster has. Hence, this method will return blank values for
-    such clusters. Initialized local clusters are ran using `sky launch`.
+    Lists both uninitialized and initialized local clusters.
+    Uninitialized local clusters are clusters that have their cluster configs
+    in ~/.sky/local. Sky does not know if the cluster is valid yet and does not
+    know what resources the cluster has. Hence, this method will return blank
+    values for such clusters.
+    Initialized local clusters are created using `sky launch`.
     Sky understands what types of resources are on the nodes and has ran at
     least one job on the cluster.
     """
     clusters_status = backend_utils.get_clusters(
         include_reserved=False,
         refresh=False,
-        filter_clouds=backend_utils.CloudFilterType.LOCAL)
+        cloud_filter=backend_utils.CloudFilter.LOCAL)
     columns = [
         'NAME',
         'CLUSTER_USER',
@@ -156,7 +157,7 @@ def show_local_status_table():
             cluster_table.add_row(row)
 
     if clusters_status or all_local_clusters:
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
                    f'clusters:{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
 
