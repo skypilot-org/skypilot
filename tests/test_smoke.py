@@ -438,6 +438,23 @@ def test_cancel_pytorch():
     run_one_test(test)
 
 
+# ---------- Testing use-spot option ----------
+def test_use_spot():
+    """Test use-spot and sky exec."""
+    name = _get_cluster_name()
+    test = Test(
+        'use-spot',
+        [
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} echo hi',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing managed spot ----------
 def test_spot():
     """Test the spot yaml."""
