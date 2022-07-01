@@ -2924,7 +2924,7 @@ def benchmark_down(
 # pylint: disable=redefined-builtin
 def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                      yes: bool) -> None:
-    """Delete benchmarks from the history."""
+    """Delete benchmark reports from the history."""
     to_delete = []
     if len(benchmarks) > 0:
         for benchmark in benchmarks:
@@ -2960,34 +2960,36 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         total=len(to_delete))
 
     def _delete_benchmark(benchmark: str) -> None:
-        message = ''
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
         records = []
         for cluster in clusters:
             record = global_user_state.get_cluster_from_name(cluster)
             records.append(record)
+        num_clusters = len([r for r in records if r is not None])
 
-        num_clusters = len([record for record in records if record is not None])
         if num_clusters > 0:
             plural = 's' if num_clusters > 1 else ''
-            message += (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
-                        f'has {num_clusters} un-terminated cluster{plural}. '
-                        f'To terminate the cluster{plural}, use `sky down`. '
-                        f'{colorama.Style.RESET_ALL}')
+            message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
+                       f'has {num_clusters} un-terminated cluster{plural}. '
+                       f'Terminate the cluster{plural} before deleting '
+                       'the benchmark report.')
+            success = False
+        else:
+            bucket_name = benchmark_state.get_benchmark_from_name(
+                benchmark)['bucket']
+            handle = global_user_state.get_handle_from_storage_name(bucket_name)
+            bucket_type = list(handle.sky_stores.keys())[0]
+            benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
+                                                  bucket_type)
+            benchmark_state.delete_benchmark(benchmark)
+            message = (f'{colorama.Fore.GREEN}Benchmark report on {benchmark} '
+                       f'deleted.{colorama.Style.RESET_ALL}')
+            success = True
 
-        bucket_name = benchmark_state.get_benchmark_from_name(
-            benchmark)['bucket']
-        handle = global_user_state.get_handle_from_storage_name(bucket_name)
-        bucket_type = list(handle.sky_stores.keys())[0]
-        benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
-                                              bucket_type)
-        benchmark_state.delete_benchmark(benchmark)
-
-        message += (f'{colorama.Fore.GREEN}Benchmark {benchmark} deleted.'
-                    f'{colorama.Style.RESET_ALL}')
         progress.stop()
         click.secho(message)
-        progress.update(task, advance=1)
+        if success:
+            progress.update(task, advance=1)
         progress.start()
 
     with progress:
