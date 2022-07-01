@@ -28,6 +28,11 @@ pip install -r requirements-dev.txt
 - For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 
+
+### Environment Variable Options
+- `export SKY_DEV=1` to show debugging logs (logging.DEBUG).
+- `export SKY_DISABLE_STATS_COLLECTION=1` to disable usage logging.
+
 ### Dump timeline
 
 Timeline is useful for performance analysis and debugging in Sky.
