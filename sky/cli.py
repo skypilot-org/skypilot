@@ -298,7 +298,7 @@ def _add_click_options(options: List[click.Option]):
 def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            gpus: Optional[str] = None,
-                           use_spot: Optional[int] = None,
+                           use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
                            disk_size: Optional[int] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
