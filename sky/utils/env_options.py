@@ -2,13 +2,13 @@
 import os
 
 
-def _check_bool_env_var(env_var_name):
+def _get_bool_env_var(env_var_name):
     """Check if an environment variable is set to True."""
     return os.getenv(env_var_name, 'False').lower() in ('true', '1')
 
 
-IS_DEVELOPPING = _check_bool_env_var('SKY_DEV')
+IS_DEVELOPPING = _get_bool_env_var('SKY_DEV')
 
-DISABLE_LOGGING = _check_bool_env_var('SKY_DISABLE_STATS_COLLECTION')
+DISABLE_LOGGING = _get_bool_env_var('SKY_DISABLE_STATS_COLLECTION')
 
-MINIMIZE_LOGGING = _check_bool_env_var('SKY_MINIMIZE_LOGGING')
+MINIMIZE_LOGGING = _get_bool_env_var('SKY_MINIMIZE_LOGGING')

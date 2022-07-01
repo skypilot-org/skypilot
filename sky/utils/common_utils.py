@@ -7,17 +7,7 @@ import hashlib
 import os
 import socket
 import sys
-import uuid
 import yaml
-
-_transaction_id = None
-
-
-def transaction_id():
-    global _transaction_id
-    if _transaction_id is None:
-        _transaction_id = str(uuid.uuid4())
-    return _transaction_id
 
 
 def get_pretty_entry_point() -> str:
@@ -64,11 +54,6 @@ def user_and_hostname_hash() -> str:
     """
     hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
     return f'{getpass.getuser()}-{hostname_hash}'
-
-
-def get_user():
-    hash_str = user_and_hostname_hash()
-    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
 
 
 def read_yaml(path):

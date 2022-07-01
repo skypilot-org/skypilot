@@ -11,7 +11,7 @@ from typing import Dict, Union
 import requests
 
 from sky import sky_logging
-from sky.utils import base_utils
+from sky.utils import common_utils
 from sky.utils import env_options
 from sky.user_stats import utils
 
@@ -78,7 +78,7 @@ def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
     for redact_type in ['setup', 'run', 'envs']:
         if redact_type in cleaned_yaml_info:
             contents = cleaned_yaml_info[redact_type]
-            lines = base_utils.dump_yaml_str({
+            lines = common_utils.dump_yaml_str({
                 redact_type: contents
             }).split('\n')
             cleaned_yaml_info[redact_type] = (
@@ -92,7 +92,7 @@ def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
 
 def send_cli_cmd():
     """Upload current CLI command to Loki."""
-    cmd = base_utils.get_pretty_entry_point()
+    cmd = common_utils.get_pretty_entry_point()
     _send_message(MessageType.CLI_CMD, cmd)
 
 
@@ -105,7 +105,7 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
         with open(yaml_config_or_path, 'r') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
-        yaml_info = base_utils.read_yaml(yaml_config_or_path)
+        yaml_info = common_utils.read_yaml(yaml_config_or_path)
     yaml_info = _clean_yaml(yaml_info, len(comment_lines))
     message = json.dumps(yaml_info)
     _send_message(yaml_type, message)

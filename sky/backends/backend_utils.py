@@ -41,7 +41,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.skylet import log_lib
-from sky.utils import base_utils
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -603,7 +603,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account cloud providers. Using uuid.getnode()
                 # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{base_utils.user_and_hostname_hash()}',
+                'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region_name}',
@@ -667,7 +667,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     else:
         assert isinstance(cloud, clouds.Azure), cloud
         config = auth.setup_azure_authentication(config)
-    base_utils.dump_yaml(cluster_config_file, config)
+    common_utils.dump_yaml(cluster_config_file, config)
 
 
 def get_run_timestamp() -> str:
@@ -774,7 +774,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
-    config = base_utils.read_yaml(cluster_yaml)
+    config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
@@ -1206,7 +1206,7 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_config = base_utils.read_yaml(handle.cluster_yaml)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 

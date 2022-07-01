@@ -14,7 +14,7 @@ import time
 
 import filelock
 
-from sky.utils import base_utils
+from sky.utils import common_utils
 
 _events = []
 
@@ -75,7 +75,7 @@ class Event:
     @staticmethod
     def decorator(name_or_fn: Union[str, Callable],
                   message: Optional[str] = None):
-        return base_utils.make_decorator(Event, name_or_fn, message=message)
+        return common_utils.make_decorator(Event, name_or_fn, message=message)
 
 
 class FileLockEvent:

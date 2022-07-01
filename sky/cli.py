@@ -55,7 +55,7 @@ from sky.data import data_utils
 from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
-from sky.utils import base_utils
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -2204,7 +2204,7 @@ def spot_launch(
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
-        base_utils.dump_yaml(f.name, task_config)
+        common_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot_lib.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(

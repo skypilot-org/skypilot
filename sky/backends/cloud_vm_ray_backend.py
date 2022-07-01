@@ -36,7 +36,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
-from sky.utils import base_utils
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -628,7 +628,7 @@ class RetryingVmProvisioner(object):
             cluster_name, acquire_per_cluster_status_lock=False)
         if handle is not None:
             try:
-                config = base_utils.read_yaml(handle.cluster_yaml)
+                config = common_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
 
                 if prev_resources is not None and cloud.is_same_cloud(
@@ -1032,9 +1032,9 @@ class RetryingVmProvisioner(object):
             # ready to ensure cluster will not scale up after preemption (spot).
             # Skip for non-spot as this takes extra time to provision (~1min).
             if use_spot:
-                ray_config = base_utils.read_yaml(cluster_config_file)
+                ray_config = common_utils.read_yaml(cluster_config_file)
                 ray_config['upscaling_speed'] = 0
-                base_utils.dump_yaml(cluster_config_file, ray_config)
+                common_utils.dump_yaml(cluster_config_file, ray_config)
                 start = time.time()
                 returncode, stdout, stderr = ray_up()
                 logger.debug(
@@ -1218,7 +1218,7 @@ class CloudVmRayBackend(backends.Backend):
             if self.launched_resources.region is not None:
                 return
 
-            config = base_utils.read_yaml(self.cluster_yaml)
+            config = common_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
             if cloud.is_same_cloud(sky.Azure()):
@@ -1484,7 +1484,8 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.add_or_update_cluster(cluster_name,
                                                         handle,
                                                         ready=True)
-                auth_config = base_utils.read_yaml(handle.cluster_yaml)['auth']
+                auth_config = common_utils.read_yaml(
+                    handle.cluster_yaml)['auth']
                 backend_utils.SSHConfigHelper.add_cluster(
                     cluster_name, ip_list, auth_config)
 
@@ -2242,7 +2243,7 @@ class CloudVmRayBackend(backends.Backend):
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
-        config = base_utils.read_yaml(handle.cluster_yaml)
+        config = common_utils.read_yaml(handle.cluster_yaml)
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
@@ -2319,7 +2320,7 @@ class CloudVmRayBackend(backends.Backend):
                                              prefix='sky_',
                                              delete=False,
                                              suffix='.yml') as f:
-                base_utils.dump_yaml(f.name, config)
+                common_utils.dump_yaml(f.name, config)
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
@@ -2403,7 +2404,7 @@ class CloudVmRayBackend(backends.Backend):
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
-        config = base_utils.read_yaml(handle.cluster_yaml)
+        config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
