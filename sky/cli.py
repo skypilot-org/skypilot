@@ -2825,58 +2825,6 @@ def benchmark_show(benchmark: str) -> None:
             fg='yellow')
 
 
-def _terminate_or_stop_benchmark(benchmark: str, clusters_to_exclude: List[str],
-                                 terminate: bool, yes: bool):
-    record = benchmark_state.get_benchmark_from_name(benchmark)
-    if record is None:
-        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
-
-    clusters = benchmark_state.get_benchmark_clusters(benchmark)
-    to_stop = []
-    for cluster in clusters:
-        if cluster in clusters_to_exclude:
-            continue
-        if global_user_state.get_cluster_from_name(cluster) is None:
-            continue
-        to_stop.append(cluster)
-
-    _terminate_or_stop_clusters(to_stop,
-                                apply_to_all=False,
-                                terminate=terminate,
-                                no_confirm=yes)
-
-
-@bench.command('stop', cls=_DocumentedCodeCommand)
-@click.argument('benchmark', required=True, type=str)
-@click.option(
-    '--exclude',
-    '-e',
-    'clusters_to_exclude',
-    required=False,
-    type=str,
-    multiple=True,
-    help=('Cluster name(s) to exclude from termination. '
-          'Typically, you might want to see the benchmark results in '
-          '`sky bench show` and exclude a "winner" cluster from termination '
-          'to finish the running task.'))
-@click.option('--yes',
-              '-y',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Skip confirmation prompt.')
-def benchmark_stop(
-    benchmark: str,
-    clusters_to_exclude: List[str],
-    yes: bool,
-) -> None:
-    """Stop all clusters belonging to a benchmark."""
-    _terminate_or_stop_benchmark(benchmark,
-                                 clusters_to_exclude,
-                                 terminate=False,
-                                 yes=yes)
-
-
 @bench.command('down', cls=_DocumentedCodeCommand)
 @click.argument('benchmark', required=True, type=str)
 @click.option(
@@ -2902,10 +2850,23 @@ def benchmark_down(
     yes: bool,
 ) -> None:
     """Terminate all clusters belonging to a benchmark."""
-    _terminate_or_stop_benchmark(benchmark,
-                                 clusters_to_exclude,
-                                 terminate=True,
-                                 yes=yes)
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+
+    clusters = benchmark_state.get_benchmark_clusters(benchmark)
+    to_stop = []
+    for cluster in clusters:
+        if cluster in clusters_to_exclude:
+            continue
+        if global_user_state.get_cluster_from_name(cluster) is None:
+            continue
+        to_stop.append(cluster)
+
+    _terminate_or_stop_clusters(to_stop,
+                                apply_to_all=False,
+                                terminate=True,
+                                no_confirm=yes)
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
