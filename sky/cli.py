@@ -2538,6 +2538,29 @@ def benchmark_launch(
     if is_yaml:
         candidates = _get_candidate_configs(entrypoint)
 
+    # Check if the candidate configs are specified in both CLI and YAML.
+    if candidates is not None:
+        message = ('is specified in both CLI and resources.candidates '
+                   'in the YAML. Please specify in only one of them.')
+        if cloud is not None:
+            if any('cloud' in candidate for candidate in candidates):
+                raise click.BadParameter(f'cloud {message}')
+        if region is not None:
+            if any('region' in candidate for candidate in candidates):
+                raise click.BadParameter(f'region {message}')
+        if gpus is not None:
+            if any('accelerators' in candidate for candidate in candidates):
+                raise click.BadParameter(f'gpus (accelerators) {message}')
+        if use_spot is not None:
+            if any('use_spot' in candidate for candidate in candidates):
+                raise click.BadParameter(f'use_spot {message}')
+        if image_id is not None:
+            if any('image_id' in candidate for candidate in candidates):
+                raise click.BadParameter(f'image_id {message}')
+        if disk_size is not None:
+            if any('disk_size' in candidate for candidate in candidates):
+                raise click.BadParameter(f'disk_size {message}')
+
     # The user can specify the benchmark candidates in either of the two ways:
     # 1. By specifying resources.candidates in the YAML.
     # 2. By specifying gpu types as a command line argument (--gpus).
