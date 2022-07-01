@@ -2588,6 +2588,9 @@ def benchmark_launch(
         cloud = resources_config.pop('cloud')
         if cloud is not None:
             resources_config['cloud'] = str(cloud)
+    if 'region' in resources_config:
+        if resources_config['region'] is None:
+            resources_config.pop('region')
     if 'accelerators' in resources_config:
         if resources_config['accelerators'] is None:
             resources_config.pop('accelerators')
