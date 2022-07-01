@@ -1,7 +1,6 @@
 name: squad_v2
 
 resources:
-  cloud: aws
   candidates:
   - {accelerators: T4:8}
   - {accelerators: V100:8}
@@ -29,12 +28,13 @@ setup: |
 run: |
   conda activate hf
   cd transformers/examples/pytorch/question-answering/
+  BATCH_SIZE = $((96 / $SKY_NUM_GPUS))
   python run_qa.py \
     --model_name_or_path bert-base-uncased \
     --dataset_name squad_v2 \
     --do_train \
     --do_eval \
-    --per_device_train_batch_size 12 \
+    --per_device_train_batch_size $BATCH_SIZE \
     --learning_rate 3e-5 \
     --num_train_epochs 2 \
     --max_seq_length 384 \

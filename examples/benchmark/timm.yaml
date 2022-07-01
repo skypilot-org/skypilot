@@ -1,7 +1,6 @@
 name: resnet50-randaug
 
 resources:
-  cloud: aws
   candidates:
   - {accelerators: T4:4}
   - {accelerators: V100:4}

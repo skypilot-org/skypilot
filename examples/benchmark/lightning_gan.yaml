@@ -1,7 +1,6 @@
 name: mnist-gan
 
 resources:
-  cloud: aws
   candidates:
   - {accelerators: T4}
   - {accelerators: V100}

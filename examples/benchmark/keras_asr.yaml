@@ -1,7 +1,6 @@
 name: ljspeech-asr
 
 resources:
-  cloud: aws
   candidates:
   - {accelerators: T4}
   - {accelerators: V100}
