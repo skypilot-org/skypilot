@@ -2609,8 +2609,10 @@ def benchmark_launch(
 
     # Configs that are only accepted by the CLI.
     commandline_args = {}
-    if idle_minutes_to_autostop is not None:
-        commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
+    # Set the default idle minutes to autostop as 0.
+    if idle_minutes_to_autostop is None:
+        idle_minutes_to_autostop = 0
+    commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
     if len(env) > 0:
         commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
 
