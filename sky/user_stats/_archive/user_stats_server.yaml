@@ -1,5 +1,0 @@
-resources:
-  cloud: aws
-
-setup: |
-  docker pull prom/pushgateway
