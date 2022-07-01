@@ -10,6 +10,7 @@ _run_id = None
 
 
 def _get_logging_run_id():
+    """Returns a unique run id for this logging."""
     global _run_id
     if _run_id is None:
         _run_id = str(uuid.uuid4())
@@ -17,6 +18,7 @@ def _get_logging_run_id():
 
 
 def _get_logging_user_hash():
+    """Returns a unique user-machine specific hash as a user id."""
     hash_str = common_utils.user_and_hostname_hash()
     return hashlib.md5(hash_str.encode()).hexdigest()[:8]
 
