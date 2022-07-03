@@ -17,7 +17,14 @@ workdir: ~/Downloads/tpu
 # Accelerators here mean task resource specs, not total cluster resources.
 # In this case, Resnet training will occupy 2 V100 GPUs.
 resources:
-  # Optional field, as long as local cluster name is specified in `sky launch`.
+  # Optional field, as long as local cluster name is specified in
+  # `sky launch -c [CLUSTER_NAME]`.
+  # Two cases:
+  #   1) When `cloud:local` is specified, users must provide a local cluster
+  #      name, or Sky will raise an error.
+  #   2) When `cloud:local` is not specified, users must still provide a local
+  #      cluster name in order to run on a local cluster. Any other cluster
+  #      name will automaticlaly run on public clouds (AWS, GCP, Azure).
   cloud: local
   accelerators: V100:2
 

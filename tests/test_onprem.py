@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import List, Optional, Tuple, NamedTuple
 
 import colorama
@@ -10,6 +11,7 @@ import pytest
 import yaml
 
 from sky import cli
+from sky import exceptions
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 
@@ -155,7 +157,7 @@ class TestOnprem:
         ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
         runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
 
-        # Removing /tmp/ray and ~/.sky to reset jobs id to index 0
+        # Removing /tmp/ray and ~/.sky to reset jobs id to index 0.
         rc = runner.run(f'sudo rm -rf /tmp/ray; sudo rm -rf /home/test/.sky',
                         stream_logs=False)
 
@@ -166,7 +168,9 @@ class TestOnprem:
         with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
             yaml.dump(admin_cluster_config, f)
             file_path = f.name
-            # Must tear down local cluster in ~/.sky.
+            # Must tear down local cluster in ~/.sky. Running `sky down`
+            # removes the local cluster from `sky status` and terminates
+            # runnng jobs.
             subprocess.check_output(
                 f'sky down -y -p {cluster_name}; sky admin deploy {file_path}',
                 shell=True)
@@ -182,7 +186,7 @@ class TestOnprem:
                 f'sky admin deploy {file_path}',
             ])
             run_one_test(test)
-
+        # Cleaning up artifacts created from the test.
         subprocess.check_output(f'rm -rf ~/.sky/local/{name}.yml', shell=True)
 
     def test_onprem_inline(self, local_cluster_name, admin_setup,
@@ -198,6 +202,7 @@ class TestOnprem:
                 f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
                 f'sky logs {name} 2 --status',
             ],
+            # Cleaning up artifacts created from the test.
             f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
         )
         run_one_test(test)
@@ -208,7 +213,13 @@ class TestOnprem:
         name = local_cluster_name
         yaml_dict = {
             'setup': 'echo "Running setup"',
-            'run': 'set -x\necho $(whoami)\nrm -rf /\npkill -f ray\nsudo pkill -f ray\nexit 0\n'
+            'run': textwrap.dedent("""\
+                    set -e
+                    echo $(whoami)
+                    pkill -f ray
+                    echo NODE ID: $SKY_NODE_RANK
+                    echo NODE IPS: "$SKY_NODE_IPS"
+                    exit 0""")
         }
 
         with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -222,6 +233,7 @@ class TestOnprem:
                     f'sky exec {name} {file_path}',
                     f'sky logs {name} 2 --status',
                 ],
+                # Cleaning up artifacts created from the test.
                 f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
             )
             run_one_test(test)
@@ -243,8 +255,9 @@ class TestOnprem:
                 f'sky exec {name} -d -- "echo hi"',
                 f'sky cancel {name} 5',
                 f'sky logs {name} 1',
-                f'sky queue {name}',
+                f'sky queue {name} | grep CANCELLED',
             ],
+            # Cleaning up artifacts created from the test.
             f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
         )
         run_one_test(test)
@@ -258,9 +271,16 @@ class TestOnprem:
         cli_runner = cli_testing.CliRunner()
         # Setup the cluster handle and get cluster resources for `sky status`
         cli_runner.invoke(cli.launch, ['-c', name, '--', ''])
-        result = cli_runner.invoke(cli.launch,
-                                   ['-c', name, '--gpus', 'V100:256', '--', ''])
-        assert 'sky.exceptions.ResourcesMismatchError' in str(
-            type(result.exception))
+
+        def _test_overspecify_gpus(cluster_name):
+            result = cli_runner.invoke(
+                cli.launch,
+                ['-c', cluster_name, '--gpus', 'V100:256', '--', ''])
+            assert 'sky.exceptions.ResourcesMismatchError' not in str(
+                type(result.exception))
+
+        with pytest.raises(AssertionError) as e:
+            _test_overspecify_gpus(name)
+        # Cleaning up artifacts created from the test.
         subprocess.check_output(
             f'sky down -p -y {name}; rm -f ~/.sky/local/{name}.yml', shell=True)

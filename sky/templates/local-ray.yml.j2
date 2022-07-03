@@ -14,6 +14,7 @@ auth:
   ssh_private_key: {{ssh_private_key}}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
+# (Ray Autoscaler Bug) `file_mounts` only mounts on head, not worker nodes.
 file_mounts: {
   "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
   "{{sky_remote_path}}": "{{sky_local_path}}",
@@ -23,7 +24,7 @@ file_mounts: {
 }
 
 # List of shell commands to run to set up nodes.
-# (Ray Autoscaler Bug) This will run only on head...
+# (Ray Autoscaler Bug) `setup_commands` only runs on head, not on worker nodes.
 setup_commands:
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
