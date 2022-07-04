@@ -24,7 +24,7 @@ resources:
   #      name, or Sky will raise an error.
   #   2) When `cloud:local` is not specified, users must still provide a local
   #      cluster name in order to run on a local cluster. Any other cluster
-  #      name will automaticlaly run on public clouds (AWS, GCP, Azure).
+  #      name will automatically run on public clouds (AWS, GCP, Azure).
   cloud: local
   accelerators: V100:2
 
