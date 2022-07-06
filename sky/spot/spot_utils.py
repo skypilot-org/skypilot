@@ -11,6 +11,7 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -54,7 +55,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         logger.info('=== Checking the job status... ===')
         status = backend.get_job_status(handle, stream_logs=False)
         logger.info(f'Job status: {status}')
-    except SystemExit:
+    except exceptions.CommandError:
         logger.info('Failed to connect to the cluster.')
     logger.info('=' * 34)
     return status
