@@ -132,7 +132,8 @@ def show_local_status_table():
             for idx, resource in enumerate(local_cluster_resources):
                 if not bool(resource):
                     local_cluster_resources[idx] = None
-            resources_str = (f'{local_cluster_resources}')
+            resources_str = '[{}]'.format(', '.join(
+                map(str, local_cluster_resources)))
         command_str = cluster_status['last_use']
         cluster_name = handle.cluster_name
         row = [

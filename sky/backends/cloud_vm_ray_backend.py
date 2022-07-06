@@ -907,11 +907,7 @@ class RetryingVmProvisioner(object):
                     region=region.name)
                 config_dict['launched_nodes'] = num_nodes
                 plural = '' if num_nodes == 1 else 's'
-                if isinstance(to_provision.cloud, clouds.Local):
-                    logger.info(
-                        f'{fore.GREEN}Successfully launched Sky services on '
-                        f'local cluster.{style.RESET_ALL}')
-                else:
+                if not isinstance(to_provision.cloud, clouds.Local):
                     logger.info(f'{fore.GREEN}Successfully provisioned or found'
                                 f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
@@ -1051,7 +1047,7 @@ class RetryingVmProvisioner(object):
 
         provision_str = 'Successfully provisioned or found existing head VM.'
         if isinstance(to_provision_cloud, clouds.Local):
-            provision_str = 'Successfully launched Sky services on head node.'
+            provision_str = 'Successfully setup Sky on head node.'
 
         logger.info(f'{style.BRIGHT}{provision_str} '
                     f'Waiting for workers.{style.RESET_ALL}')
