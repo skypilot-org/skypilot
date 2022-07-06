@@ -82,14 +82,13 @@ def show_status_table(show_all: bool, refresh: bool):
 def show_local_status_table():
     """Lists all local clusters.
 
-    Lists both uninitialized and initialized local clusters.
-    Uninitialized local clusters are clusters that have their cluster configs
-    in ~/.sky/local. Sky does not know if the cluster is valid yet and does not
-    know what resources the cluster has. Hence, this method will return blank
-    values for such clusters.
-    Initialized local clusters are created using `sky launch`.
-    Sky understands what types of resources are on the nodes and has ran at
-    least one job on the cluster.
+    Lists both uninitialized and initialized local clusters. Uninitialized
+    local clusters are clusters that have their cluster configs in
+    ~/.sky/local. Sky does not know if the cluster is valid yet and does not
+    know what resources the cluster has. Hence, this func will return blank
+    values for such clusters. Initialized local clusters are created using
+    `sky launch`. Sky understands what types of resources are on the nodes and
+    has ran at least one job on the cluster.
     """
     clusters_status = backend_utils.get_clusters(
         include_reserved=False,

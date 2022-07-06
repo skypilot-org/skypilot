@@ -734,7 +734,7 @@ def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
         SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
     if os.path.isfile(local_file):
         return read_yaml(local_file)
-    return None
+    raise ValueError(f'Cluster config {local_file} not found.')
 
 
 def run_command_and_handle_ssh_failure(
