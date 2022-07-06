@@ -353,6 +353,16 @@ class Resources:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Local/On-prem mode does not support spot '
                                      'instances.')
+            local_region = clouds.Local.DEFAULT_INSTANCE_TYPE
+            if self._instance_type and self._instance_type != local_region:
+                raise ValueError(
+                    'Local/On-prem mode does not support instance type:'
+                    f' {self._instance_type}.')
+            if self._image_id:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Local/On-prem mode does not support custom '
+                        'images.')
 
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
