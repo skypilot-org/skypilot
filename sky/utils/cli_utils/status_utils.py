@@ -90,6 +90,7 @@ def show_local_status_table():
     `sky launch`. Sky understands what types of resources are on the nodes and
     has ran at least one job on the cluster.
     """
+    all_local_clusters = backend_utils.list_local_clusters()
     clusters_status = backend_utils.get_clusters(
         include_reserved=False,
         refresh=False,
@@ -121,6 +122,11 @@ def show_local_status_table():
                     r.accelerators
                     for r in handle.local_handle['cluster_resources']
                 ]
+                # Replace with (no GPUs)
+                local_cluster_resources = [
+                    r if r is not None else '(no GPUs)'
+                    for r in local_cluster_resources
+                ]
             else:
                 local_cluster_resources = []
             for idx, resource in enumerate(local_cluster_resources):
@@ -143,7 +149,6 @@ def show_local_status_table():
         cluster_table.add_row(row)
 
     # Handling for uninitialized clusters.
-    all_local_clusters = backend_utils.list_local_clusters()
     for clus in all_local_clusters:
         if clus not in names:
             row = [

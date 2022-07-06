@@ -907,8 +907,13 @@ class RetryingVmProvisioner(object):
                     region=region.name)
                 config_dict['launched_nodes'] = num_nodes
                 plural = '' if num_nodes == 1 else 's'
-                logger.info(f'{fore.GREEN}Successfully provisioned or found'
-                            f' existing VM{plural}.{style.RESET_ALL}')
+                if isinstance(to_provision.cloud, clouds.Local):
+                    logger.info(
+                        f'{fore.GREEN}Successfully launched Sky services on '
+                        f'local cluster.{style.RESET_ALL}')
+                else:
+                    logger.info(f'{fore.GREEN}Successfully provisioned or found'
+                                f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
@@ -1010,11 +1015,11 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-
         # Special case handling for Local cloud (since there are no zones).
         if isinstance(to_provision_cloud, clouds.Local):
-            logger.info(
-                f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud}')
+            cluster_name = os.path.basename(cluster_config_file).split('.')[0]
+            logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
+                        f'{cluster_name!r}.')
         else:
             logger.info(
                 f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
@@ -1044,8 +1049,12 @@ class RetryingVmProvisioner(object):
         if returncode != 0:
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr
 
-        logger.info(f'{style.BRIGHT}Successfully provisioned or found'
-                    f' existing head VM. Waiting for workers.{style.RESET_ALL}')
+        provision_str = 'Successfully provisioned or found existing head VM.'
+        if isinstance(to_provision_cloud, clouds.Local):
+            provision_str = 'Successfully launched Sky services on head node.'
+
+        logger.info(f'{style.BRIGHT}{provision_str} '
+                    f'Waiting for workers.{style.RESET_ALL}')
 
         # Special handling is needed for the local case. This is due to a
         # Ray autoscaler bug, where filemounting and setup does not work for
@@ -1352,8 +1361,12 @@ class CloudVmRayBackend(backends.Backend):
         # in the Resources object of first task that was ran on the cluster.
         # In the local cloud case, resources.accelerators means the task
         # resources.
+        mismatch_str = (f'To fix: specify a new cluster name, or down the '
+                        f'existing cluster first: sky down {cluster_name}')
         if hasattr(handle, 'local_handle') and handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
+            mismatch_str = ('To fix: specify resources that fit the local '
+                            'cluster\'s resources.')
         # requested_resources <= actual_resources.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(
@@ -1371,8 +1384,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'  Requested:\t{task.num_nodes}x {task_resources} \n'
                     f'  Existing:\t{handle.launched_nodes}x '
                     f'{handle.launched_resources}\n'
-                    f'To fix: specify a new cluster name, or down the '
-                    f'existing cluster first: sky down {cluster_name}')
+                    f'{mismatch_str}')
 
     @timeline.event
     def _check_existing_cluster(
@@ -1396,7 +1408,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name)['auth']['ssh_user']
             logger.info(
                 f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
-                f'"{cluster_name}" [Username: {ssh_user}].'
+                f'{cluster_name!r} [Username: {ssh_user}].'
                 f'{colorama.Style.RESET_ALL}\n'
                 'Run `sky status` to see existing local clusters.')
         else:
@@ -2330,8 +2342,13 @@ class CloudVmRayBackend(backends.Backend):
         colorama.init()
         fore = colorama.Fore
         style = colorama.Style
+        name = handle.cluster_name
+        stop_str = ('\nTo stop the cluster:'
+                    f'\t{backend_utils.BOLD}sky stop {name}'
+                    f'{backend_utils.RESET_BOLD}')
+        if isinstance(handle.launched_resources.cloud, clouds.Local):
+            stop_str = ''
         if not teardown:
-            name = handle.cluster_name
             logger.info(f'\n{fore.CYAN}Cluster name: '
                         f'{style.BRIGHT}{name}{style.RESET_ALL}'
                         '\nTo log into the head VM:\t'
@@ -2340,9 +2357,7 @@ class CloudVmRayBackend(backends.Backend):
                         '\nTo submit a job:'
                         f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
                         f'{backend_utils.RESET_BOLD}'
-                        '\nTo stop the cluster:'
-                        f'\t{backend_utils.BOLD}sky stop {name}'
-                        f'{backend_utils.RESET_BOLD}'
+                        f'{stop_str}'
                         '\nTo teardown the cluster:'
                         f'\t{backend_utils.BOLD}sky down {name}'
                         f'{backend_utils.RESET_BOLD}')
