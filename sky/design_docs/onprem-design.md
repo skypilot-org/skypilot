@@ -10,4 +10,4 @@
 
 ## Miscellaneous
 - `sky start/stop/autostop` is not supported.
-- `sky down` is supported. The command `sky down` does terminate the cluster, but it kills all user's jobs in the cluster and removes the local cluster from `sky status`.
+- `sky down` is supported. The command `sky down` does not terminate the cluster, but it kills the user's jobs in the cluster and removes the local cluster from `sky status`.

@@ -500,12 +500,6 @@ class Resources:
             return False
         if self._instance_type is not None or other.instance_type is not None:
             return self._instance_type == other.instance_type
-        # For GCP, when a accelerator type fails to launch, it should be blocked
-        # regardless of the count, since the larger number will fail either.
-        if self.accelerators is None:
-            if other.accelerators is None:
-                return True
-            return False
         return self.accelerators.keys() == other.accelerators.keys()
 
     def is_empty(self) -> bool:

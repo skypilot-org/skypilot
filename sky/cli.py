@@ -86,6 +86,11 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
 }
 
+# TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
+_UNINITIALIZED_CLUSTER_MESSAGE = (
+    'Found uninitialized local cluster {cluster}. '
+    'Run this command to initialize it locally: `sky launch -c {cluster} \'\'`')
+
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -94,9 +99,8 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
             if cluster in backend_utils.list_local_clusters():
-                click.echo(f'Local Cluster {cluster} is not initialized.\n'
-                           f'Run a task with `sky launch -c {cluster} ...` to '
-                           f'initialize the cluster.')
+                click.echo(
+                    _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
             else:
                 click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
@@ -105,7 +109,7 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
 
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
                            error_msg: str) -> bool:
-    """Raises error if the cluster name is not a local cluster."""
+    """Raises warning if the cluster name is a local cluster."""
     if cluster in local_clusters:
         click.echo(error_msg)
         return False
@@ -577,8 +581,8 @@ def _check_cluster_config(yaml_config: dict):
             auth['ssh_private_key'] == backend_utils.AUTH_PLACEHOLDER):
         raise ValueError(
             'Authentication into local cluster requires specifying '
-            'username and private key. '
-            'Please enter credentials in '
+            '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
+            'Please fill aforementioned fields in '
             f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
@@ -971,8 +975,7 @@ def exec(
     if handle is None:
         if cluster in backend_utils.list_local_clusters():
             raise click.BadParameter(
-                f'Found local cluster {cluster!r}. '
-                'Use `sky launch` to set up local cluster.')
+                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1132,8 +1135,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     if handle is None:
         if cluster in backend_utils.list_local_clusters():
             raise click.BadParameter(
-                f'Found local cluster {cluster!r}. '
-                'Use `sky launch` to set up local cluster.')
+                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster_name))
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1205,8 +1207,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     if handle is None:
         if cluster in backend_utils.list_local_clusters():
             raise click.BadParameter(
-                f'Found local cluster {cluster!r}. '
-                'Use `sky launch` to set up local cluster.')
+                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found'
                                  ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)

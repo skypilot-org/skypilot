@@ -632,7 +632,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
-                # Local IP Handling.
+                # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
@@ -679,14 +679,19 @@ def list_local_clusters():
     """Lists all local clusters."""
     local_dir = os.path.expanduser(os.path.dirname(SKY_USER_LOCAL_CONFIG_PATH))
     os.makedirs(local_dir, exist_ok=True)
-    local_cluster_paths = [os.path.join(local_dir, f) for f in \
-    os.listdir(local_dir) if os.path.isfile(os.path.join(local_dir, f))]
+    local_cluster_paths = [
+        os.path.join(local_dir, f) for f in os.listdir(local_dir)
+    ]
+    # Filter out folders.
+    local_cluster_paths = [
+        path for path in local_cluster_paths if os.path.isfile(path)
+    ]
 
     local_cluster_names = []
-    for clus in local_cluster_paths:
+    for path in local_cluster_paths:
         # TODO(mluo): Define a scheme for cluster config to check if YAML
         # schema is correct.
-        with open(clus, 'r') as f:
+        with open(path, 'r') as f:
             yaml_config = yaml.safe_load(f)
             user_config = yaml_config['auth']
             cluster_name = yaml_config['cluster']['name']
@@ -737,7 +742,6 @@ def run_command_and_handle_ssh_failure(
         command: str,
         failure_message: Optional[str] = None) -> str:
     """Runs command remote and returns the output with proper error handling."""
-
     rc, stdout, stderr = runner.run(command,
                                     require_outputs=True,
                                     stream_logs=False)
@@ -746,7 +750,7 @@ def run_command_and_handle_ssh_failure(
         raise ValueError(
             f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
             f'to {runner.ip} failed. This is most likely due to incorrect '
-            ' credentials. Check your credentials and try again.')
+            'credentials. Check your credentials and try again.')
     subprocess_utils.handle_returncode(rc,
                                        command,
                                        failure_message,
@@ -758,8 +762,8 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
     """Completes filemounting and setup on worker nodes.
 
     Syncs filemounts and runs setup on worker nodes for a local cluster.
-    This is a workaround for Ray Autoscaler bug
-    in which ray up does not perform these tasks for a local cluster
+    This is a workaround for a Ray Autoscaler bug where `ray up` does not
+    perform filemounting or setup for local cluster worker nodes.
     """
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)

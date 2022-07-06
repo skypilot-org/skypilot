@@ -9,6 +9,8 @@ from sky.backends import backend_utils
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
+_COMMAND_TRUNC_LENGTH = 25
+
 
 class StatusColumn:
     """One column of the displayed cluster table"""
@@ -47,7 +49,7 @@ def show_status_table(show_all: bool, refresh: bool):
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('COMMAND',
                      _get_command,
-                     trunc_length=25 if not show_all else 0),
+                     trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
         StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False)
     ]
 
@@ -126,7 +128,7 @@ def show_local_status_table():
                 if not bool(resource):
                     local_cluster_resources[idx] = None
             resources_str = (f'{local_cluster_resources}')
-
+        command_str = cluster_status['last_use']
         cluster_name = handle.cluster_name
         row = [
             # NAME
@@ -136,7 +138,7 @@ def show_local_status_table():
             # RESOURCES
             resources_str,
             # COMMAND
-            cluster_status['last_use'],
+            cli_utils.truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
         ]
         names.append(cluster_name)
         cluster_table.add_row(row)
