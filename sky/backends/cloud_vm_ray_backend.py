@@ -1264,8 +1264,12 @@ class CloudVmRayBackend(backends.Backend):
 
         def _generate_local_handle(self):
             self.local_handle = None
-            config = backend_utils.get_local_cluster_config(self.cluster_name)
-            if config is not None:
+            local_file = os.path.expanduser(
+                backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+                    self.cluster_name))
+            if os.path.isfile(local_file):
+                config = backend_utils.get_local_cluster_config(
+                    self.cluster_name)
                 self.local_handle = {}
                 self.launched_resources = resources_lib.Resources(
                     cloud=clouds.Local(), region='Local')

@@ -684,9 +684,9 @@ def list_local_clusters():
     ]
     # Filter out folders.
     local_cluster_paths = [
-        path for path in local_cluster_paths if os.path.isfile(path)
+        path for path in local_cluster_paths
+        if os.path.isfile(path) and path.endswith('.yml')
     ]
-
     local_cluster_names = []
     for path in local_cluster_paths:
         # TODO(mluo): Define a scheme for cluster config to check if YAML
@@ -703,6 +703,17 @@ def list_local_clusters():
                 'Please enter credentials in '
                 f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
         local_cluster_names.append(cluster_name)
+
+    # Remove clusters that are in global user state but are not in
+    # ~/.sky/local.
+    records = get_clusters(include_reserved=False,
+                           refresh=False,
+                           cloud_filter=CloudFilter.LOCAL)
+    saved_clusters = [r['name'] for r in records]
+    for cluster_name in saved_clusters:
+        if cluster_name not in local_cluster_names:
+            global_user_state.remove_cluster(cluster_name, terminate=True)
+
     return local_cluster_names
 
 
