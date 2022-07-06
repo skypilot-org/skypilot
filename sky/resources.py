@@ -103,7 +103,7 @@ class Resources:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
 
         if isinstance(self.cloud, clouds.Local):
-            return f'{self.cloud}({accelerators}{accelerator_args})'
+            return f'{self.cloud}({self.accelerators})'
 
         use_spot = ''
         if self.use_spot:

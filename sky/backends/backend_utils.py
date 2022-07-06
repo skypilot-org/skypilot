@@ -761,9 +761,9 @@ def run_command_and_handle_ssh_failure(
 def local_cloud_ray_postprocess(cluster_config_file: str):
     """Completes filemounting and setup on worker nodes.
 
-    Syncs filemounts and runs setup on worker nodes for a local cluster.
-    This is a workaround for a Ray Autoscaler bug where `ray up` does not
-    perform filemounting or setup for local cluster worker nodes.
+    Syncs filemounts and runs setup on worker nodes for a local cluster. This
+    is a workaround for a Ray Autoscaler bug where `ray up` does not perform
+    filemounting or setup for local cluster worker nodes.
     """
     with open(cluster_config_file, 'r') as f:
         config = yaml.safe_load(f)
