@@ -1,9 +1,15 @@
 """Miscellaneous Utils for Sky Data
 """
+import subprocess
 from typing import Any, Tuple
 import urllib.parse
 
 from sky.adaptors import aws, gcp
+from sky.backends import backend_utils
+from sky import exceptions
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
 
 Client = Any
 
@@ -69,3 +75,14 @@ def is_cloud_store_url(url):
     result = urllib.parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
+
+
+def download_bucket_template(name: str, sync_command: str):
+    try:
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Downloading [green]bucket {name}'):
+            subprocess.check_output(sync_command.split(' '))
+    except subprocess.CalledProcessError as e:
+        logger.error(e.output)
+        raise exceptions.StorageBucketDownloadError(
+            f'Failed to download bucket {name}.')

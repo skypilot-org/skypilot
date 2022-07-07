@@ -170,7 +170,7 @@ class AbstractStore:
         raise NotImplementedError
 
     def download(self, local_path: str) -> None:
-        """Downloads directory from remote bucket to the specified
+        """Downloads the remote bucket to the specified
         local_path
 
         Args:
@@ -604,13 +604,14 @@ class Storage(object):
         if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
             global_user_state.remove_storage(self.name)
+            return
 
-        if store_type:
+        if store_type is not None:
             store = self.stores[store_type]
             store.download(local_path)
         else:
             # Download from the first store encountered.
-            for _, store in self.stores.items():
+            for store in self.stores.values():
                 store.download(local_path)
                 break
 
@@ -856,22 +857,15 @@ class S3Store(AbstractStore):
         return bucket, True
 
     def download(self, local_path: str) -> None:
-        """Downloads directory from S3 bucket to the specified
+        """Downloads from S3 bucket to the specified
         local_path
 
         Args:
           local_path: Local path on user's device
         """
         local_path = os.path.expanduser(local_path)
-        try:
-            with backend_utils.safe_console_status(
-                    f'[bold cyan]Downloading [green]bucket {self.name}'):
-                sync_command = f'aws s3 sync s3://{self.name}/ {local_path}'
-                subprocess.check_output(sync_command.split(' '))
-        except subprocess.CalledProcessError as e:
-            logger.error(e.output)
-            raise exceptions.StorageBucketDownloadError(
-                f'Failed to download S3 bucket {self.name} to {local_path}.')
+        sync_command = f'aws s3 sync s3://{self.name}/ {local_path}'
+        data_utils.download_bucket_template(self.name, sync_command)
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -1140,22 +1134,15 @@ class GcsStore(AbstractStore):
                                                    mount_cmd)
 
     def download(self, local_path: str) -> None:
-        """Downloads directory from GS bucket to the specified
+        """Downloads from GS bucket to the specified
         local_path
 
         Args:
           local_path: Local path on user's device
         """
         local_path = os.path.expanduser(local_path)
-        try:
-            with backend_utils.safe_console_status(
-                    f'[bold cyan]Downloading [green]bucket {self.name}'):
-                sync_cmd = f'gsutil -m rsync -r gs://{self.name}/ {local_path}'
-                subprocess.check_output(sync_cmd.split(' '))
-        except subprocess.CalledProcessError as e:
-            logger.error(e.output)
-            raise exceptions.StorageBucketDownloadError(
-                f'Failed to download GCS bucket {self.name} to {local_path}.')
+        sync_command = f'gsutil -m rsync -r gs://{self.name}/ {local_path}'
+        data_utils.download_bucket_template(self.name, sync_command)
 
     def download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
