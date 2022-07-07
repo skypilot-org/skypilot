@@ -517,7 +517,7 @@ def test_spot_recovery():
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
             'sleep 30',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|RUNNING\|STARTING"',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
             'sleep 30',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|STARTING"',
         ],
