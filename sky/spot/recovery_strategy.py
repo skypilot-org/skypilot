@@ -77,7 +77,7 @@ class StrategyExecutor:
                            cluster_name=self.cluster_name,
                            detach_run=True)
                 logger.info('Spot cluster launched.')
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
                 logger.info('Failed to launch the spot cluster.')
