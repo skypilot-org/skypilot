@@ -25,6 +25,7 @@ class Backend:
         def get_cluster_name(self) -> str:
             raise NotImplementedError
 
+    # --- APIs ---
     def check_resources_fit_cluster(self, handle: ResourceHandle,
                                     task: 'task_lib.Task') -> None:
         """Check whether resources of the task are satisfied by cluster."""
@@ -40,15 +41,6 @@ class Backend:
                   retry_until_up: bool = False) -> ResourceHandle:
         return self._provision(task, to_provision, dryrun, stream_logs,
                                cluster_name, retry_until_up)
-
-    def _provision(self,
-                   task: 'task_lib.Task',
-                   to_provision: Optional['resources.Resources'],
-                   dryrun: bool,
-                   stream_logs: bool,
-                   cluster_name: Optional[str] = None,
-                   retry_until_up: bool = False) -> ResourceHandle:
-        raise NotImplementedError
 
     @timeline.event
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -96,6 +88,15 @@ class Backend:
         pass
 
     # --- Implementations of the APIs ---
+    def _provision(self,
+                   task: 'task_lib.Task',
+                   to_provision: Optional['resources.Resources'],
+                   dryrun: bool,
+                   stream_logs: bool,
+                   cluster_name: Optional[str] = None,
+                   retry_until_up: bool = False) -> ResourceHandle:
+        raise NotImplementedError
+
     def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         raise NotImplementedError
 
