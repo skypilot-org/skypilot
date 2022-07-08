@@ -72,10 +72,9 @@ class Event:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end()
 
-    @staticmethod
-    def decorator(name_or_fn: Union[str, Callable],
+def event(name_or_fn: Union[str, Callable],
                   message: Optional[str] = None):
-        return common_utils.make_decorator(Event, name_or_fn, message=message)
+    return common_utils.make_decorator(Event, name_or_fn, message=message)
 
 
 class FileLockEvent:

@@ -2096,7 +2096,7 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@timeline.Event.decorator
+@timeline.event
 def spot_launch(
     entrypoint: str,
     name: Optional[str],
