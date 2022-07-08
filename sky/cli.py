@@ -595,6 +595,10 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
     if yaml_config is not None and yaml_config.get('resources'):
         yaml_cloud = yaml_config['resources'].get('cloud')
 
+    # CLI should overwrite YAML specs.
+    if cloud is not None:
+        yaml_cloud = None
+
     if cluster_name in backend_utils.list_local_clusters():
         if cloud and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '

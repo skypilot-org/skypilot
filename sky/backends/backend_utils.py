@@ -806,6 +806,8 @@ def local_cloud_ray_postprocess(cluster_config_file: str):
                     runner,
                     mkdir_dst,
                     failure_message=f'Failed to run {mkdir_dst} on remote.')
+                if os.path.isdir(src):
+                    src = f'{src}/'
                 runner.rsync_up(source=src, target=dst, stream_logs=False)
 
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
