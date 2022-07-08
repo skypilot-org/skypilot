@@ -507,18 +507,18 @@ def test_spot_recovery():
     test = Test(
         'managed-spot-recovery',
         [
-            f'sky spot launch --region {region} -n {name} examples/managed_spot.yaml -y -d',
-            'sleep 30',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|STARTING"',
+            f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
+            'sleep 120',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             f'aws ec2 terminate-instances --region {region} --instance-ids $('
             f'aws ec2 describe-instances --region {region} '
             f'--filters Name=tag:ray-cluster-name,Values={name}* '
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
-            'sleep 30',
+            'sleep 40',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
-            'sleep 30',
+            'sleep 40',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|STARTING"',
         ],
         f'sky spot cancel -y -n {name}',
