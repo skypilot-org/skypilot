@@ -518,8 +518,8 @@ def test_spot_recovery():
             '--output text)',
             'sleep 40',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
-            'sleep 40',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|STARTING"',
+            'sleep 200',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
         ],
         f'sky spot cancel -y -n {name}',
     )
