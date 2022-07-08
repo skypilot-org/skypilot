@@ -508,7 +508,7 @@ def test_spot_recovery():
         'managed-spot-recovery',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
-            'sleep 120',
+            'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             f'aws ec2 terminate-instances --region {region} --instance-ids $('
