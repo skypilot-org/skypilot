@@ -1644,7 +1644,6 @@ class CloudVmRayBackend(backends.Backend):
             subprocess_utils.run_in_parallel(_symlink_node, runners)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
-        self._execute_storage_mounts(handle, storage_mounts)
 
         # ===============================================================
         # Step 2: Executes storage mounts: installing mounting tools and
