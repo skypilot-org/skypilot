@@ -61,20 +61,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
-from sky.user_stats import usage_logging
-
-_PRIVACY_POLICY_PATH = os.path.expanduser('~/.sky/privacy_policy')
-
-# An indicator for PRIVACY_POLICY has already been shown.
-if not os.path.exists(_PRIVACY_POLICY_PATH):
-    with open(_PRIVACY_POLICY_PATH, 'x'):
-        click.secho(
-            'Sky collects usage data to improve our services. '
-            'User-input setup and run commands are omitted from '
-            'usage to ensure privacy. '
-            'Usage logging can also be disabled by setting '
-            'environment variable SKY_DISABLE_USAGE_COLLECTION=1.',
-            fg='yellow')
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
@@ -577,8 +564,7 @@ def _make_dag_from_entrypoint_with_overrides(
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            usage_logging.send_yaml(entrypoint,
-                                    usage_logging.MessageType.TASK_YAML)
+            usage_lib.send_yaml(entrypoint, usage_lib.MessageType.TASK_YAML)
             task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
@@ -637,8 +623,8 @@ def _make_dag_from_entrypoint_with_overrides(
         if name is not None:
             task.name = name
         task.set_envs(env)
-        usage_logging.send_yaml(task.to_yaml_config(),
-                                usage_logging.MessageType.TASK_OVERRIDE_YAML)
+        usage_lib.send_yaml(task.to_yaml_config(),
+                            usage_lib.MessageType.TASK_OVERRIDE_YAML)
         # TODO(wei-lin): move this validation into Python API.
         if new_resources.accelerators is not None:
             acc, _ = list(new_resources.accelerators.items())[0]
@@ -691,7 +677,7 @@ class _DocumentedCodeCommand(click.Command):
 
 @click.group(cls=_NaturalOrderGroup)
 def cli():
-    usage_logging.send_cli_cmd()
+    usage_lib.send_cli_cmd()
     pass
 
 
@@ -752,7 +738,7 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@usage_logging.send_exception('launch')
+@usage_lib.send_exception
 def launch(
     entrypoint: str,
     cluster: Optional[str],
@@ -830,7 +816,7 @@ def launch(
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
 @_add_click_options(_TASK_OPTIONS)
-@usage_logging.send_exception('exec')
+@usage_lib.send_exception
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -940,7 +926,7 @@ def exec(
               is_flag=True,
               required=False,
               help='Query cluster status from the cloud provider.')
-@usage_logging.send_exception('status')
+@usage_lib.send_exception
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
@@ -979,6 +965,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
               required=False,
               help='Show only pending/running jobs\' information.')
 @click.argument('clusters', required=False, type=str, nargs=-1)
+@usage_lib.send_exception
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
@@ -1053,6 +1040,7 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
 @click.argument('cluster', required=True, type=str)
 @click.argument('job_id', required=False, type=str)
 # TODO(zhwu): support logs by job name
+@usage_lib.send_exception
 def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
 
@@ -1117,6 +1105,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
               required=False,
               help='Cancel all jobs on the specified cluster.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
+@usage_lib.send_exception
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
     if len(jobs) == 0 and not all:
@@ -1170,7 +1159,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@usage_logging.send_exception('stop')
+@usage_lib.send_exception
 def stop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1234,6 +1223,7 @@ def stop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.send_exception
 def autostop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1297,7 +1287,7 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if sky fails to start the cluster due to unavailability errors.'))
-@usage_logging.send_exception('start')
+@usage_lib.send_exception
 def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
@@ -1409,7 +1399,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
               required=False,
               help='Ignore cloud provider errors (if any). '
               'Useful for cleaning up manually deleted cluster(s).')
-@usage_logging.send_exception('down')
+@usage_lib.send_exception
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1632,6 +1622,7 @@ def _terminate_or_stop_clusters(
 
 
 @_interactive_node_cli_command
+@usage_lib.send_exception
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
@@ -1702,6 +1693,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @_interactive_node_cli_command
+@usage_lib.send_exception
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
@@ -1767,6 +1759,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @_interactive_node_cli_command
+@usage_lib.send_exception
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
@@ -1834,6 +1827,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
+@usage_lib.send_exception
 def check():
     """Determine the set of clouds available to use.
 
@@ -1855,6 +1849,7 @@ def check():
               default=None,
               type=str,
               help='Cloud provider to query.')
+@usage_lib.send_exception
 def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
@@ -1965,6 +1960,7 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@usage_lib.send_exception
 def storage_ls():
     """List storage objects created."""
     storage_stat = global_user_state.get_storage()
@@ -2004,6 +2000,7 @@ def storage_ls():
               required=False,
               help='Delete all storage objects.')
 @click.argument('name', required=False, type=str, nargs=-1)
+@usage_lib.send_exception
 def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
@@ -2097,6 +2094,7 @@ def spot():
               required=False,
               help='Skip confirmation prompt.')
 @timeline.event
+@usage_lib.send_exception
 def spot_launch(
     entrypoint: str,
     name: Optional[str],
@@ -2248,6 +2246,7 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@usage_lib.send_exception
 # pylint: disable=redefined-builtin
 def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs.
@@ -2328,6 +2327,7 @@ def spot_status(all: bool, refresh: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.send_exception
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed spot jobs.
@@ -2400,6 +2400,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               type=str,
               help='Managed spot job name.')
 @click.argument('job_id', required=False, type=int)
+@usage_lib.send_exception
 def spot_logs(name: Optional[str], job_id: Optional[int]):
     """Tail the log of a managed spot job."""
     # TODO(zhwu): Automatically restart the spot controller

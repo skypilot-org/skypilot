@@ -47,7 +47,7 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
-from sky.user_stats import usage_logging
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -622,7 +622,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
-    usage_logging.send_yaml(yaml_path, usage_logging.MessageType.RAY_YAML)
+    usage_lib.send_yaml(yaml_path, usage_lib.MessageType.RAY_YAML)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):

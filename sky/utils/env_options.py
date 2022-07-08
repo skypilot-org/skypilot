@@ -9,6 +9,6 @@ def _get_bool_env_var(env_var_name):
 
 IS_DEVELOPPING = _get_bool_env_var('SKY_DEV')
 
-DISABLE_LOGGING = _get_bool_env_var('SKY_DISABLE_STATS_COLLECTION')
+DISABLE_LOGGING = _get_bool_env_var('SKY_DISABLE_USAGE_COLLECTION')
 
 MINIMIZE_LOGGING = _get_bool_env_var('SKY_MINIMIZE_LOGGING')

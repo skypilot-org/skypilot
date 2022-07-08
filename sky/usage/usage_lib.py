@@ -1,9 +1,11 @@
 """Logging events to Grafana Loki"""
 
+import click
 import contextlib
 import datetime
 import enum
 import json
+import os
 import time
 import traceback
 from typing import Dict, Union
@@ -13,12 +15,20 @@ import requests
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.user_stats import utils
+from sky.usage import usage_constants
+from sky.usage import utils
 
 logger = sky_logging.init_logger(__name__)
 
-_LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
-log_timestamp = None
+# An indicator for PRIVACY_POLICY has already been shown.
+privacy_policy_indicator = os.path.expanduser(
+    usage_constants.PRIVACY_POLICY_PATH)
+if not env_options.DISABLE_LOGGING:
+    try:
+        with open(privacy_policy_indicator, 'x'):
+            click.secho(usage_constants.USAGE_POLICY_MESSAGE, fg='yellow')
+    except FileExistsError:
+        pass
 
 
 class MessageType(enum.Enum):
@@ -41,10 +51,7 @@ def _send_message(msg_type: MessageType,
                   custom_labels: Dict[str, str] = None):
     if env_options.DISABLE_LOGGING:
         return
-    global log_timestamp
-    if log_timestamp is None:
-        log_timestamp = datetime.datetime.now(
-            datetime.timezone.utc).isoformat('T')
+    log_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat('T')
 
     if custom_labels is None:
         custom_labels = dict()
@@ -67,7 +74,9 @@ def _send_message(msg_type: MessageType,
         }]
     }
     payload = json.dumps(payload)
-    response = requests.post(_LOG_URL, data=payload, headers=headers)
+    response = requests.post(usage_constants.LOG_URL,
+                             data=payload,
+                             headers=headers)
     if response.status_code != 204:
         logger.debug(f'Grafana Loki failed with response: {response.text}')
 
