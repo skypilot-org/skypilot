@@ -80,7 +80,8 @@ class StrategyExecutor:
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
-                logger.info(f'Failed to launch the spot cluster with error: {e}')
+                logger.info(
+                    f'Failed to launch the spot cluster with error: {e}')
 
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
                 self.cluster_name, force_refresh=True)
