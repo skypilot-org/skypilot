@@ -77,10 +77,11 @@ class StrategyExecutor:
                            cluster_name=self.cluster_name,
                            detach_run=True)
                 logger.info('Spot cluster launched.')
-            except SystemExit:
+            except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
-                logger.info('Failed to launch the spot cluster.')
+                logger.info(
+                    f'Failed to launch the spot cluster with error: {e}')
 
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
                 self.cluster_name, force_refresh=True)
@@ -149,7 +150,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             self.cluster_name)
         try:
             self.backend.cancel_jobs(handle, jobs=None)
-        except SystemExit:
+        except exceptions.CommandError:
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
             logger.info('Ignoring the job cancellation failure; the spot '
