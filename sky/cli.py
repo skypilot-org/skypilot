@@ -595,22 +595,18 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
     if yaml_config is not None and yaml_config.get('resources'):
         yaml_cloud = yaml_config['resources'].get('cloud')
 
-    # CLI should overwrite YAML specs.
-    if cloud is not None:
-        yaml_cloud = None
-
     if cluster_name in backend_utils.list_local_clusters():
-        if cloud and cloud != 'local':
+        if cloud is not None and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
-        elif yaml_cloud and yaml_cloud != 'local':
+        if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
             raise ValueError(
                 f'Detected Local cluster {cluster_name}. Must specify '
                 '`cloud: local` or no cloud in YAML.')
         return True
     else:
         if cloud == 'local' or yaml_cloud == 'local':
-            if cluster_name:
+            if cluster_name is not None:
                 raise click.UsageError(
                     f'Local cluster \'{cluster_name}\' does not exist. \n'
                     'See `sky status` for local cluster name(s).')
@@ -1086,6 +1082,14 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
                 fg='yellow')
             continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
+
+    for local_cluster in backend_utils.list_local_clusters():
+        if local_cluster not in clusters:
+            click.secho(
+                f'Local cluster {local_cluster} is uninitialized;'
+                ' skipped.',
+                fg='yellow')
+
     if unsupported_clusters:
         click.secho(
             f'Note: Job queues are not supported on clusters: '
