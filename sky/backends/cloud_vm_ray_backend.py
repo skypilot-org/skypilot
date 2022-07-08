@@ -166,7 +166,7 @@ class RayCodeGen:
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             # Connects to Ray cluster via Ray Client, requires redis password if an external user needs to access Ray cluster
-            ray.init(address = 'ray://localhost:10001', _redis_password='5241590000000000', namespace='__sky__{job_id}__', log_to_driver=True)
+            ray.init(address = 'ray://localhost:10001', namespace='__sky__{job_id}__', log_to_driver=True)
 
             run_fn = None
             futures = []"""),
@@ -626,7 +626,10 @@ class RetryingVmProvisioner(object):
 
         # For the local cloud case, there are no errors regarding provisioning.
         if isinstance(cloud, clouds.Local):
-            return None
+            raise RuntimeError(
+                'Local cluster provisioning should not fail, '
+                'as no actual provisioning of VMs takes place. This error '
+                'should never be reached.')
 
         assert False, f'Unknown cloud: {cloud}.'
 
@@ -656,7 +659,8 @@ class RetryingVmProvisioner(object):
                     elif cloud.is_same_cloud(sky.Local()):
                         # Only 1 region per local cloud ('Local region').
                         # No zones per local cloud.
-                        region = clouds.Local.LOCAL_REGION.name
+                        local_regions = clouds.Local.regions()
+                        region = local_regions[0].name
                         zones = None
                     else:
                         assert False, cloud
@@ -1013,7 +1017,7 @@ class RetryingVmProvisioner(object):
         zone_str = logging_info['zone_str']
         # Special case handling for Local cloud (since there are no zones).
         if isinstance(to_provision_cloud, clouds.Local):
-            cluster_name = os.path.basename(cluster_config_file).split('.')[0]
+            cluster_name = logging_info['cluster_name']
             logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
                         f'{cluster_name!r}.')
         else:
@@ -1023,8 +1027,7 @@ class RetryingVmProvisioner(object):
         start = time.time()
 
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
-        # cluster lock and cluster state. This also happens for public cloud
-        # clusters.
+        # cluster lock and cluster state.
         os.makedirs('/tmp/ray', exist_ok=True)
         returncode, stdout, stderr = ray_up()
         if (returncode != 0 and 'Processing file mounts' in stdout and
@@ -1047,17 +1050,18 @@ class RetryingVmProvisioner(object):
 
         provision_str = 'Successfully provisioned or found existing head VM.'
         if isinstance(to_provision_cloud, clouds.Local):
-            provision_str = 'Successfully setup Sky on head node.'
+            provision_str = 'Successfully connected to head node.'
 
         logger.info(f'{style.BRIGHT}{provision_str} '
                     f'Waiting for workers.{style.RESET_ALL}')
 
-        # Special handling is needed for the local case. This is due to a
-        # Ray autoscaler bug, where filemounting and setup does not work for
-        # the on-prem case in Ray. Hence, this method here replicates
-        # what the Ray autoscaler would do were it for public cloud.
+        # Special handling is needed for the local case. This is due to a Ray
+        # autoscaler bug, where filemounting and setup does not run on worker
+        # nodes. Hence, this method here replicates what the Ray autoscaler
+        # would do were it for public cloud.
         if isinstance(to_provision_cloud, clouds.Local):
-            backend_utils.local_cloud_ray_postprocess(cluster_config_file)
+            backend_utils.do_filemounts_and_setup_on_local_workers(
+                cluster_config_file)
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
@@ -1067,7 +1071,7 @@ class RetryingVmProvisioner(object):
             num_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
-            cloud=to_provision_cloud)
+            is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
             # ray up --no-restart again with upscaling_speed=0 after cluster is
@@ -1111,26 +1115,26 @@ class RetryingVmProvisioner(object):
             # At this state, an erroneous cluster may not have cached
             # handle.head_ip (global_user_state.add_or_update_cluster(...,
             # ready=True)).
-            stream_logs=False,
             use_cached_head_ip=False)
         if returncode == 0:
             return
-        else:
-            launched_resources = handle.launched_resources
-            # On-premise cluster should never reach this code. Ray cluster
-            # should already be running if the system admin has setup Ray.
-            if isinstance(launched_resources.cloud, clouds.Local):
-                raise ValueError('Ray status errored out on On-premise machine.'
-                                 'Check if ray==1.10.0 is installed correctly.')
-            backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
-            log_lib.run_with_log(
-                ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
-                log_abs_path,
-                stream_logs=False,
-                # Disable stdin to avoid ray outputs mess up the terminal with
-                # misaligned output when multithreading/multiprocessing is used.
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
-                stdin=subprocess.DEVNULL)
+        launched_resources = handle.launched_resources
+        # On-premise cluster should never reach this code. Ray cluster
+        # should already be running if the system admin has setup Ray.
+        if isinstance(launched_resources.cloud, clouds.Local):
+            raise ValueError(
+                'Ray status errored out on the head node of the local cluster. '
+                'Check if ray[default]==1.10.0 is installed or running '
+                'correctly.')
+        backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+        log_lib.run_with_log(
+            ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
+            log_abs_path,
+            stream_logs=False,
+            # Disable stdin to avoid ray outputs mess up the terminal with
+            # misaligned output when multithreading/multiprocessing is used.
+            # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
+            stdin=subprocess.DEVNULL)
 
     @timeline.event
     def provision_with_retries(
@@ -1251,7 +1255,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
-            self._generate_local_handle()
+            self._maybe_make_local_handle()
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1267,13 +1271,21 @@ class CloudVmRayBackend(backends.Backend):
         def get_cluster_name(self):
             return self.cluster_name
 
-        def _generate_local_handle(self):
+        def _maybe_make_local_handle(self):
             self.local_handle = None
             local_file = os.path.expanduser(
                 backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
                     self.cluster_name))
+            # Local cluster case requires several modifications:
+            #   1) Create local_handle to store local cluster IPs and
+            #      custom accelerators for each node.
+            #   2) Replace launched_resources to represent a generic local
+            #      node (without accelerator specifications). This will be
+            #      used later in subsequent `sky launch`.
+            #   3) Replace launched_nodes to represent the total nodes in the
+            #      local cluster, not total nodes that a task specifies.
             if os.path.isfile(local_file):
-                config = backend_utils.get_local_cluster_config(
+                config = backend_utils.get_local_cluster_config_or_error(
                     self.cluster_name)
                 self.local_handle = {}
                 self.launched_resources = resources_lib.Resources(
@@ -1306,7 +1318,8 @@ class CloudVmRayBackend(backends.Backend):
                 region = provider['region']
             elif cloud.is_same_cloud(sky.Local()):
                 # There is only 1 region for Local cluster, 'Local'.
-                region = clouds.Local.LOCAL_REGION.name
+                local_regions = clouds.Local.regions()
+                region = local_regions[0].name
 
             self.launched_resources = self.launched_resources.copy(
                 region=region)
@@ -1351,19 +1364,17 @@ class CloudVmRayBackend(backends.Backend):
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
 
-        # Special handling for local cloud case.
-        # ResourcesHandle is saved into ~/.sky/ when the first task is run on
-        # the cluster. For subsequent tasks,Resources.less_demanding_than takes
-        # in the Resources object of first task that was ran on the cluster.
-        # In the local cloud case, resources.accelerators means the task
-        # resources.
         mismatch_str = (f'To fix: specify a new cluster name, or down the '
                         f'existing cluster first: sky down {cluster_name}')
         if hasattr(handle, 'local_handle') and handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
-            mismatch_str = ('To fix: specify resources that fit the local '
-                            'cluster\'s resources.')
-        # requested_resources <= actual_resources.
+            mismatch_str = ('To fix: use accelerators/number of nodes that can '
+                            'be satisfied by the local cluster')
+        # Requested_resources <= actual_resources.
+        # Special handling for local cloud case, which assumes a cluster can
+        # be heterogeneous. Here, launched_resources is a list of custom
+        # accelerators per node, and Resources.less_demanding_than determines
+        # how many nodes satisfy task resource requirements.
         if not (task.num_nodes <= handle.launched_nodes and
                 task_resources.less_demanding_than(
                     launched_resources, requested_num_nodes=task.num_nodes)):
@@ -1392,21 +1403,18 @@ class CloudVmRayBackend(backends.Backend):
             self.check_resources_fit_cluster(handle, task)
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
-            num_nodes = handle.launched_nodes
             return RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, handle.launched_resources, num_nodes, True)
+                cluster_name, handle.launched_resources, handle.launched_nodes,
+                True)
         cloud = to_provision.cloud
-        # Alternative logging for local clusters, as opposed to public cloud
-        # clusters.
         if isinstance(cloud, clouds.Local):
             # The field ssh_user is specified in the cluster config file.
-            ssh_user = backend_utils.get_local_cluster_config(
+            ssh_user = backend_utils.get_local_cluster_config_or_error(
                 cluster_name)['auth']['ssh_user']
-            logger.info(
-                f'{colorama.Fore.CYAN}Connecting to existing local cluster: '
-                f'{cluster_name!r} [Username: {ssh_user}].'
-                f'{colorama.Style.RESET_ALL}\n'
-                'Run `sky status` to see existing local clusters.')
+            logger.info(f'{colorama.Fore.CYAN}Connecting to local cluster: '
+                        f'{cluster_name!r} [Username: {ssh_user}].'
+                        f'{colorama.Style.RESET_ALL}\n'
+                        'Run `sky status` to see existing clusters.')
         else:
             logger.info(
                 f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
@@ -2060,13 +2068,13 @@ class CloudVmRayBackend(backends.Backend):
         ssh_user = ssh_credentials[0]
         ray_job_id = f'{job_id}-{ssh_user}'
         if isinstance(handle.launched_resources.cloud, clouds.Local):
-            # Ray Multitenancy is unsupported
+            # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
-            # Temporary workaround - wrap the run command in a script, upload it
-            # to user's $HOME/sky_logs/, and execute it as the specified user.
+            # Temporary workaround - wrap the run command in a script, and
+            # execute it as the specified user.
             ray_command = (f'{cd} && {executable} -u {script_path} '
                            f'> {remote_log_path} 2>&1')
-            job_submit_cmd = self.gen_code_on_local_head(
+            job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
@@ -2103,7 +2111,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{backend_utils.BOLD}sky queue {name}'
                         f'{backend_utils.RESET_BOLD}')
 
-    def gen_code_on_local_head(
+    def _setup_and_create_job_cmd_on_local_head(
         self,
         handle: ResourceHandle,
         ray_command: str,
@@ -2116,7 +2124,7 @@ class CloudVmRayBackend(backends.Backend):
         runner = command_runner.SSHCommandRunner(handle.head_ip,
                                                  *ssh_credentials)
         remote_log_dir = self.log_dir
-        with tempfile.NamedTemporaryFile('w', prefix='sky_run_') as fp:
+        with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
             fp.write(ray_command)
             fp.flush()
             run_file = os.path.basename(fp.name)
@@ -2129,7 +2137,7 @@ class CloudVmRayBackend(backends.Backend):
         runner.run(f'mkdir -p {remote_log_dir}; chmod a+rwx {remote_run_file}',
                    stream_logs=False)
         job_submit_cmd = (
-            'ray job submit -v '
+            'ray job submit '
             f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
             f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
         return job_submit_cmd

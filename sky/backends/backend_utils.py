@@ -699,9 +699,13 @@ def list_local_clusters():
                                 user_config['ssh_private_key']):
             raise ValueError(
                 'Authentication into local cluster requires specifying '
-                'username and private key. '
-                'Please enter credentials in '
+                '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
+                'Please fill aforementioned fields in '
                 f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
+        if cluster_name in local_cluster_names:
+            raise ValueError(
+                f'Local cluster {cluster_name} already exists. '
+                'Make sure local cluster configs have different cluster names.')
         local_cluster_names.append(cluster_name)
 
     # Remove clusters that are in global user state but are not in
@@ -712,6 +716,8 @@ def list_local_clusters():
     saved_clusters = [r['name'] for r in records]
     for cluster_name in saved_clusters:
         if cluster_name not in local_cluster_names:
+            logger.warning(f'Removing local cluster {cluster_name} from '
+                           '`sky status`. No config found in ~/.sky/local.')
             global_user_state.remove_cluster(cluster_name, terminate=True)
 
     return local_cluster_names
@@ -719,7 +725,7 @@ def list_local_clusters():
 
 def get_local_ips(cluster_name: str) -> List[str]:
     """Returns IP addresses of the local cluster."""
-    config = get_local_cluster_config(cluster_name)
+    config = get_local_cluster_config_or_error(cluster_name)
     ips = config['cluster']['ips']
     if isinstance(ips, str):
         ips = [ips]
@@ -728,7 +734,7 @@ def get_local_ips(cluster_name: str) -> List[str]:
 
 def get_local_auth_config(cluster_name: str) -> List[str]:
     """Returns IP addresses of the local cluster."""
-    config = get_local_cluster_config(cluster_name)
+    config = get_local_cluster_config_or_error(cluster_name)
     return config['auth']
 
 
@@ -739,7 +745,7 @@ def get_job_owner(cluster_yaml: dict) -> str:
     return cluster_config['auth']['ssh_user']
 
 
-def get_local_cluster_config(cluster_name: str) -> Optional[Dict[str, Any]]:
+def get_local_cluster_config_or_error(cluster_name: str) -> Dict[str, Any]:
     """Gets the local cluster config in ~/.sky/local/."""
     local_file = os.path.expanduser(
         SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
@@ -769,7 +775,7 @@ def run_command_and_handle_ssh_failure(
     return stdout
 
 
-def local_cloud_ray_postprocess(cluster_config_file: str):
+def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
     """Completes filemounting and setup on worker nodes.
 
     Syncs filemounts and runs setup on worker nodes for a local cluster. This
@@ -1162,7 +1168,7 @@ def wait_until_ray_cluster_ready(
     cluster_config_file: str,
     num_nodes: int,
     log_path: str,
-    cloud: clouds.Cloud,
+    is_local_cloud: bool = False,
     nodes_launching_progress_timeout: Optional[int] = None,
 ) -> bool:
     """Returns whether the entire ray cluster is ready."""
@@ -1201,7 +1207,7 @@ def wait_until_ray_cluster_ready(
             # we poll for number of nodes launched instead of counting for
             # head and number of worker nodes separately (it is impossible
             # to distinguish between head and worker node for local case).
-            if isinstance(cloud, clouds.Local):
+            if is_local_cloud:
                 result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
                 # In the local case, ready_workers mean the total number
                 # of nodes launched, including head.

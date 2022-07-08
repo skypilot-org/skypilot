@@ -34,7 +34,7 @@ class Local(clouds.Cloud):
         provide their own credentials instead of Sky autogenerating
         cluster credentials.
     """
-    DEFAULT_INSTANCE_TYPE = 'on-prem'
+    _DEFAULT_INSTANCE_TYPE = 'on-prem'
     LOCAL_REGION = clouds.Region('Local')
     _regions: List[clouds.Region] = [LOCAL_REGION]
 
@@ -83,7 +83,7 @@ class Local(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls) -> str:
         # There is only "1" instance type for local cloud: on-prem
-        return Local.DEFAULT_INSTANCE_TYPE
+        return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod
     def get_accelerators_from_instance_type(

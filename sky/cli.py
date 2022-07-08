@@ -88,8 +88,8 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
 
 # TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
 _UNINITIALIZED_CLUSTER_MESSAGE = (
-    'Found uninitialized local cluster {cluster}. '
-    'Run this command to initialize it locally: `sky launch -c {cluster} \'\'`')
+    'Found uninitialized local cluster {cluster}. Run this '
+    'command to initialize it locally: `sky launch -c {cluster} -- \'\'`')
 
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:

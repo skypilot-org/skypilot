@@ -353,12 +353,14 @@ class Resources:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Local/On-prem mode does not support spot '
                                      'instances.')
-            local_region = clouds.Local.DEFAULT_INSTANCE_TYPE
-            if self._instance_type and self._instance_type != local_region:
-                raise ValueError(
-                    'Local/On-prem mode does not support instance type:'
-                    f' {self._instance_type}.')
-            if self._image_id:
+            local_instance = clouds.Local.get_default_instance_type()
+            if (self._instance_type is not None and
+                    self._instance_type != local_instance):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Local/On-prem mode does not support instance type:'
+                        f' {self._instance_type}.')
+            if self._image_id is not None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Local/On-prem mode does not support custom '
@@ -510,6 +512,7 @@ class Resources:
             return False
         if self._instance_type is not None or other.instance_type is not None:
             return self._instance_type == other.instance_type
+        # For GCP, when a accelerator type fails to launch, it should be blocked
         return self.accelerators.keys() == other.accelerators.keys()
 
     def is_empty(self) -> bool:
