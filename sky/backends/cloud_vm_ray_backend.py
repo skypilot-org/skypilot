@@ -1166,18 +1166,6 @@ class CloudVmRayBackend(backends.Backend):
 
     NAME = 'cloudvmray'
 
-    def __init__(self):
-        self.run_timestamp = backend_utils.get_run_timestamp()
-        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, self.run_timestamp)
-        # Do not make directories to avoid create folder for commands that
-        # do not need it (`sky status`, `sky logs` ...)
-        # os.makedirs(self.log_dir, exist_ok=True)
-
-        self._dag = None
-        self._optimize_target = None
-
-    # --- Implementation of Backend APIs ---
-
     class ResourceHandle(object):
         """A pickle-able tuple of:
 
@@ -1246,6 +1234,18 @@ class CloudVmRayBackend(backends.Backend):
 
             self.__dict__.update(state)
             self._update_cluster_region()
+
+    def __init__(self):
+        self.run_timestamp = backend_utils.get_run_timestamp()
+        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, self.run_timestamp)
+        # Do not make directories to avoid create folder for commands that
+        # do not need it (`sky status`, `sky logs` ...)
+        # os.makedirs(self.log_dir, exist_ok=True)
+
+        self._dag = None
+        self._optimize_target = None
+
+    # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
         self._dag = kwargs.pop('dag', self._dag)
@@ -1661,8 +1661,6 @@ class CloudVmRayBackend(backends.Backend):
 
         if not storage_mounts:
             return
-        fore = colorama.Fore
-        style = colorama.Style
         plural = 's' if len(storage_mounts) > 1 else ''
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
                     f'storage mount{plural}.{style.RESET_ALL}')
@@ -1670,10 +1668,6 @@ class CloudVmRayBackend(backends.Backend):
         ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                              handle.launched_nodes,
                                              handle=handle)
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():

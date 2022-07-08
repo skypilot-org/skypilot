@@ -78,6 +78,27 @@ class LocalDockerBackend(backends.Backend):
 
     NAME = 'localdocker'
 
+    class ResourceHandle(str):
+        """The name of the cluster/container prefixed with the handle prefix."""
+
+        def __new__(cls, s, **kw):
+            if s.startswith(_DOCKER_HANDLE_PREFIX):
+                prefixed_str = s
+            else:
+                prefixed_str = _DOCKER_HANDLE_PREFIX + s
+            return str.__new__(cls, prefixed_str, **kw)
+
+        def get_cluster_name(self):
+            return self.lstrip(_DOCKER_HANDLE_PREFIX)
+
+    # Define the Docker-in-Docker mount
+    _dind_mount = {
+        '/var/run/docker.sock': {
+            'bind': '/var/run/docker.sock',
+            'mode': 'rw'
+        }
+    }
+
     def __init__(self, use_gpu: Union[bool, str] = 'auto'):
         """
         Args:
@@ -96,19 +117,6 @@ class LocalDockerBackend(backends.Backend):
         self._update_state()
 
     # --- Implementation of Backend APIs ---
-
-    class ResourceHandle(str):
-        """The name of the cluster/container prefixed with the handle prefix."""
-
-        def __new__(cls, s, **kw):
-            if s.startswith(_DOCKER_HANDLE_PREFIX):
-                prefixed_str = s
-            else:
-                prefixed_str = _DOCKER_HANDLE_PREFIX + s
-            return str.__new__(cls, prefixed_str, **kw)
-
-        def get_cluster_name(self):
-            return self.lstrip(_DOCKER_HANDLE_PREFIX)
 
     def check_resources_fit_cluster(self, handle: ResourceHandle,
                                     task: 'task_lib.Task') -> None:
@@ -306,14 +314,6 @@ class LocalDockerBackend(backends.Backend):
         return True
 
     # --- Utilities ---
-
-    # Define the Docker-in-Docker mount
-    _dind_mount = {
-        '/var/run/docker.sock': {
-            'bind': '/var/run/docker.sock',
-            'mode': 'rw'
-        }
-    }
 
     def _update_state(self):
         """
