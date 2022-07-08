@@ -1,8 +1,8 @@
 """Logging events to Grafana Loki"""
 
+import contextlib
 import datetime
 import enum
-import functools
 import json
 import time
 import traceback
@@ -111,46 +111,40 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
     _send_message(yaml_type, message)
 
 
-def send_exception(name: str):
-    """Decorator to catch exceptions and upload to usage logging."""
+@contextlib.contextmanager
+def send_exception_context(name: str):
     if env_options.DISABLE_LOGGING:
-        return lambda func: func
+        yield
+        return
 
-    def _send_exception(func):
-
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                return func(*args, **kwargs)
-            except (Exception, SystemExit, KeyboardInterrupt):
-                trace = traceback.format_exc()
-                _send_message(MessageType.STACK_TRACE,
-                              trace,
-                              custom_labels={'name': name})
-                raise
-
-        return wrapper
-
-    return _send_exception
+    try:
+        yield
+    except (Exception, SystemExit, KeyboardInterrupt):
+        trace = traceback.format_exc()
+        _send_message(MessageType.STACK_TRACE,
+                      trace,
+                      custom_labels={'name': name})
+        raise
 
 
-def send_runtime(name: str):
-    """Decorator to log runtime of function."""
+def send_exception(name_or_fn: str):
+    return common_utils.make_decorator(send_exception_context, name_or_fn)
+
+
+@contextlib.contextmanager
+def send_runtime_context(name: str):
     if env_options.DISABLE_LOGGING:
-        return lambda func: func
+        yield
+        return
 
-    def _send_runtime(func):
+    try:
+        start = time.time()
+        yield
+    finally:
+        _send_message(MessageType.RUNTIME,
+                      f'{time.time() - start}',
+                      custom_labels={'name': name})
 
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            try:
-                start = time.time()
-                return func(*args, **kwargs)
-            finally:
-                _send_message(MessageType.RUNTIME,
-                              f'{time.time() - start}',
-                              custom_labels={'name': name})
 
-        return wrapper
-
-    return _send_runtime
+def send_runtime(name_or_fn: str):
+    return common_utils.make_decorator(send_runtime_context, name_or_fn)
