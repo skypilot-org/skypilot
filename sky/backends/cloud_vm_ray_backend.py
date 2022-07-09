@@ -165,7 +165,6 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
-            # Connects to Ray cluster via Ray Client, requires redis password if an external user needs to access Ray cluster
             ray.init(address = 'ray://localhost:10001', namespace='__sky__{job_id}__', log_to_driver=True)
 
             run_fn = None
