@@ -24,6 +24,7 @@ logger = sky_logging.init_logger(__name__)
 privacy_policy_indicator = os.path.expanduser(
     usage_constants.PRIVACY_POLICY_PATH)
 if not env_options.Options.DISABLE_LOGGING.get():
+    os.mkdir(os.path.dirname(privacy_policy_indicator), exist_ok=True)
     try:
         with open(privacy_policy_indicator, 'x'):
             click.secho(usage_constants.USAGE_POLICY_MESSAGE, fg='yellow')

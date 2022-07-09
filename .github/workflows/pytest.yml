@@ -51,4 +51,4 @@ jobs:
           pip install pytest
 
       - name: Run tests with pytest
-        run: SKY_DISABLE_STATS_COLLECTION=1 pytest ${{ matrix.test-path }}
+        run: SKY_DISABLE_USAGE_COLLECTION=1 pytest ${{ matrix.test-path }}
