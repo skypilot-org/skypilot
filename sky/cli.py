@@ -2517,22 +2517,21 @@ def benchmark_launch(
                                  f'run `sky bench delete {benchmark}`.')
 
     entrypoint = ' '.join(entrypoint)
-    if entrypoint:
-        is_yaml = _check_yaml(entrypoint)
-        if is_yaml:
-            # Treat entrypoint as a yaml.
-            click.secho('Benchmarking a task from YAML spec: ',
-                        fg='yellow',
-                        nl=False)
-        else:
-            # Treat entrypoint as a bash command.
-            click.secho('Benchmarking a task from command: ',
-                        fg='yellow',
-                        nl=False)
-        click.secho(entrypoint, bold=True)
+    if not entrypoint:
+        raise click.BadParameter('Please specify a task to benchmark.')
+
+    is_yaml = _check_yaml(entrypoint)
+    if is_yaml:
+        # Treat entrypoint as a yaml.
+        click.secho('Benchmarking a task from YAML spec: ',
+                    fg='yellow',
+                    nl=False)
     else:
-        entrypoint = None
-        is_yaml = False
+        # Treat entrypoint as a bash command.
+        click.secho('Benchmarking a task from command: ',
+                    fg='yellow',
+                    nl=False)
+    click.secho(entrypoint, bold=True)
 
     candidates = None
     if is_yaml:
