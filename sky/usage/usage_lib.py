@@ -107,7 +107,7 @@ def _send_message(msg_type: MessageType,
         logger.warning(f'Usage logging exception caught: {e}')
 
 
-def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
+def _clean_yaml(yaml_info: Dict[str, str]):
     """Remove sensitive information from user YAML."""
     cleaned_yaml_info = yaml_info.copy()
     for redact_type in ['setup', 'run', 'envs']:
@@ -119,8 +119,6 @@ def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
             cleaned_yaml_info[redact_type] = (
                 f'{len(lines)} lines {redact_type.upper()}'
                 ' redacted')
-
-    cleaned_yaml_info['__redacted_comment_lines'] = num_comment_lines
 
     return cleaned_yaml_info
 
@@ -141,7 +139,9 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
         yaml_info = common_utils.read_yaml(yaml_config_or_path)
-    yaml_info = _clean_yaml(yaml_info, len(comment_lines))
+
+    yaml_info = _clean_yaml(yaml_info)
+    yaml_info['__redacted_comment_lines'] = len(comment_lines)
     message = json.dumps(yaml_info)
     _send_message(yaml_type, message)
 
