@@ -2277,7 +2277,10 @@ def spot_status(all: bool, refresh: bool):
         stop_msg = 'To view the latest job table: sky spot status --refresh'
     controller_status, handle = _is_spot_controller_up(stop_msg)
 
-    if refresh and controller_status == global_user_state.ClusterStatus.STOPPED:
+    if (refresh and controller_status in [
+            global_user_state.ClusterStatus.STOPPED,
+            global_user_state.ClusterStatus.INIT
+    ]):
         click.secho('Restarting controller for latest status...', fg='yellow')
         handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
                                 idle_minutes_to_autostop=spot_lib.
