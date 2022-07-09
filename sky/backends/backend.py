@@ -3,6 +3,7 @@ import typing
 from typing import Dict, Optional
 
 from sky.utils import timeline
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -32,6 +33,7 @@ class Backend:
         raise NotImplementedError
 
     @timeline.event
+    @usage_lib.send_runtime('provision')
     def provision(self,
                   task: 'task_lib.Task',
                   to_provision: Optional['resources.Resources'],
@@ -43,10 +45,12 @@ class Backend:
                                cluster_name, retry_until_up)
 
     @timeline.event
+    @usage_lib.send_runtime('sync_workdir')
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         return self._sync_workdir(handle, workdir)
 
     @timeline.event
+    @usage_lib.send_runtime('sync_file_mounts')
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -56,6 +60,7 @@ class Backend:
         return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
 
     @timeline.event
+    @usage_lib.send_runtime('setup')
     def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
         return self._setup(handle, task)
 
@@ -63,6 +68,7 @@ class Backend:
         raise NotImplementedError
 
     @timeline.event
+    @usage_lib.send_runtime('execute')
     def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
                 detach_run: bool) -> None:
         return self._execute(handle, task, detach_run)
@@ -77,6 +83,7 @@ class Backend:
         return self._teardown_ephemeral_storage(task)
 
     @timeline.event
+    @usage_lib.send_runtime('teardown')
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
