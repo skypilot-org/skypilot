@@ -2001,8 +2001,8 @@ class CloudVmRayBackend(backends.Backend):
                 # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
                 stdin=subprocess.DEVNULL,
             )
-        except SystemExit as e:
-            returncode = e.code
+        except KeyboardInterrupt as e:
+            returncode = e.args[0]
         return returncode
 
     def tail_spot_logs(self,
