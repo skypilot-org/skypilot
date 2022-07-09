@@ -12,6 +12,8 @@ _DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 class SkyTransformersCallback(transformers.TrainerCallback):
     """SkyCallback for HuggingFace Transformers.
 
+    Refer to: https://huggingface.co/docs/transformers/main_classes/callback
+
     Example:
         ```python
         from sky_callback import SkyTransformersCallback

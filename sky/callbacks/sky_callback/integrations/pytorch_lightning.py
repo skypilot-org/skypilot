@@ -12,6 +12,8 @@ _DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 class SkyLightningCallback(pl.Callback):
     """SkyCallback for PyTorch Lightning.
 
+    Refer to: https://pytorch-lightning.readthedocs.io/en/latest/extensions/callbacks.html  # pylint: disable=line-too-long
+
     Example:
         ```python
         from sky_callback import SkyLightningCallback

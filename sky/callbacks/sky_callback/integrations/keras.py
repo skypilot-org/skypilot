@@ -13,6 +13,8 @@ _DISABLE_CALLBACK = utils.DISABLE_CALLBACK
 class SkyKerasCallback(keras.callbacks.Callback):
     """SkyCallback for Keras.
 
+    Refer to: https://keras.io/api/callbacks/
+
     Example:
         ```python
         from sky_callback import SkyKerasCallback
