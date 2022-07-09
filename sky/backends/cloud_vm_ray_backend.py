@@ -41,7 +41,6 @@ from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import dag
