@@ -40,14 +40,16 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_cluster_name():
+def _get_cluster_name(with_test_id: bool = True) -> str:
     """Returns a user-unique cluster name for each test_<name>().
 
     Must be called from each test_<name>().
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    return f'{test_name}-{_smoke_test_hash}-{test_id}'
+    if with_test_id:
+        return f'{test_name}-{_smoke_test_hash}-{test_id}'
+    return f'{test_name}-{_smoke_test_hash}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -209,7 +211,8 @@ def test_n_node_job_queue():
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
-    name = _get_cluster_name()  # Keep consistent with the py script.
+    name = _get_cluster_name(
+        with_test_id=False)  # Keep consistent with the py script.
     test = Test(
         'multi_echo',
         [
@@ -299,7 +302,8 @@ def test_multi_hostname():
 
 # ---------- Task: n=2 nodes with setups. ----------
 def test_distributed_tf():
-    name = _get_cluster_name()  # Keep consistent with the py script.
+    name = _get_cluster_name(
+        with_test_id=False)  # Keep consistent with the py script.
     test = Test(
         'resnet_distributed_tf_app',
         [
