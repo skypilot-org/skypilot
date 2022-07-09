@@ -76,7 +76,7 @@ class BenchmarkStatus(enum.Enum):
     # Job status: CANCELLED, FAILED.
     # TODO(woosuk): Add KILLED state to distinguish whether the benchmarking
     # job is killed by the user or by its own error.
-    STOPPED = 'STOPPED'
+    TERMINATED = 'TERMINATED'
 
     # Job status: SUCCEEDED.
     # Jobs terminated with zero exit code.
