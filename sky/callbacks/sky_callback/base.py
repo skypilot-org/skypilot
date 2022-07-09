@@ -49,6 +49,9 @@ class BaseCallback:
         self._worker = _AsyncSummaryWriter(log_dir, total_steps, warmup_steps,
                                            self._step_begins, self._step_ends)
         self._worker.start()
+
+        # When the main process exits, the exit handler will call stop(),
+        # which will wait for the worker thread to gracefully exit.
         # Refer to: https://superfastpython.com/stop-daemon-thread/
         atexit.register(self._worker.stop)
 
