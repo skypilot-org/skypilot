@@ -36,6 +36,7 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
@@ -1295,12 +1296,10 @@ class CloudVmRayBackend(backends.Backend):
                    to_provision: Optional['resources_lib.Resources'],
                    dryrun: bool,
                    stream_logs: bool,
-                   cluster_name: Optional[str] = None,
+                   cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # Try to launch the exiting cluster first
-        if cluster_name is None:
-            cluster_name = backend_utils.generate_cluster_name()
         backend_utils.check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
@@ -1318,6 +1317,7 @@ class CloudVmRayBackend(backends.Backend):
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
                         cluster_name, acquire_per_cluster_status_lock=False))
+            usage_lib.update_cluster_nodes(to_provision_config.num_nodes)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
             # TODO(suquark): once we have sky on PYPI, we should directly

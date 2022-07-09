@@ -11,7 +11,7 @@ from sky.utils import common_utils
 _run_id = None
 
 
-def _get_logging_run_id():
+def get_logging_run_id():
     """Returns a unique run id for this logging."""
     global _run_id
     if _run_id is None:
@@ -19,7 +19,7 @@ def _get_logging_run_id():
     return _run_id
 
 
-def _get_logging_user_hash():
+def get_logging_user_hash():
     """Returns a unique user-machine specific hash as a user id."""
     hash_str = common_utils.user_and_hostname_hash()
     return hashlib.md5(hash_str.encode()).hexdigest()[:8]
@@ -28,9 +28,9 @@ def _get_logging_user_hash():
 def get_base_labels():
     """Returns a dict of common base labels for logs."""
     labels = {
-        'user': _get_logging_user_hash(),
-        'run_id': _get_logging_run_id(),
+        'user': get_logging_user_hash(),
+        'run_id': get_logging_run_id(),
         'time': time.time(),
-        'schema_version': usage_constants.SCHEMA_VERSION
+        'schema_version': usage_constants.USAGE_MESSAGE_SCHEMA_VERSION
     }
     return labels

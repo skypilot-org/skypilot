@@ -24,6 +24,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.usage import usage_lib
 from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -191,6 +192,7 @@ def _execute(
 
 
 @timeline.event
+@usage_lib.entrypoint
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -222,6 +224,7 @@ def launch(
     )
 
 
+@usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,

@@ -1,14 +1,14 @@
 """Logging events to Grafana Loki"""
 
+import enum
 import click
 import contextlib
 import datetime
-import enum
 import json
 import os
 import time
 import traceback
-from typing import Dict, Union
+from typing import Any, Dict, List, Optional, Union
 
 import requests
 
@@ -24,22 +24,43 @@ logger = sky_logging.init_logger(__name__)
 privacy_policy_indicator = os.path.expanduser(
     usage_constants.PRIVACY_POLICY_PATH)
 if not env_options.Options.DISABLE_LOGGING.get():
-    os.mkdir(os.path.dirname(privacy_policy_indicator), exist_ok=True)
+    os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
     try:
         with open(privacy_policy_indicator, 'x'):
             click.secho(usage_constants.USAGE_POLICY_MESSAGE, fg='yellow')
     except FileExistsError:
         pass
 
-
 class MessageType(enum.Enum):
-    CLI_CMD = 'cli-cmd'
-    TASK_YAML = 'task-yaml'
-    TASK_OVERRIDE_YAML = 'task-override-yaml'
-    RAY_YAML = 'ray-yaml'
-    STACK_TRACE = 'stack-trace'
-    RUNTIME = 'runtime'
-    # STACK_TRACE and RUNTIME has custom label: 'name'
+    """Types for messages to be sent to Loki."""
+    USAGE = 'usage'
+    # TODO(zhwu): Add more types, e.g., cluster_lifecycle.
+
+
+class UsageMessageToReport:
+    """Message to be reported to Grafana Loki for each run"""
+    def __init__(self) -> None:
+        self.schema_version: str = usage_constants.USAGE_MESSAGE_SCHEMA_VERSION
+        self.user: str = utils.get_logging_user_hash()
+        self.run_id: str = utils.get_logging_run_id()
+        self.time: str = str(time.time())
+        self.cmd: str = common_utils.get_pretty_entry_point()
+        self.entrypoint: Optional[str] = None
+        self.cluster_names: Optional[List[str]] = []
+        self.cluster_nodes: Optional[int] = None
+        self.task_nodes: Optional[int] = None
+        self.user_task_yaml: Optional[str] = None
+        self.actual_task: Optional[str] = None
+        self.ray_yamls: List[str] = []
+        self.runtimes: Dict[str, int] = {}
+        self.stacktrace: Optional[str] = None
+
+    def __repr__(self) -> str:
+        d = self.__dict__.copy()
+        return json.dumps(d)
+
+
+usage_message = UsageMessageToReport()
 
 
 def _make_labels_str(d):
@@ -48,43 +69,16 @@ def _make_labels_str(d):
     return dict_str
 
 
-def _send_message(msg_type: MessageType,
-                  message: str,
-                  custom_labels: Dict[str, str] = None):
-    """Send the logging to the Grafana Loki.
-
-    The logging message will be a json dict:
-    {
-        'labels': {
-            'user': hash id of user,
-            'run_id': run id (same for a single run),
-            'time': the uploading time,
-            'schema_version': the version of the schema
-            **custom_labels: any custom labels provided
-        },
-        'message': the main content of the logging
-    }
-
-    Args:
-        msg_type: The type of the logging from the enum
-        message: The contents of the logging
-        custom_labels: any custom labels for the message
-    """
+def _send_message(message: str, message_type: MessageType):
+    """Send the message to the Grafana Loki."""
     if env_options.Options.DISABLE_LOGGING.get():
         return
 
     try:
         log_timestamp = datetime.datetime.now(
             datetime.timezone.utc).isoformat('T')
-        if custom_labels is None:
-            custom_labels = dict()
-        custom_labels.update(utils.get_base_labels())
 
-        prom_labels = {'type': msg_type.value}
-        message = {
-            'labels': custom_labels,
-            'message': message,
-        }
+        prom_labels = {'type': message_type.value}
 
         headers = {'Content-type': 'application/json'}
         payload = {
@@ -92,7 +86,7 @@ def _send_message(msg_type: MessageType,
                 'labels': _make_labels_str(prom_labels),
                 'entries': [{
                     'ts': log_timestamp,
-                    'line': json.dumps(message),
+                    'line': str(message),
                 }]
             }]
         }
@@ -104,8 +98,7 @@ def _send_message(msg_type: MessageType,
         if response.status_code != 204:
             logger.debug(f'Grafana Loki failed with response: {response.text}')
     except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-        logger.warning(f'Usage logging exception caught: {e}')
-
+        logger.warning(f'Usage logging exception caught: {type(e)}({e})')
 
 def _clean_yaml(yaml_info: Dict[str, str]):
     """Remove sensitive information from user YAML."""
@@ -123,13 +116,7 @@ def _clean_yaml(yaml_info: Dict[str, str]):
     return cleaned_yaml_info
 
 
-def send_cli_cmd():
-    """Upload current CLI command to Loki."""
-    cmd = common_utils.get_pretty_entry_point()
-    _send_message(MessageType.CLI_CMD, cmd)
-
-
-def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
+def prepare_yaml(yaml_config_or_path: Union[Dict, str]):
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
         yaml_info = yaml_config_or_path
@@ -142,13 +129,50 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
 
     yaml_info = _clean_yaml(yaml_info)
     yaml_info['__redacted_comment_lines'] = len(comment_lines)
-    message = json.dumps(yaml_info)
-    _send_message(yaml_type, message)
+    json_str = json.dumps(yaml_info)
+    return json_str
+
+
+def update_user_task_yaml(yaml_config_or_path: Union[Dict, str]):
+    usage_message.user_task_yaml = prepare_yaml(yaml_config_or_path)
+
+
+def update_actual_task(config: Dict[str, Any]):
+    usage_message.actual_task = prepare_yaml(config)
+    usage_message.task_nodes = config['num_nodes']
+
+def update_ray_yaml(yaml_config_or_path: Union[Dict, str]):
+    usage_message.ray_yamls.append(prepare_yaml(yaml_config_or_path))
+
+
+def update_cluster_name(cluster_name: Union[List[str], str]):
+    if isinstance(cluster_name, str):
+        usage_message.cluster_names = [cluster_name]
+    else:
+        usage_message.cluster_names = cluster_name
+
+def update_cluster_nodes(num_nodes: int):
+    usage_message.cluster_nodes = num_nodes
+
+@contextlib.contextmanager
+def update_runtime_context(name: str):
+    try:
+        start = time.time()
+        yield
+    finally:
+        usage_message.runtimes[name] = time.time() - start
+
+
+def update_runtime(name_or_fn: str):
+    return common_utils.make_decorator(update_runtime_context, name_or_fn)
 
 
 @contextlib.contextmanager
-def send_exception_context(name: str):
-    if env_options.Options.DISABLE_LOGGING.get():
+def entrypoint_context(name: str):
+    is_outermost = usage_message.entrypoint is None
+    if is_outermost:
+        usage_message.entrypoint = name
+    if env_options.Options.DISABLE_LOGGING.get() or not is_outermost:
         yield
         return
 
@@ -156,30 +180,12 @@ def send_exception_context(name: str):
         yield
     except (Exception, SystemExit, KeyboardInterrupt):
         trace = traceback.format_exc()
-        _send_message(MessageType.STACK_TRACE,
-                      trace,
-                      custom_labels={'name': name})
+        usage_message.stacktrace = trace
         raise
-
-
-def send_exception(name_or_fn: str):
-    return common_utils.make_decorator(send_exception_context, name_or_fn)
-
-
-@contextlib.contextmanager
-def send_runtime_context(name: str):
-    if env_options.Options.DISABLE_LOGGING.get():
-        yield
-        return
-
-    try:
-        start = time.time()
-        yield
     finally:
-        _send_message(MessageType.RUNTIME,
-                      f'{time.time() - start}',
-                      custom_labels={'name': name})
+        if is_outermost:
+            _send_message(str(usage_message), MessageType.USAGE)
 
 
-def send_runtime(name_or_fn: str):
-    return common_utils.make_decorator(send_runtime_context, name_or_fn)
+def entrypoint(name_or_fn: str):
+    return common_utils.make_decorator(entrypoint_context, name_or_fn)

@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional
 from sky import clouds
 from sky.skylet.utils import db_utils
 from sky.utils import common_utils
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import backends
