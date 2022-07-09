@@ -132,7 +132,8 @@ class timer:
                 'Please call `sky_callback.init` before using sky_callback.')
 
     def __iter__(self):
-        # Inlining for speed optimization.
+        # Inlining instance variables as locals for speed optimization.
+        # Refer to: https://github.com/tqdm/tqdm/blob/4f208e72552c4d916aa4fe6a955349ee8b2ed353/tqdm/std.py#L1177  # pylint: disable=line-too-long
         iterable = self._iterable
         if _DISABLE_CALLBACK or _sky_callback is None:
             for obj in iterable:
