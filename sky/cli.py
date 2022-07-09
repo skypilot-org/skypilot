@@ -2416,6 +2416,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int]):
 # ==============================
 
 
+@ux_utils.print_exception_no_traceback()
 def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     """Gets benchmark candidate configs from a YAML file.
 
@@ -2431,19 +2432,25 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
     config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
-    assert isinstance(config, dict)
+    if not isinstance(config, dict):
+        raise ValueError(f'Invalid YAML file: {yaml_path}. '
+                         'The YAML file should be parsed into a dictionary.')
     if config.get('resources') is None:
         return None
 
     resources = config['resources']
-    assert isinstance(resources, dict)
+    if not isinstance(resources, dict):
+        raise ValueError(f'Invalid resources configuration in {yaml_path}. '
+                         'Resources must be a dictionary.')
     if resources.get('candidates') is None:
         return None
 
     candidates = resources['candidates']
-    assert isinstance(candidates, list)
+    if not isinstance(candidates, list):
+        raise ValueError('Resource candidates must be a list of dictionaries.')
     for candidate in candidates:
-        assert isinstance(candidate, dict)
+        if not isinstance(candidate, dict):
+            raise ValueError('Each resource candidate must be a dictionary.')
     return candidates
 
 
@@ -2528,9 +2535,7 @@ def benchmark_launch(
                     nl=False)
     else:
         # Treat entrypoint as a bash command.
-        click.secho('Benchmarking a task from command: ',
-                    fg='yellow',
-                    nl=False)
+        click.secho('Benchmarking a task from command: ', fg='yellow', nl=False)
     click.secho(entrypoint, bold=True)
 
     candidates = None
@@ -2540,7 +2545,7 @@ def benchmark_launch(
     # Check if the candidate configs are specified in both CLI and YAML.
     if candidates is not None:
         message = ('is specified in both CLI and resources.candidates '
-                   'in the YAML. Please specify in only one of them.')
+                   'in the YAML. Please specify only one of them.')
         if cloud is not None:
             if any('cloud' in candidate for candidate in candidates):
                 raise click.BadParameter(f'cloud {message}')
