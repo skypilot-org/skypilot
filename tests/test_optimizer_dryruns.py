@@ -24,7 +24,7 @@ def _test_parse_accelerators(spec, expected_accelerators):
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
 # to return all three clouds. We also monkeypatch `sky.check.check` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
-# raise SystemExit.
+# raise exceptions.
 def _make_resources(
     monkeypatch,
     *resources_args,
