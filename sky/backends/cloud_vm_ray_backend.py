@@ -1312,7 +1312,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
-                to_provision_config = self._check_existing_cluster(
+                to_provision_config = self.__check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
@@ -1382,9 +1382,9 @@ class CloudVmRayBackend(backends.Backend):
             cluster_config_file = config_dict['ray']
 
             if 'tpu_name' in config_dict:
-                self._set_tpu_name(cluster_config_file,
-                                   config_dict['launched_nodes'],
-                                   config_dict['tpu_name'])
+                self.__set_tpu_name(cluster_config_file,
+                                    config_dict['launched_nodes'],
+                                    config_dict['tpu_name'])
 
             with timeline.Event('backend.provision.get_node_ips'):
                 ip_list = backend_utils.get_node_ips(
@@ -1514,181 +1514,8 @@ class CloudVmRayBackend(backends.Backend):
         storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
         """Mounts all user files to the remote nodes."""
-
-        # ===============================================================
-        # Step 1: Executes file mounts - rsyncing local files and copying
-        # from remote stores.
-        # ===============================================================
-
-        # File mounts handling for remote paths possibly without write access:
-        #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
-        #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
-        if all_file_mounts is None or not all_file_mounts:
-            return
-        symlink_commands = []
-        fore = colorama.Fore
-        style = colorama.Style
-        logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
-        start = time.time()
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes)
-        ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            handle.cluster_yaml)
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
-        log_path = os.path.join(self.log_dir, 'file_mounts.log')
-
-        # Check the files and warn
-        for dst, src in all_file_mounts.items():
-            if not data_utils.is_cloud_store_url(src):
-                full_src = os.path.abspath(os.path.expanduser(src))
-                # Checked during Task.set_file_mounts().
-                assert os.path.exists(full_src), f'{full_src} does not exist.'
-                src_size = backend_utils.path_size_megabytes(full_src)
-                if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
-                    logger.warning(
-                        f'{fore.YELLOW}The size of file mount src {src!r} '
-                        f'is {src_size} MB. Try to keep src small or use '
-                        '.gitignore to exclude large files, as large sizes '
-                        f'will slow down rsync. {style.RESET_ALL}')
-                if os.path.islink(full_src):
-                    logger.warning(
-                        f'{fore.YELLOW}Source path {src!r} is a symlink. '
-                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
-
-        tail_cmd = f'tail -n100 -f {log_path}'
-        logger.info('To view detailed progress: '
-                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-
-        for dst, src in all_file_mounts.items():
-            # TODO: room for improvement.  Here there are many moving parts
-            # (download gsutil on remote, run gsutil on remote).  Consider
-            # alternatives (smart_open, each provider's own sdk), a
-            # data-transfer container etc.
-            if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'~/{dst}'
-            # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
-            wrapped_dst = dst
-            if not dst.startswith('~/') and not dst.startswith('/tmp/'):
-                # Handles the remote paths possibly without write access.
-                # (1) add <prefix> to these target paths.
-                wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
-                cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
-                    source=dst, target=wrapped_dst)
-                symlink_commands.append(cmd)
-
-            if not data_utils.is_cloud_store_url(src):
-                full_src = os.path.abspath(os.path.expanduser(src))
-
-                if os.path.isfile(full_src):
-                    mkdir_for_wrapped_dst = (
-                        f'mkdir -p {os.path.dirname(wrapped_dst)}')
-                else:
-                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-
-                # TODO(mluo): Fix method so that mkdir and rsync run together
-                backend_utils.parallel_data_transfer_to_nodes(
-                    runners,
-                    source=src,
-                    target=wrapped_dst,
-                    cmd=mkdir_for_wrapped_dst,
-                    run_rsync=True,
-                    action_message='Syncing',
-                    log_path=log_path,
-                    stream_logs=False,
-                )
-                continue
-
-            storage = cloud_stores.get_storage_from_path(src)
-            if storage.is_directory(src):
-                sync = storage.make_sync_dir_command(source=src,
-                                                     destination=wrapped_dst)
-                # It is a directory so make sure it exists.
-                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
-            else:
-                sync = storage.make_sync_file_command(source=src,
-                                                      destination=wrapped_dst)
-                # It is a file so make sure *its parent dir* exists.
-                mkdir_for_wrapped_dst = \
-                    f'mkdir -p {os.path.dirname(wrapped_dst)}'
-
-            download_target_commands = [
-                # Ensure sync can write to wrapped_dst (e.g., '/data/').
-                mkdir_for_wrapped_dst,
-                # Both the wrapped and the symlink dir exist; sync.
-                sync,
-            ]
-            command = ' && '.join(download_target_commands)
-            # dst is only used for message printing.
-            backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src,
-                target=dst,
-                cmd=command,
-                run_rsync=False,
-                action_message='Syncing',
-                log_path=log_path,
-                stream_logs=False,
-            )
-        # (2) Run the commands to create symlinks on all the nodes.
-        symlink_command = ' && '.join(symlink_commands)
-        if symlink_command:
-
-            def _symlink_node(runner: command_runner.SSHCommandRunner):
-                returncode = runner.run(symlink_command, log_path=log_path)
-                subprocess_utils.handle_returncode(
-                    returncode, symlink_command,
-                    'Failed to create symlinks. The target destination '
-                    'may already exist')
-
-            subprocess_utils.run_in_parallel(_symlink_node, runners)
-        end = time.time()
-        logger.debug(f'File mount sync took {end - start} seconds.')
-
-        # ===============================================================
-        # Step 2: Executes storage mounts: installing mounting tools and
-        # mounting.
-        # ===============================================================
-
-        # Process only mount mode objects here. COPY mode objects have been
-        # converted to regular copy file mounts and thus have been handled
-        # in the '_execute_file_mounts' method.
-        storage_mounts = {
-            path: storage_mount
-            for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
-        }
-
-        if not storage_mounts:
-            return
-        plural = 's' if len(storage_mounts) > 1 else ''
-        logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
-                    f'storage mount{plural}.{style.RESET_ALL}')
-        start = time.time()
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
-        log_path = os.path.join(self.log_dir, 'storage_mounts.log')
-
-        for dst, storage_obj in storage_mounts.items():
-            if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'~/{dst}'
-            # Get the first store and use it to mount
-            store = list(storage_obj.stores.values())[0]
-            mount_cmd = store.mount_command(dst)
-            src_print = (storage_obj.source
-                         if storage_obj.source else storage_obj.name)
-            backend_utils.parallel_data_transfer_to_nodes(
-                runners,
-                source=src_print,
-                target=dst,
-                cmd=mount_cmd,
-                run_rsync=False,
-                action_message='Mounting',
-                log_path=log_path,
-            )
-        end = time.time()
-        logger.debug(f'Storage mount sync took {end - start} seconds.')
+        self.__execute_file_mounts(handle, all_file_mounts)
+        self.__execute_storage_mounts(handle, storage_mounts)
 
     def _setup(self, handle: ResourceHandle, task: task_lib.Task) -> None:
         start = time.time()
@@ -1849,11 +1676,11 @@ class CloudVmRayBackend(backends.Backend):
 
         # Case: task_lib.Task(run, num_nodes=1)
         if task.num_nodes == 1:
-            self._execute_task_one_node(handle, task, job_id, detach_run)
+            self.__execute_task_one_node(handle, task, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=N)
             assert task.num_nodes > 1, task.num_nodes
-            self._execute_task_n_nodes(handle, task, job_id, detach_run)
+            self.__execute_task_n_nodes(handle, task, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -2321,7 +2148,7 @@ class CloudVmRayBackend(backends.Backend):
     # --- Utilities ---
 
     @timeline.event
-    def _check_existing_cluster(
+    def __check_existing_cluster(
             self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -2343,8 +2170,8 @@ class CloudVmRayBackend(backends.Backend):
                                                        to_provision,
                                                        task.num_nodes)
 
-    def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
-                      tpu_name: str) -> None:
+    def __set_tpu_name(self, cluster_config_file: str, num_nodes: int,
+                       tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
@@ -2365,9 +2192,188 @@ class CloudVmRayBackend(backends.Backend):
 
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
-    def _execute_task_one_node(self, handle: ResourceHandle,
-                               task: task_lib.Task, job_id: int,
-                               detach_run: bool) -> None:
+    def __execute_file_mounts(self, handle: ResourceHandle,
+                              file_mounts: Dict[Path, Path]):
+        """Executes file mounts - rsyncing local files and
+        copying from remote stores."""
+        # File mounts handling for remote paths possibly without write access:
+        #  (1) in 'file_mounts' sections, add <prefix> to these target paths.
+        #  (2) then, create symlinks from '/.../file' to '<prefix>/.../file'.
+        if file_mounts is None or not file_mounts:
+            return
+        symlink_commands = []
+        fore = colorama.Fore
+        style = colorama.Style
+        logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
+        start = time.time()
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
+        log_path = os.path.join(self.log_dir, 'file_mounts.log')
+
+        # Check the files and warn
+        for dst, src in file_mounts.items():
+            if not data_utils.is_cloud_store_url(src):
+                full_src = os.path.abspath(os.path.expanduser(src))
+                # Checked during Task.set_file_mounts().
+                assert os.path.exists(full_src), f'{full_src} does not exist.'
+                src_size = backend_utils.path_size_megabytes(full_src)
+                if src_size >= _PATH_SIZE_MEGABYTES_WARN_THRESHOLD:
+                    logger.warning(
+                        f'{fore.YELLOW}The size of file mount src {src!r} '
+                        f'is {src_size} MB. Try to keep src small or use '
+                        '.gitignore to exclude large files, as large sizes '
+                        f'will slow down rsync. {style.RESET_ALL}')
+                if os.path.islink(full_src):
+                    logger.warning(
+                        f'{fore.YELLOW}Source path {src!r} is a symlink. '
+                        f'Symlink contents are not uploaded.{style.RESET_ALL}')
+
+        tail_cmd = f'tail -n100 -f {log_path}'
+        logger.info('To view detailed progress: '
+                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+
+        for dst, src in file_mounts.items():
+            # TODO: room for improvement.  Here there are many moving parts
+            # (download gsutil on remote, run gsutil on remote).  Consider
+            # alternatives (smart_open, each provider's own sdk), a
+            # data-transfer container etc.
+            if not os.path.isabs(dst) and not dst.startswith('~/'):
+                dst = f'~/{dst}'
+            # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
+            wrapped_dst = dst
+            if not dst.startswith('~/') and not dst.startswith('/tmp/'):
+                # Handles the remote paths possibly without write access.
+                # (1) add <prefix> to these target paths.
+                wrapped_dst = backend_utils.FileMountHelper.wrap_file_mount(dst)
+                cmd = backend_utils.FileMountHelper.make_safe_symlink_command(
+                    source=dst, target=wrapped_dst)
+                symlink_commands.append(cmd)
+
+            if not data_utils.is_cloud_store_url(src):
+                full_src = os.path.abspath(os.path.expanduser(src))
+
+                if os.path.isfile(full_src):
+                    mkdir_for_wrapped_dst = (
+                        f'mkdir -p {os.path.dirname(wrapped_dst)}')
+                else:
+                    mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+
+                # TODO(mluo): Fix method so that mkdir and rsync run together
+                backend_utils.parallel_data_transfer_to_nodes(
+                    runners,
+                    source=src,
+                    target=wrapped_dst,
+                    cmd=mkdir_for_wrapped_dst,
+                    run_rsync=True,
+                    action_message='Syncing',
+                    log_path=log_path,
+                    stream_logs=False,
+                )
+                continue
+
+            storage = cloud_stores.get_storage_from_path(src)
+            if storage.is_directory(src):
+                sync = storage.make_sync_dir_command(source=src,
+                                                     destination=wrapped_dst)
+                # It is a directory so make sure it exists.
+                mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
+            else:
+                sync = storage.make_sync_file_command(source=src,
+                                                      destination=wrapped_dst)
+                # It is a file so make sure *its parent dir* exists.
+                mkdir_for_wrapped_dst = \
+                    f'mkdir -p {os.path.dirname(wrapped_dst)}'
+
+            download_target_commands = [
+                # Ensure sync can write to wrapped_dst (e.g., '/data/').
+                mkdir_for_wrapped_dst,
+                # Both the wrapped and the symlink dir exist; sync.
+                sync,
+            ]
+            command = ' && '.join(download_target_commands)
+            # dst is only used for message printing.
+            backend_utils.parallel_data_transfer_to_nodes(
+                runners,
+                source=src,
+                target=dst,
+                cmd=command,
+                run_rsync=False,
+                action_message='Syncing',
+                log_path=log_path,
+                stream_logs=False,
+            )
+        # (2) Run the commands to create symlinks on all the nodes.
+        symlink_command = ' && '.join(symlink_commands)
+        if symlink_command:
+
+            def _symlink_node(runner: command_runner.SSHCommandRunner):
+                returncode = runner.run(symlink_command, log_path=log_path)
+                subprocess_utils.handle_returncode(
+                    returncode, symlink_command,
+                    'Failed to create symlinks. The target destination '
+                    'may already exist')
+
+            subprocess_utils.run_in_parallel(_symlink_node, runners)
+        end = time.time()
+        logger.debug(f'File mount sync took {end - start} seconds.')
+
+    def __execute_storage_mounts(self, handle: ResourceHandle,
+                                 storage_mounts: Dict[Path,
+                                                      storage_lib.Storage]):
+        """Executes storage mounts: installing mounting tools and mounting."""
+        # Process only mount mode objects here. COPY mode objects have been
+        # converted to regular copy file mounts and thus have been handled
+        # in the '_execute_file_mounts' method.
+        storage_mounts = {
+            path: storage_mount
+            for path, storage_mount in storage_mounts.items()
+            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+        }
+
+        if not storage_mounts:
+            return
+        fore = colorama.Fore
+        style = colorama.Style
+        plural = 's' if len(storage_mounts) > 1 else ''
+        logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
+                    f'storage mount{plural}.{style.RESET_ALL}')
+        start = time.time()
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes,
+                                             handle=handle)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
+        log_path = os.path.join(self.log_dir, 'storage_mounts.log')
+
+        for dst, storage_obj in storage_mounts.items():
+            if not os.path.isabs(dst) and not dst.startswith('~/'):
+                dst = f'~/{dst}'
+            # Get the first store and use it to mount
+            store = list(storage_obj.stores.values())[0]
+            mount_cmd = store.mount_command(dst)
+            src_print = (storage_obj.source
+                         if storage_obj.source else storage_obj.name)
+            backend_utils.parallel_data_transfer_to_nodes(
+                runners,
+                source=src_print,
+                target=dst,
+                cmd=mount_cmd,
+                run_rsync=False,
+                action_message='Mounting',
+                log_path=log_path,
+            )
+        end = time.time()
+        logger.debug(f'Storage mount sync took {end - start} seconds.')
+
+    def __execute_task_one_node(self, handle: ResourceHandle,
+                                task: task_lib.Task, job_id: int,
+                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
@@ -2399,8 +2405,9 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
-    def _execute_task_n_nodes(self, handle: ResourceHandle, task: task_lib.Task,
-                              job_id: int, detach_run: bool) -> None:
+    def __execute_task_n_nodes(self, handle: ResourceHandle,
+                               task: task_lib.Task, job_id: int,
+                               detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
