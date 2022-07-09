@@ -81,7 +81,7 @@ class Backend:
                  handle: ResourceHandle,
                  terminate: bool,
                  purge: bool = False) -> bool:
-        self._teardown(handle, terminate, purge)
+        return self._teardown(handle, terminate, purge)
 
     def register_info(self, **kwargs) -> None:
         """Register backend-specific information."""
