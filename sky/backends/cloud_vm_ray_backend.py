@@ -597,6 +597,34 @@ class RetryingVmProvisioner(object):
         else:
             self._blocked_regions.add(region.name)
 
+    def _update_blocklist_on_local_error(self, region, zones, stdout, stderr):
+        del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'ERR' in s.strip() or 'PANIC' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Errors occurred during launching of cluster services; '
+                    'check logs above.')
+        # The underlying ray autoscaler / boto3 will try all zones of a region
+        # at once.
+        logger.warning(f'Got error(s) in region \'{region.name}\':')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_regions.add(region.name)
+
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
                                    stderr) -> None:
         """Handles cloud-specific errors and updates the block list.
@@ -623,12 +651,9 @@ class RetryingVmProvisioner(object):
             return self._update_blocklist_on_azure_error(
                 region, zones, stdout, stderr)
 
-        # For the local cloud case, there are no errors regarding provisioning.
         if isinstance(cloud, clouds.Local):
-            raise RuntimeError(
-                'Local cluster provisioning should not fail, '
-                'as no actual provisioning of VMs takes place. This error '
-                'should never be reached.')
+            return self._update_blocklist_on_local_error(
+                region, zones, stdout, stderr)
 
         assert False, f'Unknown cloud: {cloud}.'
 
@@ -1279,10 +1304,9 @@ class CloudVmRayBackend(backends.Backend):
             #   1) Create local_handle to store local cluster IPs and
             #      custom accelerators for each node.
             #   2) Replace launched_resources to represent a generic local
-            #      node (without accelerator specifications). This will be
-            #      used later in subsequent `sky launch`.
+            #      node (without accelerator specifications).
             #   3) Replace launched_nodes to represent the total nodes in the
-            #      local cluster, not total nodes that a task specifies.
+            #      local cluster.
             if os.path.isfile(local_file):
                 config = backend_utils.get_local_cluster_config_or_error(
                     self.cluster_name)

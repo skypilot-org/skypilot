@@ -687,6 +687,7 @@ def list_local_clusters():
         path for path in local_cluster_paths
         if os.path.isfile(path) and path.endswith('.yml')
     ]
+
     local_cluster_names = []
     for path in local_cluster_paths:
         # TODO(mluo): Define a scheme for cluster config to check if YAML

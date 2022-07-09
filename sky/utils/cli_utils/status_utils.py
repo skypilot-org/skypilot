@@ -1,5 +1,5 @@
 """Utilities for sky status."""
-from typing import Callable
+from typing import Callable, List
 
 import click
 import colorama
@@ -79,7 +79,7 @@ def show_status_table(show_all: bool, refresh: bool):
         click.echo('No existing clusters.')
 
 
-def show_local_status_table():
+def show_local_status_table(local_clusters: List[str]):
     """Lists all local clusters.
 
     Lists both uninitialized and initialized local clusters. Uninitialized
@@ -90,7 +90,6 @@ def show_local_status_table():
     `sky launch`. Sky understands what types of resources are on the nodes and
     has ran at least one job on the cluster.
     """
-    all_local_clusters = backend_utils.list_local_clusters()
     clusters_status = backend_utils.get_clusters(
         include_reserved=False,
         refresh=False,
@@ -150,7 +149,7 @@ def show_local_status_table():
         cluster_table.add_row(row)
 
     # Handling for uninitialized clusters.
-    for clus in all_local_clusters:
+    for clus in local_clusters:
         if clus not in names:
             row = [
                 # NAME
@@ -164,7 +163,7 @@ def show_local_status_table():
             ]
             cluster_table.add_row(row)
 
-    if clusters_status or all_local_clusters:
+    if clusters_status or local_clusters:
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Local '
                    f'clusters:{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)

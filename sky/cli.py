@@ -1032,8 +1032,9 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
+    local_clusters = backend_utils.list_local_clusters()
     status_utils.show_status_table(all, refresh)
-    status_utils.show_local_status_table()
+    status_utils.show_local_status_table(local_clusters)
 
 
 @cli.command()
@@ -1066,6 +1067,8 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
+    local_clusters = backend_utils.list_local_clusters()
+
     unsupported_clusters = []
     for cluster in clusters:
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -1083,7 +1086,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
 
-    for local_cluster in backend_utils.list_local_clusters():
+    for local_cluster in local_clusters:
         if local_cluster not in clusters:
             click.secho(
                 f'Local cluster {local_cluster} is uninitialized;'
