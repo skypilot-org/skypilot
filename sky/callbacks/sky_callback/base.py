@@ -45,6 +45,7 @@ class BaseCallback:
         self._worker = _AsyncSummaryWriter(log_dir, total_steps, warmup_steps,
                                            self._step_begins, self._step_ends)
         self._worker.start()
+        # Refer to: https://superfastpython.com/stop-daemon-thread/
         atexit.register(self._worker.stop)
 
     def on_step_begin(self) -> None:
