@@ -33,11 +33,12 @@ if not env_options.Options.DISABLE_LOGGING.get():
 
 class MessageType(enum.Enum):
     CLI_CMD = 'cli-cmd'
-    STACK_TRACE = 'stack-trace'
     TASK_YAML = 'task-yaml'
     TASK_OVERRIDE_YAML = 'task-override-yaml'
     RAY_YAML = 'ray-yaml'
+    STACK_TRACE = 'stack-trace'
     RUNTIME = 'runtime'
+    # STACK_TRACE and RUNTIME has custom label: 'name'
 
 
 def _make_labels_str(d):
@@ -49,36 +50,60 @@ def _make_labels_str(d):
 def _send_message(msg_type: MessageType,
                   message: str,
                   custom_labels: Dict[str, str] = None):
+    """Send the logging to the Grafana Loki.
+
+    The logging message will be a json dict:
+    {
+        'labels': {
+            'user': hash id of user,
+            'run_id': run id (same for a single run),
+            'time': the uploading time,
+            'schema_version': the version of the schema
+            **custom_labels: any custom labels provided
+        },
+        'message': the main content of the logging
+    }
+
+    Args:
+        msg_type: The type of the logging from the enum
+        message: The contents of the logging
+        custom_labels: any custom labels for the message
+    """
     if env_options.Options.DISABLE_LOGGING.get():
         return
-    log_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat('T')
 
-    if custom_labels is None:
-        custom_labels = dict()
-    custom_labels.update(utils.get_base_labels())
+    try:
+        log_timestamp = datetime.datetime.now(
+            datetime.timezone.utc).isoformat('T')
+        if custom_labels is None:
+            custom_labels = dict()
+        custom_labels.update(utils.get_base_labels())
 
-    prom_labels = {'type': msg_type.value}
-    message = {
-        'labels': custom_labels,
-        'message': message,
-    }
+        prom_labels = {'type': msg_type.value}
+        message = {
+            'labels': custom_labels,
+            'message': message,
+        }
 
-    headers = {'Content-type': 'application/json'}
-    payload = {
-        'streams': [{
-            'labels': _make_labels_str(prom_labels),
-            'entries': [{
-                'ts': log_timestamp,
-                'line': json.dumps(message),
+        headers = {'Content-type': 'application/json'}
+        payload = {
+            'streams': [{
+                'labels': _make_labels_str(prom_labels),
+                'entries': [{
+                    'ts': log_timestamp,
+                    'line': json.dumps(message),
+                }]
             }]
-        }]
-    }
-    payload = json.dumps(payload)
-    response = requests.post(usage_constants.LOG_URL,
-                             data=payload,
-                             headers=headers)
-    if response.status_code != 204:
-        logger.debug(f'Grafana Loki failed with response: {response.text}')
+        }
+        payload = json.dumps(payload)
+        response = requests.post(usage_constants.LOG_URL,
+                                 data=payload,
+                                 headers=headers,
+                                 timeout=0.5)
+        if response.status_code != 204:
+            logger.debug(f'Grafana Loki failed with response: {response.text}')
+    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+        logger.warning(f'Usage logging exception caught: {e}')
 
 
 def _clean_yaml(yaml_info: Dict[str, str], num_comment_lines: int):
