@@ -23,7 +23,7 @@ logger = sky_logging.init_logger(__name__)
 # An indicator for PRIVACY_POLICY has already been shown.
 privacy_policy_indicator = os.path.expanduser(
     usage_constants.PRIVACY_POLICY_PATH)
-if not env_options.DISABLE_LOGGING:
+if not env_options.Options.DISABLE_LOGGING.get():
     try:
         with open(privacy_policy_indicator, 'x'):
             click.secho(usage_constants.USAGE_POLICY_MESSAGE, fg='yellow')
@@ -49,7 +49,7 @@ def _make_labels_str(d):
 def _send_message(msg_type: MessageType,
                   message: str,
                   custom_labels: Dict[str, str] = None):
-    if env_options.DISABLE_LOGGING:
+    if env_options.Options.DISABLE_LOGGING.get():
         return
     log_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat('T')
 
@@ -122,7 +122,7 @@ def send_yaml(yaml_config_or_path: Union[Dict, str], yaml_type: MessageType):
 
 @contextlib.contextmanager
 def send_exception_context(name: str):
-    if env_options.DISABLE_LOGGING:
+    if env_options.Options.DISABLE_LOGGING.get():
         yield
         return
 
@@ -142,7 +142,7 @@ def send_exception(name_or_fn: str):
 
 @contextlib.contextmanager
 def send_runtime_context(name: str):
-    if env_options.DISABLE_LOGGING:
+    if env_options.Options.DISABLE_LOGGING.get():
         yield
         return
 

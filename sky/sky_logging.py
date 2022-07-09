@@ -6,7 +6,7 @@ from sky.utils import env_options
 
 # If the SKY_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
-FORMAT = (None if env_options.MINIMIZE_LOGGING else
+FORMAT = (None if env_options.Options.MINIMIZE_LOGGING.get() else
           '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')
 DATE_FORMAT = '%m-%d %H:%M:%S'
 
@@ -34,7 +34,7 @@ def init_logger(name: str):
 
     logger = logging.getLogger(name)
     logger.addHandler(h)
-    if env_options.IS_DEVELOPPING:
+    if env_options.Options.IS_DEVELOPER.get():
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)

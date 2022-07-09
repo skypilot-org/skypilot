@@ -1,14 +1,13 @@
 """Global environment options for sky."""
+import enum
 import os
 
 
-def _get_bool_env_var(env_var_name):
-    """Check if an environment variable is set to True."""
-    return os.getenv(env_var_name, 'False').lower() in ('true', '1')
+class Options(enum.Enum):
+    IS_DEVELOPER = 'SKY_DEV'
+    DISABLE_LOGGING = 'SKY_DISABLE_USAGE_COLLECTION'
+    MINIMIZE_LOGGING = 'SKY_MINIMIZE_LOGGING'
 
-
-IS_DEVELOPPING = _get_bool_env_var('SKY_DEV')
-
-DISABLE_LOGGING = _get_bool_env_var('SKY_DISABLE_USAGE_COLLECTION')
-
-MINIMIZE_LOGGING = _get_bool_env_var('SKY_MINIMIZE_LOGGING')
+    def get(self):
+        """Check if an environment variable is set to True."""
+        return os.getenv(self.value, 'False').lower() in ('true', '1')
