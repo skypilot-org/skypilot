@@ -112,3 +112,10 @@ pip install tuna # Tuna for viz
 python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
 tuna sky.prof
 ```
+
+### Grafana Loki Setup
+To setup the Loki server that collects the usage logging:
+1. click the `Connect data` button in the home page
+2. Search for the "Loki" and select the `Loki`
+3. Use the following settings.
+![docs](docs/source/images/grafana-loki-setup.png)
