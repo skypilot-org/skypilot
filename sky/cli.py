@@ -455,7 +455,8 @@ def _create_and_ssh_into_node(
     assert session_manager in (None, 'screen', 'tmux'), session_manager
     if cluster_name in backend_utils.check_and_get_local_clusters():
         raise click.BadParameter(
-            f'Local cluster {cluster_name!r} conflicts with {node_type}.')
+            f'Name {cluster_name!r} taken a by a local cluster and cannot '
+            f'be used for a {node_type}.')
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -522,7 +523,7 @@ def _create_and_ssh_into_node(
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
-def _check_yaml(entrypoint: str, with_outputs=False):
+def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
     """Checks if entrypoint is a readable YAML file.
 
     Args:
@@ -566,9 +567,7 @@ def _check_yaml(entrypoint: str, with_outputs=False):
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
-    if with_outputs:
-        return is_yaml, config
-    return is_yaml
+    return is_yaml, config
 
 
 # TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
@@ -594,17 +593,18 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
                             yaml_config: Optional[dict] = None) -> bool:
     """Checks if user-provided arguments satisfies local cloud specs."""
     yaml_cloud = None
-    if yaml_config is not None and yaml_config.get('resources'):
+    if yaml_config is not None and 'resources' in yaml_config:
         yaml_cloud = yaml_config['resources'].get('cloud')
 
-    if cluster_name in backend_utils.check_and_get_local_clusters():
+    if (cluster_name is not None and
+            cluster_name in backend_utils.check_and_get_local_clusters()):
         if cloud is not None and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
         if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
             raise ValueError(
                 f'Detected Local cluster {cluster_name}. Must specify '
-                '`cloud: local` or no cloud in YAML.')
+                '`cloud: local` or no cloud in YAML or CLI args.')
         return True
     else:
         if cloud == 'local' or yaml_cloud == 'local':
@@ -640,7 +640,7 @@ def _make_dag_from_entrypoint_with_overrides(
     entrypoint = ' '.join(entrypoint)
 
     with sky.Dag() as dag:
-        is_yaml, yaml_config = _check_yaml(entrypoint, with_outputs=True)
+        is_yaml, yaml_config = _check_yaml(entrypoint)
         if is_yaml:
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
@@ -2178,7 +2178,7 @@ def admin_deploy(clusterspec_yaml: str):
     steps = 1
     clusterspec_yaml = ' '.join(clusterspec_yaml)
     assert clusterspec_yaml
-    is_yaml, yaml_config = _check_yaml(clusterspec_yaml, with_outputs=True)
+    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
     if not is_yaml:
         raise ValueError('Must specify cluster config')
 

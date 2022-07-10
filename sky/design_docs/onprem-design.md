@@ -10,6 +10,7 @@
 
 ## Installing Ray and Sky 
 - Admin installs Ray==1.10.0 and Sky globally on all machines. It is assumed that the admin regularly keeps Sky updated on the cluster.
+- Python > 3.6 for all users.
 - When a regular user runs `sky launch`, a local version of Sky will be installed on the machine for each user.
 
 ## Job Submission Pipeline
