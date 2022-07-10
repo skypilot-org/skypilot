@@ -118,6 +118,8 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
           command. If enabled, lines are printed only when '\r' or '\n' is
           found.
+        ray_job_id: The id for a ray job.
+        use_sudo: Whether to use sudo to create log_path.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -133,7 +135,7 @@ def run_with_log(
         # a job for Sky on-prem, when a non-admin user submits a job.
         subprocess.call(
             f'sudo mkdir -p {dirname};sudo touch {log_path}; '
-            f'sudo chmod a+rwx {log_path}',
+            f'sudo chmod a+rw {log_path}',
             shell=True)
         # Hack: Subprocess Popen does not accept sudo.
         # subprocess.Popen in local mode with shell=True does not work,
@@ -244,7 +246,7 @@ def make_task_bash_script(codegen: str,
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               job_owner: str,
-                              job_id: str,
+                              job_id: int,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False,
@@ -279,7 +281,7 @@ def run_bash_command_with_log(bash_command: str,
             # the cmd to be a list.
             subprocess_cmd,
             log_path,
-            ray_job_id=f'{job_id}-{job_owner}',
+            ray_job_id=job_lib.make_ray_job_id(job_id, job_owner),
             stream_logs=stream_logs,
             with_ray=with_ray,
             use_sudo=use_sudo,

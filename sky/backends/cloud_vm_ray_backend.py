@@ -2089,7 +2089,7 @@ class CloudVmRayBackend(backends.Backend):
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
         ssh_user = ssh_credentials[0]
-        ray_job_id = f'{job_id}-{ssh_user}'
+        ray_job_id = job_lib.make_ray_job_id(job_id, ssh_user)
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800

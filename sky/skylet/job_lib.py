@@ -86,6 +86,10 @@ db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
 _CONN.commit()
 
 
+def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
+    return f'{sky_job_id}-{job_owner}'
+
+
 def add_job(job_name: str, username: str, run_timestamp: str,
             resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
@@ -225,17 +229,17 @@ def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
         return []
 
     # TODO: if too slow, directly query against redis.
-    ray_job_ids = [f'{job_id}-{job_owner}' for job_id in job_ids]
+    ray_job_ids = [make_ray_job_id(job_id, job_owner) for job_id in job_ids]
     test_cmd = [
         (
-            f'(ray job status --address 127.0.0.1:8265 {ray_job} 2>&1 | '
+            f'(ray job status --address 127.0.0.1:8265 {ray_job_id} 2>&1 | '
             # Not a typo, ray has inconsistent output for job status.
             # succeeded: Job 'job_id' succeeded
             # running: job 'job_id': RUNNING
             # stopped: Job 'job_id' was stopped
             # failed: Job 'job_id' failed
-            f'grep "ob \'{ray_job}\'" || echo "not found")')
-        for ray_job in ray_job_ids
+            f'grep "ob \'{ray_job_id}\'" || echo "not found")')
+        for ray_job_id in ray_job_ids
     ]
     test_cmd = ' && '.join(test_cmd)
     proc = subprocess.run(test_cmd,
@@ -370,12 +374,12 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
         job_records = _get_jobs_by_ids(jobs)
 
     jobs = [job['job_id'] for job in job_records]
-    ray_job_ids = [f'{job_id}-{job_owner}' for job_id in jobs]
+    ray_job_ids = [make_ray_job_id(job_id, job_owner) for job_id in jobs]
     # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     cancel_cmd = [
-        f'ray job stop --address 127.0.0.1:8265 {ray_job}'
-        for ray_job in ray_job_ids
+        f'ray job stop --address 127.0.0.1:8265 {ray_job_id}'
+        for ray_job_id in ray_job_ids
     ]
     cancel_cmd = ';'.join(cancel_cmd)
     subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
@@ -470,8 +474,8 @@ class JobLibCodeGen:
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'log_dir = job_lib.log_dir(job_id)',
-            f'log_lib.tail_logs({job_owner!r},'
-            f'job_id, log_dir, {spot_job_id!r})',
+            (f'log_lib.tail_logs({job_owner!r},'
+             f'job_id, log_dir, {spot_job_id!r})'),
         ]
         return cls._build(code)
 
