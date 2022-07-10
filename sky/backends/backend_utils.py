@@ -675,8 +675,28 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def check_and_get_local_clusters() -> List[str]:
-    """Lists all local clusters and checks."""
+def check_if_local_cloud(cluster: str) -> bool:
+    """Checks if cluster name is a local cloud.
+
+    If cluster is a public cloud, this function will not check local
+    cluster configs. If this cluster is a private cloud, this function
+    will run correctness tests for cluster configs.
+    """
+    local_clusters = check_and_get_local_clusters(suppress_error=True)
+    if cluster not in local_clusters:
+        # Public clouds go through no error checking.
+        return False
+    # Hack: go through check again, to raise errors for local clusters.
+    check_and_get_local_clusters(suppress_error=False)
+    return True
+
+
+def check_and_get_local_clusters(suppress_error=False) -> List[str]:
+    """Lists all local clusters and checks cluster config validity.
+
+    Args:
+        suppress_error: Whether to suppress any errors raised.
+    """
     local_dir = os.path.expanduser(os.path.dirname(SKY_USER_LOCAL_CONFIG_PATH))
     os.makedirs(local_dir, exist_ok=True)
     local_cluster_paths = [
@@ -697,8 +717,9 @@ def check_and_get_local_clusters() -> List[str]:
             yaml_config = yaml.safe_load(f)
             user_config = yaml_config['auth']
             cluster_name = yaml_config['cluster']['name']
-        if AUTH_PLACEHOLDER in (user_config['ssh_user'],
-                                user_config['ssh_private_key']):
+        if (AUTH_PLACEHOLDER
+                in (user_config['ssh_user'], user_config['ssh_private_key']) and
+                not suppress_error):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Authentication into local cluster requires specifying '
@@ -706,13 +727,14 @@ def check_and_get_local_clusters() -> List[str]:
                     'Please fill aforementioned fields in '
                     f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
         if cluster_name in local_cluster_names:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Multiple configs in ~/.sky/local/ have the same '
-                    f'cluster name {cluster_name!r}. '
-                    'Fix the duplication and retry:'
-                    f'\nCurrent config: {path}'
-                    f'\nExisting config: {name_to_path_dict[cluster_name]}')
+            if not suppress_error:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple configs in ~/.sky/local/ have the same '
+                        f'cluster name {cluster_name!r}. '
+                        'Fix the duplication and retry:'
+                        f'\nCurrent config: {path}'
+                        f'\nExisting config: {name_to_path_dict[cluster_name]}')
         else:
             name_to_path_dict[cluster_name] = path
             local_cluster_names.append(cluster_name)
@@ -1479,7 +1501,7 @@ def get_node_ips(cluster_yaml: str,
             cluster_name = os.path.basename(cluster_yaml).split('.')[0]
             if ((handle is None and hasattr(handle, 'local_handle') and
                  handle.local_handle is not None) or
-                    cluster_name in check_and_get_local_clusters()):
+                    check_if_local_cloud(cluster_name)):
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 # Remove head ip from worker ip list.

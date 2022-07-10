@@ -98,7 +98,7 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            if cluster in backend_utils.check_and_get_local_clusters():
+            if backend_utils.check_if_local_cloud(cluster):
                 click.echo(
                     _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
             else:
@@ -453,7 +453,7 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
-    if cluster_name in backend_utils.check_and_get_local_clusters():
+    if backend_utils.check_if_local_cloud(cluster_name):
         raise click.BadParameter(
             f'Name {cluster_name!r} taken a by a local cluster and cannot '
             f'be used for a {node_type}.')
@@ -597,7 +597,7 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
         yaml_cloud = yaml_config['resources'].get('cloud')
 
     if (cluster_name is not None and
-            cluster_name in backend_utils.check_and_get_local_clusters()):
+            backend_utils.check_if_local_cloud(cluster_name)):
         if cloud is not None and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
@@ -887,8 +887,7 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
-        is_local_cloud=(cluster
-                        in backend_utils.check_and_get_local_clusters()))
+        is_local_cloud=backend_utils.check_if_local_cloud(cluster))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -976,7 +975,7 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if cluster in backend_utils.check_and_get_local_clusters():
+        if backend_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
@@ -1147,7 +1146,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        if cluster in backend_utils.check_and_get_local_clusters():
+        if backend_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster_name))
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
@@ -1219,7 +1218,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
     if handle is None:
-        if cluster in backend_utils.check_and_get_local_clusters():
+        if backend_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found'
@@ -1412,11 +1411,11 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
       sky start cluster1 cluster2
 
     """
-    local_clusters = backend_utils.check_and_get_local_clusters()
     to_start = []
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
+        local_clusters = backend_utils.check_and_get_local_clusters()
         clusters = [
             c for c in clusters
             if _warn_if_local_cluster(c, local_clusters, (
