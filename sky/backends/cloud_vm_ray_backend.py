@@ -620,7 +620,7 @@ class RetryingVmProvisioner(object):
                     'check logs above.')
         # The underlying ray autoscaler / boto3 will try all zones of a region
         # at once.
-        logger.warning(f'Got error(s) in region \'{region.name}\':')
+        logger.warning('Got error(s) on local cluster:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)

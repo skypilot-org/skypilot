@@ -98,7 +98,7 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            if cluster in backend_utils.list_local_clusters():
+            if cluster in backend_utils.check_and_get_local_clusters():
                 click.echo(
                     _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
             else:
@@ -108,10 +108,10 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
 
 
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
-                           error_msg: str) -> bool:
+                           message: str) -> bool:
     """Raises warning if the cluster name is a local cluster."""
     if cluster in local_clusters:
-        click.echo(error_msg)
+        click.echo(message)
         return False
     return True
 
@@ -453,7 +453,7 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
-    if cluster_name in backend_utils.list_local_clusters():
+    if cluster_name in backend_utils.check_and_get_local_clusters():
         raise click.BadParameter(
             f'Local cluster {cluster_name!r} conflicts with {node_type}.')
     with sky.Dag() as dag:
@@ -571,7 +571,8 @@ def _check_yaml(entrypoint: str, with_outputs=False):
     return is_yaml
 
 
-# TODO(mluo): Refactor out of cli.py.
+# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
+# this.
 def _check_cluster_config(yaml_config: dict):
     """Checks if the cluster config has filled-in user credentials."""
     auth = yaml_config['auth']
@@ -586,7 +587,8 @@ def _check_cluster_config(yaml_config: dict):
             f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
-# TODO(mluo): Refactor out of cli.py.
+# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
+# this.
 def _check_local_cloud_args(cloud: Optional[str] = None,
                             cluster_name: Optional[str] = None,
                             yaml_config: Optional[dict] = None) -> bool:
@@ -595,7 +597,7 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
     if yaml_config is not None and yaml_config.get('resources'):
         yaml_cloud = yaml_config['resources'].get('cloud')
 
-    if cluster_name in backend_utils.list_local_clusters():
+    if cluster_name in backend_utils.check_and_get_local_clusters():
         if cloud is not None and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
@@ -885,7 +887,8 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
-        is_local_cloud=(cluster in backend_utils.list_local_clusters()))
+        is_local_cloud=(cluster
+                        in backend_utils.check_and_get_local_clusters()))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -973,7 +976,7 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if cluster in backend_utils.list_local_clusters():
+        if cluster in backend_utils.check_and_get_local_clusters():
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
@@ -1032,7 +1035,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    local_clusters = backend_utils.list_local_clusters()
+    local_clusters = backend_utils.check_and_get_local_clusters()
     status_utils.show_status_table(all, refresh)
     status_utils.show_local_status_table(local_clusters)
 
@@ -1067,7 +1070,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
-    local_clusters = backend_utils.list_local_clusters()
+    local_clusters = backend_utils.check_and_get_local_clusters()
 
     unsupported_clusters = []
     for cluster in clusters:
@@ -1144,7 +1147,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        if cluster in backend_utils.list_local_clusters():
+        if cluster in backend_utils.check_and_get_local_clusters():
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster_name))
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
@@ -1216,7 +1219,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
     if handle is None:
-        if cluster in backend_utils.list_local_clusters():
+        if cluster in backend_utils.check_and_get_local_clusters():
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found'
@@ -1409,7 +1412,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
       sky start cluster1 cluster2
 
     """
-    local_clusters = backend_utils.list_local_clusters()
+    local_clusters = backend_utils.check_and_get_local_clusters()
     to_start = []
     if clusters:
         # Get GLOB cluster names
@@ -1571,7 +1574,7 @@ def _terminate_or_stop_clusters(
         operation = f'{verb} auto-stop on'
 
     if len(names) > 0:
-        local_clusters = backend_utils.list_local_clusters()
+        local_clusters = backend_utils.check_and_get_local_clusters()
         reserved_clusters = [
             name for name in names
             if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
@@ -2150,7 +2153,7 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
 
 @cli.group(cls=_NaturalOrderGroup)
 def admin():
-    """Sky Administrator Commands for Local Clusters."""
+    """Sky administrator commands for local clusters."""
     pass
 
 

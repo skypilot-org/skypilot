@@ -77,7 +77,7 @@ RESET_BOLD = '\033[0m'
 
 # Do not use /tmp because it gets cleared on VM restart.
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
-_SKY_REMOTE_RESOURCES_PATH = '~/.sky/resource_group.py'
+_SKY_GET_ACCELERATORS_SCRIPT_PATH = '~/.sky/get_accelerators.py'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
 _LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
@@ -636,10 +636,10 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
-                'ssh_user': None
-                            if auth_config is None else auth_config['ssh_user'],
-                'ssh_private_key': None if auth_config is None else
-                                   auth_config['ssh_private_key'],
+                'ssh_user':
+                    (None if auth_config is None else auth_config['ssh_user']),
+                'ssh_private_key': (None if auth_config is None else
+                                    auth_config['ssh_private_key']),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -675,8 +675,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
     return config_dict
 
 
-def list_local_clusters():
-    """Lists all local clusters."""
+def check_and_get_local_clusters() -> List[str]:
+    """Lists all local clusters and checks."""
     local_dir = os.path.expanduser(os.path.dirname(SKY_USER_LOCAL_CONFIG_PATH))
     os.makedirs(local_dir, exist_ok=True)
     local_cluster_paths = [
@@ -689,6 +689,7 @@ def list_local_clusters():
     ]
 
     local_cluster_names = []
+    name_to_path_dict = {}
     for path in local_cluster_paths:
         # TODO(mluo): Define a scheme for cluster config to check if YAML
         # schema is correct.
@@ -698,16 +699,23 @@ def list_local_clusters():
             cluster_name = yaml_config['cluster']['name']
         if AUTH_PLACEHOLDER in (user_config['ssh_user'],
                                 user_config['ssh_private_key']):
-            raise ValueError(
-                'Authentication into local cluster requires specifying '
-                '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
-                'Please fill aforementioned fields in '
-                f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Authentication into local cluster requires specifying '
+                    '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
+                    'Please fill aforementioned fields in '
+                    f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
         if cluster_name in local_cluster_names:
-            raise ValueError(
-                f'Local cluster {cluster_name} already exists. '
-                'Make sure local cluster configs have different cluster names.')
-        local_cluster_names.append(cluster_name)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Multiple configs in ~/.sky/local/ have the same '
+                    f'cluster name {cluster_name!r}. '
+                    'Fix the duplication and retry:'
+                    f'\nCurrent config: {path}'
+                    f'\nExisting config: {name_to_path_dict[cluster_name]}')
+        else:
+            name_to_path_dict[cluster_name] = path
+            local_cluster_names.append(cluster_name)
 
     # Remove clusters that are in global user state but are not in
     # ~/.sky/local.
@@ -759,13 +767,13 @@ def run_command_and_handle_ssh_failure(
         runner: command_runner.SSHCommandRunner,
         command: str,
         failure_message: Optional[str] = None) -> str:
-    """Runs command remote and returns the output with proper error handling."""
+    """Runs command remotely and returns output with proper error handling."""
     rc, stdout, stderr = runner.run(command,
                                     require_outputs=True,
                                     stream_logs=False)
     if rc == 255:
         # SSH failed
-        raise ValueError(
+        raise RuntimeError(
             f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
             f'to {runner.ip} failed. This is most likely due to incorrect '
             'credentials. Check your credentials and try again.')
@@ -806,7 +814,7 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
 
         # Ray Autoscaler Bug: Filemounting + Ray Setup
         # does not happen on workers.
-        def _ray_up_local_worker(runner: command_runner.SSHCommandRunner):
+        def _setup_local_worker(runner: command_runner.SSHCommandRunner):
             for dst, src in file_mounts.items():
                 mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
                 run_command_and_handle_ssh_failure(
@@ -827,7 +835,7 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
                 'Failed to setup Ray autoscaler commands on remote.',
                 stderr=stdout)
 
-        subprocess_utils.run_in_parallel(_ray_up_local_worker, worker_runners)
+        subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
 
 
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
@@ -835,7 +843,7 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
 
     Checks if python3, Ray, and Sky have been installed correctly. This method
     assumes that the user is a system administrator and has sudo access to the
-    machine.
+    machines.
 
     Args:
         ips: List of ips in the local cluster. 0-index corresponds to the head
@@ -850,13 +858,13 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
         ips, *ssh_credentials)
 
     def _check_dependencies(runner: command_runner.SSHCommandRunner) -> None:
-        # Checks for python3 installation.
+        # Checks for global python3 installation.
         run_command_and_handle_ssh_failure(
             runner,
             'sudo python3 --version',
             failure_message=f'Python3 is not installed on {runner.ip}.')
 
-        # Checks if base python and the root user (sudo) base python are the
+        # Checks if user python and the root user (sudo) base python are the
         # same version.
         base_python = run_command_and_handle_ssh_failure(
             runner,
@@ -866,29 +874,30 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
         sudo_python = run_command_and_handle_ssh_failure(
             runner,
             f'sudo {get_python_cmd}',
-            failure_message=f'Check python installation on {runner.ip}.')
+            failure_message=
+            f'Check `sudo {get_python_cmd}` can be run on {runner.ip}.')
 
         base_python = base_python.strip()
         sudo_python = sudo_python.strip()
         if base_python != sudo_python:
-            raise ValueError(
+            raise RuntimeError(
                 f'User\'s base python version {base_python} differs '
                 f'from that of the root user\'s python version {sudo_python} '
                 f'(on node: {runner.ip}).')
 
-        # Checks for Ray installation.
+        # Checks for global Ray installation (accessible by all users).
         run_command_and_handle_ssh_failure(
             runner,
             'sudo ray --version',
             failure_message=f'Ray is not installed on {runner.ip}.')
 
-        # Checks for Sky installation.
+        # Checks for global Sky installation (accessible by all users).
         run_command_and_handle_ssh_failure(
             runner,
-            'sky --help',
+            'sudo sky --help',
             failure_message=f'Sky is not installed on {runner.ip}.')
 
-        # Patches Ray.
+        # Patches global Ray.
         run_command_and_handle_ssh_failure(
             runner,
             'sudo python3 -c "from sky.skylet.ray_patches import patch; patch()"',
@@ -920,10 +929,12 @@ def get_local_cluster_accelerators(
     """
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
-    remote_resource_dir = os.path.dirname(_SKY_REMOTE_RESOURCES_PATH)
+    remote_resource_dir = os.path.dirname(_SKY_GET_ACCELERATORS_SCRIPT_PATH)
     custom_resources = []
 
     # Ran on the remote cluster node to identify accelerator resources.
+    # TODO(mluo): Add code to detect how much GPU memory a GPU has. This is
+    # to distinguish between (V100, V100-32GB) and (A100, A100-80GB).
     code = textwrap.dedent("""\
         import os
 
@@ -957,11 +968,11 @@ def get_local_cluster_accelerators(
             fp.flush()
             runner.run(f'mkdir -p {remote_resource_dir}', stream_logs=False)
             runner.rsync_up(source=fp.name,
-                            target=_SKY_REMOTE_RESOURCES_PATH,
+                            target=_SKY_GET_ACCELERATORS_SCRIPT_PATH,
                             stream_logs=False)
             output = run_command_and_handle_ssh_failure(
                 runner,
-                f'python3 {_SKY_REMOTE_RESOURCES_PATH}',
+                f'python3 {_SKY_GET_ACCELERATORS_SCRIPT_PATH}',
                 failure_message=f'Fail to fetch accelerators on {runner.ip}')
         node_accs = ast.literal_eval(output)
         return node_accs
@@ -972,7 +983,7 @@ def get_local_cluster_accelerators(
 
 
 def launch_ray_on_local_cluster(
-        cluster_config: Dict[str, Dict[str, object]],
+        cluster_config: Dict[str, Dict[str, Any]],
         custom_resources: List[Dict[str, int]] = None) -> None:
     """Launches Ray on all nodes for local cluster.
 
@@ -1010,13 +1021,13 @@ def launch_ray_on_local_cluster(
             worker_ips, *ssh_credentials)
 
     # Stops all running Ray instances on all nodes
-    with console.status('[bold cyan]Stopping Ray Cluster'):
+    with console.status('[bold cyan]Stopping ray cluster'):
 
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             run_command_and_handle_ssh_failure(
                 runner,
                 'sudo ray stop -f',
-                failure_message=f'Failed to stop Ray on {runner.ip}.')
+                failure_message=f'Failed to stop ray on {runner.ip}.')
 
         subprocess_utils.run_in_parallel(_stop_ray_workers,
                                          [head_runner] + worker_runners)
@@ -1027,11 +1038,11 @@ def launch_ray_on_local_cluster(
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={head_resources!r}')
 
-    with console.status('[bold cyan]Launching Ray Cluster on Head'):
+    with console.status('[bold cyan]Launching ray cluster on head'):
         run_command_and_handle_ssh_failure(
             head_runner,
             head_cmd,
-            failure_message='Failed to launch Ray on Head node.')
+            failure_message='Failed to launch ray on head node.')
 
     if not worker_runners:
         return
@@ -1052,7 +1063,7 @@ def launch_ray_on_local_cluster(
     port_cmd = (f'ssh -tt -L 8265:localhost:8265 '
                 f'{ssh_options} {ssh_user}@{head_ip} '
                 '\'while true; do sleep 86400; done\'')
-    with console.status('[bold cyan]Waiting for workers...'):
+    with console.status('[bold cyan]Waiting for workers.'):
 
         def _start_ray_workers(
                 runner_tuple: Tuple[command_runner.SSHCommandRunner, int]):
@@ -1060,7 +1071,7 @@ def launch_ray_on_local_cluster(
             run_command_and_handle_ssh_failure(
                 runner,
                 'sudo ray stop -f',
-                failure_message=f'Failed to stop Ray on {runner.ip}.')
+                failure_message=f'Failed to stop ray on {runner.ip}.')
 
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
@@ -1071,9 +1082,9 @@ def launch_ray_on_local_cluster(
                 runner,
                 worker_cmd,
                 failure_message=
-                f'Failed to launch Ray on Worker node {runner.ip}.')
+                f'Failed to launch ray on worker node {runner.ip}.')
 
-            # Comnecting Ray Dashboard with worker node.
+            # Connecting ray dashboard with worker node.
             runner.rsync_up(source=ssh_key,
                             target=remote_ssh_key,
                             stream_logs=False)
@@ -1089,13 +1100,12 @@ def launch_ray_on_local_cluster(
                 'screen -S ray-dashboard -X quit;'
                 f'screen -S ray-dashboard -dm {dashboard_remote_path}',
                 failure_message=
-                f'Failed to connect Ray dashboard to worker node {runner.ip}.')
+                f'Failed to connect ray dashboard to worker node {runner.ip}.')
 
         subprocess_utils.run_in_parallel(_start_ray_workers, worker_runners)
 
 
-def save_distributable_yaml(
-        cluster_config: Dict[str, Dict[str, object]]) -> None:
+def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     """Generates a distributable yaml for the system admin to send to users.
 
     Args:
@@ -1467,8 +1477,8 @@ def get_node_ips(cluster_yaml: str,
             worker_ips = re.findall(IP_ADDR_REGEX, out)
             # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
             # Workaround: List of IPs are shown in Stderr
-            ray_yaml = read_yaml(cluster_yaml)
-            if ray_yaml['provider']['type'] == 'local':
+            if hasattr(handle,
+                       'local_handle') and handle.local_handle is not None:
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 # Remove head ip from worker ip list.

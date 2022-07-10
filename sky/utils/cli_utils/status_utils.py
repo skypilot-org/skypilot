@@ -96,7 +96,8 @@ def show_local_status_table(local_clusters: List[str]):
         cloud_filter=backend_utils.CloudFilter.LOCAL)
     columns = [
         'NAME',
-        'CLUSTER_USER',
+        'USER',
+        'HEAD_IP',
         'RESOURCES',
         'COMMAND',
     ]
@@ -126,8 +127,10 @@ def show_local_status_table(local_clusters: List[str]):
                     r if r is not None else '(no GPUs)'
                     for r in local_cluster_resources
                 ]
+                head_ip = handle.local_handle['ips'][0]
             else:
                 local_cluster_resources = []
+                head_ip = ''
             for idx, resource in enumerate(local_cluster_resources):
                 if not bool(resource):
                     local_cluster_resources[idx] = None
@@ -138,8 +141,10 @@ def show_local_status_table(local_clusters: List[str]):
         row = [
             # NAME
             cluster_name,
-            # CLUSTER USER
+            # USER
             username,
+            # HEAD_IP
+            head_ip,
             # RESOURCES
             resources_str,
             # COMMAND
@@ -154,7 +159,9 @@ def show_local_status_table(local_clusters: List[str]):
             row = [
                 # NAME
                 clus,
-                # CLUSTER USER
+                # USER
+                '-',
+                # HEAD_IP
                 '-',
                 # RESOURCES
                 '-',

@@ -53,7 +53,7 @@ if __name__ == '__main__':
                 }:
                     break
                 time.sleep(1)
-        except requests.exceptions.ConnectionError as e:
+        except (requests.exceptions.ConnectionError, RuntimeError) as e:
             print(e)
             wait_for_process = True
 
