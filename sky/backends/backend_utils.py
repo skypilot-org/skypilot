@@ -1467,7 +1467,6 @@ def get_node_ips(cluster_yaml: str,
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
-
     if expected_num_nodes > 1:
         try:
             proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
@@ -1477,8 +1476,10 @@ def get_node_ips(cluster_yaml: str,
             worker_ips = re.findall(IP_ADDR_REGEX, out)
             # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
             # Workaround: List of IPs are shown in Stderr
-            if hasattr(handle,
-                       'local_handle') and handle.local_handle is not None:
+            cluster_name = os.path.basename(cluster_yaml).split('.')[0]
+            if ((handle is None and hasattr(handle, 'local_handle') and
+                 handle.local_handle is not None) or
+                    cluster_name in check_and_get_local_clusters()):
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 # Remove head ip from worker ip list.
