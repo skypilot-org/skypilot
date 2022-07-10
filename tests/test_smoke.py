@@ -22,6 +22,7 @@ from sky.utils import subprocess_utils
 _smoke_test_hash = common_utils.user_and_hostname_hash()
 test_id = str(uuid.uuid4())[-2:]
 
+
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
