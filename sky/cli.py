@@ -1507,7 +1507,6 @@ def _terminate_or_stop_clusters(
             if record['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
 
-
     clusters = []
     for name in names:
         handle = global_user_state.get_handle_from_cluster_name(name)

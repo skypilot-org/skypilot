@@ -1267,6 +1267,7 @@ class CloudVmRayBackend(backends.Backend):
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
+        usage_lib.update_cluster_nodes(handle.launched_nodes)
 
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
@@ -2161,6 +2162,7 @@ class CloudVmRayBackend(backends.Backend):
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
+        usage_lib.set_new_cluster()
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'

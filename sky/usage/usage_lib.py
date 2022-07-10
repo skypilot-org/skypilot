@@ -31,6 +31,7 @@ if not env_options.Options.DISABLE_LOGGING.get():
     except FileExistsError:
         pass
 
+
 class MessageType(enum.Enum):
     """Types for messages to be sent to Loki."""
     USAGE = 'usage'
@@ -39,6 +40,7 @@ class MessageType(enum.Enum):
 
 class UsageMessageToReport:
     """Message to be reported to Grafana Loki for each run"""
+
     def __init__(self) -> None:
         self.schema_version: str = usage_constants.USAGE_MESSAGE_SCHEMA_VERSION
         self.user: str = utils.get_logging_user_hash()
@@ -46,12 +48,17 @@ class UsageMessageToReport:
         self.time: str = str(time.time())
         self.cmd: str = common_utils.get_pretty_entry_point()
         self.entrypoint: Optional[str] = None
-        self.cluster_names: Optional[List[str]] = []
+        self.cluster_names: List[str] = []
+        self.new_cluster: bool = False
+        #: Number of clusters in the cluster_names list.
+        self.num_related_clusters: Optional[int] = None
         self.cluster_nodes: Optional[int] = None
         self.task_nodes: Optional[int] = None
         self.user_task_yaml: Optional[str] = None
-        self.actual_task: Optional[str] = None
-        self.ray_yamls: List[str] = []
+        self.actual_task: Optional[Dict[str, Any]] = None
+        self.ray_yamls: List[Dict[str, Any]] = []
+        #: Number of Ray YAML files.
+        self.num_tried_regions: Optional[int] = None
         self.runtimes: Dict[str, int] = {}
         self.stacktrace: Optional[str] = None
 
@@ -74,31 +81,28 @@ def _send_message(message: str, message_type: MessageType):
     if env_options.Options.DISABLE_LOGGING.get():
         return
 
-    try:
-        log_timestamp = datetime.datetime.now(
-            datetime.timezone.utc).isoformat('T')
+    log_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat('T')
 
-        prom_labels = {'type': message_type.value}
+    prom_labels = {'type': message_type.value}
 
-        headers = {'Content-type': 'application/json'}
-        payload = {
-            'streams': [{
-                'labels': _make_labels_str(prom_labels),
-                'entries': [{
-                    'ts': log_timestamp,
-                    'line': str(message),
-                }]
+    headers = {'Content-type': 'application/json'}
+    payload = {
+        'streams': [{
+            'labels': _make_labels_str(prom_labels),
+            'entries': [{
+                'ts': log_timestamp,
+                'line': str(message),
             }]
-        }
-        payload = json.dumps(payload)
-        response = requests.post(usage_constants.LOG_URL,
-                                 data=payload,
-                                 headers=headers,
-                                 timeout=0.5)
-        if response.status_code != 204:
-            logger.debug(f'Grafana Loki failed with response: {response.text}')
-    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-        logger.warning(f'Usage logging exception caught: {type(e)}({e})')
+        }]
+    }
+    payload = json.dumps(payload)
+    response = requests.post(usage_constants.LOG_URL,
+                             data=payload,
+                             headers=headers,
+                             timeout=0.5)
+    if response.status_code != 204:
+        logger.debug(f'Grafana Loki failed with response: {response.text}')
+
 
 def _clean_yaml(yaml_info: Dict[str, str]):
     """Remove sensitive information from user YAML."""
@@ -106,9 +110,12 @@ def _clean_yaml(yaml_info: Dict[str, str]):
     for redact_type in ['setup', 'run', 'envs']:
         if redact_type in cleaned_yaml_info:
             contents = cleaned_yaml_info[redact_type]
+            if not contents:
+                cleaned_yaml_info[redact_type] = None
+                continue
             lines = common_utils.dump_yaml_str({
                 redact_type: contents
-            }).split('\n')
+            }).strip().split('\n')
             cleaned_yaml_info[redact_type] = (
                 f'{len(lines)} lines {redact_type.upper()}'
                 ' redacted')
@@ -129,8 +136,7 @@ def prepare_yaml(yaml_config_or_path: Union[Dict, str]):
 
     yaml_info = _clean_yaml(yaml_info)
     yaml_info['__redacted_comment_lines'] = len(comment_lines)
-    json_str = json.dumps(yaml_info)
-    return json_str
+    return yaml_info
 
 
 def update_user_task_yaml(yaml_config_or_path: Union[Dict, str]):
@@ -141,8 +147,10 @@ def update_actual_task(config: Dict[str, Any]):
     usage_message.actual_task = prepare_yaml(config)
     usage_message.task_nodes = config['num_nodes']
 
+
 def update_ray_yaml(yaml_config_or_path: Union[Dict, str]):
     usage_message.ray_yamls.append(prepare_yaml(yaml_config_or_path))
+    usage_message.num_tried_regions = len(usage_message.ray_yamls)
 
 
 def update_cluster_name(cluster_name: Union[List[str], str]):
@@ -150,9 +158,16 @@ def update_cluster_name(cluster_name: Union[List[str], str]):
         usage_message.cluster_names = [cluster_name]
     else:
         usage_message.cluster_names = cluster_name
+    usage_message.num_related_clusters = len(usage_message.cluster_names)
+
 
 def update_cluster_nodes(num_nodes: int):
     usage_message.cluster_nodes = num_nodes
+
+
+def set_new_cluster():
+    usage_message.new_cluster = True
+
 
 @contextlib.contextmanager
 def update_runtime_context(name: str):
@@ -184,7 +199,11 @@ def entrypoint_context(name: str):
         raise
     finally:
         if is_outermost:
-            _send_message(str(usage_message), MessageType.USAGE)
+            try:
+                _send_message(str(usage_message), MessageType.USAGE)
+            except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Usage logging exception caught: {type(e)}({e})')
 
 
 def entrypoint(name_or_fn: str):

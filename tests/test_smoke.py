@@ -1,4 +1,5 @@
 import inspect
+import os
 import pathlib
 import subprocess
 import sys
@@ -12,16 +13,14 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
-_smoke_test_hash = backend_utils.user_and_hostname_hash()
+_smoke_test_hash = common_utils.user_and_hostname_hash()
 test_id = str(uuid.uuid4())[-2:]
-
 
 class Test(NamedTuple):
     name: str

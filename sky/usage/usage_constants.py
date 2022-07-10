@@ -2,7 +2,7 @@
 
 LOG_URL = 'https://178762:eyJrIjoiN2VhYWQ3YWRkNzM0NDY0ZmE4YmRlNzRhYTk2ZGRhOWQ5ZjdkMGE0ZiIsIm4iOiJza3lwaWxvdC11c2VyLXN0YXRzLW1ldHJpY3MiLCJpZCI6NjE1MDQ2fQ=@logs-prod3.grafana.net/api/prom/push'  # pylint: disable=line-too-long
 
-USAGE_MESSAGE_SCHEMA_VERSION = 3
+USAGE_MESSAGE_SCHEMA_VERSION = 6
 
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 
