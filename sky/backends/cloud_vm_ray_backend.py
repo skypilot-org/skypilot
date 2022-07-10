@@ -1039,7 +1039,7 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-        # Special case handling for Local cloud (since there are no zones).
+
         if isinstance(to_provision_cloud, clouds.Local):
             cluster_name = logging_info['cluster_name']
             logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
@@ -1146,7 +1146,7 @@ class RetryingVmProvisioner(object):
         # On-premise cluster should never reach this code. Ray cluster
         # should already be running if the system admin has setup Ray.
         if isinstance(launched_resources.cloud, clouds.Local):
-            raise ValueError(
+            raise RuntimeError(
                 'Ray status errored out on the head node of the local cluster. '
                 'Check if ray[default]==1.10.0 is installed or running '
                 'correctly.')
@@ -1275,6 +1275,7 @@ class CloudVmRayBackend(backends.Backend):
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
+            # Represents a task's specified resources.
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -1296,6 +1297,13 @@ class CloudVmRayBackend(backends.Backend):
             return self.cluster_name
 
         def _maybe_make_local_handle(self):
+            """Adds local handle for the local cloud case.
+
+            For public cloud, the first time sky launch is ran, task resources
+            = cluster resources. For the local cloud case, sky launch is ran,
+            task resources != cluster resources; hence, this method is needed
+            to correct this.
+            """
             self.local_handle = None
             local_file = os.path.expanduser(
                 backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
@@ -1311,11 +1319,12 @@ class CloudVmRayBackend(backends.Backend):
                 config = backend_utils.get_local_cluster_config_or_error(
                     self.cluster_name)
                 self.local_handle = {}
-                self.launched_resources = resources_lib.Resources(
-                    cloud=clouds.Local(), region='Local')
                 cluster_config = config['cluster']
                 auth_config = config['auth']
                 ips = cluster_config['ips']
+                # Convert from task -> cluster resources.
+                self.launched_resources = resources_lib.Resources(
+                    cloud=clouds.Local(), region='Local')
                 self.launched_nodes = len(ips)
                 self.local_handle['ips'] = ips
                 cluster_accs = backend_utils.get_local_cluster_accelerators(
@@ -2162,7 +2171,7 @@ class CloudVmRayBackend(backends.Backend):
         job_submit_cmd = (
             'ray job submit '
             f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-            f'-- sudo -H su - {ssh_user} -c \"{remote_run_file}\"')
+            f'-- sudo -H su {ssh_user} -c \"{remote_run_file}\"')
         return job_submit_cmd
 
     def tail_logs(self,

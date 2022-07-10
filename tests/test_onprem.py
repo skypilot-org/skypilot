@@ -192,12 +192,14 @@ class TestOnprem:
             f.write(str(admin_cluster_config))
             f.flush()
             file_path = f.name
-            test = Test('test-admin-deploy', [
-                f'sky admin deploy {file_path}',
-            ])
+            test = Test(
+                'test-admin-deploy',
+                [
+                    f'sky admin deploy {file_path}',
+                ],
+                # Cleaning up artifacts created from the test.
+                f'rm -rf ~/.sky/local/{name}.yml')
             run_one_test(test)
-        # Cleaning up artifacts created from the test.
-        subprocess.check_output(f'rm -rf ~/.sky/local/{name}.yml', shell=True)
 
     def test_onprem_inline(self, local_cluster_name, admin_setup,
                            cluster_config_setup, first_ssh_user):
@@ -275,7 +277,7 @@ class TestOnprem:
                 f'sky exec {name} -d -- "echo hi"',
                 f'sky cancel {name} 5',
                 f'sky logs {name} 1',
-                f'sky queue {name} | grep CANCELLED',
+                f'sky queue {name} | grep 5 | grep CANCELLED',
             ],
             # Cleaning up artifacts created from the test.
             f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
@@ -301,11 +303,11 @@ class TestOnprem:
                 f'sky exec {second_cluster_name} -d -- "sleep 120; echo hi"',
                 f'sky cancel {first_cluster_name} 2',
                 f'sleep 5',
-                f'sky queue {first_cluster_name} | grep CANCELLED',
+                f'sky queue {first_cluster_name} | grep 2 | grep CANCELLED',
                 # User 1 should not cancel user 2's jobs.
-                f'sky queue {second_cluster_name} | grep -v CANCELLED',
+                f'sky queue {second_cluster_name} | grep 2 | grep -v CANCELLED',
                 f'sky cancel {second_cluster_name} 2',
-                f'sky queue {second_cluster_name} | grep CANCELLED',
+                f'sky queue {second_cluster_name} | grep 2 | grep CANCELLED',
                 f'sky logs {first_cluster_name} 1',
                 f'sky logs {second_cluster_name} 1'
             ],
