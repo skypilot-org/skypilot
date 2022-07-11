@@ -5,7 +5,7 @@ This doc is for sky team only to set up the usage collection service. Instead of
 To set up the service, following steps should be applied.
 ### Create a persistent storage for logging
 1. Create a S3 bucket for the logging storage (our current bucket: `s3://sky-host-loki` in us-west-2).
-1. Create an IAM role that can only access that bucket using the following policy:
+1. [Create an IAM role](https://objectivefs.com/howto/how-to-restrict-s3-bucket-policy-to-only-one-aws-s3-bucket) that can only access that bucket using the following policy:
 ![iam](figures/sky-host-loki-iam.png)
 1. Replace the `access_key_id` and `secret_access_key` in [loki-s3-config.yaml](sky/usage/loki-s3-config.yaml) with the keys of that IAM role.
 
