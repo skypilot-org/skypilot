@@ -1304,7 +1304,7 @@ def _update_cluster_status(
 
     The function will update the cached cluster status in the global state. For the
     design of the cluster status and transition, please refer to the
-    sky/design_docs/cluster_states.md
+    sky/design_docs/cluster_status.md
 
     Returns:
       If the cluster is terminated or does not exist, return None.

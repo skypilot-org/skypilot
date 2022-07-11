@@ -1,0 +1,24 @@
+resources:
+  cloud: aws
+
+file_mounts:
+  # /data:
+  #   source: s3://fah-public-data-covid19-cryptic-pockets/
+  #   mode: MOUNT
+  /data_ro:
+    source: s3://fah-public-data-covid19-cryptic-pockets/
+    mode: MOUNT
+
+setup: |
+  pip install --upgrade pip
+  conda init bash
+  conda activate jupyter
+  conda create -n jupyter python=3.9 -y
+  conda activate jupyter
+  pip install jupyter
+  pip install tqdm
+  pip install wandb
+
+run: |
+  conda activate jupyter
+  jupyter notebook --port 8888

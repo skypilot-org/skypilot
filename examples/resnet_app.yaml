@@ -18,6 +18,12 @@ outputs: {
 # }
 
 setup: |
+  wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+  bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda
+  $HOME/miniconda/bin/conda init bash
+  conda config --set auto_activate_base false
+  source ~/.bashrc
+  
   git clone https://github.com/concretevitamin/tpu || true
   cd tpu
   git checkout 9459fee
