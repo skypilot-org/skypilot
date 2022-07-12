@@ -53,6 +53,8 @@ def _get_cluster_name(with_test_id: bool = True) -> str:
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
+    # Fail fast if `sky` CLI somehow errors out.
+    subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
     log_file = tempfile.NamedTemporaryFile('a',
                                            prefix=f'{test.name}-',
                                            suffix='.log',
@@ -273,7 +275,9 @@ def test_tpu_vm():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
-            f'sky start -y {name}',
+            # Use retry: guard against transient errors observed for
+            # just-stopped TPU VMs (#962).
+            f'sky start --retry-until-up -y {name}',
             f'sky exec {name} examples/tpu/tpuvm_mnist.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
@@ -452,8 +456,10 @@ def test_use_spot():
         'use-spot',
         [
             f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
+            'sleep 10',  # Guard against line below failing w/ PENDING.
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
+            'sleep 10',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',

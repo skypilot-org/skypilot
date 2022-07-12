@@ -58,7 +58,7 @@ logger = sky_logging.init_logger(__name__)
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -224,7 +224,7 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node' + plural + '.'
-                print('SKY INFO: Waiting for task resources on ' + node_str + 
+                print('SKY INFO: Waiting for task resources on ' + node_str +
                       ' This will block if the cluster is full.\\n'
                       'SKY INFO: Use Ctrl-C to exit log streaming (task will not be killed).',
                       file=sys.stderr,
@@ -1300,7 +1300,6 @@ class CloudVmRayBackend(backends.Backend):
         # Try to launch the exiting cluster first
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
-        backend_utils.check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
@@ -1319,6 +1318,8 @@ class CloudVmRayBackend(backends.Backend):
                         cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+            backend_utils.check_cluster_name_is_valid(
+                cluster_name, to_provision_config.resources.cloud)
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             with timeline.Event('backend.provision.wheel_build'):
