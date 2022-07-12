@@ -3,7 +3,7 @@ FROM public.ecr.aws/a9w6z7w5/sky:latest
 # Initialize conda for root user, install ssh and other local dependencies
 RUN conda init && \
     apt update -y && \
-    apt install openssh-server pciutils nano -y && \
+    apt install patch openssh-server pciutils nano -y && \
     rm -rf /var/lib/apt/lists/* && \
     pip install ray[default]==1.10
 
