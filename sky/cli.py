@@ -2165,12 +2165,18 @@ def local_up():
     Runs Sky inside a container on your laptop.
     """
     click.secho('Launching Sky locally in docker.', fg='green')
-    click.secho('Make sure you have configured your keypairs in local/.env and local/docker-cluster-cfg.yaml!', fg='red')
+    click.secho(
+        'Make sure you have configured your keypairs in local/.env and '
+        'local/docker-cluster-cfg.yaml!',
+        fg='red')
     scripts_path = pathlib.Path(__file__).parent.parent.resolve() / 'local'
     setup_script = scripts_path / 'setup.sh'
     try:
         subprocess_utils.run([setup_script], cwd=scripts_path)
-        click.secho('Done! You may now run tasks on docker cluster. e.g., try sky launch -y -c docker examples/minimal.yaml', fg='green')
+        click.secho(
+            'Done! You may now run tasks on docker cluster. e.g., try '
+            'sky launch -y -c docker examples/minimal.yaml',
+            fg='green')
     except subprocess.CalledProcessError:
         click.secho('Failed to launch Sky docker container.', fg='red')
 
