@@ -1312,7 +1312,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
-                to_provision_config = self.__check_existing_cluster(
+                to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
@@ -1382,7 +1382,7 @@ class CloudVmRayBackend(backends.Backend):
             cluster_config_file = config_dict['ray']
 
             if 'tpu_name' in config_dict:
-                self.__set_tpu_name(cluster_config_file,
+                self._set_tpu_name(cluster_config_file,
                                     config_dict['launched_nodes'],
                                     config_dict['tpu_name'])
 
@@ -1514,8 +1514,8 @@ class CloudVmRayBackend(backends.Backend):
         storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
         """Mounts all user files to the remote nodes."""
-        self.__execute_file_mounts(handle, all_file_mounts)
-        self.__execute_storage_mounts(handle, storage_mounts)
+        self._execute_file_mounts(handle, all_file_mounts)
+        self._execute_storage_mounts(handle, storage_mounts)
 
     def _setup(self, handle: ResourceHandle, task: task_lib.Task) -> None:
         start = time.time()
@@ -1676,11 +1676,11 @@ class CloudVmRayBackend(backends.Backend):
 
         # Case: task_lib.Task(run, num_nodes=1)
         if task.num_nodes == 1:
-            self.__execute_task_one_node(handle, task, job_id, detach_run)
+            self._execute_task_one_node(handle, task, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=N)
             assert task.num_nodes > 1, task.num_nodes
-            self.__execute_task_n_nodes(handle, task, job_id, detach_run)
+            self._execute_task_n_nodes(handle, task, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -2148,7 +2148,7 @@ class CloudVmRayBackend(backends.Backend):
     # --- Utilities ---
 
     @timeline.event
-    def __check_existing_cluster(
+    def _check_existing_cluster(
             self, task: task_lib.Task, to_provision: 'resources_lib.Resources',
             cluster_name: str) -> RetryingVmProvisioner.ToProvisionConfig:
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -2170,7 +2170,7 @@ class CloudVmRayBackend(backends.Backend):
                                                        to_provision,
                                                        task.num_nodes)
 
-    def __set_tpu_name(self, cluster_config_file: str, num_nodes: int,
+    def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
                        tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
@@ -2192,7 +2192,7 @@ class CloudVmRayBackend(backends.Backend):
 
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
-    def __execute_file_mounts(self, handle: ResourceHandle,
+    def _execute_file_mounts(self, handle: ResourceHandle,
                               file_mounts: Dict[Path, Path]):
         """Executes file mounts - rsyncing local files and
         copying from remote stores."""
@@ -2321,7 +2321,7 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
 
-    def __execute_storage_mounts(self, handle: ResourceHandle,
+    def _execute_storage_mounts(self, handle: ResourceHandle,
                                  storage_mounts: Dict[Path,
                                                       storage_lib.Storage]):
         """Executes storage mounts: installing mounting tools and mounting."""
@@ -2371,7 +2371,7 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-    def __execute_task_one_node(self, handle: ResourceHandle,
+    def _execute_task_one_node(self, handle: ResourceHandle,
                                 task: task_lib.Task, job_id: int,
                                 detach_run: bool) -> None:
         # Launch the command as a Ray task.
@@ -2405,7 +2405,7 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
-    def __execute_task_n_nodes(self, handle: ResourceHandle,
+    def _execute_task_n_nodes(self, handle: ResourceHandle,
                                task: task_lib.Task, job_id: int,
                                detach_run: bool) -> None:
         # Strategy:
