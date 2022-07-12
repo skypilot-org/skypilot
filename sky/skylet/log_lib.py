@@ -22,7 +22,7 @@ from sky.skylet.utils import log_utils
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
-_SKY_LOG_TAILING_GAP_SECONDS = 0.02
+_SKY_LOG_TAILING_GAP_SECONDS = 0.2
 
 logger = sky_logging.init_logger(__name__)
 
@@ -118,6 +118,8 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
           command. If enabled, lines are printed only when '\r' or '\n' is
           found.
+        ray_job_id: The id for a ray job.
+        use_sudo: Whether to use sudo to create log_path.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -131,11 +133,10 @@ def run_with_log(
     if use_sudo:
         # Sudo case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
-        subprocess.call(
-            f'sudo mkdir -p {dirname};sudo touch {log_path}; '
-            f'sudo chmod a+rwx {log_path}',
-            shell=True)
-        # Hack: Subprocess shell does not accept sudo.
+        subprocess.run(f'sudo mkdir -p {dirname}', shell=True, check=True)
+        # Hack: Subprocess Popen does not accept sudo.
+        # subprocess.Popen in local mode with shell=True does not work,
+        # as it does not understand what -H means for sudo.
         shell = False
     else:
         os.makedirs(dirname, exist_ok=True)
@@ -230,7 +231,7 @@ def make_task_bash_script(codegen: str,
     ]
     if env_vars is not None:
         for k, v in env_vars.items():
-            script.append(f'export {k}={v!r}')
+            script.append(f'export {k}="{v}"')
     script += [
         codegen,
         '',  # New line at EOF.
@@ -242,50 +243,44 @@ def make_task_bash_script(codegen: str,
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               job_owner: str,
-                              job_id: str,
+                              job_id: int,
                               env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False,
                               use_sudo: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
-        if env_vars is not None:
-            export_env_vars = '\n'.join(
-                [f'export {k}="{v}"' for k, v in env_vars.items()])
-            bash_command = export_env_vars + '\n' + bash_command
-        bash_command = make_task_bash_script(bash_command)
+        bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
 
+        # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
-        gpu_list = ray.get_gpu_ids()
-        if len(gpu_list) > 0:
-            gpu_list = [str(gpu_id) for gpu_id in gpu_list]
-            # Switching users will give Ray process access to all GPUs,
-            # instead of the GPUs allocated.
-            inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
-                gpu_list) + ' ' + inner_command
+
         if use_sudo:
-            subprocess.call(f'chmod a+rwx {script_path}', shell=True)
+            gpu_list = ray.get_gpu_ids()
+            if len(gpu_list) > 0:
+                gpu_list = [str(gpu_id) for gpu_id in gpu_list]
+                # Switching users will give Ray process access to all GPUs,
+                # instead of the GPUs allocated.
+                inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
+                    gpu_list) + ' ' + inner_command
+            subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
             subprocess_cmd = [
-                'sudo', '-H', 'su', '-', job_owner, '-c', inner_command
+                'sudo', '-H', 'su', job_owner, '-c', inner_command
             ]
         else:
             subprocess_cmd = inner_command
 
-        return run_with_log(
-            # Need this `-i` option to make sure `source ~/.bashrc` work.
-            # Do not use shell=True because it will cause the environment
-            # set in this task visible to other tasks. shell=False requires
-            # the cmd to be a list.
-            subprocess_cmd,
-            log_path,
-            ray_job_id=f'{job_id}-{job_owner}',
-            stream_logs=stream_logs,
-            with_ray=with_ray,
-            use_sudo=use_sudo,
-            shell=True)
+        return run_with_log(subprocess_cmd,
+                            log_path,
+                            ray_job_id=job_lib.make_ray_job_id(
+                                job_id, job_owner),
+                            stream_logs=stream_logs,
+                            with_ray=with_ray,
+                            use_sudo=use_sudo,
+                            shell=True)
 
 
 def _follow_job_logs(file,

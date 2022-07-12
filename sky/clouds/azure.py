@@ -8,6 +8,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -295,13 +296,16 @@ class Azure(clouds.Cloud):
             if not azure_subscription_id:
                 raise ValueError  # The error message will be replaced.
         except ModuleNotFoundError as e:
-            raise ModuleNotFoundError('Unable to import azure python '
-                                      'module. Is azure-cli python package '
-                                      'installed? Try pip install '
-                                      '.[azure] in the sky repo.') from e
-        except Exception as e:
-            raise RuntimeError(
-                'Failed to get subscription id from azure cli. '
-                'Make sure you have logged in and run this Azure '
-                'cli command: "az account set -s <subscription_id>".') from e
+            with ux_utils.print_exception_no_traceback():
+                raise ModuleNotFoundError('Unable to import azure python '
+                                          'module. Is azure-cli python package '
+                                          'installed? Try pip install '
+                                          '.[azure] in the sky repo.') from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to get subscription id from azure cli. '
+                    'Make sure you have logged in and run this Azure '
+                    'cli command: "az account set -s <subscription_id>".'
+                ) from e
         return azure_subscription_id

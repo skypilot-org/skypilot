@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 from typing import List, Optional, Tuple, NamedTuple
 
 import colorama
@@ -10,9 +11,12 @@ import pytest
 import yaml
 
 from sky import cli
-from sky.backends import backend_utils
+from sky import exceptions
+from sky.utils import command_runner
+from sky.utils import subprocess_utils
 
 
+# TODO(mluo): Refactor smoke test methods
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
@@ -68,7 +72,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(msg)
     log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
-        backend_utils.run(
+        subprocess_utils.run(
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -108,8 +112,12 @@ class TestOnprem:
         yield 'ubuntu'
 
     @pytest.fixture
-    def regular_ssh_user(self):
+    def first_ssh_user(self):
         yield 'test'
+
+    @pytest.fixture
+    def second_ssh_user(self):
+        yield 'test1'
 
     @pytest.fixture
     def ssh_private_key(self):
@@ -132,44 +140,47 @@ class TestOnprem:
         return yaml_dict
 
     @pytest.fixture
-    def cluster_config_setup(self, regular_ssh_user, admin_cluster_config,
-                             local_cluster_name):
+    def cluster_config_setup(self, admin_cluster_config, local_cluster_name):
+        # Returns a function that setups up the cluster for the user
         # Set up user's cluster config to be stored in `~/.sky/local/...`.
-        local_sky_folder = os.path.expanduser('~/.sky/local/')
-        os.makedirs(local_sky_folder, exist_ok=True)
-        with open(f'{local_sky_folder}/{local_cluster_name}.yml', 'w') as f:
-            # Change from normal admin to user (emulates admin sending users
-            # the private key)
-            admin_cluster_config['auth']['ssh_user'] = regular_ssh_user
-            yaml.dump(admin_cluster_config, f)
+        def _local_cluster_setup(ssh_user, cluster_name=local_cluster_name):
+            local_sky_folder = os.path.expanduser('~/.sky/local/')
+            os.makedirs(local_sky_folder, exist_ok=True)
+            with open(f'{local_sky_folder}/{cluster_name}.yml', 'w') as f:
+                # Change from normal admin to user (emulates admin sending users
+                # the private key)
+                admin_cluster_config['auth']['ssh_user'] = ssh_user
+                admin_cluster_config['cluster']['name'] = cluster_name
+                yaml.dump(admin_cluster_config, f)
+
+        return _local_cluster_setup
 
     @pytest.fixture
-    def jobs_reset(self, admin_cluster_config):
+    def jobs_reset(self, admin_cluster_config, first_ssh_user, second_ssh_user):
         # Deletes all prior jobs on the cluster.
         head_ip = admin_cluster_config['cluster']['ips'][0]
         ssh_user = admin_cluster_config['auth']['ssh_user']
         ssh_key = admin_cluster_config['auth']['ssh_private_key']
 
-        # Removing /tmp/ray and ~/.sky to reset jobs id to index 0
-        rc = backend_utils.run_command_on_ip_via_ssh(
-            head_ip,
-            f'sudo rm -rf /tmp/ray; sudo rm -rf /home/test/.sky',
-            ssh_user=ssh_user,
-            ssh_private_key=ssh_key,
-            stream_logs=False)
+        ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+        runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+
+        # Removing /tmp/ray and ~/.sky to reset jobs id to index 0.
+        rc = runner.run(('sudo rm -rf /tmp/ray; '
+                         f'sudo rm -rf /home/{first_ssh_user}/.sky; '
+                         f'sudo rm -rf /home/{second_ssh_user}/.sky'),
+                        stream_logs=False)
 
     @pytest.fixture
     def admin_setup(self, jobs_reset, admin_cluster_config):
         # Sets up Ray cluster on the onprem node.
-        head_ip = admin_cluster_config['cluster']['ips'][0]
-        ssh_user = admin_cluster_config['auth']['ssh_user']
-        ssh_key = admin_cluster_config['auth']['ssh_private_key']
         cluster_name = admin_cluster_config['cluster']['name']
-
         with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
             yaml.dump(admin_cluster_config, f)
             file_path = f.name
-            # Must tear down local cluster in ~/.sky.
+            # Must tear down local cluster in ~/.sky. Running `sky down`
+            # removes the local cluster from `sky status` and terminates
+            # runnng jobs.
             subprocess.check_output(
                 f'sky down -y -p {cluster_name}; sky admin deploy {file_path}',
                 shell=True)
@@ -181,15 +192,21 @@ class TestOnprem:
             f.write(str(admin_cluster_config))
             f.flush()
             file_path = f.name
-            test = Test('test-admin-deploy', [
-                f'sky admin deploy {file_path}',
-            ])
+            test = Test(
+                'test-admin-deploy',
+                [
+                    f'sky admin deploy {file_path}',
+                ],
+                # Cleaning up artifacts created from the test.
+                f'rm -rf ~/.sky/local/{name}.yml')
             run_one_test(test)
 
-        subprocess.check_output(f'rm -rf ~/.sky/local/{name}.yml', shell=True)
-
     def test_onprem_inline(self, local_cluster_name, admin_setup,
-                           cluster_config_setup):
+                           cluster_config_setup, first_ssh_user):
+
+        # Setups up local cluster config for user 'test'
+        cluster_config_setup(first_ssh_user)
+
         # Tests running commands on on-prem cluster.
         name = local_cluster_name
 
@@ -201,17 +218,27 @@ class TestOnprem:
                 f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
                 f'sky logs {name} 2 --status',
             ],
+            # Cleaning up artifacts created from the test.
             f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
         )
         run_one_test(test)
 
     def test_onprem_yaml(self, local_cluster_name, admin_setup,
-                         cluster_config_setup):
+                         cluster_config_setup, first_ssh_user):
+        # Setups up local cluster config for user 'test'
+        cluster_config_setup(first_ssh_user)
+
         # Tests running Sky task yaml on on-prem cluster.
         name = local_cluster_name
         yaml_dict = {
             'setup': 'echo "Running setup"',
-            'run': 'set -x\necho $(whoami)\nrm -rf /\npkill -f ray\nsudo pkill -f ray\nexit 0\n'
+            'run': textwrap.dedent("""\
+                    set -e
+                    echo $(whoami)
+                    pkill -f ray
+                    echo NODE ID: $SKY_NODE_RANK
+                    echo NODE IPS: "$SKY_NODE_IPS"
+                    exit 0""")
         }
 
         with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
@@ -225,12 +252,16 @@ class TestOnprem:
                     f'sky exec {name} {file_path}',
                     f'sky logs {name} 2 --status',
                 ],
+                # Cleaning up artifacts created from the test.
                 f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
             )
             run_one_test(test)
 
     def test_onprem_job_queue(self, local_cluster_name, admin_setup,
-                              cluster_config_setup):
+                              cluster_config_setup, first_ssh_user):
+        # Setups up local cluster config for user 'test'
+        cluster_config_setup(first_ssh_user)
+
         # Tests running many jobs on the on-prem cluster.
         name = local_cluster_name
         test = Test(
@@ -246,14 +277,50 @@ class TestOnprem:
                 f'sky exec {name} -d -- "echo hi"',
                 f'sky cancel {name} 5',
                 f'sky logs {name} 1',
-                f'sky queue {name}',
+                f'sky queue {name} | grep 5 | grep CANCELLED',
             ],
+            # Cleaning up artifacts created from the test.
             f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
         )
         run_one_test(test)
 
+    def test_onprem_multi_tenancy(self, local_cluster_name, admin_setup,
+                                  cluster_config_setup, first_ssh_user,
+                                  second_ssh_user):
+        # Setups up local cluster config for users `test` and `test1`
+        first_cluster_name = local_cluster_name
+        cluster_config_setup(first_ssh_user)
+        second_cluster_name = 'on-prem-smoke-test-1'
+        cluster_config_setup(second_ssh_user, second_cluster_name)
+
+        # Tests running many jobs on the on-prem cluster.
+        test = Test(
+            'test_onprem_multi_tenancy',
+            [
+                f'sky launch -y -c {first_cluster_name} -- "echo hi"',
+                f'sky launch -y -c {second_cluster_name} -- "echo hi"',
+                f'sky exec {first_cluster_name} -d -- "sleep 60; echo hi"',
+                f'sky exec {second_cluster_name} -d -- "sleep 120; echo hi"',
+                f'sky cancel {first_cluster_name} 2',
+                f'sleep 5',
+                f'sky queue {first_cluster_name} | grep 2 | grep CANCELLED',
+                # User 1 should not cancel user 2's jobs.
+                f'sky queue {second_cluster_name} | grep 2 | grep -v CANCELLED',
+                f'sky cancel {second_cluster_name} 2',
+                f'sky queue {second_cluster_name} | grep 2 | grep CANCELLED',
+                f'sky logs {first_cluster_name} 1',
+                f'sky logs {second_cluster_name} 1'
+            ],
+            # Cleaning up artifacts created from the test.
+            (f'sky down -y {first_cluster_name} {second_cluster_name}; '
+             f'rm -f ~/.sky/local/{first_cluster_name}.yml; '
+             f'rm -f ~/.sky/local/{second_cluster_name}.yml'))
+        run_one_test(test)
+
     def test_onprem_resource_mismatch(self, local_cluster_name, admin_setup,
-                                      cluster_config_setup):
+                                      cluster_config_setup, first_ssh_user):
+        # Setups up local cluster config for user 'test'
+        cluster_config_setup(first_ssh_user)
         # Tests on-prem cases when users specify resources that are not on
         # the cluster. This test should error out with
         # ResourcesMismatchError.
@@ -261,8 +328,16 @@ class TestOnprem:
         cli_runner = cli_testing.CliRunner()
         # Setup the cluster handle and get cluster resources for `sky status`
         cli_runner.invoke(cli.launch, ['-c', name, '--', ''])
-        result = cli_runner.invoke(cli.launch,
-                                   ['-c', name, '--gpus', 'V100:256', '--', ''])
-        assert 'sky.exceptions.ResourcesMismatchError' in result.output
+
+        def _test_overspecify_gpus(cluster_name):
+            result = cli_runner.invoke(
+                cli.launch,
+                ['-c', cluster_name, '--gpus', 'V100:256', '--', ''])
+            assert 'sky.exceptions.ResourcesMismatchError' not in str(
+                type(result.exception))
+
+        with pytest.raises(AssertionError) as e:
+            _test_overspecify_gpus(name)
+        # Cleaning up artifacts created from the test.
         subprocess.check_output(
             f'sky down -p -y {name}; rm -f ~/.sky/local/{name}.yml', shell=True)

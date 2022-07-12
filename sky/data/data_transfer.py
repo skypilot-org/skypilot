@@ -99,8 +99,8 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
-    sync_command = f'gsutil -m rsync -rd gs://{gs_bucket_name} \
-        s3://{s3_bucket_name}'
+    sync_command = (f'gsutil -m rsync -rd gs://{gs_bucket_name} '
+                    f's3://{s3_bucket_name}')
 
     subprocess.call(sync_command, shell=True)
 

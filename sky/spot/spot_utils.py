@@ -11,6 +11,7 @@ import colorama
 import filelock
 
 from sky import backends
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -18,6 +19,7 @@ from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.spot import constants
 from sky.spot import spot_state
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -53,7 +55,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         logger.info('=== Checking the job status... ===')
         status = backend.get_job_status(handle, stream_logs=False)
         logger.info(f'Job status: {status}')
-    except SystemExit:
+    except exceptions.CommandError:
         logger.info('Failed to connect to the cluster.')
     logger.info('=' * 34)
     return status
@@ -68,8 +70,9 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                                                      code,
                                                      stream_logs=False,
                                                      require_outputs=True)
-    backend_utils.handle_returncode(returncode, code, 'Failed to get job time.',
-                                    stdout + stderr)
+    subprocess_utils.handle_returncode(returncode, code,
+                                       'Failed to get job time.',
+                                       stdout + stderr)
     return float(stdout)
 
 

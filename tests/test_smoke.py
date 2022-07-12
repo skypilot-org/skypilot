@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
+import uuid
 
 import colorama
 import pytest
@@ -13,10 +14,12 @@ import sky
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
+from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
-_user_and_host = backend_utils.user_and_hostname_hash()
+_smoke_test_hash = backend_utils.user_and_hostname_hash()
+test_id = str(uuid.uuid4())[-2:]
 
 
 class Test(NamedTuple):
@@ -37,14 +40,16 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_cluster_name():
+def _get_cluster_name(with_test_id: bool = True) -> str:
     """Returns a user-unique cluster name for each test_<name>().
 
     Must be called from each test_<name>().
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    return f'{test_name}-{_user_and_host}'
+    if with_test_id:
+        return f'{test_name}-{_smoke_test_hash}-{test_id}'
+    return f'{test_name}-{_smoke_test_hash}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -84,7 +89,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     test.echo(msg)
     log_file.write(msg)
     if proc.returncode == 0 and test.teardown is not None:
-        backend_utils.run(
+        subprocess_utils.run(
             test.teardown,
             stdout=log_file,
             stderr=subprocess.STDOUT,
@@ -206,7 +211,8 @@ def test_n_node_job_queue():
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
-    name = _get_cluster_name()  # Keep consistent with the py script.
+    name = _get_cluster_name(
+        with_test_id=False)  # Keep consistent with the py script.
     test = Test(
         'multi_echo',
         [
@@ -296,7 +302,8 @@ def test_multi_hostname():
 
 # ---------- Task: n=2 nodes with setups. ----------
 def test_distributed_tf():
-    name = _get_cluster_name()  # Keep consistent with the py script.
+    name = _get_cluster_name(
+        with_test_id=False)  # Keep consistent with the py script.
     test = Test(
         'resnet_distributed_tf_app',
         [
@@ -372,7 +379,7 @@ def test_autostop():
     run_one_test(test)
 
 
-def _get_cancel_task_with_cloud(name, cloud):
+def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',
         [
@@ -388,6 +395,7 @@ def _get_cancel_task_with_cloud(name, cloud):
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
+        timeout=timeout,
     )
     return test
 
@@ -402,7 +410,7 @@ def test_cancel_aws():
 # ---------- Testing `sky cancel` on Azure ----------
 def test_cancel_azure():
     name = _get_cluster_name()
-    test = _get_cancel_task_with_cloud(name, 'azure')
+    test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
     run_one_test(test)
 
 
@@ -430,6 +438,23 @@ def test_cancel_pytorch():
             # Ensure Xorg is the only process running.
             '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing use-spot option ----------
+def test_use_spot():
+    """Test use-spot and sky exec."""
+    name = _get_cluster_name()
+    test = Test(
+        'use-spot',
+        [
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} echo hi',
+            f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
     )
@@ -472,6 +497,33 @@ def test_gcp_spot():
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
+        ],
+        f'sky spot cancel -y -n {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Testing managed spot recovery ----------
+def test_spot_recovery():
+    """Test managed spot recovery."""
+    name = _get_cluster_name()
+    region = 'us-west-2'
+    test = Test(
+        'managed-spot-recovery',
+        [
+            f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
+            'sleep 200',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            # Terminate the cluster manually.
+            f'aws ec2 terminate-instances --region {region} --instance-ids $('
+            f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:ray-cluster-name,Values={name}* '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text)',
+            'sleep 40',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
+            'sleep 200',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
         ],
         f'sky spot cancel -y -n {name}',
     )

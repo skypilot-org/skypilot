@@ -87,7 +87,6 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    @ux_utils.print_exception_no_traceback_decorator
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
@@ -252,7 +251,8 @@ class Optimizer:
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
-                    raise exceptions.ResourcesUnavailableError(error_msg)
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -640,10 +640,8 @@ class Optimizer:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
-            instance_type = '' if resources.instance_type is None \
-                else resources.instance_type
             return [
-                str(resources.cloud), instance_type + spot,
+                str(resources.cloud), resources.instance_type + spot,
                 str(accelerators)
             ]
 
@@ -789,10 +787,7 @@ class DummyCloud(clouds.Cloud):
 
 
 def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
-    is_cloud = any(cloud.is_same_cloud(c) for c in lst)
-    if isinstance(cloud, clouds.Local):
-        return True
-    return is_cloud
+    return any(cloud.is_same_cloud(c) for c in lst)
 
 
 def _filter_out_blocked_launchable_resources(
@@ -831,18 +826,21 @@ def _fill_in_launchable_resources(
                 check.check(quiet=True)
                 return _fill_in_launchable_resources(
                     task, blocked_launchable_resources, False)
-            raise exceptions.ResourcesUnavailableError(
-                f'Task {task} requires {resources.cloud} which is not '
-                'enabled. Run `sky check` to enable access to it, '
-                'or change the cloud requirement.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    f'Task {task} requires {resources.cloud} which is not '
+                    'enabled. Run `sky check` to enable access to it, '
+                    'or change the cloud requirement.')
         elif resources.is_launchable():
             launchable[resources] = [resources]
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds
             # Hack: When >=2 cloud candidates, always remove local cloud from
-            # possible candidates.
-            # TODO(mluo): Add on-prem spillover.
+            # possible candidates. This is so the optimizer will consider
+            # public clouds, except local. Local will be included as part of
+            # optimizer in a future PR.
+            # TODO(mluo): Add on-prem to cloud spillover.
             if len(clouds_list) >= 2:
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Local)

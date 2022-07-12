@@ -3,6 +3,8 @@ import collections
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from sky.utils import ux_utils
+
 if typing.TYPE_CHECKING:
     from sky import resources
 
@@ -32,8 +34,9 @@ class _CloudRegistry(dict):
         if name is None:
             return None
         if name.lower() not in self:
-            raise ValueError(f'Cloud {name} is not a valid cloud among '
-                             '{list(self.keys())}')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cloud {name} is not a valid cloud among '
+                                 f'{list(self.keys())}')
         return self.get(name.lower())
 
     def register(self, cloud_cls: 'Cloud') -> None:
