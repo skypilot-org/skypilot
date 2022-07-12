@@ -1383,8 +1383,8 @@ class CloudVmRayBackend(backends.Backend):
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(cluster_config_file,
-                                    config_dict['launched_nodes'],
-                                    config_dict['tpu_name'])
+                                   config_dict['launched_nodes'],
+                                   config_dict['tpu_name'])
 
             with timeline.Event('backend.provision.get_node_ips'):
                 ip_list = backend_utils.get_node_ips(
@@ -2171,7 +2171,7 @@ class CloudVmRayBackend(backends.Backend):
                                                        task.num_nodes)
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
-                       tpu_name: str) -> None:
+                      tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
@@ -2193,7 +2193,7 @@ class CloudVmRayBackend(backends.Backend):
         subprocess_utils.run_in_parallel(_setup_tpu_name_on_node, runners)
 
     def _execute_file_mounts(self, handle: ResourceHandle,
-                              file_mounts: Dict[Path, Path]):
+                             file_mounts: Dict[Path, Path]):
         """Executes file mounts - rsyncing local files and
         copying from remote stores."""
         # File mounts handling for remote paths possibly without write access:
@@ -2322,8 +2322,8 @@ class CloudVmRayBackend(backends.Backend):
         logger.debug(f'File mount sync took {end - start} seconds.')
 
     def _execute_storage_mounts(self, handle: ResourceHandle,
-                                 storage_mounts: Dict[Path,
-                                                      storage_lib.Storage]):
+                                storage_mounts: Dict[Path,
+                                                     storage_lib.Storage]):
         """Executes storage mounts: installing mounting tools and mounting."""
         # Process only mount mode objects here. COPY mode objects have been
         # converted to regular copy file mounts and thus have been handled
@@ -2372,8 +2372,8 @@ class CloudVmRayBackend(backends.Backend):
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
     def _execute_task_one_node(self, handle: ResourceHandle,
-                                task: task_lib.Task, job_id: int,
-                                detach_run: bool) -> None:
+                               task: task_lib.Task, job_id: int,
+                               detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
@@ -2405,9 +2405,8 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
-    def _execute_task_n_nodes(self, handle: ResourceHandle,
-                               task: task_lib.Task, job_id: int,
-                               detach_run: bool) -> None:
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: task_lib.Task,
+                              job_id: int, detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
