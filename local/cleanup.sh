@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -x
 docker compose down
-sky down -py local
+sky down -py docker
+rm -f ~/.sky/local/docker.yml

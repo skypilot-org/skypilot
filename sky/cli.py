@@ -30,7 +30,9 @@ each other.
 import functools
 import getpass
 import os
+import pathlib
 import shlex
+import subprocess
 import sys
 import tempfile
 import typing
@@ -2148,6 +2150,45 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         raise click.ClickException(
             'Must pass in \'-a/--all\' or storage names to \'sky '
             'storage delete\'.')
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def local():
+    """Sky Local Demo."""
+    pass
+
+
+@local.command('up', cls=_DocumentedCodeCommand)
+def local_up():
+    """Launches Sky in docker on your laptop.
+
+    Runs Sky inside a container on your laptop.
+    """
+    click.secho('Launching Sky locally in docker.', fg='green')
+    click.secho('Make sure you have configured your keypairs in local/.env and local/docker-cluster-cfg.yaml!', fg='red')
+    scripts_path = pathlib.Path(__file__).parent.parent.resolve() / 'local'
+    setup_script = scripts_path / 'setup.sh'
+    try:
+        subprocess_utils.run([setup_script], cwd=scripts_path)
+        click.secho('Done! You may now run tasks on docker cluster. e.g., try sky launch -y -c docker examples/minimal.yaml', fg='green')
+    except subprocess.CalledProcessError:
+        click.secho('Failed to launch Sky docker container.', fg='red')
+
+
+@local.command('down', cls=_DocumentedCodeCommand)
+def local_down():
+    """Launches Sky in docker on your laptop.
+
+    Runs Sky inside a container on your laptop.
+    """
+    click.secho('Removing Sky docker container.', fg='green')
+    scripts_path = pathlib.Path(__file__).parent.parent.resolve() / 'local'
+    cleanup_script = scripts_path / 'cleanup.sh'
+    try:
+        subprocess_utils.run([cleanup_script], cwd=scripts_path)
+        click.secho('Cleanup done!', fg='green')
+    except subprocess.CalledProcessError:
+        click.secho('Failed to run down Sky docker container.', fg='red')
 
 
 @cli.group(cls=_NaturalOrderGroup)
