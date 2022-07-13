@@ -45,6 +45,10 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
     as the arguments.
     """
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
+    if len(args) == 1:
+        # Avoid creating a pool if there is only one argument to optimize
+        # the performance.
+        return [func(args[0])]
     with pool.ThreadPool() as p:
         # Run the function in parallel on the arguments, keeping the order.
         return list(p.imap(func, args))

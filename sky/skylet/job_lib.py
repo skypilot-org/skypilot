@@ -8,11 +8,11 @@ import pathlib
 import re
 import shlex
 import sqlite3
-import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from sky import sky_logging
+from sky.utils import subprocess_utils
 from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
 
@@ -43,9 +43,9 @@ class JobStatus(enum.Enum):
 _RAY_TO_JOB_STATUS_MAP = {
     'PENDING': JobStatus.PENDING,
     'RUNNING': JobStatus.RUNNING,
-    'succeeded': JobStatus.SUCCEEDED,
-    'failed': JobStatus.FAILED,
-    'stopped': JobStatus.CANCELLED,
+    'SUCCEEDED': JobStatus.SUCCEEDED,
+    'FAILED': JobStatus.FAILED,
+    'STOPPED': JobStatus.CANCELLED,
 }
 
 ANSI_ESCAPE = re.compile(r'(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]')
@@ -215,44 +215,41 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 
 def query_job_status(job_ids: List[int]) -> List[JobStatus]:
-    """Return the status of the jobs based on the `ray job status` command.
+    """Return the status of the jobs based on the ray job status.
 
     Though we update job status actively in ray program and job cancelling,
     we still need this to handle staleness problem, caused by instance
     restarting and other corner cases (if any).
+
+    This function should only be run on the remote instance with ray==1.13.0.
     """
     if len(job_ids) == 0:
         return []
 
     # TODO: if too slow, directly query against redis.
-    test_cmd = [
-        (
-            f'(ray job status --address 127.0.0.1:8265 {job} 2>&1 | '
-            # Not a typo, ray has inconsistent output for job status.
-            # succeeded: Job 'job_id' succeeded
-            # running: job 'job_id': RUNNING
-            # stopped: Job 'job_id' was stopped
-            # failed: Job 'job_id' failed
-            f'grep "ob \'{job}\'" || echo "not found")') for job in job_ids
-    ]
-    test_cmd = ' && '.join(test_cmd)
-    proc = subprocess.run(test_cmd,
-                          shell=True,
-                          check=True,
-                          executable='/bin/bash',
-                          stdout=subprocess.PIPE)
-    stdout = proc.stdout.decode('utf-8')
+    from ray import job_submission  # pylint: disable=import-outside-toplevel
+    job_client = job_submission.JobSubmissionClient(
+        address='http://127.0.0.1:8265')
 
-    results = stdout.strip().split('\n')
-    assert len(results) == len(job_ids), (results, job_ids)
+    def get_job_status(job_id) -> str:
+        try:
+            # The return value is a string, e.g. 'RUNNING', which conflicts
+            # with the return type in ray code.
+            return job_client.get_job_status(job_id)
+        except RuntimeError:
+            # Job not found.
+            return None
+
+    ray_statuses: List[Union[str, None]]
+    ray_statuses = subprocess_utils.run_in_parallel(get_job_status, job_ids)
+    assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
 
     # Process the results
     job_status_list = []
-    for job_id, res in zip(job_ids, results):
+    for job_id, ray_status in zip(job_ids, ray_statuses):
         # Replace the color codes in the output
-        res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
         original_status = get_status(job_id)
-        if res == 'not found':
+        if ray_status is None:
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
@@ -260,7 +257,6 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             if not original_status.is_terminal():
                 status = JobStatus.FAILED
         else:
-            ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
             # To avoid race condition, where the original status has already
             # been set to later state by the job. We skip the update.
@@ -285,7 +281,7 @@ def update_status(submitted_gap_sec: int = 0) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
-    # function, as the `ray job status job_id` does not exist due to the app
+    # function, as the ray job status does not exist due to the app
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
     running_jobs = _get_jobs(
@@ -368,13 +364,19 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
     else:
         job_records = _get_jobs_by_ids(jobs)
     jobs = [job['job_id'] for job in job_records]
-    # TODO(zhwu): `ray job stop` will wait for the jobs to be killed, but
+    # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
-    cancel_cmd = [
-        f'ray job stop --address 127.0.0.1:8265 {job_id}' for job_id in jobs
-    ]
-    cancel_cmd = ';'.join(cancel_cmd)
-    subprocess.run(cancel_cmd, shell=True, check=False, executable='/bin/bash')
+    from ray import job_submission  # pylint: disable=import-outside-toplevel
+    job_client = job_submission.JobSubmissionClient(
+        address='http://127.0.0.1:8265')
+
+    def stop_job(job: str):
+        try:
+            job_client.stop_job(job)
+        except RuntimeError:
+            pass
+
+    subprocess_utils.run_in_parallel(stop_job, jobs)
     for job in job_records:
         if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
             set_status(job['job_id'], JobStatus.CANCELLED)

@@ -13,7 +13,7 @@ To get original versions, go to the Ray branch with version:
   sky.backends.backend_utils.SKY_REMOTE_RAY_VERSION
 
 Example:
-- https://raw.githubusercontent.com/ray-project/ray/releases/1.10.0/python/ray/worker.py
+- https://raw.githubusercontent.com/ray-project/ray/releases/1.13.0/python/ray/worker.py
 """
 import os
 import subprocess
