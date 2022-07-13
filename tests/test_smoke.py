@@ -275,7 +275,7 @@ def test_tpu_vm():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
-            f'sky start -y {name}',
+            f'sky start --retry-until-up -y {name}',
             f'sky exec {name} examples/tpu/tpuvm_mnist.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
