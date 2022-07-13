@@ -165,6 +165,7 @@ def update_cluster_name(cluster_name: Union[List[str], str]):
 def update_region(region: str):
     usage_message.region = region
 
+
 def update_cluster_nodes(num_nodes: int):
     usage_message.cluster_nodes = num_nodes
 
