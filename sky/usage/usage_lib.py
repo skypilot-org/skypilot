@@ -52,6 +52,7 @@ class UsageMessageToReport:
         self.new_cluster: bool = False
         #: Number of clusters in the cluster_names list.
         self.num_related_clusters: Optional[int] = None
+        self.region: Optional[str] = None
         self.cluster_nodes: Optional[int] = None
         self.task_nodes: Optional[int] = None
         self.user_task_yaml: Optional[str] = None
@@ -160,6 +161,9 @@ def update_cluster_name(cluster_name: Union[List[str], str]):
         usage_message.cluster_names = cluster_name
     usage_message.num_related_clusters = len(usage_message.cluster_names)
 
+
+def update_region(region: str):
+    usage_message.region = region
 
 def update_cluster_nodes(num_nodes: int):
     usage_message.cluster_nodes = num_nodes

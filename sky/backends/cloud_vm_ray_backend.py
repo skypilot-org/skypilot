@@ -1405,6 +1405,7 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+            usage_lib.update_region(handle.launched_resources.region)
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
@@ -1664,6 +1665,7 @@ class CloudVmRayBackend(backends.Backend):
         task: task_lib.Task,
         detach_run: bool,
     ) -> None:
+        usage_lib.update_region(handle.launched_resources.region)
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)
