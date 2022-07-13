@@ -1005,24 +1005,21 @@ class RetryingVmProvisioner(object):
             # This is required when using custom image for GCP.
             retry_cnt = 1
             while ('Head node fetch timed out. Failed to create head node.'
-                    in stderr and isinstance(to_provision_cloud, clouds.Azure)) and retry_cnt < _MAX_RAY_UP_RETRY:
+                   in stderr and
+                   isinstance(to_provision_cloud,
+                              clouds.Azure)) and retry_cnt < _MAX_RAY_UP_RETRY:
                 logger.info(
                     'Retrying head node provisioning due to head fetching '
                     'timeout.')
                 returncode, stdout, stderr = ray_up()
 
+            retry_cnt = 1
             while ('Processing file mounts' in stdout and
-                    'Running setup commands' not in stdout and
-                    'Failed to setup head node.' in stderr)  and retry_cnt < _MAX_RAY_UP_RETRY:
+                   'Running setup commands' not in stdout and
+                   'Failed to setup head node.'
+                   in stderr) and retry_cnt < _MAX_RAY_UP_RETRY:
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
-                returncode, stdout, stderr = ray_up()
-
-            if ('Head node fetch timed out. Failed to create head node.'
-                    in stderr and isinstance(to_provision_cloud, clouds.Azure)):
-                logger.info(
-                    'Retrying head node provisioning due to head fetching '
-                    'timeout.')
                 returncode, stdout, stderr = ray_up()
 
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
