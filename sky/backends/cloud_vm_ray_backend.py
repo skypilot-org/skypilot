@@ -995,15 +995,25 @@ class RetryingVmProvisioner(object):
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
         returncode, stdout, stderr = ray_up()
-        if (returncode != 0 and 'Processing file mounts' in stdout and
-                'Running setup commands' not in stdout):
-            # Retry ray up if it failed due to file mounts, because it is
-            # probably due to too many ssh connections issue and can be fixed
-            # by retrying.
+        if returncode != 0:
+            # Retry ray up, due to the following reasons:
+            # 1. Failed due to file mounts, because it is probably has too
+            # many ssh connections and can be fixed by retrying.
             # This is required when using custom image for GCP.
-            logger.info(
-                'Retrying sky runtime setup due to ssh connection issue.')
-            returncode, stdout, stderr = ray_up()
+            # 2. Failed due to timeout when fetching head node for Azure.
+            if ('Processing file mounts' in stdout and
+                    'Running setup commands' not in stdout and
+                    'Failed to setup head node.' in stderr):
+                logger.info(
+                    'Retrying sky runtime setup due to ssh connection issue.')
+                returncode, stdout, stderr = ray_up()
+
+            if ('Head node fetch timed out. Failed to create head node.'
+                    in stderr and isinstance(to_provision_cloud, clouds.Azure)):
+                logger.info(
+                    'Retrying head node provisioning due to head fetching '
+                    'timeout.')
+                returncode, stdout, stderr = ray_up()
 
         logger.debug(f'Ray up takes {time.time() - start} seconds.')
 
