@@ -45,6 +45,9 @@ def patch() -> None:
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
+    from ray.dashboard.modules.job import cli
+    _run_patch(cli.__file__, _to_absolute('cli.py.patch'))
+
     from ray.autoscaler._private import resource_demand_scheduler
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))

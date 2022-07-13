@@ -72,6 +72,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         except subprocess.TimeoutExpired as e:
             log_file.flush()
             test.echo(e)
+            # Kill the current process.
+            proc.terminate()
             proc.returncode = 1  # None if we don't set it.
             break
 
@@ -451,7 +453,7 @@ def test_use_spot():
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
@@ -512,7 +514,7 @@ def test_spot_recovery():
         'managed-spot-recovery',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
-            'sleep 200',
+            'sleep 300',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -598,6 +600,7 @@ def test_custom_image():
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     run_one_test(test)
 
