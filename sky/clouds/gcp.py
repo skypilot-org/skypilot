@@ -9,6 +9,7 @@ from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -331,11 +332,13 @@ class GCP(clouds.Cloud):
         else:
             gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
         if not os.path.exists(gcp_credential_path):
-            raise FileNotFoundError(f'No GCP credentials found at '
-                                    f'{gcp_credential_path}. Please set the '
-                                    f'GOOGLE_APPLICATION_CREDENTIALS '
-                                    f'environment variable to point to '
-                                    f'the path of your credentials file.')
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    f'No GCP credentials found at '
+                    f'{gcp_credential_path}. Please set the '
+                    f'GOOGLE_APPLICATION_CREDENTIALS '
+                    f'environment variable to point to '
+                    f'the path of your credentials file.')
 
         with open(gcp_credential_path, 'r') as fp:
             gcp_credentials = json.load(fp)

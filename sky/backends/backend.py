@@ -2,6 +2,8 @@
 import typing
 from typing import Dict, Optional
 
+from sky.utils import timeline
+
 if typing.TYPE_CHECKING:
     from sky import resources
     from sky import task as task_lib
@@ -23,11 +25,13 @@ class Backend:
         def get_cluster_name(self) -> str:
             raise NotImplementedError
 
+    # --- APIs ---
     def check_resources_fit_cluster(self, handle: ResourceHandle,
                                     task: 'task_lib.Task') -> None:
         """Check whether resources of the task are satisfied by cluster."""
         raise NotImplementedError
 
+    @timeline.event
     def provision(self,
                   task: 'task_lib.Task',
                   to_provision: Optional['resources.Resources'],
@@ -35,12 +39,68 @@ class Backend:
                   stream_logs: bool,
                   cluster_name: Optional[str] = None,
                   retry_until_up: bool = False) -> ResourceHandle:
-        raise NotImplementedError
+        return self._provision(task, to_provision, dryrun, stream_logs,
+                               cluster_name, retry_until_up)
 
+    @timeline.event
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+        return self._sync_workdir(handle, workdir)
+
+    @timeline.event
+    def sync_file_mounts(
+        self,
+        handle: ResourceHandle,
+        all_file_mounts: Dict[Path, Path],
+        storage_mounts: Dict[Path, 'storage_lib.Storage'],
+    ) -> None:
+        return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
+
+    @timeline.event
+    def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
+        return self._setup(handle, task)
+
+    def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def sync_file_mounts(
+    @timeline.event
+    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+                detach_run: bool) -> None:
+        return self._execute(handle, task, detach_run)
+
+    @timeline.event
+    def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+        """Post execute(): e.g., print helpful inspection messages."""
+        return self._post_execute(handle, teardown)
+
+    @timeline.event
+    def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
+        return self._teardown_ephemeral_storage(task)
+
+    @timeline.event
+    def teardown(self,
+                 handle: ResourceHandle,
+                 terminate: bool,
+                 purge: bool = False) -> bool:
+        return self._teardown(handle, terminate, purge)
+
+    def register_info(self, **kwargs) -> None:
+        """Register backend-specific information."""
+        pass
+
+    # --- Implementations of the APIs ---
+    def _provision(self,
+                   task: 'task_lib.Task',
+                   to_provision: Optional['resources.Resources'],
+                   dryrun: bool,
+                   stream_logs: bool,
+                   cluster_name: Optional[str] = None,
+                   retry_until_up: bool = False) -> ResourceHandle:
+        raise NotImplementedError
+
+    def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+        raise NotImplementedError
+
+    def _sync_file_mounts(
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
@@ -48,29 +108,21 @@ class Backend:
     ) -> None:
         raise NotImplementedError
 
-    def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
+    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def add_storage_objects(self, task: 'task_lib.Task') -> None:
+    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+                 detach_run: bool) -> None:
         raise NotImplementedError
 
-    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
-                detach_run: bool) -> None:
+    def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         raise NotImplementedError
 
-    def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
-        """Post execute(): e.g., print helpful inspection messages."""
+    def _teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
-    def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
+    def _teardown(self,
+                  handle: ResourceHandle,
+                  terminate: bool,
+                  purge: bool = False) -> bool:
         raise NotImplementedError
-
-    def teardown(self,
-                 handle: ResourceHandle,
-                 terminate: bool,
-                 purge: bool = False) -> bool:
-        raise NotImplementedError
-
-    def register_info(self, **kwargs) -> None:
-        """Register backend-specific information."""
-        pass
