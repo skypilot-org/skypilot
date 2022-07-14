@@ -2965,8 +2965,10 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             plural = 's' if num_clusters > 1 else ''
             message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
                        f'has {num_clusters} un-terminated cluster{plural}. '
-                       f'Terminate the cluster{plural} before deleting '
-                       'the benchmark report.')
+                       f'Terminate the cluster{plural} with '
+                       f'{backend_utils.BOLD} sky bench down {benchmark} '
+                       f'{backend_utils.RESET_BOLD} '
+                       'before deleting the benchmark report.')
             success = False
         else:
             bucket_name = benchmark_state.get_benchmark_from_name(
