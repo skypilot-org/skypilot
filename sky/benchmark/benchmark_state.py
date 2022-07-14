@@ -83,7 +83,7 @@ class BenchmarkStatus(enum.Enum):
     FINISHED = 'FINISHED'
 
     def is_terminal(self):
-        return self in (BenchmarkStatus.STOPPED, BenchmarkStatus.FINISHED)
+        return self in (BenchmarkStatus.TERMINATED, BenchmarkStatus.FINISHED)
 
 
 class BenchmarkRecord(NamedTuple):
