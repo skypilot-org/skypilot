@@ -455,7 +455,7 @@ def _create_and_ssh_into_node(
     assert session_manager in (None, 'screen', 'tmux'), session_manager
     if backend_utils.check_if_local_cloud(cluster_name):
         raise click.BadParameter(
-            f'Name {cluster_name!r} taken a by a local cluster and cannot '
+            f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
@@ -528,7 +528,6 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
 
     Args:
         entrypoint: Path to a YAML file.
-        with_outputs: If True, also returns the loaded YAML dict.
     """
     is_yaml = True
     config = None

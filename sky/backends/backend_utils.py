@@ -682,8 +682,8 @@ def check_if_local_cloud(cluster: str) -> bool:
     cluster configs. If this cluster is a private cloud, this function
     will run correctness tests for cluster configs.
     """
-    local_clusters = check_and_get_local_clusters(suppress_error=True)
-    if cluster not in local_clusters:
+    config_path = os.path.expanduser(SKY_USER_LOCAL_CONFIG_PATH.format(cluster))
+    if not os.path.exists(config_path):
         # Public clouds go through no error checking.
         return False
     # Hack: go through check again, to raise errors for local clusters.
@@ -691,7 +691,7 @@ def check_if_local_cloud(cluster: str) -> bool:
     return True
 
 
-def check_and_get_local_clusters(suppress_error=False) -> List[str]:
+def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     """Lists all local clusters and checks cluster config validity.
 
     Args:
@@ -913,7 +913,11 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
             'sudo ray --version',
             failure_message=f'Ray is not installed on {runner.ip}.')
 
-        # Checks for global Sky installation (accessible by all users).
+        # Checks for global Sky installation (accessible by all users). When
+        # Sky's job submission code is ran on a user's account, Sky calls the
+        # Ray cluster to prepare the user's job. Due to Ray's limitations,
+        # this is ran under the admin's environment, which requires Sky to be
+        # installed globally.
         run_command_and_handle_ssh_failure(
             runner,
             'sudo sky --help',
@@ -955,8 +959,8 @@ def get_local_cluster_accelerators(
     custom_resources = []
 
     # Ran on the remote cluster node to identify accelerator resources.
-    # TODO(mluo): Add code to detect how much GPU memory a GPU has. This is
-    # to distinguish between (V100, V100-32GB) and (A100, A100-80GB).
+    # TODO(mluo): Add code to detect more types of GPUS and how much GPU
+    # memory a GPU has.
     code = textwrap.dedent("""\
         import os
 
@@ -1499,9 +1503,7 @@ def get_node_ips(cluster_yaml: str,
             # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
             # Workaround: List of IPs are shown in Stderr
             cluster_name = os.path.basename(cluster_yaml).split('.')[0]
-            if ((handle is None and hasattr(handle, 'local_handle') and
-                 handle.local_handle is not None) or
-                    check_if_local_cloud(cluster_name)):
+            if check_if_local_cloud(cluster_name):
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 # Remove head ip from worker ip list.

@@ -618,8 +618,6 @@ class RetryingVmProvisioner(object):
                 raise RuntimeError(
                     'Errors occurred during launching of cluster services; '
                     'check logs above.')
-        # The underlying ray autoscaler / boto3 will try all zones of a region
-        # at once.
         logger.warning('Got error(s) on local cluster:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
@@ -681,8 +679,6 @@ class RetryingVmProvisioner(object):
                         region = config['provider']['location']
                         zones = None
                     elif cloud.is_same_cloud(sky.Local()):
-                        # Only 1 region per local cloud ('Local region').
-                        # No zones per local cloud.
                         local_regions = clouds.Local.regions()
                         region = local_regions[0].name
                         zones = None
@@ -1143,13 +1139,13 @@ class RetryingVmProvisioner(object):
         if returncode == 0:
             return
         launched_resources = handle.launched_resources
-        # On-premise cluster should never reach this code. Ray cluster
-        # should already be running if the system admin has setup Ray.
+        # Ray cluster should already be running if the system admin has setup
+        # Ray.
         if isinstance(launched_resources.cloud, clouds.Local):
             raise RuntimeError(
-                'Ray status errored out on the head node of the local cluster. '
-                'Check if ray[default]==1.10.0 is installed or running '
-                'correctly.')
+                'The command `ray status` errored out on the head node '
+                'of the local cluster. Check if ray[default]==1.10.0 '
+                'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
@@ -1275,7 +1271,6 @@ class CloudVmRayBackend(backends.Backend):
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
             self.head_ip = head_ip
-            # Represents a task's specified resources.
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -1322,9 +1317,11 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_config = config['cluster']
                 auth_config = config['auth']
                 ips = cluster_config['ips']
-                # Convert from task -> cluster resources.
+                local_region = clouds.Local.regions()[0].name
+                # Convert existing ResourceHandle fields to specify local
+                # cluster resources.
                 self.launched_resources = resources_lib.Resources(
-                    cloud=clouds.Local(), region='Local')
+                    cloud=clouds.Local(), region=local_region)
                 self.launched_nodes = len(ips)
                 self.local_handle['ips'] = ips
                 cluster_accs = backend_utils.get_local_cluster_accelerators(
@@ -1333,7 +1330,7 @@ class CloudVmRayBackend(backends.Backend):
                     resources_lib.Resources(
                         cloud=clouds.Local(),
                         accelerators=acc_dict if acc_dict else None,
-                        region='Local') for acc_dict in cluster_accs
+                        region=local_region) for acc_dict in cluster_accs
                 ]
 
         def _update_cluster_region(self):
@@ -2046,8 +2043,8 @@ class CloudVmRayBackend(backends.Backend):
                 # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
                 stdin=subprocess.DEVNULL,
             )
-        except KeyboardInterrupt as e:
-            returncode = e.args[0]
+        except SystemExit as e:
+            returncode = e.code
         return returncode
 
     def tail_spot_logs(self,
@@ -2538,7 +2535,7 @@ class CloudVmRayBackend(backends.Backend):
         # TODO(romil): Support Mounting for Local (remove sudo installation)
         if isinstance(cloud, clouds.Local):
             logger.warning(
-                f'{colorama.Fore.RED}Sky On-prem does not support '
+                f'{colorama.Fore.YELLOW}Sky On-prem does not support '
                 f'mounting. No action will be taken.{colorama.Style.RESET_ALL}')
             return
 
