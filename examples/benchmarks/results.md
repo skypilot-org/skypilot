@@ -12,18 +12,18 @@ All benchmarks on run on AWS m5.8xlarge with default EBS volume attached with
 
 ### Disk Bandwidth (MB/s)
 
-|                  | EBS | Sky Storage<br/>(S3, MOUNT mode)     |
-|------------------|-----|--------------------------------------|
-| Sequential Read  | 121 | 358                                  |
-| Sequential Write | 128 | 1800                                 |
+|                  | EBS | Sky Storage<br/>(S3, MOUNT mode) |
+|------------------|-----|----------------------------------|
+| Sequential Read  | 130 | 642                              |
+| Sequential Write | 129 | 1828                             |
 
 
 ### Disk IOPS
 
-|                  | EBS    | Sky Storage<br/>(S3, MOUNT mode) |
-|------------------|--------|----------------------------------|
-| Sequential Read  | 5740   | 1944                             |
-| Sequential Write | 28807  | 1800                             |
+|                  | EBS  | Sky Storage<br/>(S3, MOUNT mode) |
+|------------------|------|----------------------------------|
+| Sequential Read  | 2051 | 8462                             |
+| Sequential Write | 2055 | 27899                            |
 
 ### S3 -> EBS copy bandwidth (MB/s)
 
@@ -44,5 +44,5 @@ We copy a 1 GB file from S3 to EBS using `aws s3 cp` command.
   writes to memory and then asynchronously uploads to S3. Sky Storage offers 
   only eventual consistency, so a write operation to sky storage may not reflect 
   immediately on the S3 storage.
-* These benchmarks are run on single large files. Due to the lower read IOPS of
-  sky storage, its performance degrades when using many small files.
+* These benchmarks are run on single large files. The performance of sky storage
+  degrades when using many small files.
