@@ -82,8 +82,12 @@ class BenchmarkStatus(enum.Enum):
     # Jobs terminated with zero exit code.
     FINISHED = 'FINISHED'
 
-    def is_terminal(self):
-        return self in (BenchmarkStatus.TERMINATED, BenchmarkStatus.FINISHED)
+    @classmethod
+    def terminal_statuses(cls) -> List['BenchmarkStatus']:
+        return (cls.TERMINATED, cls.FINISHED)
+
+    def is_terminal(self) -> bool:
+        return self in self.terminal_statuses()
 
 
 class BenchmarkRecord(NamedTuple):
