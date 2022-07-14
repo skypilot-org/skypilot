@@ -175,6 +175,7 @@ class RayCodeGen:
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
+            inspect.getsource(log_lib.add_sudo_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
@@ -1805,10 +1806,13 @@ class CloudVmRayBackend(backends.Backend):
                             stream_logs=False)
         runner.run(f'mkdir -p {remote_log_dir}; chmod a+rwx {remote_run_file}',
                    stream_logs=False)
+        switch_user_cmd = job_lib.make_switch_user_command(
+            ssh_user, remote_run_file)
+        switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
             f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-            f'-- sudo -H su {ssh_user} -c \"{remote_run_file}\"')
+            f'-- {switch_user_cmd}')
         return job_submit_cmd
 
     def _add_job(self, handle: ResourceHandle, job_name: str,

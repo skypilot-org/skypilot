@@ -13,7 +13,6 @@ import tempfile
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
-import ray
 
 from sky import sky_logging
 from sky.skylet import job_lib
@@ -240,6 +239,21 @@ def make_task_bash_script(codegen: str,
     return script
 
 
+def add_sudo_env_vars(env_vars: Dict[str, str] = None) -> Dict[str, str]:
+    # Adds Ray-related environment variables.
+    if env_vars is None:
+        env_vars = {}
+    ray_env_vars = [
+        'CUDA_VISIBLE_DEVICES', 'RAY_CLIENT_MODE', 'RAY_JOB_ID',
+        'RAY_RAYLET_PID', 'OMP_NUM_THREADS'
+    ]
+    env_dict = dict(os.environ)
+    for env_var in ray_env_vars:
+        if env_var in env_dict:
+            env_vars[env_var] = env_dict[env_var]
+    return env_vars
+
+
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
                               job_owner: str,
@@ -250,6 +264,8 @@ def run_bash_command_with_log(bash_command: str,
                               use_sudo: bool = False):
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
+        if use_sudo:
+            env_vars = add_sudo_env_vars(env_vars)
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
@@ -259,17 +275,9 @@ def run_bash_command_with_log(bash_command: str,
         inner_command = f'/bin/bash -i {script_path}'
 
         if use_sudo:
-            gpu_list = ray.get_gpu_ids()
-            if len(gpu_list) > 0:
-                gpu_list = [str(gpu_id) for gpu_id in gpu_list]
-                # Switching users will give Ray process access to all GPUs,
-                # instead of the GPUs allocated.
-                inner_command = 'CUDA_VISIBLE_DEVICES=' + ','.join(
-                    gpu_list) + ' ' + inner_command
             subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
-            subprocess_cmd = [
-                'sudo', '-H', 'su', job_owner, '-c', inner_command
-            ]
+            subprocess_cmd = job_lib.make_switch_user_command(
+                job_owner, inner_command)
         else:
             subprocess_cmd = inner_command
 

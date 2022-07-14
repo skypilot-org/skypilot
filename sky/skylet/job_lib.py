@@ -90,6 +90,10 @@ def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
     return f'{sky_job_id}-{job_owner}'
 
 
+def make_switch_user_command(username: str, command: str) -> List[str]:
+    return ['sudo', '-H', 'su', '-', username, '-c', command]
+
+
 def add_job(job_name: str, username: str, run_timestamp: str,
             resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
