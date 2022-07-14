@@ -44,3 +44,5 @@ We copy a 1 GB file from S3 to EBS using `aws s3 cp` command.
   writes to memory and then asynchronously uploads to S3. Sky Storage offers 
   only eventual consistency, so a write operation to sky storage may not reflect 
   immediately on the S3 storage.
+* These benchmarks are run on single large files. Due to the lower read IOPS of
+  sky storage, its performance degrades when using many small files.
