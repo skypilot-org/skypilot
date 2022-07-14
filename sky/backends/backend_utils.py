@@ -931,7 +931,7 @@ def generate_cluster_name():
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
-    backoff = Backoff(initial_backoff = 5, max_backoff_factor=5)
+    backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
             out = subprocess_utils.run(
