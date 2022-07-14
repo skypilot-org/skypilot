@@ -90,7 +90,7 @@ def _get_optimized_resources(
             task = sky.Task()
             task.set_resources({resources})
 
-        dag = sky.optimize(dag, print_plan=False)
+        dag = sky.optimize(dag, quiet=True)
         task = dag.tasks[0]
         optimized_resources.append(task.best_resources)
     return optimized_resources
