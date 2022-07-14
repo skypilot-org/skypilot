@@ -19,6 +19,12 @@ from sky.utils import subprocess_utils
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
 _smoke_test_hash = backend_utils.user_and_hostname_hash()
+
+# To avoid the second smoke test reusing the cluster launched in the first
+# smoke test. Also required for test_spot_recovery to make sure the manual
+# termination with aws ec2 does not accidentally terminate other spot clusters
+# from the different spot launch with the same cluster name but a different job
+# id.
 test_id = str(uuid.uuid4())[-2:]
 
 
