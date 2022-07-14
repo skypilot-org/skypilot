@@ -291,7 +291,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
         # The cluster has terminated or stopped, or
         # the cluster is UP and the job has terminated.
         if end_time is None:
-            benchmark_status = benchmark_state.BenchmarkStatus.STOPPED
+            benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
         else:
             benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
 
@@ -335,7 +335,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
                    f'or not used for {cluster}.')
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=time.time())
-    elif benchmark_status == benchmark_state.BenchmarkStatus.STOPPED:
+    elif benchmark_status == benchmark_state.BenchmarkStatus.TERMINATED:
         # (4) The benchmarking job has terminated abnormally.
         message = f'Benchmarking on {cluster} has terminated abnormally.'
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
@@ -501,7 +501,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 def update_benchmark_state(benchmark: str) -> None:
     benchmark_results = benchmark_state.get_benchmark_results(benchmark)
     if all(result['status'] in [
-            benchmark_state.BenchmarkStatus.STOPPED,
+            benchmark_state.BenchmarkStatus.TERMINATED,
             benchmark_state.BenchmarkStatus.FINISHED,
     ] for result in benchmark_results):
         return
