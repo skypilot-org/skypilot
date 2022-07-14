@@ -138,11 +138,15 @@ def get_instance_type_for_accelerator(
 def get_accelerator_hourly_cost(
     acc_name: str,
     acc_count: int,
+    use_spot: bool,
     clouds: CloudFilter = None,
 ) -> float:
     """Returns the hourly cost with the accelerators."""
-    return _map_clouds_catalog(clouds, 'get_accelerator_hourly_cost', acc_name,
-                               acc_count)
+    return _map_clouds_catalog(clouds,
+                               'get_accelerator_hourly_cost',
+                               acc_name,
+                               acc_count,
+                               use_spot=use_spot)
 
 
 def get_region_zones_for_accelerators(

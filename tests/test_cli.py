@@ -1,11 +1,10 @@
-import pytest
 import tempfile
 import textwrap
 
-import click
 from click import testing as cli_testing
 
 import sky
+from sky import clouds
 import sky.cli as cli
 
 
@@ -42,107 +41,22 @@ def test_infer_tpunode_type():
         assert cli._infer_interactive_node_type(spec) == 'tpunode', spec
 
 
-def test_default_resources_check():
-    default_resources = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    # sky gpunode --cloud aws --gpus V100
-    resources = sky.Resources(cloud=sky.AWS(),
-                              instance_type=default_resources.instance_type,
-                              accelerators='V100',
-                              use_spot=default_resources.use_spot)
-    launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
-    cli._check_interactive_node_resources_match('gpunode',
-                                                resources,
-                                                launched_resources,
-                                                user_requested_resources=True)
-    # sky gpunode
-    cli._check_interactive_node_resources_match('gpunode',
-                                                default_resources,
-                                                launched_resources,
-                                                user_requested_resources=False)
-
-    # sky gpunode --cloud aws -t p3.2xlarge
-    requested_resources = sky.Resources(cloud=sky.AWS(),
-                                        instance_type='p3.2xlarge')
-    cli._check_interactive_node_resources_match('gpunode',
-                                                requested_resources,
-                                                launched_resources,
-                                                user_requested_resources=True)
-
-
-def test_resource_mismatch_check():
-    default_resources = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
-    # Launched resources from running: sky gpunode --cloud aws --gpus V100
-    launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
-
-    requested_resources = [
-        # sky gpunode --cloud gcp
-        sky.Resources(cloud=sky.GCP(),
-                      instance_type=default_resources.instance_type,
-                      accelerators=default_resources.accelerators,
-                      use_spot=default_resources.use_spot),
-
-        # sky gpunode --gpus K80
-        sky.Resources(cloud=default_resources.cloud,
-                      instance_type=default_resources.instance_type,
-                      accelerators='K80',
-                      use_spot=default_resources.use_spot)
-    ]
-    for spec in requested_resources:
-        with pytest.raises(click.UsageError) as e:
-            cli._check_interactive_node_resources_match(
-                'gpunode',
-                spec,
-                launched_resources,
-                user_requested_resources=True)
-        assert 'Resources cannot change for an existing cluster' in str(e.value)
-
-
-def test_node_type_check():
-    cnode_defaults = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
-    tnode_defaults = cli._INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
-    # Launched resources from running: sky gpunode -c t1 --cloud aws --gpus V100
-    launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
-
-    requested_resources = [
-        # sky cpunode -c t1
-        ('cpunode',
-         sky.Resources(cloud=cnode_defaults.cloud,
-                       instance_type=cnode_defaults.instance_type,
-                       accelerators=cnode_defaults.accelerators,
-                       use_spot=cnode_defaults.use_spot)),
-        # sky tpunode -c t1
-        ('tpunode',
-         sky.Resources(cloud=sky.GCP(),
-                       instance_type=tnode_defaults.instance_type,
-                       accelerators=tnode_defaults.accelerators,
-                       use_spot=tnode_defaults.use_spot)),
-    ]
-    for requested_node_type, spec in requested_resources:
-        with pytest.raises(click.UsageError) as e:
-            cli._check_interactive_node_resources_match(
-                requested_node_type,
-                spec,
-                launched_resources,
-                user_requested_resources=False)
-        assert 'Resources cannot change for an existing cluster' in str(e.value)
-
-
-def test_infer_cloud_resource_check():
-    # sky gpunode --gpus V100
-    resources = sky.Resources(cloud=None, accelerators='V100')
-    launched_resources = sky.Resources(cloud=sky.AWS(),
-                                       instance_type='p3.2xlarge')
-    cli._check_interactive_node_resources_match('gpunode',
-                                                resources,
-                                                launched_resources,
-                                                user_requested_resources=True)
-
-
-def test_accelerator_mismatch():
+def test_accelerator_mismatch(monkeypatch):
     """Test the specified accelerator does not match the instance_type."""
+    # Monkey-patching is required because in the test environment, no cloud is
+    # enabled. The optimizer checks the environment to find enabled clouds, and
+    # only generates plans within these clouds. The tests assume that all three
+    # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
+    # to return all three clouds. We also monkeypatch `sky.check.check` so that
+    # when the optimizer tries calling it to update enabled_clouds, it does not
+    # raise exceptions.
+    enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
+    monkeypatch.setattr(
+        'sky.global_user_state.get_enabled_clouds',
+        lambda: enabled_clouds,
+    )
+    monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
+
     spec = textwrap.dedent("""\
         resources:
           cloud: aws

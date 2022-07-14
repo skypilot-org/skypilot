@@ -4,8 +4,9 @@ from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import pandas as pd
 
-from sky.clouds import cloud as cloud_lib
 from sky import sky_logging
+from sky.clouds import cloud as cloud_lib
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -63,24 +64,22 @@ def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
-    region: str,
+    region: Optional[str],
     use_spot: bool = False,
 ) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     df = _get_instance_type(df, instance_type, region)
-    assert len(set(df['Price'])) == 1, df
     assert pd.isnull(
         df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
                                         f'Spot: {use_spot}" in the catalog.')
-    if not use_spot:
-        return df['Price'].iloc[0]
+    # TODO(zhwu): We should handle the price difference among different regions.
+    price_str = 'SpotPrice' if use_spot else 'Price'
+    assert region is None or len(set(df[price_str])) == 1, df
 
-    cheapest_idx = df['SpotPrice'].idxmin()
-    if pd.isnull(cheapest_idx):
-        return df['Price'].iloc[0]
+    cheapest_idx = df[price_str].idxmin()
 
     cheapest = df.loc[cheapest_idx]
-    return cheapest['SpotPrice']
+    return cheapest[price_str]
 
 
 def get_accelerators_from_instance_type_impl(
@@ -89,7 +88,8 @@ def get_accelerators_from_instance_type_impl(
 ) -> Optional[Dict[str, int]]:
     df = _get_instance_type(df, instance_type, None)
     if len(df) == 0:
-        raise ValueError(f'No instance type {instance_type} found.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):

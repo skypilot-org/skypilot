@@ -44,10 +44,10 @@ Your usage of sky storage can fall under four broad use cases:
 2.  **You want to mount an existing S3/GCS bucket to your remote VM -** specify
     just the source field (e.g., s3://my-bucket/)
 
-3.  **You want to have a write-able path to directly write files to S3 buckets
+3.  **You want to have a write-able path to directly write files to S3 or GCS buckets
     -** specify a name (to create a bucket if it doesn't exist) and set the mode
     to MOUNT. This is useful for writing code outputs, such as checkpoints or
-    logs directly to a S3 bucket.
+    logs directly to a S3 or GCS bucket.
 
 4.  **You want to have a shared file-system across workers running on different
     nodes -** specify a name (to create a bucket if it doesn't exist) and set
@@ -171,9 +171,9 @@ and storage mounting:
 
 .. note::
     Symbolic links are handled differently in :code:`file_mounts` depending on whether Sky Storage is used.
-    For mounts backed by Sky Storage, referenced data for all symbolic links is copied to remote.
-    For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied.
-    Their targets must be separately mounted or else the symlinks may break.
+    For mounts backed by Sky Storage, symbolic links are not copied to remote.
+    For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
+    The targets must be separately mounted or else the symlinks may break.
 
 Creating a shared file system
 -----------------------------

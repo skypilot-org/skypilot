@@ -1,4 +1,5 @@
 .. _auto-failover:
+
 Auto-provisioning GPUs
 ==========================
 
@@ -23,7 +24,7 @@ and other accelerators.  The user is **freed from manually searching for regions
   within the specified cloud.
 
 Cross-region failover
-----------------
+---------------------
 
 The provisioner first retries across all regions within a task's chosen cloud.
 
@@ -65,7 +66,7 @@ provisioner handles such a request:
 GCP was chosen as the best cloud to run the task. There was no capacity in any of the regions in US Central, so the auto-failover provisioner moved to US West instead, allowing for our instance to be successfully provisioned.
 
 Cross-cloud failover
-----------------
+---------------------
 If all regions within the chosen cloud failed, the provisioner retries on the next
 cheapest cloud.
 

@@ -89,7 +89,7 @@ class LocalDockerBackend(backends.Backend):
             return str.__new__(cls, prefixed_str, **kw)
 
         def get_cluster_name(self):
-            return self
+            return self.lstrip(_DOCKER_HANDLE_PREFIX)
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
@@ -116,45 +116,31 @@ class LocalDockerBackend(backends.Backend):
         self.client = docker.from_env()
         self._update_state()
 
-    def _update_state(self):
-        """
-        Updates local state of the backend object.
+    # --- Implementation of Backend APIs ---
 
-        Queries the docker daemon to get the list of running containers, and
-        populates the self.images and self.containers attributes from metadata
-        of running containers.
+    def check_resources_fit_cluster(self, handle: ResourceHandle,
+                                    task: 'task_lib.Task') -> None:
+        pass
 
-        Metadata is stored with running containers in the form of container
-        labels prefixed by skymeta_ (e.g. skymeta_workdir).
-        """
-        search_filter = {
-            'label': [f'{k}={v}' for k, v in _DOCKER_DEFAULT_LABELS.items()]
-        }
-        containers = self.client.containers.list(filters=search_filter)
-        for c in containers:
-            # Extract container/image metadata
-            metadata = {}
-            for k, v in c.labels.items():
-                if k.startswith(_DOCKER_LABEL_PREFIX):
-                    # Remove 'skymeta_' from key
-                    metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
-            self.images[c.name] = [c.image, metadata]
-            self.containers[c.name] = c
-
-    def provision(self,
-                  task: 'task_lib.Task',
-                  to_provision: Optional['resources.Resources'],
-                  dryrun: bool,
-                  stream_logs: bool,
-                  cluster_name: Optional[str] = None) -> ResourceHandle:
+    def _provision(self,
+                   task: 'task_lib.Task',
+                   to_provision: Optional['resources.Resources'],
+                   dryrun: bool,
+                   stream_logs: bool,
+                   cluster_name: Optional[str] = None,
+                   retry_until_up: bool = False) -> ResourceHandle:
         """
         Builds docker image for the task and returns the cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        assert task.name is not None, 'Task name cannot be None - have you ' \
-                                      'specified a task name?'
+        assert task.name is not None, ('Task name cannot be None - have you '
+                                       'specified a task name?')
+        if retry_until_up:
+            logger.warning(
+                f'Retrying until up is not supported in backend: {self.NAME}. '
+                'Ignored the flag.')
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
         if stream_logs:
@@ -174,7 +160,7 @@ class LocalDockerBackend(backends.Backend):
                                                 ready=False)
         return handle
 
-    def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         """Workdir is sync'd by adding to the docker image.
 
         This happens in the execute step.
@@ -183,7 +169,7 @@ class LocalDockerBackend(backends.Backend):
                     ' a NoOp. If you are running sky exec, your workdir has not'
                     ' been updated.')
 
-    def sync_file_mounts(
+    def _sync_file_mounts(
         self,
         handle: ResourceHandle,
         all_file_mounts: Dict[Path, Path],
@@ -206,7 +192,7 @@ class LocalDockerBackend(backends.Backend):
                 }
         self.volume_mounts[handle] = docker_mounts
 
-    def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
+    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
         """
         Launches a container and runs a sleep command on it.
 
@@ -224,7 +210,7 @@ class LocalDockerBackend(backends.Backend):
         runtime = 'nvidia' if self._use_gpu else None
         logger.info(f'Image {image_tag} found. Running container now. use_gpu '
                     f'is {self._use_gpu}')
-        cluster_name = global_user_state.get_cluster_name_from_handle(handle)
+        cluster_name = handle.get_cluster_name()
         # Encode metadata in docker labels:
         labels = {f'{_DOCKER_LABEL_PREFIX}{k}': v for k, v in metadata.items()}
         labels.update(_DOCKER_DEFAULT_LABELS)
@@ -264,8 +250,8 @@ class LocalDockerBackend(backends.Backend):
                                                 cluster_handle=handle,
                                                 ready=True)
 
-    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
-                detach_run: bool) -> None:
+    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+                 detach_run: bool) -> None:
         """ Launches the container."""
 
         if detach_run:
@@ -283,6 +269,76 @@ class LocalDockerBackend(backends.Backend):
             return
 
         self._execute_task_one_node(handle, task)
+
+    def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+        colorama.init()
+        style = colorama.Style
+        container = self.containers[handle]
+
+        # Fetch latest status from docker daemon
+        container.reload()
+
+        if container.status == 'running':
+            logger.info('Your container is now running with name '
+                        f'{style.BRIGHT}{container.name}{style.RESET_ALL}')
+            logger.info(
+                f'To get a shell in your container, run {style.BRIGHT}docker '
+                f'exec -it {container.name} /bin/bash{style.RESET_ALL}')
+        else:
+            logger.info('Your container has finished running. Name was '
+                        f'{style.BRIGHT}{container.name}{style.RESET_ALL}')
+        logger.info(
+            'To create a new container for debugging without running the '
+            f'task run command, run {style.BRIGHT}docker run -it '
+            f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
+
+    def _teardown(self,
+                  handle: ResourceHandle,
+                  terminate: bool,
+                  purge: bool = False) -> bool:
+        """Teardown kills the container."""
+        del purge  # Unused.
+        if not terminate:
+            logger.warning(
+                'LocalDockerBackend.teardown() will terminate '
+                'containers for now, despite receiving terminate=False.')
+
+        # If handle is not found in the self.containers, it implies it has
+        # already been removed externally in docker. No action is needed
+        # except for removing it from global_user_state.
+        if handle in self.containers:
+            container = self.containers[handle]
+            container.remove(force=True)
+        cluster_name = handle.get_cluster_name()
+        global_user_state.remove_cluster(cluster_name, terminate=True)
+        return True
+
+    # --- Utilities ---
+
+    def _update_state(self):
+        """
+        Updates local state of the backend object.
+
+        Queries the docker daemon to get the list of running containers, and
+        populates the self.images and self.containers attributes from metadata
+        of running containers.
+
+        Metadata is stored with running containers in the form of container
+        labels prefixed by skymeta_ (e.g. skymeta_workdir).
+        """
+        search_filter = {
+            'label': [f'{k}={v}' for k, v in _DOCKER_DEFAULT_LABELS.items()]
+        }
+        containers = self.client.containers.list(filters=search_filter)
+        for c in containers:
+            # Extract container/image metadata
+            metadata = {}
+            for k, v in c.labels.items():
+                if k.startswith(_DOCKER_LABEL_PREFIX):
+                    # Remove 'skymeta_' from key
+                    metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v
+            self.images[c.name] = [c.image, metadata]
+            self.containers[c.name] = c
 
     def _execute_task_one_node(self, handle: ResourceHandle,
                                task: 'task_lib.Task') -> None:
@@ -324,46 +380,3 @@ class LocalDockerBackend(backends.Backend):
                 privileged=True)
             for line in kill_log:
                 logger.info(line.decode('utf-8').strip())
-
-    def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
-        colorama.init()
-        style = colorama.Style
-        container = self.containers[handle]
-
-        # Fetch latest status from docker daemon
-        container.reload()
-
-        if container.status == 'running':
-            logger.info('Your container is now running with name '
-                        f'{style.BRIGHT}{container.name}{style.RESET_ALL}')
-            logger.info(
-                f'To get a shell in your container, run {style.BRIGHT}docker '
-                f'exec -it {container.name} /bin/bash{style.RESET_ALL}')
-        else:
-            logger.info('Your container has finished running. Name was '
-                        f'{style.BRIGHT}{container.name}{style.RESET_ALL}')
-        logger.info(
-            'To create a new container for debugging without running the '
-            f'task run command, run {style.BRIGHT}docker run -it '
-            f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
-
-    def teardown(self,
-                 handle: ResourceHandle,
-                 terminate: bool,
-                 purge: bool = False) -> bool:
-        """Teardown kills the container."""
-        del purge  # Unused.
-        if not terminate:
-            logger.warning(
-                'LocalDockerBackend.teardown() will terminate '
-                'containers for now, despite receiving terminate=False.')
-
-        # If handle is not found in the self.containers, it implies it has
-        # already been removed externally in docker. No action is needed
-        # except for removing it from global_user_state.
-        if handle in self.containers:
-            container = self.containers[handle]
-            container.remove(force=True)
-        cluster_name = global_user_state.get_cluster_name_from_handle(handle)
-        global_user_state.remove_cluster(cluster_name, terminate=True)
-        return True

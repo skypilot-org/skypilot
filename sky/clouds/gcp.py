@@ -2,16 +2,33 @@
 import json
 import os
 import subprocess
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from google import auth
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
+
+# Minimum set of files under ~/.config/gcloud that grant GCP access.
+_CREDENTIAL_FILES = [
+    'credentials.db',
+    'application_default_credentials.json',
+    'access_tokens.db',
+    'configurations',
+    'legacy_credentials',
+]
+
+_IMAGE_ID_PREFIX = (
+    'projects/deeplearning-platform-release/global/images/family/')
 
 
 def _run_output(cmd):
@@ -23,55 +40,12 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+@clouds.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
-
-    # Pricing.  All info assumes us-central1.
-    # In general, query pricing from the cloud.
-    _ON_DEMAND_PRICES = {
-        # VMs: https://cloud.google.com/compute/all-pricing.
-        # N1 standard
-        'n1-standard-1': 0.04749975,
-        'n1-standard-2': 0.0949995,
-        'n1-standard-4': 0.189999,
-        'n1-standard-8': 0.379998,
-        'n1-standard-16': 0.759996,
-        'n1-standard-32': 1.519992,
-        'n1-standard-64': 3.039984,
-        'n1-standard-96': 4.559976,
-        # N1 highmem
-        'n1-highmem-2': 0.118303,
-        'n1-highmem-4': 0.236606,
-        'n1-highmem-8': 0.473212,
-        'n1-highmem-16': 0.946424,
-        'n1-highmem-32': 1.892848,
-        'n1-highmem-64': 3.785696,
-        'n1-highmem-96': 5.678544,
-    }
-
-    _SPOT_PRICES = {
-        # VMs: https://cloud.google.com/compute/all-pricing.
-        # N1 standard
-        'n1-standard-1': 0.01,
-        'n1-standard-2': 0.02,
-        'n1-standard-4': 0.04,
-        'n1-standard-8': 0.08,
-        'n1-standard-16': 0.16,
-        'n1-standard-32': 0.32,
-        'n1-standard-64': 0.64,
-        'n1-standard-96': 0.96,
-        # N1 highmem
-        'n1-highmem-2': 0.024906,
-        'n1-highmem-4': 0.049812,
-        'n1-highmem-8': 0.099624,
-        'n1-highmem-16': 0.199248,
-        'n1-highmem-32': 0.398496,
-        'n1-highmem-64': 0.796992,
-        'n1-highmem-96': 1.195488,
-    }
 
     #### Regions/Zones ####
 
@@ -142,15 +116,17 @@ class GCP(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
-        if use_spot:
-            return GCP._SPOT_PRICES[instance_type]
-        return GCP._ON_DEMAND_PRICES[instance_type]
+        return service_catalog.get_hourly_cost(instance_type,
+                                               region=None,
+                                               use_spot=use_spot,
+                                               clouds='gcp')
 
-    def accelerators_to_hourly_cost(self, accelerators):
+    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
         return service_catalog.get_accelerator_hourly_cost(acc,
                                                            acc_count,
+                                                           use_spot,
                                                            clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
@@ -171,25 +147,44 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls) -> str:
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
         return 'n1-highmem-8'
 
     @classmethod
-    def get_default_region(cls) -> clouds.Region:
+    def _get_default_region(cls) -> clouds.Region:
         return cls.regions()[-1]
 
-    def make_deploy_resources_variables(self, resources):
+    def make_deploy_resources_variables(
+            self, resources: 'resources.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+            zones = region.zones
+        else:
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
+
+        region_name = region.name
+        zones = [zones[0].name]
+
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu'
+
         r = resources
         # Find GPU spec, if any.
         resources_vars = {
             'instance_type': r.instance_type,
+            'region': region_name,
+            'zones': ','.join(zones),
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
+            'tpu_vm': False,
             'custom_resources': None,
             'use_spot': r.use_spot,
-            'image_name': 'common-cpu',
         }
         accelerators = r.accelerators
         if accelerators is not None:
@@ -201,7 +196,10 @@ class GCP(clouds.Cloud):
             if 'tpu' in acc:
                 resources_vars['tpu_type'] = acc.replace('tpu-', '')
                 assert r.accelerator_args is not None, r
-                resources_vars['tf_version'] = r.accelerator_args['tf_version']
+
+                resources_vars['tpu_vm'] = r.accelerator_args.get('tpu_vm')
+                resources_vars['runtime_version'] = r.accelerator_args[
+                    'runtime_version']
                 resources_vars['tpu_name'] = r.accelerator_args.get('tpu_name')
             else:
                 # Convert to GCP names:
@@ -209,7 +207,12 @@ class GCP(clouds.Cloud):
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 # CUDA driver version 470.103.01, CUDA Library 11.3
-                resources_vars['image_name'] = 'common-cu113'
+                image_id = _IMAGE_ID_PREFIX + 'common-cu113'
+
+        if resources.image_id is not None:
+            image_id = resources.image_id
+
+        resources_vars['image_id'] = image_id
 
         return resources_vars
 
@@ -218,27 +221,37 @@ class GCP(clouds.Cloud):
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             return ([resources], fuzzy_candidate_list)
-        accelerator_match = None
-        if resources.accelerators is not None:
-            # TODO: Refactor below implementation with pandas
-            available_accelerators = service_catalog.list_accelerators(
-                gpus_only=False, clouds='gcp')
-            for acc, acc_count in resources.accelerators.items():
-                for acc_avail, infos in available_accelerators.items():
-                    # case-insenstive matching
-                    if acc.upper() == acc_avail.upper() and any(
-                            acc_count == info.accelerator_count
-                            for info in infos):
-                        accelerator_match = {acc_avail: acc_count}
-                        break
-                if accelerator_match is None:
-                    return ([], fuzzy_candidate_list)
+
         # No other resources (cpu/mem) to filter for now, so just return a
         # default VM type.
+        host_vm_type = GCP.get_default_instance_type()
+        acc_dict = None
+        # Find instance candidates to meet user's requirements
+        if resources.accelerators is not None:
+            assert len(resources.accelerators.items(
+            )) == 1, 'cannot handle more than one accelerator candidates.'
+            acc, acc_count = list(resources.accelerators.items())[0]
+            (instance_list, fuzzy_candidate_list
+            ) = service_catalog.get_instance_type_for_accelerator(acc,
+                                                                  acc_count,
+                                                                  clouds='gcp')
+
+            if instance_list is None:
+                return ([], fuzzy_candidate_list)
+            assert len(
+                instance_list
+            ) == 1, f'More than one instance type matched, {instance_list}'
+
+            host_vm_type = instance_list[0]
+            acc_dict = {acc: acc_count}
+            if resources.accelerator_args is not None:
+                use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+                if use_tpu_vm:
+                    host_vm_type = 'TPU-VM'
         r = resources.copy(
             cloud=GCP(),
-            instance_type=GCP.get_default_instance_type(),
-            accelerators=accelerator_match,
+            instance_type=host_vm_type,
+            accelerators=acc_dict,
         )
         return ([r], fuzzy_candidate_list)
 
@@ -267,10 +280,15 @@ class GCP(clouds.Cloud):
             # Calling `auth.default()` ensures the GCP client library works,
             # which is used by Ray Autoscaler to launch VMs.
             auth.default()
+            # Check google-api-python-client installation.
+            # pylint: disable=import-outside-toplevel,unused-import
+            import googleapiclient
+
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
         except (AssertionError, auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError, FileNotFoundError, KeyError):
+                subprocess.CalledProcessError, FileNotFoundError, KeyError,
+                ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
                 'GCP tools are not installed or credentials are not set. '
@@ -288,17 +306,17 @@ class GCP(clouds.Cloud):
             )
         return True, None
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
+    def get_credential_file_mounts(self) -> Dict[str, str]:
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
-        # rsync_exclude only supports relative paths.
-        # TODO(zhwu): rsync_exclude here is unsafe as it may exclude the folder
-        # from other file_mounts as well in ray yaml.
-        return {'~/.config/gcloud': '~/.config/gcloud'}, ['virtenv']
+        return {
+            f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
-        return instance_type in self._ON_DEMAND_PRICES.keys()
+        return service_catalog.instance_type_exists(instance_type, 'gcp')
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'gcp')
@@ -314,11 +332,13 @@ class GCP(clouds.Cloud):
         else:
             gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
         if not os.path.exists(gcp_credential_path):
-            raise FileNotFoundError(f'No GCP credentials found at '
-                                    f'{gcp_credential_path}. Please set the '
-                                    f'GOOGLE_APPLICATION_CREDENTIALS '
-                                    f'environment variable to point to '
-                                    f'the path of your credentials file.')
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    f'No GCP credentials found at '
+                    f'{gcp_credential_path}. Please set the '
+                    f'GOOGLE_APPLICATION_CREDENTIALS '
+                    f'environment variable to point to '
+                    f'the path of your credentials file.')
 
         with open(gcp_credential_path, 'r') as fp:
             gcp_credentials = json.load(fp)

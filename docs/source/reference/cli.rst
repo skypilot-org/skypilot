@@ -1,9 +1,10 @@
 .. _cli:
+
 CLI Reference
 =============
 
-Core
-----
+Core CLI
+---------
 
 .. click:: sky.cli:launch
    :prog: sky launch
@@ -33,8 +34,9 @@ Core
    :prog: sky autostop
    :nested: full
 
-Interactive Nodes
-------------
+
+Interactive Node CLI
+-----------------------
 
 .. click:: sky.cli:cpunode
    :prog: sky cpunode
@@ -50,8 +52,8 @@ Interactive Nodes
    :nested: full
 
 
-Job Queue
----------
+Job Queue CLI
+--------------
 
 .. click:: sky.cli:queue
    :prog: sky queue
@@ -66,8 +68,8 @@ Job Queue
    :nested: full
 
 
-Storage
----------
+Storage CLI
+------------
 
 .. click:: sky.cli:storage_ls
    :prog: sky storage ls
@@ -77,6 +79,24 @@ Storage
    :prog: sky storage delete
    :nested: full
 
+Managed Spot Jobs CLI
+---------------------------
+
+.. click:: sky.cli:spot_launch
+   :prog: sky spot launch
+   :nested: full
+
+.. click:: sky.cli:spot_status
+   :prog: sky spot status
+   :nested: full
+
+.. click:: sky.cli:spot_cancel
+   :prog: sky spot cancel
+   :nested: full
+
+.. click:: sky.cli:spot_logs
+   :prog: sky spot logs
+   :nested: full
 
 Miscellaneous
 -------------

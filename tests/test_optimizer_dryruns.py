@@ -24,7 +24,7 @@ def _test_parse_accelerators(spec, expected_accelerators):
 # clouds are enabled, so we monkeypatch the `sky.global_user_state` module
 # to return all three clouds. We also monkeypatch `sky.check.check` so that
 # when the optimizer tries calling it to update enabled_clouds, it does not
-# raise SystemExit.
+# raise exceptions.
 def _make_resources(
     monkeypatch,
     *resources_args,
@@ -224,6 +224,42 @@ def test_infer_cloud_from_region(monkeypatch):
                     cloud=sky.Azure(),
                     region='northcentralus',
                     expected_cloud=sky.Azure())
+
+
+def test_invalid_image(monkeypatch):
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch,
+                        cloud=sky.AWS(),
+                        image_id='ami-0868a20f5a3bf9702')
+    assert 'in a specific region' in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch, image_id='ami-0868a20f5a3bf9702')
+    assert 'Cloud must be specified' in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
+    assert 'only supported for AWS and GCP' in str(e.value)
+
+
+def test_valid_image(monkeypatch):
+    _test_resources(monkeypatch,
+                    cloud=sky.AWS(),
+                    region='us-east-1',
+                    image_id='ami-0868a20f5a3bf9702')
+    _test_resources(
+        monkeypatch,
+        cloud=sky.GCP(),
+        region='us-central1',
+        image_id=
+        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+    )
+    _test_resources(
+        monkeypatch,
+        cloud=sky.GCP(),
+        image_id=
+        'projects/deeplearning-platform-release/global/images/family/common-cpu'
+    )
 
 
 def test_parse_accelerators_from_yaml():

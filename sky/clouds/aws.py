@@ -12,6 +12,11 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
+# Minimum set of files under ~/.aws that grant AWS access.
+_CREDENTIAL_FILES = [
+    'credentials',
+]
+
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -22,6 +27,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+@clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
@@ -122,7 +128,7 @@ class AWS(clouds.Cloud):
                                                use_spot=use_spot,
                                                clouds='aws')
 
-    def accelerators_to_hourly_cost(self, accelerators):
+    def accelerators_to_hourly_cost(self, accelerators, use_spot):
         # AWS includes accelerators as part of the instance type.  Implementing
         # this is also necessary for e.g., the instance may have 4 GPUs, while
         # the task specifies to use 1 GPU.
@@ -159,8 +165,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
-        return 'm4.2xlarge'
+        # 8 vCpus, 32 GB RAM. 3rd generation Intel Xeon. General Purpose.
+        return 'm6i.2xlarge'
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -172,8 +178,22 @@ class AWS(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources'):
+    def make_deploy_resources_variables(
+            self, resources: 'resources_lib.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+            zones = region.zones
+        else:
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
+
+        region_name = region.name
+        zones = [zone.name for zone in zones]
+
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -181,10 +201,19 @@ class AWS(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
+
+        if r.image_id is not None:
+            image_id = r.image_id
+        else:
+            image_id = self.get_default_ami(region_name, r.instance_type)
+
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
+            'region': region_name,
+            'zones': ','.join(zones),
+            'image_id': image_id,
         }
 
     def get_feasible_launchable_resources(self,
@@ -273,8 +302,11 @@ class AWS(clouds.Cloud):
             return True, None
         return False, 'AWS credentials is not set.' + help_str
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
-        return {'~/.aws': '~/.aws'}, []
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        return {
+            f'~/.aws/{filename}': f'~/.aws/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')

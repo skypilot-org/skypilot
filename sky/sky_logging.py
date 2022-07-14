@@ -1,8 +1,14 @@
 """Sky logging utilities."""
 import logging
+import os
 import sys
 
-FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
+# If the SKY_MINIMIZE_LOGGING environment variable is set to True,
+# remove logging prefixes and unnecessary information in optimizer
+MINIMIZE_LOGGING = os.environ.get('SKY_MINIMIZE_LOGGING',
+                                  'False').lower() in ('true', '1')
+FORMAT = (None if MINIMIZE_LOGGING else
+          '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')
 DATE_FORMAT = '%m-%d %H:%M:%S'
 
 

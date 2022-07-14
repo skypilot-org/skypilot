@@ -28,15 +28,16 @@ if typing.TYPE_CHECKING:
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
 class _SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
-    def __init__(self):
+    def __init__(self, db_path: str):
         super().__init__()
-        self.conn = sqlite3.connect(_DB_PATH)
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
         self.cursor = self.conn.cursor()
         self._create_tables()
 
@@ -45,10 +46,11 @@ class _SQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS clusters (
             name TEXT PRIMARY KEY,
-            lauched_at INTEGER,
+            launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
-            status TEXT)""")
+            status TEXT,
+            autostop INTEGER DEFAULT -1)""")
         # Table for Sky Config (e.g. enabled clouds)
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS config (
@@ -57,7 +59,7 @@ class _SQLiteConn(threading.local):
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS storage (
             name TEXT PRIMARY KEY,
-            lauched_at INTEGER,
+            launched_at INTEGER,
             handle BLOB,
             last_use TEXT,
             status TEXT)""")
@@ -67,15 +69,14 @@ class _SQLiteConn(threading.local):
         # Add autostop column to clusters table
         db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
                                      'autostop', 'INTEGER DEFAULT -1')
-        db_utils.rename_column(self.cursor, self.conn, 'clusters', 'lauched_at',
-                               'launched_at')
-        db_utils.rename_column(self.cursor, self.conn, 'storage', 'lauched_at',
-                               'launched_at')
+
+        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
+                                     'metadata', 'TEXT DEFAULT "{}"')
 
         self.conn.commit()
 
 
-_DB = _SQLiteConn()
+_DB = _SQLiteConn(_DB_PATH)
 
 
 class ClusterStatus(enum.Enum):
@@ -133,24 +134,53 @@ def _get_pretty_entry_point() -> str:
 
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
-                          ready: bool):
+                          ready: bool,
+                          is_launch: bool = True):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
-    cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
-    last_use = _get_pretty_entry_point()
+    cluster_launched_at = int(time.time()) if is_launch else None
+    last_use = _get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         '(name, launched_at, handle, last_use, status, autostop) '
-        'VALUES (?, ?, ?, ?, ?, '
+        'VALUES ('
+        # name
+        '?, '
+        # launched_at
+        'COALESCE('
+        '?, (SELECT launched_at FROM clusters WHERE name=?)), '
+        # handle
+        '?, '
+        # last_use
+        'COALESCE('
+        '?, (SELECT last_use FROM clusters WHERE name=?)), '
+        # status
+        '?, '
+        # autostop
         # Keep the old autostop value if it exists, otherwise set it to
         # default -1.
         'COALESCE('
         '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
-        ')',  # VALUES
-        (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name, ClusterStatus.STOPPED.value))
+        ')',
+        (
+            # name
+            cluster_name,
+            # launched_at
+            cluster_launched_at,
+            cluster_name,
+            # handle
+            handle,
+            # last_use
+            last_use,
+            cluster_name,
+            # status
+            status.value,
+            # autostop
+            cluster_name,
+            ClusterStatus.STOPPED.value,
+        ))
     _DB.conn.commit()
 
 
@@ -199,15 +229,6 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_cluster_name_from_handle(
-        cluster_handle: 'backends.Backend.ResourceHandle') -> Optional[str]:
-    handle = pickle.dumps(cluster_handle)
-    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE handle=(?)',
-                              (handle,))
-    for (name,) in rows:
-        return name
-
-
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,
@@ -232,11 +253,32 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
+                              (cluster_name,))
+    for (metadata,) in rows:
+        if metadata is None:
+            return None
+        return json.loads(metadata)
+
+
+def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+    _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
+        json.dumps(metadata),
+        cluster_name,
+    ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,))
-    for name, launched_at, handle, last_use, status, autostop in rows:
+    for name, launched_at, handle, last_use, status, autostop, metadata in rows:
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -244,14 +286,16 @@ def get_cluster_from_name(
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
+            'metadata': json.loads(metadata),
         }
         return record
 
 
 def get_clusters() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from clusters')
+    rows = _DB.cursor.execute(
+        'select * from clusters order by launched_at desc')
     records = []
-    for name, launched_at, handle, last_use, status, autostop in rows:
+    for name, launched_at, handle, last_use, status, autostop, metadata in rows:
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -260,6 +304,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
+            'metadata': json.loads(metadata),
         }
         records.append(record)
     return records
@@ -272,7 +317,7 @@ def get_enabled_clouds() -> List[clouds.Cloud]:
     for (value,) in rows:
         ret = json.loads(value)
         break
-    return [clouds.from_str(cloud) for cloud in ret]
+    return [clouds.CLOUD_REGISTRY.from_str(cloud) for cloud in ret]
 
 
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:

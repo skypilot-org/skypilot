@@ -1,4 +1,5 @@
 .. _grid-search:
+
 Grid Search
 ===========
 
@@ -24,7 +25,7 @@ Refer to :ref:`Job Queue <job-queue>` for more details on Sky's scheduling behav
 
 
 Multiple trials per GPU
------------
+-----------------------
 
 To run multiple trials per GPU, use *fractional GPUs* in the resource requirement.
 For example, use :code:`--gpus V100:0.5` to make 2 trials share 1 GPU:

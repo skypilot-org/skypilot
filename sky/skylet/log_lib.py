@@ -10,20 +10,23 @@ import sys
 import time
 import textwrap
 import tempfile
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import sky_logging
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
-from sky import sky_logging
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
+_SKY_LOG_WAITING_GAP_SECONDS = 1
+_SKY_LOG_WAITING_MAX_RETRY = 5
+_SKY_LOG_TAILING_GAP_SECONDS = 0.2
 
 logger = sky_logging.init_logger(__name__)
 
 
-def redirect_process_output(
+def process_subprocess_stream(
     proc,
     log_path: str,
     stream_logs: bool,
@@ -33,9 +36,6 @@ def redirect_process_output(
     line_processor: Optional[log_utils.LineProcessor] = None
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
-    log_path = os.path.expanduser(log_path)
-    dirname = os.path.dirname(log_path)
-    os.makedirs(dirname, exist_ok=True)
 
     if line_processor is None:
         line_processor = log_utils.LineProcessor()
@@ -102,20 +102,34 @@ def run_with_log(
     require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
-    redirect_stdout_stderr: bool = True,
+    process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     **kwargs,
 ) -> Union[int, Tuple[int, str, str]]:
     """Runs a command and logs its output to a file.
 
+    Args:
+        cmd: The command to run.
+        log_path: The path to the log file.
+        stream_logs: Whether to stream the logs to stdout/stderr.
+        require_outputs: Whether to return the stdout/stderr of the command.
+        process_stream: Whether to post-process the stdout/stderr of the
+          command. If enabled, lines are printed only when '\r' or '\n' is
+          found.
+
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
     """
-    assert redirect_stdout_stderr or log_path == '/dev/null'
+    assert process_stream or not require_outputs, (
+        process_stream, require_outputs,
+        'require_outputs should be False when process_stream is False')
+    log_path = os.path.expanduser(log_path)
+    dirname = os.path.dirname(log_path)
+    os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
     stdout = stderr = None
-    if redirect_stdout_stderr:
+    if process_stream:
         stdout = subprocess.PIPE
         stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
@@ -131,11 +145,14 @@ def run_with_log(
         parent_pid = os.getpid()
         daemon_script = os.path.join(
             os.path.dirname(os.path.abspath(job_lib.__file__)),
-            'subprocess_daemon.sh')
+            'subprocess_daemon.py')
         daemon_cmd = [
-            '/bin/bash', daemon_script,
+            'python3',
+            daemon_script,
+            '--parent-pid',
             str(parent_pid),
-            str(proc.pid)
+            '--proc-pid',
+            str(proc.pid),
         ]
         subprocess.Popen(
             daemon_cmd,
@@ -143,21 +160,25 @@ def run_with_log(
             # Suppress output
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            # Disable input
+            stdin=subprocess.DEVNULL,
         )
         stdout = ''
         stderr = ''
-        if redirect_stdout_stderr:
+
+        if process_stream:
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
-            stdout, stderr = redirect_process_output(
+            # NOTE: Lines are printed only when '\r' or '\n' is found.
+            stdout, stderr = process_subprocess_stream(
                 proc,
                 log_path,
                 stream_logs,
                 start_streaming_at=start_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to find
-                # other way to turn off these two warning.
+                # Skip these lines caused by `-i` option of bash. Failed to
+                # find other way to turn off these two warning.
                 # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # TODO(zongheng,zhwu): ssh -T -i -tt seems to get rid of these.
+                # `ssh -T -i -tt` still cause the problem.
                 skip_lines=[
                     'bash: cannot set terminal process group',
                     'bash: no job control in this shell',
@@ -172,7 +193,8 @@ def run_with_log(
         return proc.returncode
 
 
-def make_task_bash_script(codegen: str) -> str:
+def make_task_bash_script(codegen: str,
+                          env_vars: Optional[Dict[str, str]] = None) -> str:
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
@@ -181,9 +203,14 @@ def make_task_bash_script(codegen: str) -> str:
             #!/bin/bash
             source ~/.bashrc
             set -a
-            . $(conda info --base)/etc/profile.d/conda.sh 2> /dev/null || true
+            . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
             cd {SKY_REMOTE_WORKDIR}"""),
+    ]
+    if env_vars is not None:
+        for k, v in env_vars.items():
+            script.append(f'export {k}="{v}"')
+    script += [
         codegen,
         '',  # New line at EOF.
     ]
@@ -193,13 +220,12 @@ def make_task_bash_script(codegen: str) -> str:
 
 def run_bash_command_with_log(bash_command: str,
                               log_path: str,
-                              export_sky_env_vars: Optional[str] = None,
+                              env_vars: Optional[Dict[str, str]] = None,
                               stream_logs: bool = False,
                               with_ray: bool = False):
-    with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
-        if export_sky_env_vars is not None:
-            bash_command = export_sky_env_vars + '\n' + bash_command
-        bash_command = make_task_bash_script(bash_command)
+    with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
+                                     delete=False) as fp:
+        bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
         script_path = fp.name
@@ -208,16 +234,15 @@ def run_bash_command_with_log(bash_command: str,
             # Do not use shell=True because it will cause the environment
             # set in this task visible to other tasks. shell=False requires
             # the cmd to be a list.
-            ['/bin/bash', '-i', script_path],
+            f'/bin/bash -i {script_path}',
             log_path,
             stream_logs=stream_logs,
             with_ray=with_ray,
-        )
+            shell=True)
 
 
 def _follow_job_logs(file,
                      job_id: int,
-                     sleep_sec: float = 0.2,
                      start_streaming_at: str = '') -> Iterator[str]:
     """Yield each line from a file as they are written.
 
@@ -250,40 +275,69 @@ def _follow_job_logs(file,
             ]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
-                    time.sleep(1 + sleep_sec)
+                    time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(
-                    f'SKY INFO: Job {job_id} finished (status: {status.value}).'
-                )
+                print(f'SKY INFO: Job finished (status: {status.value}).')
                 return
 
-            if sleep_sec:
-                time.sleep(sleep_sec)
+            time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status(job_id)
 
 
-def tail_logs(job_id: int, log_dir: Optional[str]) -> None:
+def tail_logs(job_id: int,
+              log_dir: Optional[str],
+              spot_job_id: Optional[int] = None) -> None:
+    """Tail the logs of a job."""
+    job_str = f'job {job_id}'
+    if spot_job_id is not None:
+        job_str = f'spot job {spot_job_id}'
+    logger.debug(f'Tailing logs for job, real job_id {job_id}, spot_job_id '
+                 f'{spot_job_id}.')
+    logger.info(f'{colorama.Fore.YELLOW}Start streaming logs for {job_str}.'
+                f'{colorama.Style.RESET_ALL}')
     if log_dir is None:
-        print(f'Job {job_id} not found (see `sky queue`).', file=sys.stderr)
+        print(f'{job_str.capitalize()} not found (see `sky queue`).',
+              file=sys.stderr)
         return
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
     status = job_lib.query_job_status([job_id])[0]
-    if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
-        try:
-            # Not using `ray job logs` because it will put progress bar in
-            # multiple lines.
-            with open(log_path, 'r', newline='') as log_file:
-                # Using `_follow` instead of `tail -f` to streaming the whole
-                # log and creating a new process for tail.
-                for line in _follow_job_logs(
-                        log_file,
-                        job_id=job_id,
-                        start_streaming_at='SKY INFO: Reserving task slots on'):
-                    print(line, end='', flush=True)
-        except KeyboardInterrupt:
+
+    # Wait for the log to be written. This is needed due to the `ray submit`
+    # will take some time to start the job and write the log.
+    retry_cnt = 0
+    while status in [
+            job_lib.JobStatus.INIT,
+            job_lib.JobStatus.PENDING,
+            job_lib.JobStatus.RUNNING,
+    ]:
+        retry_cnt += 1
+        if os.path.exists(log_path):
+            break
+        if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
+            print(
+                f'{colorama.Fore.RED}SKY ERROR: Logs for '
+                f'{job_str} (status: {status.value}) does not exist '
+                f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return
+        print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+              'to be written...')
+        time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
+        status = job_lib.query_job_status([job_id])[0]
+
+    if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
+        # Not using `ray job logs` because it will put progress bar in
+        # multiple lines.
+        with open(log_path, 'r', newline='') as log_file:
+            # Using `_follow` instead of `tail -f` to streaming the whole
+            # log and creating a new process for tail.
+            for line in _follow_job_logs(
+                    log_file,
+                    job_id=job_id,
+                    start_streaming_at='SKY INFO: Waiting for task resources on'
+            ):
+                print(line, end='', flush=True)
     else:
         try:
             with open(log_path, 'r') as f:

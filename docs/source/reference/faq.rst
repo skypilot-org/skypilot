@@ -10,7 +10,7 @@ Frequently Asked Questions
 
 
 Can I clone private GitHub repositories in a task's ``setup`` commands?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Yes, provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_.
 For example, run the following on your laptop:
@@ -54,3 +54,15 @@ To get around this, mount the files to a different path, then symlink to them.  
   setup: |
     git clone git@github.com:your-id/your-repo.git ~/code-repo/
     ln -s /tmp/tmp.txt ~/code-repo/
+
+
+How to make Sky clusters use my Weights & Biases credentials?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install the wandb library on your laptop and login to your account via ``wandb login``.
+Then, add the following lines in your task yaml file:
+
+.. code-block:: yaml
+
+  file_mounts:
+    ~/.netrc: ~/.netrc

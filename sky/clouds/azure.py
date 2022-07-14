@@ -2,11 +2,24 @@
 import json
 import os
 import subprocess
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources
+
+# Minimum set of files under ~/.azure that grant Azure access.
+_CREDENTIAL_FILES = [
+    'azureProfile.json',
+    'clouds.config',
+    'config',
+    'msal_token_cache.json',
+]
 
 
 def _run_output(cmd):
@@ -18,6 +31,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+@clouds.CLOUD_REGISTRY.register
 class Azure(clouds.Cloud):
     """Azure."""
 
@@ -30,7 +44,7 @@ class Azure(clouds.Cloud):
                                                use_spot=use_spot,
                                                clouds='azure')
 
-    def accelerators_to_hourly_cost(self, accelerators):
+    def accelerators_to_hourly_cost(self, accelerators, use_spot):
         # Azure includes accelerators as part of the instance type.
         # Implementing this is also necessary for e.g., the instance may have 4
         # GPUs, while the task specifies to use 1 GPU.
@@ -66,7 +80,10 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls):
+    def get_default_instance_type(cls,
+                                  accelerators: Optional[Dict[str, int]] = None
+                                 ) -> str:
+        del accelerators
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'Standard_D8_v4'
 
@@ -145,7 +162,19 @@ class Azure(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
 
-    def make_deploy_resources_variables(self, resources):
+    def make_deploy_resources_variables(
+            self, resources: 'resources.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+
+        region_name = region.name
+        # Azure does not support specific zones.
+        zones = []
+
         r = resources
         assert not r.use_spot, \
             'Our subscription offer ID does not support spot instances.'
@@ -163,10 +192,16 @@ class Azure(clouds.Cloud):
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
+            'region': region_name,
+            'zones': zones,
             **image_config
         }
 
     def get_feasible_launchable_resources(self, resources):
+        if resources.use_spot:
+            # TODO(zhwu): our azure subscription offer ID does not support spot.
+            # Need to support it.
+            return ([], [])
         fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -238,8 +273,12 @@ class Azure(clouds.Cloud):
             return True, None
         return False, 'Azure credentials not set.' + help_str
 
-    def get_credential_file_mounts(self) -> Tuple[Dict[str, str], List[str]]:
-        return {'~/.azure': '~/.azure'}, []
+    def get_credential_file_mounts(self) -> Dict[str, str]:
+        """Returns a dict of credential file paths to mount paths."""
+        return {
+            f'~/.azure/{filename}': f'~/.azure/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type,
@@ -257,13 +296,16 @@ class Azure(clouds.Cloud):
             if not azure_subscription_id:
                 raise ValueError  # The error message will be replaced.
         except ModuleNotFoundError as e:
-            raise ModuleNotFoundError('Unable to import azure python '
-                                      'module. Is azure-cli python package '
-                                      'installed? Try pip install '
-                                      '.[azure] in the sky repo.') from e
-        except Exception as e:
-            raise RuntimeError(
-                'Failed to get subscription id from azure cli. '
-                'Make sure you have logged in and run this Azure '
-                'cli command: "az account set -s <subscription_id>".') from e
+            with ux_utils.print_exception_no_traceback():
+                raise ModuleNotFoundError('Unable to import azure python '
+                                          'module. Is azure-cli python package '
+                                          'installed? Try pip install '
+                                          '.[azure] in the sky repo.') from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to get subscription id from azure cli. '
+                    'Make sure you have logged in and run this Azure '
+                    'cli command: "az account set -s <subscription_id>".'
+                ) from e
         return azure_subscription_id

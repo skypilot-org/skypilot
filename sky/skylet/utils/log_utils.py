@@ -1,6 +1,6 @@
 """Sky logging utils."""
 import enum
-from typing import Optional
+from typing import List, Optional
 
 import colorama
 import pendulum
@@ -54,28 +54,57 @@ class RayUpLineProcessor(LineProcessor):
         self.status_display.stop()
 
 
-def create_table(field_names):
+def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     """Creates table with default style."""
-    table = prettytable.PrettyTable()
-    table.field_names = field_names
-    table.border = False
+    border = kwargs.pop('border', False)
+    align = kwargs.pop('align', 'l')
+    table = prettytable.PrettyTable(align=align,
+                                    border=border,
+                                    field_names=field_names,
+                                    **kwargs)
     table.left_padding_width = 0
     table.right_padding_width = 2
-    table.align = 'l'
     return table
 
 
 def readable_time_duration(start: Optional[int],
                            end: Optional[int] = None,
                            absolute: bool = False) -> str:
-    """Human readable time duration from timestamps."""
-    if start is None:
+    """Human readable time duration from timestamps.
+
+    Args:
+        start: Start timestamp.
+        end: End timestamp. If None, current time is used.
+        absolute: Whether to return accurate time duration.
+    Returns:
+        Human readable time duration. e.g. "1 hour ago", "2 minutes ago", etc.
+        If absolute is specified, returns the accurate time duration,
+          e.g. "1h 2m 23s"
+    """
+    # start < 0 means that the starting time is not specified yet.
+    # It is only used in spot_utils.show_jobs() for job duration calculation.
+    if start is None or start < 0:
         return '-'
     if end is not None:
         end = pendulum.from_timestamp(end)
-    duration = pendulum.from_timestamp(start)
-    diff = duration.diff_for_humans(end, absolute=absolute)
-    diff = diff.replace('second', 'sec')
-    diff = diff.replace('minute', 'min')
-    diff = diff.replace('hour', 'hr')
+    start_time = pendulum.from_timestamp(start)
+    duration = start_time.diff(end)
+    if absolute:
+        diff = start_time.diff(end).in_words()
+        if duration.in_seconds() < 1:
+            diff = '< 1 second'
+        diff = diff.replace(' seconds', 's')
+        diff = diff.replace(' second', 's')
+        diff = diff.replace(' minutes', 'm')
+        diff = diff.replace(' minute', 'm')
+        diff = diff.replace(' hours', 'h')
+        diff = diff.replace(' hour', 'h')
+    else:
+        diff = start_time.diff_for_humans(end)
+        if duration.in_seconds() < 1:
+            diff = '< 1 second'
+        diff = diff.replace('second', 'sec')
+        diff = diff.replace('minute', 'min')
+        diff = diff.replace('hour', 'hr')
+
     return diff

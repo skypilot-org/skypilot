@@ -6,13 +6,17 @@ import enum
 import os
 import pathlib
 import re
+import shlex
 import sqlite3
 import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
+from sky import sky_logging
 from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
+
+logger = sky_logging.init_logger(__name__)
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
@@ -32,8 +36,12 @@ class JobStatus(enum.Enum):
         return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
                         JobStatus.CANCELLED)
 
+    def __lt__(self, other):
+        return list(JobStatus).index(self) < list(JobStatus).index(other)
+
 
 _RAY_TO_JOB_STATUS_MAP = {
+    'PENDING': JobStatus.PENDING,
     'RUNNING': JobStatus.RUNNING,
     'succeeded': JobStatus.SUCCEEDED,
     'failed': JobStatus.FAILED,
@@ -67,12 +75,12 @@ _CURSOR.execute("""\
     job_id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_name TEXT,
     username TEXT,
-    submitted_at INTEGER,
+    submitted_at FLOAT,
     status TEXT,
     run_timestamp TEXT CANDIDATE KEY,
-    start_at INTEGER)""")
+    start_at FLOAT)""")
 
-db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'INTEGER')
+db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'FLOAT')
 db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
 
 _CONN.commit()
@@ -81,7 +89,7 @@ _CONN.commit()
 def add_job(job_name: str, username: str, run_timestamp: str,
             resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
-    job_submitted_at = int(time.time())
+    job_submitted_at = time.time()
     # job_id will autoincrement with the null value
     _CURSOR.execute('INSERT INTO jobs VALUES (null, ?, ?, ?, ?, ?, ?, null, ?)',
                     (job_name, username, job_submitted_at, JobStatus.INIT.value,
@@ -100,7 +108,7 @@ def set_status(job_id: int, status: JobStatus) -> None:
         'Please use set_job_started() to set job status to RUNNING')
 
     if status.is_terminal():
-        end_at = int(time.time())
+        end_at = time.time()
         # status does not need to be set if the end_at is not null, since the
         # job must be in a terminal state already.
         _CURSOR.execute(
@@ -114,18 +122,34 @@ def set_status(job_id: int, status: JobStatus) -> None:
     _CONN.commit()
 
 
-def get_status(job_id: int) -> JobStatus:
+def get_status(job_id: int) -> Optional[JobStatus]:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (status,) in rows:
-        assert status is not None
+        if status is None:
+            return None
         return JobStatus[status]
+
+
+def get_latest_job_id() -> Optional[int]:
+    rows = _CURSOR.execute(
+        'SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
+    for (job_id,) in rows:
+        return job_id
+
+
+def get_job_time(job_id: int, is_end: bool) -> Optional[int]:
+    field = 'end_at' if is_end else 'start_at'
+    rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
+                           (job_id,))
+    for (timestamp,) in rows:
+        return timestamp
 
 
 def set_job_started(job_id: int) -> None:
     _CURSOR.execute(
         'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-        'WHERE job_id=(?)', (JobStatus.RUNNING.value, int(time.time()), job_id))
+        'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
     _CONN.commit()
 
 
@@ -149,9 +173,9 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
     return records
 
 
-def _get_jobs(
-        username: Optional[str],
-        status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
+def _get_jobs(username: Optional[str],
+              status_list: Optional[List[JobStatus]] = None,
+              submitted_gap_sec: int = 0) -> List[Dict[str, Any]]:
     if status_list is None:
         status_list = list(JobStatus)
     status_str_list = [status.value for status in status_list]
@@ -160,17 +184,18 @@ def _get_jobs(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
+            AND submitted_at <= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list,),
+            (*status_str_list, time.time() - submitted_gap_sec),
         )
     else:
         rows = _CURSOR.execute(
             f"""\
             SELECT * FROM jobs
             WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?)
+            AND username=(?) AND submitted_at <= (?)
             ORDER BY job_id DESC""",
-            (*status_str_list, username),
+            (*status_str_list, username, time.time() - submitted_gap_sec),
         )
 
     records = _get_records_from_rows(rows)
@@ -226,16 +251,20 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
     for job_id, res in zip(job_ids, results):
         # Replace the color codes in the output
         res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
+        original_status = get_status(job_id)
         if res == 'not found':
             # The job may be stale, when the instance is restarted (the ray
             # redis is volatile). We need to reset the status of the task to
             # FAILED if its original status is RUNNING or PENDING.
-            status = get_status(job_id)
-            if status in [JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING]:
+            status = original_status
+            if not original_status.is_terminal():
                 status = JobStatus.FAILED
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
+            # To avoid race condition, where the original status has already
+            # been set to later state by the job. We skip the update.
+            status = max(status, original_status)
         job_status_list.append(status)
     return job_status_list
 
@@ -252,7 +281,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status() -> None:
+def update_status(submitted_gap_sec: int = 0) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -261,7 +290,8 @@ def update_status() -> None:
     # app starts.
     running_jobs = _get_jobs(
         username=None,
-        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING])
+        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING],
+        submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
     job_status = query_job_status(running_job_ids)
@@ -271,6 +301,7 @@ def update_status() -> None:
         # because it could be pending for resources instead. The
         # RUNNING status will be set by our generated ray program.
         if status != JobStatus.RUNNING:
+            logger.info(f'Updating job {job["job_id"]} status to {status}')
             set_status(job['job_id'], status)
 
 
@@ -357,9 +388,27 @@ def log_dir(job_id: int) -> Optional[str]:
             WHERE job_id=(?)""", (job_id,))
     row = _CURSOR.fetchone()
     if row is None:
-        return None, None
+        return None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+
+
+def log_dirs_with_globbing(job_id: str) -> List[str]:
+    """Returns the relative paths to the log files for job with globbing."""
+    _CURSOR.execute(
+        """\
+            SELECT * FROM jobs
+            WHERE job_id GLOB (?)""", (job_id,))
+    rows = _CURSOR.fetchall()
+    if len(rows) == 0:
+        return None
+    log_paths = []
+    for row in rows:
+        job_id = row[JobInfoLoc.JOB_ID.value]
+        run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
+        log_path = os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+        log_paths.append((job_id, log_path))
+    return log_paths
 
 
 class JobLibCodeGen:
@@ -411,19 +460,37 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_id: int) -> str:
+    def tail_logs(cls, job_id: Optional[int],
+                  spot_job_id: Optional[int]) -> str:
         code = [
-            f'log_dir = job_lib.log_dir({job_id})',
-            f'log_lib.tail_logs({job_id}, log_dir)',
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            'log_dir = job_lib.log_dir(job_id)',
+            f'log_lib.tail_logs(job_id, log_dir, {spot_job_id!r})',
         ]
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: str) -> str:
+    def get_job_status(cls, job_id: Optional[int] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
         code = [
-            f'job_status = job_lib.get_status({job_id})',
-            f'print("Job", {job_id}, job_status.value, flush=True)',
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            'job_status = job_lib.get_status(job_id)',
+            'status_str = None if job_status is None else job_status.value',
+            'print("Job", job_id, status_str, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def get_job_time(cls,
+                     job_id: Optional[int] = None,
+                     is_end: bool = False) -> str:
+        code = [
+            f'job_id = {job_id} if {job_id} is not None '
+            'else job_lib.get_latest_job_id()',
+            f'job_time = job_lib.get_job_time(job_id, {is_end})',
+            'print(job_time, flush=True)',
         ]
         return cls._build(code)
 
@@ -436,7 +503,17 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_log_path_with_globbing(cls, job_id: Optional[str]) -> str:
+        code = [
+            f'job_id = {job_id!r} if {job_id!r} is not None '
+            'else job_lib.get_latest_job_id()',
+            'log_dirs = job_lib.log_dirs_with_globbing(str(job_id))',
+            'print(log_dirs, flush=True)',
+        ]
+        return cls._build(code)
+
+    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         code = ';'.join(code)
-        return f'python3 -u -c {code!r}'
+        return f'python3 -u -c {shlex.quote(code)}'

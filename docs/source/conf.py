@@ -61,3 +61,5 @@ epub_show_urls = 'footnote'
 # -- Options for sphinx-copybutton
 copybutton_prompt_text = r'\$ '
 copybutton_prompt_is_regexp = True
+
+html_show_sourcelink = False

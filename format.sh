@@ -44,7 +44,7 @@ YAPF_FLAGS=(
 )
 
 YAPF_EXCLUDES=(
-    # '--exclude' 'python/build/*'
+    '--exclude' 'sky/skylet/providers/**'
 )
 
 # Format specified files
@@ -70,9 +70,9 @@ format_changed() {
 
 }
 
-# Format all files, and print the diff to stdout for travis.
+# Format all files
 format_all() {
-    yapf --diff "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" test python
+    yapf --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" sky tests examples
 }
 
 ## This flag formats individual files. --files *must* be the first command line
@@ -89,7 +89,10 @@ else
 fi
 
 # Run Pylint
+echo 'Sky Pylint:'
 pylint --load-plugins pylint_quotes sky
+echo 'Sky Utils Pylint:'
+pylint --load-plugins pylint_quotes sky/utils
 
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'

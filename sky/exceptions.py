@@ -1,13 +1,17 @@
 """Exceptions."""
 import enum
 
+# Return code for keyboard interruption and SIGTSTP
+KEYBOARD_INTERRUPT_CODE = 130
+SIGTSTP_CODE = 146
+
 
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable."""
 
-    def __init__(self, *args: object, no_retry: bool = False) -> None:
+    def __init__(self, *args: object, no_failover: bool = False) -> None:
         super().__init__(*args)
-        self.no_retry = no_retry
+        self.no_failover = no_failover
 
 
 class ResourcesMismatchError(Exception):
@@ -18,16 +22,19 @@ class ResourcesMismatchError(Exception):
 class CommandError(Exception):
     """Raised when a command fails.
 
-      returncode: The returncode of the command.
-      command: The command that was run.
-      error_message: The error message to print.
+    Args:
+    returncode: The returncode of the command.
+    command: The command that was run.
+    error_message: The error message to print.
     """
 
     def __init__(self, returncode: int, command: str, error_msg: str) -> None:
-        super().__init__()
         self.returncode = returncode
         self.command = command
         self.error_msg = error_msg
+        message = (f'Command {command} failed with return code {returncode}.'
+                   f'\n{error_msg}')
+        super().__init__(message)
 
 
 class StorageError(Exception):
@@ -52,6 +59,11 @@ class StorageBucketCreateError(StorageInitError):
 
 class StorageBucketGetError(StorageInitError):
     # Error raised if attempt to fetch an existing bucket fails.
+    pass
+
+
+class StorageBucketDeleteError(StorageError):
+    # Error raised if attempt to delete an existing bucket fails.
     pass
 
 
@@ -89,3 +101,13 @@ class FetchIPError(Exception):
     def __init__(self, reason: Reason) -> None:
         super().__init__()
         self.reason = reason
+
+
+class NetworkError(Exception):
+    """Raised when network fails."""
+    pass
+
+
+class ClusterStatusFetchingError(Exception):
+    """Raised when fetching the cluster status fails."""
+    pass
