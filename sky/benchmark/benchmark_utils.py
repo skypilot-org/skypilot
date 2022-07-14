@@ -145,10 +145,12 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     elif 'GCP' in enabled_clouds:
         bucket_type = data.StoreType.GCS.value
     elif 'AZURE' in enabled_clouds:
-        bucket_type = data.StoreType.AZURE.value
+        raise RuntimeError(
+            'Azure Blob Storage is not supported yet. '
+            'Please enable another cloud to create a benchmark bucket.')
     else:
-        raise ValueError('No cloud is enabled. '
-                         'Please enable at least one cloud.')
+        raise RuntimeError('No cloud is enabled. '
+                           'Please enable at least one cloud.')
 
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')
