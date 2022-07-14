@@ -2166,7 +2166,7 @@ class CloudVmRayBackend(backends.Backend):
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
-        usage_lib.set_new_cluster()
+        usage_lib.usage_message.set_new_cluster()
         logger.info(
             f'{colorama.Fore.CYAN}Creating a new cluster: "{cluster_name}" '
             f'[{task.num_nodes}x {to_provision}].{colorama.Style.RESET_ALL}\n'
