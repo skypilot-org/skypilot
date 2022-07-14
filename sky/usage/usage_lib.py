@@ -67,6 +67,48 @@ class UsageMessageToReport:
         d = self.__dict__.copy()
         return json.dumps(d)
 
+    def update_entrypoint(self, msg: str):
+        self.entrypoint = msg
+
+    def update_user_task_yaml(self, yaml_config_or_path: Union[Dict, str]):
+        self.user_task_yaml = prepare_yaml(yaml_config_or_path)
+
+    def update_actual_task(self, config: Dict[str, Any]):
+        self.actual_task = prepare_yaml(config)
+        self.task_nodes = config['num_nodes']
+
+    def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
+        self.ray_yamls.append(prepare_yaml(yaml_config_or_path))
+        self.num_tried_regions = len(self.ray_yamls)
+
+    def update_cluster_name(self, cluster_name: Union[List[str], str]):
+        if isinstance(cluster_name, str):
+            self.cluster_names = [cluster_name]
+        else:
+            self.cluster_names = cluster_name
+        self.num_related_clusters = len(self.cluster_names)
+
+    def update_region(self, region: str):
+        self.region = region
+
+    def update_cluster_nodes(self, num_nodes: int):
+        self.cluster_nodes = num_nodes
+
+    def set_new_cluster(self):
+        self.new_cluster = True
+
+    @contextlib.contextmanager
+    def update_runtime_context(self, name: str):
+        try:
+            start = time.time()
+            yield
+        finally:
+            self.runtimes[name] = time.time() - start
+
+    def update_runtime(self, name_or_fn: str):
+        return common_utils.make_decorator(self.update_runtime_context,
+                                           name_or_fn)
+
 
 usage_message = UsageMessageToReport()
 
@@ -140,58 +182,11 @@ def prepare_yaml(yaml_config_or_path: Union[Dict, str]):
     return yaml_info
 
 
-def update_user_task_yaml(yaml_config_or_path: Union[Dict, str]):
-    usage_message.user_task_yaml = prepare_yaml(yaml_config_or_path)
-
-
-def update_actual_task(config: Dict[str, Any]):
-    usage_message.actual_task = prepare_yaml(config)
-    usage_message.task_nodes = config['num_nodes']
-
-
-def update_ray_yaml(yaml_config_or_path: Union[Dict, str]):
-    usage_message.ray_yamls.append(prepare_yaml(yaml_config_or_path))
-    usage_message.num_tried_regions = len(usage_message.ray_yamls)
-
-
-def update_cluster_name(cluster_name: Union[List[str], str]):
-    if isinstance(cluster_name, str):
-        usage_message.cluster_names = [cluster_name]
-    else:
-        usage_message.cluster_names = cluster_name
-    usage_message.num_related_clusters = len(usage_message.cluster_names)
-
-
-def update_region(region: str):
-    usage_message.region = region
-
-
-def update_cluster_nodes(num_nodes: int):
-    usage_message.cluster_nodes = num_nodes
-
-
-def set_new_cluster():
-    usage_message.new_cluster = True
-
-
-@contextlib.contextmanager
-def update_runtime_context(name: str):
-    try:
-        start = time.time()
-        yield
-    finally:
-        usage_message.runtimes[name] = time.time() - start
-
-
-def update_runtime(name_or_fn: str):
-    return common_utils.make_decorator(update_runtime_context, name_or_fn)
-
-
 @contextlib.contextmanager
 def entrypoint_context(name: str):
     is_outermost = usage_message.entrypoint is None
     if is_outermost:
-        usage_message.entrypoint = name
+        usage_message.update_entrypoint(name)
     if env_options.Options.DISABLE_LOGGING.get() or not is_outermost:
         yield
         return

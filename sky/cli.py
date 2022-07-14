@@ -564,7 +564,7 @@ def _make_dag_from_entrypoint_with_overrides(
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            usage_lib.update_user_task_yaml(entrypoint)
+            usage_lib.usage_message.update_user_task_yaml(entrypoint)
             task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
@@ -1516,7 +1516,8 @@ def _terminate_or_stop_clusters(
             # should've been printed by _get_glob_clusters() above.
             continue
         clusters.append({'name': name, 'handle': handle})
-    usage_lib.update_cluster_name([cluster['name'] for cluster in clusters])
+    usage_lib.usage_message.update_cluster_name(
+        [cluster['name'] for cluster in clusters])
 
     if not clusters:
         print('\nCluster(s) not found (tip: see `sky status`).')
