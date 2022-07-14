@@ -223,7 +223,7 @@ def _download_remote_dir(remote_dir: str, local_dir: str,
                        stderr=subprocess.DEVNULL,
                        check=True)
     else:
-        raise RuntimeError(f'Azure Blob Storage is not supported yet.')
+        raise RuntimeError('Azure Blob Storage is not supported yet.')
 
 
 def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
@@ -241,7 +241,7 @@ def _delete_remote_dir(remote_dir: str, bucket_type: data.StoreType) -> None:
                        stderr=subprocess.DEVNULL,
                        check=True)
     else:
-        raise RuntimeError(f'Azure Blob Storage is not supported yet.')
+        raise RuntimeError('Azure Blob Storage is not supported yet.')
 
 
 def _read_timestamp(path: str) -> float:
