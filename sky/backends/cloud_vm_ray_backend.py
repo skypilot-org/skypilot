@@ -65,7 +65,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching head IP address.
-_HEAD_IP_MAX_ATTEMPTS = 3
+_HEAD_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -1620,11 +1620,14 @@ class CloudVmRayBackend(backends.Backend):
             f'--address=127.0.0.1:8265 --job-id {job_id} --no-wait '
             f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-        returncode = self.run_on_head(handle,
+        returncode, stdout, stderr = self.run_on_head(handle,
                                       f'{cd} && {job_submit_cmd}',
-                                      stream_logs=False)
+                                      stream_logs=False,
+                                      require_outputs = True,
+                                    )
         subprocess_utils.handle_returncode(returncode, job_submit_cmd,
-                                           f'Failed to submit job {job_id}.')
+                                           f'Failed to submit job {job_id}.',
+                                           stderr = stdout + stderr)
 
         logger.info('Job submitted with Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
