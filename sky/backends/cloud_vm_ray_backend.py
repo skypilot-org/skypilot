@@ -1340,10 +1340,13 @@ class CloudVmRayBackend(backends.Backend):
             backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
-                # RetryingVmProvisioner will retry within the given region
-                # first (if a zone is not explicitly requested), then
-                # optionally retry on all other clouds and regions (if
-                # backend.register_info() has been called).
+                # For on-demand instances, RetryingVmProvisioner will retry
+                # within the given region first, then optionally retry on all
+                # other clouds and regions (if backend.register_info()
+                # has been called).
+                # For spot instances, each provisioning request is made for a
+                # single zone and the provisioner will retry on all other
+                # clouds, regions, and zones.
                 # After this "round" of optimization across clouds, provisioning
                 # may still have not succeeded. This while loop will then kick
                 # in if retry_until_up is set, which will kick off new "rounds"
