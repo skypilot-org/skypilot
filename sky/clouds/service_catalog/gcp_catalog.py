@@ -45,7 +45,7 @@ _A100_HOST_MEMORY = {
 }
 
 # Pricing.  All info assumes us-central1.
-# In general, query pricing from the cloud.
+# FIXME: In general, query pricing from the cloud.
 _ON_DEMAND_PRICES = {
     # VMs: https://cloud.google.com/compute/all-pricing.
     # N1 standard
@@ -210,24 +210,31 @@ def instance_type_exists(instance_type: str) -> bool:
 
 def get_hourly_cost(
     instance_type: str,
-    region: str,
+    region: Optional[str],
+    zone: Optional[str],
     use_spot: bool = False,
 ) -> float:
-    """Returns the hourly price for a given instance type and region."""
-    del region  # unused
+    """Returns the price of a VM instance in the given region and zone."""
+    del region, zone  # unused
     if use_spot:
         return _SPOT_PRICES[instance_type]
     return _ON_DEMAND_PRICES[instance_type]
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
+        acc_name: str,
+        acc_count: int,
+        use_spot: bool = False,
+        region: Optional[str] = None,
+        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
 
     Return: a list with a single matched instance type and a list of candidates
     with fuzzy search (should be empty as it must have already been generated in
     caller).
     """
+    del use_spot, region, zone  # unused
+
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
          df=_df, acc_name=acc_name, acc_count=acc_count)
@@ -268,28 +275,35 @@ def _get_accelerator(
     accelerator: str,
     count: int,
     region: Optional[str],
+    zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = (df['AcceleratorName'].str.fullmatch(
         accelerator, case=False)) & (df['AcceleratorCount'] == count)
     if region is not None:
         idx &= df['Region'] == region
+    if zone is not None:
+        idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
 
 def get_accelerator_hourly_cost(accelerator: str,
                                 count: int,
                                 region: Optional[str] = None,
+                                zone: Optional[str] = None,
                                 use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
+    if zone is not None:
+        assert region is not None, 'Region must be specified if zone is.'
     if region is None:
         for tpu_region in _TPU_REGIONS:
             df = _get_accelerator(_df, accelerator, count, tpu_region)
             if len(set(df['Price'])) == 1:
                 region = tpu_region
                 break
-    df = _get_accelerator(_df, accelerator, count, region)
+
+    df = _get_accelerator(_df, accelerator, count, region, zone)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:
         return df['Price'].iloc[0]

@@ -115,18 +115,29 @@ class GCP(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self,
+                                     instance_type,
+                                     use_spot,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
+                                               region=region,
+                                               zone=zone,
                                                use_spot=use_spot,
                                                clouds='gcp')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
+    def accelerators_to_hourly_cost(self,
+                                    accelerators,
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
         return service_catalog.get_accelerator_hourly_cost(acc,
                                                            acc_count,
-                                                           use_spot,
+                                                           use_spot=use_spot,
+                                                           region=region,
+                                                           zone=zone,
                                                            clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
@@ -232,9 +243,13 @@ class GCP(clouds.Cloud):
             )) == 1, 'cannot handle more than one accelerator candidates.'
             acc, acc_count = list(resources.accelerators.items())[0]
             (instance_list, fuzzy_candidate_list
-            ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                                  acc_count,
-                                                                  clouds='gcp')
+            ) = service_catalog.get_instance_type_for_accelerator(
+                acc,
+                acc_count,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone,
+                clouds='gcp')
 
             if instance_list is None:
                 return ([], fuzzy_candidate_list)

@@ -640,13 +640,18 @@ class Optimizer:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
+            region_or_zone = resources.region
+            if resources.zone is not None:
+                region_or_zone = resources.zone
             return [
-                str(resources.cloud), resources.instance_type + spot,
-                str(accelerators)
+                str(resources.cloud),
+                resources.instance_type + spot,
+                str(accelerators),
+                region_or_zone,
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS']
+        resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS', 'REGION (ZONE)']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]
@@ -790,6 +795,24 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
     return any(cloud.is_same_cloud(c) for c in lst)
 
 
+def _generate_launchables_with_region_zones(
+        resources: resources_lib.Resources) -> List[resources_lib.Resources]:
+    assert resources.is_launchable()
+    launchables = []
+    for region, zones in resources.get_valid_region_zones():
+        if (resources.region is not None and region.name != resources.region):
+            continue
+        if not resources.use_spot:
+            launchables.append(resources.copy(region=region.name))
+        else:
+            for zone in zones:
+                if (resources.zone is not None and zone.name != resources.zone):
+                    continue
+                launchables.append(
+                    resources.copy(region=region.name, zone=zone.name))
+    return launchables
+
+
 def _filter_out_blocked_launchable_resources(
         launchable_resources: List[resources_lib.Resources],
         blocked_launchable_resources: List[resources_lib.Resources]):
@@ -798,7 +821,11 @@ def _filter_out_blocked_launchable_resources(
     for resources in launchable_resources:
         for blocked_resources in blocked_launchable_resources:
             if resources.is_launchable_fuzzy_equal(blocked_resources):
-                break
+                if (blocked_resources.region is None or
+                        blocked_resources.region == resources.region):
+                    if (blocked_resources.zone is None or
+                            blocked_resources.zone == resources.zone):
+                        break
         else:  # non-blokced launchable resources. (no break)
             available_resources.append(resources)
     return available_resources
@@ -832,7 +859,8 @@ def _fill_in_launchable_resources(
                     'enabled. Run `sky check` to enable access to it, '
                     'or change the cloud requirement.')
         elif resources.is_launchable():
-            launchable[resources] = [resources]
+            launchable[resources] = _generate_launchables_with_region_zones(
+                resources)
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds
@@ -843,7 +871,9 @@ def _fill_in_launchable_resources(
                 if len(feasible_resources) > 0:
                     # Assume feasible_resources is sorted by prices and
                     # only append the cheapest option for each cloud
-                    launchable[resources].append(feasible_resources[0])
+                    cheapest = feasible_resources[0]
+                    launchable[resources].extend(
+                        _generate_launchables_with_region_zones(cheapest))
                     cloud_candidates[cloud] = feasible_resources
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)

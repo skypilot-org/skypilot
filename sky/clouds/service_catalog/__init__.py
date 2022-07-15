@@ -107,11 +107,17 @@ def get_region_zones_for_instance_type(
 
 def get_hourly_cost(instance_type: str,
                     region: Optional[str],
+                    zone: Optional[str],
                     use_spot: bool,
                     clouds: CloudFilter = None):
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+    """Returns the price of a VM instance in the given region and zone.
+
+    If region is None, return the cheapest price among all regions.
+    If zone is None, return the cheapest price among all the zones in the given
+    region.
+    """
     return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
-                               use_spot)
+                               zone, use_spot)
 
 
 def get_accelerators_from_instance_type(
@@ -125,6 +131,9 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
+    use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
@@ -132,21 +141,30 @@ def get_instance_type_for_accelerator(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
-                               acc_name, acc_count)
+                               acc_name, acc_count, use_spot, region, zone)
 
 
 def get_accelerator_hourly_cost(
     acc_name: str,
     acc_count: int,
     use_spot: bool,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> float:
-    """Returns the hourly cost with the accelerators."""
+    """Returns the price of the accelerators in the given region and zone.
+
+    If region is None, return the cheapest price among all regions.
+    If zone is None, return the cheapest price among all the zones in the given
+    region.
+    """
     return _map_clouds_catalog(clouds,
                                'get_accelerator_hourly_cost',
                                acc_name,
                                acc_count,
-                               use_spot=use_spot)
+                               use_spot=use_spot,
+                               region=region,
+                               zone=zone)
 
 
 def get_region_zones_for_accelerators(

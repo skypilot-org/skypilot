@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -55,6 +55,7 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        zone: Optional[str] = None,
         image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
@@ -62,6 +63,7 @@ class Resources:
 
         self._region: Optional[str] = None
         self._set_region(region)
+        self._zone = zone
 
         self._instance_type = instance_type
 
@@ -119,6 +121,10 @@ class Resources:
     @property
     def region(self):
         return self._region
+
+    @property
+    def zone(self) -> Optional[str]:
+        return self._zone
 
     @property
     def instance_type(self):
@@ -264,7 +270,32 @@ class Resources:
             self._cloud = valid_clouds[0]
         self._region = region
 
-    def _try_validate_instance_type(self):
+    def get_valid_region_zones(
+            self) -> List[Tuple[clouds.Region, clouds.Zone]]:
+        """Returns a list of valid (region, zones) tuples for the resources."""
+        assert self.is_launchable()
+
+        if isinstance(self._cloud, clouds.GCP):
+            gcp_region_zones = list(
+                self._cloud.region_zones_provision_loop(
+                    accelerators=self.accelerators, use_spot=self._use_spot))
+
+            # GCP provision loop yields 1 zone per request.
+            # For consistency with other clouds, we group the zones with the
+            # same region.
+            region_zones = []
+            regions = set()
+            for region, _ in gcp_region_zones:
+                if region.name not in regions:
+                    regions.add(region.name)
+                    region_zones.append((region, region.zones))
+        else:
+            region_zones = list(
+                self._cloud.region_zones_provision_loop(
+                    instance_type=self._instance_type, use_spot=self._use_spot))
+        return region_zones
+
+    def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
             return
 
@@ -303,9 +334,22 @@ class Resources:
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
 
+        # Validate instance type against the region.
+        if not isinstance(self._cloud, clouds.GCP) and self._region is not None:
+            region_zones = self.get_valid_region_zones()
+            regions = {region.name for region, _ in region_zones}
+            if self._region not in regions:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid region {self._region!r} '
+                        f'for instance type {self._instance_type!r}.')
+
     def _try_validate_accelerators(self) -> None:
-        """Try-validates accelerators against the instance type."""
-        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
+        """Try-validates accelerators against the instance type and region."""
+        if not self.is_launchable():
+            return
+
+        if not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
             acc_requested = self.accelerators
             if acc_requested is None:
@@ -327,6 +371,22 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
+        else:
+            # TODO: Take into account the host VM restrictions in
+            # https://cloud.google.com/compute/docs/gpus and
+            # https://cloud.google.com/compute/docs/machine-types#gpus.
+
+            # Validate accelerators against the region.
+            # For AWS and Azure, validating the instance type against the region
+            # is sufficient.
+            if self._region is not None:
+                region_zones = self.get_valid_region_zones()
+                regions = {region.name for region, _ in region_zones}
+                if self._region not in regions:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid region {self._region!r} '
+                            f'for accelerators {self.accelerators}.')
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
@@ -365,11 +425,11 @@ class Resources:
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self._instance_type, self.use_spot)
+            self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot)
+                self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -392,6 +452,13 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if (self.zone is None) != (other.zone is None):
+            # self and other's zone should be both None or both not None
+            return False
+
+        if self.zone is not None and self.zone != other.zone:
+            return False
 
         if (self.image_id is None) != (other.image_id is None):
             # self and other's image id should be both None or both not None
@@ -430,6 +497,10 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if self.zone is not None and self.zone != other.zone:
+            return False
+        # self.zone <= other.zone
 
         if (self.image_id is not None and self.image_id != other.image_id):
             return False
@@ -504,6 +575,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
@@ -599,4 +671,5 @@ class Resources:
 
         if version < 4:
             self._image_id = None
+            self._zone = None
         self.__dict__.update(state)

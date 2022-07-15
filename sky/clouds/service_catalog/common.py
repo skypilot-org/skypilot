@@ -45,10 +45,14 @@ def _get_instance_type(
     df: pd.DataFrame,
     instance_type: str,
     region: Optional[str],
+    zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = df['InstanceType'] == instance_type
     if region is not None:
         idx &= df['Region'] == region
+    if zone is not None:
+        # For Azure instances, zone must be None.
+        idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
 
@@ -65,16 +69,23 @@ def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
     region: Optional[str],
+    zone: Optional[str],
     use_spot: bool = False,
 ) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    df = _get_instance_type(df, instance_type, region)
+    df = _get_instance_type(df, instance_type, region, zone)
     assert pd.isnull(
         df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
                                         f'Spot: {use_spot}" in the catalog.')
-    # TODO(zhwu): We should handle the price difference among different regions.
-    price_str = 'SpotPrice' if use_spot else 'Price'
-    assert region is None or len(set(df[price_str])) == 1, df
+    if zone is not None:
+        assert region is not None, 'Region must be specified if zone is.'
+
+    if use_spot:
+        price_str = 'SpotPrice'
+        assert zone is None or len(set(df[price_str])) == 1, df
+    else:
+        price_str = 'Price'
+        assert region is None or len(set(df[price_str])) == 1, df
 
     cheapest_idx = df[price_str].idxmin()
 
@@ -101,6 +112,9 @@ def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
+    use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
@@ -121,8 +135,18 @@ def get_instance_type_for_accelerator_impl(
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
                                             f'{int(row["AcceleratorCount"])}')
         return (None, fuzzy_candidate_list)
+
+    if region is not None:
+        result = result[result['Region'] == region]
+        if zone is not None:
+            # For Azure regions, zone must be None.
+            result = result[result['AvailabilityZone'] == zone]
+        if len(result) == 0:
+            return ([], [])
+
     # Current strategy: choose the cheapest instance
-    result = result.sort_values('Price', ascending=True)
+    price_str = 'SpotPrice' if use_spot else 'Price'
+    result = result.sort_values(price_str, ascending=True)
     instance_types = list(result['InstanceType'].drop_duplicates())
     return (instance_types, [])
 
