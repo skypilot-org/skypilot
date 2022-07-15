@@ -42,8 +42,8 @@ class Resources:
     # If any fields changed:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
-    # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 4
+    # 3. Modify the to_yaml_config method to handle the new fields.
+    _VERSION = 5
 
     def __init__(
         self,
@@ -670,5 +670,7 @@ class Resources:
 
         if version < 4:
             self._image_id = None
+        
+        if version < 5:
             self._zone = None
         self.__dict__.update(state)
