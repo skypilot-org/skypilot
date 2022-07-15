@@ -1,9 +1,8 @@
 """Utilities for sky status."""
-from typing import Callable
+from typing import Any, Callable, Dict, List
 import click
 
 from sky import backends
-from sky.backends import backend_utils
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
@@ -28,10 +27,9 @@ class StatusColumn:
         return val
 
 
-def show_status_table(show_all: bool, refresh: bool):
+def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
     """Compute cluster table values and display."""
     # TODO(zhwu): Update the information for auto-stop clusters.
-    cluster_records = backend_utils.get_clusters(show_all, refresh)
 
     status_columns = [
         StatusColumn('NAME', _get_name),

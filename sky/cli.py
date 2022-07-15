@@ -29,10 +29,10 @@ each other.
 """
 import functools
 import getpass
+import json
 import os
 import shlex
 import sys
-import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 import yaml
@@ -51,8 +51,6 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
-from sky.data import data_utils
-from sky.data.storage import StoreType
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils import command_runner
@@ -938,7 +936,8 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    status_utils.show_status_table(all, refresh)
+    cluster_records = sky.sdk.status(show_all=all, refresh=refresh)
+    status_utils.show_status_table(cluster_records, refresh)
 
 
 @cli.command()
@@ -958,13 +957,6 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
-    all_jobs = not skip_finished
-
-    username = getpass.getuser()
-    if all_users:
-        username = None
-    code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
-
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
@@ -973,43 +965,24 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
     unsupported_clusters = []
     for cluster in clusters:
-        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster)
-        backend = backend_utils.get_backend_from_handle(handle)
-        if isinstance(backend, backends.LocalDockerBackend):
-            # LocalDockerBackend does not support job queues
-            unsupported_clusters.append(cluster)
+        try:
+            sky.sdk.queue(cluster, skip_finished, all_users)
+        except ValueError as e:
+            if 'LocalDockerBackend' in str(e):
+                unsupported_clusters.append(cluster)
+            click.echo(str(e))
             continue
-        if cluster_status != global_user_state.ClusterStatus.UP:
-            click.secho(
-                f'Cluster {cluster} is not up (status: {cluster_status.value});'
-                ' skipped.',
-                fg='yellow')
+        except RuntimeError as e:
+            click.echo(str(e))
             continue
-        _show_job_queue_on_cluster(cluster, handle, backend, code)
+        job_table = job_lib.format_job_table(json.loads(job_table))
+        click.echo(f'{job_table}')
+
     if unsupported_clusters:
         click.secho(
             f'Note: Job queues are not supported on clusters: '
             f'{", ".join(unsupported_clusters)}',
             fg='yellow')
-
-
-def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
-                               backend: 'backend_lib.Backend', code: str):
-    click.echo(f'\nSky Job Queue of Cluster {cluster}')
-    if handle.head_ip is None:
-        click.echo(
-            f'Cluster {cluster} has been stopped or not properly set up. '
-            'Please re-launch it with `sky launch` to view the job queue.')
-        return
-
-    returncode, job_table, stderr = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True)
-    if returncode != 0:
-        click.echo(stderr)
-        click.secho(f'Failed to get job queue on cluster {cluster}.', fg='red')
-    click.echo(f'{job_table}')
 
 
 @cli.command()
@@ -2114,98 +2087,7 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    assert len(dag.tasks) == 1, dag
-    task = dag.tasks[0]
-    assert len(task.resources) == 1, task
-    resources = list(task.resources)[0]
-
-    change_default_value = dict()
-    if not resources.use_spot_specified:
-        logger.info('Field use_spot not specified; defaulting to True.')
-        change_default_value['use_spot'] = True
-    if resources.spot_recovery is None:
-        logger.info('No spot recovery strategy specified; defaulting to '
-                    f'{spot_lib.SPOT_DEFAULT_STRATEGY}.')
-        change_default_value['spot_recovery'] = spot_lib.SPOT_DEFAULT_STRATEGY
-
-    new_resources = resources.copy(**change_default_value)
-    task.set_resources({new_resources})
-
-    if task.run is None:
-        click.secho(
-            'Skipping the managed spot task as the run section is not set.',
-            fg='green')
-        return
-
-    # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
-    # following validations.
-    # Check the file mounts in the task.
-    # Disallow all local file mounts (copy mounts).
-    if task.workdir is not None:
-        raise click.UsageError('Workdir is not allowed for managed spot jobs.')
-    copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts:
-        copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
-        raise click.UsageError(
-            'Local file mounts are not allowed for managed spot jobs, '
-            f'but following are found: {copy_mounts_str}')
-
-    # Copy the local source to a bucket. The task will not be executed locally,
-    # so we need to copy the files to the bucket manually here before sending to
-    # the remote spot controller.
-    task.add_storage_mounts()
-
-    # Replace the source field that is local path in all storage_mounts with
-    # bucket URI and remove the name field.
-    for storage_obj in task.storage_mounts.values():
-        if (storage_obj.source is not None and
-                not data_utils.is_cloud_store_url(storage_obj.source)):
-            # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the sky storage mount can work on the spot
-            # controller.
-            store_types = list(storage_obj.stores.keys())
-            assert len(store_types) == 1, (
-                'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            if store_type == StoreType.S3:
-                storage_obj.source = f's3://{storage_obj.name}'
-            elif store_type == StoreType.GCS:
-                storage_obj.source = f'gs://{storage_obj.name}'
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unsupported store type: {store_type}')
-            storage_obj.name = None
-
-    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
-                                     mode='w') as f:
-        task_config = task.to_yaml_config()
-        backend_utils.dump_yaml(f.name, task_config)
-
-        controller_name = spot_lib.SPOT_CONTROLLER_NAME
-        yaml_path = backend_utils.fill_template(
-            spot_lib.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot_lib.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
-            },
-            output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
-        with sky.Dag() as dag:
-            controller_task = sky.Task.from_yaml(yaml_path)
-            controller_task.spot_task = task
-            assert len(controller_task.resources) == 1
-        click.secho(
-            f'Launching managed spot job {name} from spot controller...',
-            fg='yellow')
-        click.echo('Launching spot controller...')
-        sky.launch(dag,
-                   stream_logs=True,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=spot_lib.
-                   SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   is_spot_controller_task=True)
+    sky.spot_launch(dag, name, detach_run=detach_run)
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)

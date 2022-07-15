@@ -3,6 +3,7 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import json
 import os
 import pathlib
 import re
@@ -317,12 +318,12 @@ def is_cluster_idle() -> bool:
         return count == 0
 
 
-def _show_job_queue(jobs) -> None:
+def format_job_queue(jobs: List[Dict[str, Any]]):
+    """Format the job queue for display."""
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
         'STATUS', 'LOG'
     ])
-
     for job in jobs:
         job_table.add_row([
             job['job_id'],
@@ -334,14 +335,14 @@ def _show_job_queue(jobs) -> None:
                                              job['end_at'],
                                              absolute=True),
             job['resources'],
-            job['status'].value,
-            os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
+            job['status'],
+            job['log_path'],
         ])
-    print(job_table)
+    return job_table
 
 
-def show_jobs(username: Optional[str], all_jobs: bool) -> None:
-    """Show the job queue.
+def get_job_queue(username: Optional[str], all_jobs: bool) -> str:
+    """Get the job queue in json format.
 
     Args:
         username: The username to show jobs for. Show all the users if None.
@@ -352,7 +353,11 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
         status_list = None
 
     jobs = _get_jobs(username, status_list=status_list)
-    _show_job_queue(jobs)
+    for job in jobs:
+        job['status'] = job['status'].value
+        job['log_path'] = os.path.join(SKY_LOGS_DIRECTORY, job.pop('run_timestamp'))
+        job.pop('run_timestamp')
+    return json.dumps(jobs, indent=2)
 
 
 def cancel_jobs(jobs: Optional[List[int]]) -> None:
@@ -444,8 +449,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def show_jobs(cls, username: Optional[str], all_jobs: bool) -> str:
-        code = [f'job_lib.show_jobs({username!r}, {all_jobs})']
+    def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
+        code = [f'job_queue = job_lib.get_job_queue({username!r}, {all_jobs})',
+                'print(job_queue, flush=True)']
         return cls._build(code)
 
     @classmethod
