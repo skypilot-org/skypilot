@@ -15,7 +15,7 @@ file_mounts:
   ~/sky_workdir:
     # Change this to the your own globally unique bucket name.
     name: sky-workdir-zhwu
-    source: .
+    source: ./examples/docker
     persistent: false
     mode: COPY
   /imagenet-image:
@@ -23,5 +23,5 @@ file_mounts:
 
 run: |
   set -ex
-  ls ~/sky_workdir/sky
+  ls ~/sky_workdir/detectron2
   ls -l /imagenet-image/datasets
