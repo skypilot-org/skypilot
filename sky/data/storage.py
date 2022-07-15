@@ -820,8 +820,9 @@ class S3Store(AbstractStore):
                                 'the bucket is public.')
                 returncode = process.wait()
                 if returncode != 0:
+                    stderr = '\n'.join(stderr)
                     with ux_utils.print_exception_no_traceback():
-                        logger.error(process.stdout + '\n'.join(stderr))
+                        logger.error(f'{process.stdout}\n{stderr}')
                         raise exceptions.StorageUploadError(
                             f'Upload to S3 failed for store {self.name} and '
                             f'source {self.source}. Please check the logs.')

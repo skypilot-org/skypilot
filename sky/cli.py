@@ -27,7 +27,6 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
-import contextlib
 import functools
 import getpass
 import os
