@@ -4,6 +4,7 @@ import os
 # Keep this order to avoid cyclic imports
 from sky import backends
 from sky import clouds
+from sky import sdk
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag, DagContext
 from sky.execution import launch, exec, spot_launch  # pylint: disable=redefined-builtin
@@ -21,6 +22,7 @@ GCP = clouds.GCP
 optimize = Optimizer.optimize
 
 __all__ = [
+    'sdk',
     'AWS',
     'Azure',
     'GCP',
