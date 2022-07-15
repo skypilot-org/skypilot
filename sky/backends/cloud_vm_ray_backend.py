@@ -1818,7 +1818,7 @@ class CloudVmRayBackend(backends.Backend):
             for i, ip in enumerate(ips):
                 try:
                     # Disable the output of rsync.
-                    with backend_utils.subpress_output():
+                    with backend_utils.suppress_output():
                         rsync_down(ip, local_log_dir, remote_log_dir)
                     logger.info(
                         f'{fore.CYAN}Job {job_id} logs: downloaded from '
