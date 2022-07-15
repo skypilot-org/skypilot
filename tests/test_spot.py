@@ -151,5 +151,5 @@ class TestReservedClustersOperations:
     def test_cancel_on_spot_controller(self, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, ['sky-spot-controller', '-a'])
-        assert isinstance(result.exception, ValueError)
-        assert 'Cancelling jobs is not allowed' in str(result.exception)
+        assert result.exit_code == click.UsageError.exit_code
+        assert 'Cancelling jobs is not allowed' in str(result.output)
