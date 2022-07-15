@@ -265,6 +265,19 @@ def spot_launch(
     name: Optional[str] = None,
     detach_run: bool = False,
 ) -> None:
+    """Launch a managed spot job.
+
+    Please refer to the sky.cli.spot_launch for the document.
+
+    Args:
+        dag: DAG to launch.
+        name: Name of the spot job.
+        detach_run: Whether to detach the run.
+
+    Raises:
+        ValueError: cluster does not exist.
+        sky.exceptions.NotSupportedError: the feature is not supported.
+    """
     if name is None:
         name = backend_utils.generate_cluster_name()
 
@@ -298,11 +311,12 @@ def spot_launch(
     # Check the file mounts in the task.
     # Disallow all local file mounts (copy mounts).
     if task.workdir is not None:
-        raise ValueError('Workdir is not allowed for managed spot jobs.')
+        raise exceptions.NotSupportedError(
+            'Workdir is not allowed for managed spot jobs.')
     copy_mounts = task.get_local_to_remote_file_mounts()
     if copy_mounts:
         copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
-        raise ValueError(
+        raise exceptions.NotSupportedError(
             'Local file mounts are not allowed for managed spot jobs, '
             f'but following are found: {copy_mounts_str}')
 
@@ -329,7 +343,8 @@ def spot_launch(
                 storage_obj.source = f'gs://{storage_obj.name}'
             else:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unsupported store type: {store_type}')
+                    raise exceptions.NotSupportedError(
+                        f'Unsupported store type: {store_type}')
             storage_obj.name = None
 
     with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
@@ -367,7 +382,10 @@ def spot_launch(
 def stop(cluster_name: str, purge: bool = False):
     """Stop the cluster
 
+    Please refer to the sky.cli.stop for the document.
+
     Raises:
+        ValueError: cluster does not exist.
         RuntimeError: Fail to stop the cluster.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
@@ -397,8 +415,10 @@ def stop(cluster_name: str, purge: bool = False):
 def down(cluster_name: str, purge: bool = False):
     """Down the cluster
 
+    Please refer to the sky.cli.down for the document.
+
     Raises:
-        ValueError: Fail to down the cluster.
+        ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
@@ -416,10 +436,13 @@ def down(cluster_name: str, purge: bool = False):
 def autostop(cluster_name: str, idle_minutes_to_autostop: int):
     """Set the autostop time of the cluster.
 
+    Please refer to the sky.cli.autostop for the document.
+
     Args:
         cluster_name (str): name of the cluster.
         autostop_time (int): autostop time in minutes.
     Raises:
+        ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
