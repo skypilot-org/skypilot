@@ -547,13 +547,13 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        # The underlying ray autoscaler / boto3 will try all zones of a region
-        # at once.
         if zones == region.zones:
+            # The underlying ray autoscaler / boto3 will try all zones of a
+            # region at once.
             logger.warning(f'Got error(s) in all zones of {region.name}:')
         else:
             zones_str = ', '.join(z.name for z in zones)
-            logger.warning(f'Got error(s) in {zones_str} of {region.name}:')
+            logger.warning(f'Got error(s) in {zones_str}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
@@ -1340,9 +1340,9 @@ class CloudVmRayBackend(backends.Backend):
             backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
-                # RetryingVmProvisioner will retry within a cloud's regions
-                # first (if a region is not explicitly requested), then
-                # optionally retry on all other clouds (if
+                # RetryingVmProvisioner will retry within the given region
+                # first (if a zone is not explicitly requested), then
+                # optionally retry on all other clouds and regions (if
                 # backend.register_info() has been called).
                 # After this "round" of optimization across clouds, provisioning
                 # may still have not succeeded. This while loop will then kick
