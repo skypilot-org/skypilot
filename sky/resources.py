@@ -670,7 +670,7 @@ class Resources:
 
         if version < 4:
             self._image_id = None
-        
+
         if version < 5:
             self._zone = None
         self.__dict__.update(state)
