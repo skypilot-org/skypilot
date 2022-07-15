@@ -675,7 +675,7 @@ class Storage(object):
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
 
-        # Add force         
+        # Add force deletion flag
         storage_obj.force_delete = force_delete
         return storage_obj
 
@@ -798,8 +798,10 @@ class S3Store(AbstractStore):
                 f'[green]{self.source} to s3://{self.name}/'):
             # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
             # to a log file.
-            with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE,) as process:
+            with subprocess.Popen(
+                    sync_command.split(' '),
+                    stderr=subprocess.PIPE,
+            ) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()

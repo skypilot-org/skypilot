@@ -537,8 +537,7 @@ def test_spot_storage():
     yaml_str = pathlib.Path(
         'examples/managed_spot_with_storage.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
-    yaml_str = yaml_str.replace('sky-workdir-zhwu',
-                                storage_name)
+    yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
         f.flush()
