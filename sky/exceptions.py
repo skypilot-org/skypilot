@@ -37,6 +37,11 @@ class CommandError(Exception):
         super().__init__(message)
 
 
+class ClusterNotUpError(Exception):
+    """Raised when a cluster is not up."""
+    pass
+
+
 class StorageError(Exception):
     pass
 

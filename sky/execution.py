@@ -363,3 +363,23 @@ def spot_launch(
                    idle_minutes_to_autostop=spot.
                    SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    is_spot_controller_task=True)
+
+
+def stop(cluster_name: str):
+    """Stop the cluster"""
+    raise NotImplementedError()
+
+
+def down(cluster_name: str):
+    """Down the cluster"""
+    raise NotImplementedError()
+
+
+def autostop(cluster_name: str, autostop_time: int):
+    """Set the autostop time of the cluster.
+
+    Args:
+        cluster_name (str): name of the cluster.
+        autostop_time (int): autostop time in minutes.
+    """
+    raise NotImplementedError()

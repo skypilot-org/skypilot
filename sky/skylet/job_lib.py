@@ -319,7 +319,12 @@ def is_cluster_idle() -> bool:
 
 
 def format_job_queue(jobs: List[Dict[str, Any]]):
-    """Format the job queue for display."""
+    """Format the job queue for display.
+
+    Usage:
+        jobs = get_job_queue()
+        print(format_job_queue(jobs))
+    """
     job_table = log_utils.create_table([
         'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
         'STATUS', 'LOG'
@@ -355,7 +360,8 @@ def get_job_queue(username: Optional[str], all_jobs: bool) -> str:
     jobs = _get_jobs(username, status_list=status_list)
     for job in jobs:
         job['status'] = job['status'].value
-        job['log_path'] = os.path.join(SKY_LOGS_DIRECTORY, job.pop('run_timestamp'))
+        job['log_path'] = os.path.join(SKY_LOGS_DIRECTORY,
+                                       job.pop('run_timestamp'))
         job.pop('run_timestamp')
     return json.dumps(jobs, indent=2)
 
@@ -450,8 +456,10 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
-        code = [f'job_queue = job_lib.get_job_queue({username!r}, {all_jobs})',
-                'print(job_queue, flush=True)']
+        code = [
+            f'job_queue = job_lib.get_job_queue({username!r}, {all_jobs})',
+            'print(job_queue, flush=True)'
+        ]
         return cls._build(code)
 
     @classmethod

@@ -34,7 +34,7 @@ import os
 import shlex
 import sys
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 import yaml
 
 import click
@@ -46,6 +46,7 @@ from sky import backends
 from sky import check as sky_check
 from sky import clouds
 from sky import data
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
@@ -936,7 +937,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    cluster_records = sky.sdk.status(show_all=all, refresh=refresh)
+    cluster_records = sky.sdk.status(all=all, refresh=refresh)
     status_utils.show_status_table(cluster_records, refresh)
 
 
@@ -968,11 +969,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         try:
             sky.sdk.queue(cluster, skip_finished, all_users)
         except ValueError as e:
-            if 'LocalDockerBackend' in str(e):
-                unsupported_clusters.append(cluster)
+            unsupported_clusters.append(cluster)
             click.echo(str(e))
             continue
-        except RuntimeError as e:
+        except (RuntimeError, exceptions.ChildProcessError) as e:
             click.echo(str(e))
             continue
         job_table = job_lib.format_job_table(json.loads(job_table))
@@ -1068,42 +1068,10 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
 @click.argument('jobs', required=False, type=int, nargs=-1)
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
-    if len(jobs) == 0 and not all:
-        raise click.UsageError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster} -s`) or the --all flag.')
-
-    backend_utils.check_cluster_name_not_reserved(
-        cluster, operation_str='Cancelling jobs')
-
-    # Check the status of the cluster.
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster {cluster!r} not found'
-                                 ' (see `sky status`).')
-    backend = backend_utils.get_backend_from_handle(handle)
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        raise click.UsageError(
-            'Job cancelling is only supported for '
-            f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster!r} '
-            f'is created by {backend.NAME}.')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        click.secho(
-            f'Cluster {cluster} is not up (status: {cluster_status.value}); '
-            'skipped.',
-            fg='yellow')
-        return
-
-    if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
-        jobs = None
-    else:
-        jobs_str = ', '.join(map(str, jobs))
-        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
-                    fg='yellow')
-
-    backend.cancel_jobs(handle, jobs)
+    try:
+        sky.sdk.cancel(cluster, all, jobs)
+    except (ValueError, exceptions.ClusterNotUpError) as e:
+        raise click.UsageError(str(e))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
