@@ -128,6 +128,7 @@ class StrategyExecutor:
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
         if handle is not None:
+            # Do not teardown the bucket, as it may be reused after recovery.
             self.backend.teardown(handle, terminate=True)
 
 
