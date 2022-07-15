@@ -968,11 +968,11 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             sky.sdk.queue(cluster, skip_finished, all_users)
-        except ValueError as e:
+        except exceptions.NotSupportedError as e:
             unsupported_clusters.append(cluster)
             click.echo(str(e))
             continue
-        except (RuntimeError, exceptions.ChildProcessError) as e:
+        except (RuntimeError, exceptions.ClusterNotUpError) as e:
             click.echo(str(e))
             continue
         job_table = job_lib.format_job_table(json.loads(job_table))
@@ -1070,7 +1070,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     """Cancel job(s)."""
     try:
         sky.sdk.cancel(cluster, all, jobs)
-    except (ValueError, exceptions.ClusterNotUpError) as e:
+    except ValueError as e:
         raise click.UsageError(str(e))
 
 
@@ -1442,7 +1442,7 @@ def _terminate_or_stop_clusters(
             # controller is not in 'sky status'.  Cluster-not-found message
             # should've been printed by _get_glob_clusters() above.
             continue
-        clusters.append({'name': name, 'handle': handle})
+        clusters.append(name)
 
     if not clusters:
         print('\nCluster(s) not found (tip: see `sky status`).')
@@ -1457,9 +1457,6 @@ def _terminate_or_stop_clusters(
             default=True,
             abort=True,
             show_default=True)
-        # Add a blank line to separate the confirmation prompt from the
-        # progress bar.
-        click.echo()
 
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -1469,56 +1466,40 @@ def _terminate_or_stop_clusters(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
 
-    def _terminate_or_stop(record):
-        name = record['name']
-        handle = record['handle']
-        backend = backend_utils.get_backend_from_handle(handle)
+    def _terminate_or_stop(name: str):
         success_progress = False
-        if (isinstance(backend, backends.CloudVmRayBackend) and
-                handle.launched_resources.use_spot and not terminate):
-            # Disable spot instances to be stopped.
-            # TODO(suquark): enable GCP+spot to be stopped in the future.
-            message = (
-                f'{colorama.Fore.YELLOW}Stopping cluster {name}... skipped.'
-                f'{colorama.Style.RESET_ALL}\n'
-                '  Stopping spot instances is not supported as the attached '
-                'disks will be lost.\n'
-                '  To terminate the cluster instead, run: '
-                f'{colorama.Style.BRIGHT}sky down {name}'
-                f'{colorama.Style.RESET_ALL}')
-        elif idle_minutes_to_autostop is not None:
-            (cluster_status,
-             handle) = backend_utils.refresh_cluster_status_handle(name)
-            if not isinstance(backend, backends.CloudVmRayBackend):
-                message = (f'{colorama.Fore.YELLOW}{operation} cluster '
-                           f'{name}... skipped{colorama.Style.RESET_ALL}'
-                           '\n  Auto-stopping is only supported by backend: '
-                           f'{backends.CloudVmRayBackend.NAME}')
-            else:
-                if cluster_status != global_user_state.ClusterStatus.UP:
-                    message = (
-                        f'{colorama.Fore.YELLOW}{operation} cluster '
-                        f'{name} (status: {cluster_status.value})... skipped'
-                        f'{colorama.Style.RESET_ALL}'
-                        '\n  Auto-stop can only be set/unset for '
-                        f'{global_user_state.ClusterStatus.UP.value} clusters.')
-                else:
-                    backend.set_autostop(handle, idle_minutes_to_autostop)
-                    message = (
-                        f'{colorama.Fore.GREEN}{operation} '
-                        f'cluster {name}...done{colorama.Style.RESET_ALL}')
-                    if idle_minutes_to_autostop >= 0:
-                        message += (
-                            f'\n  The cluster will be stopped after '
-                            f'{idle_minutes_to_autostop} minutes of idleness.'
-                            '\n  To cancel the autostop, run: '
-                            f'{colorama.Style.BRIGHT}'
-                            f'sky autostop {name} --cancel'
-                            f'{colorama.Style.RESET_ALL}')
-                    success_progress = True
+        if idle_minutes_to_autostop is not None:
+            try:
+                sky.sdk.autostop(name, idle_minutes_to_autostop)
+            except (exceptions.NotSupportedError,
+                    exceptions.ClusterNotUpError) as e:
+                message = str(e)
+            else:  # no exception raised
+                success_progress = True
+                message = (f'{colorama.Fore.GREEN}{operation} '
+                           f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
+                if idle_minutes_to_autostop >= 0:
+                    message += (
+                        f'\n  The cluster will be stopped after '
+                        f'{idle_minutes_to_autostop} minutes of idleness.'
+                        '\n  To cancel the autostop, run: '
+                        f'{colorama.Style.BRIGHT}'
+                        f'sky autostop {name} --cancel'
+                        f'{colorama.Style.RESET_ALL}')
         else:
-            success = backend.teardown(handle, terminate=terminate, purge=purge)
-            if success:
+            try:
+                if terminate:
+                    sky.sdk.down(name, purge=purge)
+                else:
+                    sky.sdk.stop(name, purge=purge)
+            except RuntimeError:
+                message = (
+                    f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
+                    'Please check the logs and try again.'
+                    f'{colorama.Style.RESET_ALL}')
+            except exceptions.NotSupportedError as e:
+                message = str(e)
+            else:  # no exception raised
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
                     f'{colorama.Style.RESET_ALL}')
@@ -1527,11 +1508,6 @@ def _terminate_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
-            else:
-                message = (
-                    f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    'Please check the logs and try again.'
-                    f'{colorama.Style.RESET_ALL}')
         progress.stop()
         click.echo(message)
         if success_progress:

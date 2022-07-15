@@ -42,6 +42,11 @@ class ClusterNotUpError(Exception):
     pass
 
 
+class NotSupportedError(Exception):
+    """Raised when a feature is not supported."""
+    pass
+
+
 class StorageError(Exception):
     pass
 

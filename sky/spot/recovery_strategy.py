@@ -128,7 +128,12 @@ class StrategyExecutor:
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
         if handle is not None:
-            self.backend.teardown(handle, terminate=True)
+            try:
+                self.backend.teardown(handle, terminate=True)
+            except RuntimeError:
+                logger.error(
+                    f'Failed to terminate the spot cluster {self.cluster_name}.'
+                )
 
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):

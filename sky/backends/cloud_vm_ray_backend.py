@@ -1715,7 +1715,7 @@ class CloudVmRayBackend(backends.Backend):
     def _teardown(self,
                   handle: ResourceHandle,
                   terminate: bool,
-                  purge: bool = False) -> bool:
+                  purge: bool = False):
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
@@ -1730,11 +1730,10 @@ class CloudVmRayBackend(backends.Backend):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
-            return success
-        except filelock.Timeout:
-            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
-                         'Check to see if it is still being launched.')
-        return False
+        except filelock.Timeout as e:
+            raise RuntimeError(
+                f'Cluster {cluster_name!r} is locked by {lock_path}. '
+                'Check to see if it is still being launched.') from e
 
     # --- CloudVMRayBackend Specific APIs ---
 

@@ -10,6 +10,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -69,9 +70,9 @@ def queue(cluster_name: str,
             }
         ]
     raises:
-        ValueError: if the cluster is not supported.
         RuntimeError: if failed to get the job queue.
-        sky.exceptions.ClusterNotUpError: if the cluster is not up.
+        sky.exceptions.ClusterNotUpError: the cluster is not up.
+        sky.exceptions.NotSupportedError: the feature is not supported.
     """
     all_jobs = not skip_finished
     username = getpass.getuser()
@@ -84,8 +85,9 @@ def queue(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
     if isinstance(backend, backends.LocalDockerBackend):
         # LocalDockerBackend does not support job queues
-        raise ValueError(f'Cluster {cluster_name} with LocalDockerBackend does '
-                         'not support job queues')
+        raise exceptions.NotSupportedError(
+            f'Cluster {cluster_name} with LocalDockerBackend does '
+            'not support job queues')
     if cluster_status != global_user_state.ClusterStatus.UP:
         raise exceptions.ClusterNotUpError(
             f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
@@ -119,7 +121,8 @@ def cancel(cluster_name: str,
 
     Raises:
         ValueError: arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterNotUpError: if the cluster is not up.
+        sky.exceptions.ClusterNotUpError: the cluster is not up.
+        sky.exceptions.NotSupportedError: the feature is not supported.
         # TODO(zhwu): more exceptions from the backend.
     """
     job_ids = [] if job_ids is None else job_ids
@@ -139,15 +142,17 @@ def cancel(cluster_name: str,
                          ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
-        raise ValueError(
-            'Job cancelling is only supported for '
-            f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster_name!r} '
-            f'is created by {backend.NAME}.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Job cancelling is only supported for '
+                f'{backends.CloudVmRayBackend.NAME}, but cluster '
+                f'{cluster_name!r} is created by {backend.NAME}.')
     if cluster_status != global_user_state.ClusterStatus.UP:
-        raise exceptions.ClusterNotUpError(
-            f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
-            f'(status: {cluster_status.value}); skipped.'
-            f'{colorama.Style.RESET_ALL}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
+                f'(status: {cluster_status.value}); skipped.'
+                f'{colorama.Style.RESET_ALL}')
 
     if all:
         logger.info(f'{colorama.Fore.YELLOW}'

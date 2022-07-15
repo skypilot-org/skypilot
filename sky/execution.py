@@ -21,6 +21,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
@@ -175,8 +176,8 @@ def _execute(
 
         if stages is None or Stage.TEARDOWN in stages:
             if teardown:
-                backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle)
+                backend.teardown_ephemeral_storage(task)
     finally:
         # UX: print live clusters to make users aware (to save costs).
         # Needed because this finally doesn't always get executed on errors.
@@ -223,7 +224,6 @@ def launch(
     )
 
 
-@timeline.event
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
@@ -260,7 +260,6 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
-@timeline.event
 def spot_launch(
     dag: sky.Dag,
     name: Optional[str] = None,
@@ -365,21 +364,90 @@ def spot_launch(
                    is_spot_controller_task=True)
 
 
-def stop(cluster_name: str):
-    """Stop the cluster"""
-    raise NotImplementedError()
+def stop(cluster_name: str, purge: bool = False):
+    """Stop the cluster
+
+    Raises:
+        RuntimeError: Fail to stop the cluster.
+        sky.exceptions.NotSupportedError: the cluster is not supported.
+    """
+    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+        raise exceptions.NotSupportedError(
+            f'Stopping sky reserved cluster {cluster_name!r} '
+            f'is not supported.')
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    if (isinstance(backend, backends.CloudVmRayBackend) and
+            handle.launched_resources.use_spot):
+        # Disable spot instances to be stopped.
+        # TODO(suquark): enable GCP+spot to be stopped in the future.
+        raise exceptions.NotSupportedError(
+            f'{colorama.Fore.YELLOW}Stopping cluster '
+            f'{cluster_name!r}... skipped.{colorama.Style.RESET_ALL}\n'
+            '  Stopping spot instances is not supported as the attached '
+            'disks will be lost.\n'
+            '  To terminate the cluster instead, run: '
+            f'{colorama.Style.BRIGHT}sky down {cluster_name}')
+    backend.teardown(handle, terminate=False, purge=purge)
 
 
-def down(cluster_name: str):
-    """Down the cluster"""
-    raise NotImplementedError()
+def down(cluster_name: str, purge: bool = False):
+    """Down the cluster
+
+    Raises:
+        ValueError: Fail to down the cluster.
+        sky.exceptions.NotSupportedError: the cluster is not supported.
+    """
+    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+        raise exceptions.NotSupportedError(
+            f'Tearing down sky reserved cluster {cluster_name!r} '
+            f'is not supported.')
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    backend.teardown(handle, terminate=True, purge=purge)
 
 
-def autostop(cluster_name: str, autostop_time: int):
+def autostop(cluster_name: str, idle_minutes_to_autostop: int):
     """Set the autostop time of the cluster.
 
     Args:
         cluster_name (str): name of the cluster.
         autostop_time (int): autostop time in minutes.
+    Raises:
+        sky.exceptions.NotSupportedError: the cluster is not supported.
+        sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
-    raise NotImplementedError()
+    verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
+    operation = f'{verb} auto-stop on'
+    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+        raise exceptions.NotSupportedError(
+            f'{operation} sky reserved cluster {cluster_name!r} '
+            f'is not supported.')
+    (cluster_status,
+     handle) = backend_utils.refresh_cluster_status_handle(cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}{operation} cluster '
+                f'{cluster_name!r}... skipped{colorama.Style.RESET_ALL}'
+                '\n  Auto-stopping is only supported by backend: '
+                f'{backends.CloudVmRayBackend.NAME}')
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}{operation} cluster '
+                f'{cluster_name!r} (status: {cluster_status.value})... skipped'
+                f'{colorama.Style.RESET_ALL}'
+                '\n  Auto-stop can only be set/unset for '
+                f'{global_user_state.ClusterStatus.UP.value} clusters.')
+    backend.set_autostop(handle, idle_minutes_to_autostop)

@@ -121,7 +121,13 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 cluster_name)
             if handle is not None:
                 backend = backend_utils.get_backend_from_handle(handle)
-                backend.teardown(handle, terminate=True)
+                try:
+                    backend.teardown(handle, terminate=True)
+                except RuntimeError:
+                    logger.error(
+                        'Failed to tear down the spot cluster '
+                        f'{cluster_name!r}.'
+                    )
 
             # The controller process for this job is not running: it must
             # have exited abnormally, and we should set the job status to
