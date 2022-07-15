@@ -270,8 +270,7 @@ class Resources:
             self._cloud = valid_clouds[0]
         self._region = region
 
-    def get_valid_region_zones(
-            self) -> List[Tuple[clouds.Region, clouds.Zone]]:
+    def get_valid_region_zones(self) -> List[Tuple[clouds.Region, clouds.Zone]]:
         """Returns a list of valid (region, zones) tuples for the resources."""
         assert self.is_launchable()
 
