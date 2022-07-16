@@ -91,10 +91,21 @@ class BenchmarkStatus(enum.Enum):
 
 
 class BenchmarkRecord(NamedTuple):
+    """Benchmark record."""
+
+    # The time when the benchmarking job is launched.
     start_time: Optional[float] = None
+
+    # The last known time. Either the job finish time or the last step time.
     last_time: Optional[float] = None
-    num_steps: Optional[int] = None
+
+    # The number of steps taken so far.
+    num_steps_so_far: Optional[int] = None
+
+    # The average time (in secs) taken per step.
     seconds_per_step: Optional[float] = None
+
+    # The estimated end-to-end time (in secs) of the benchmarking job.
     estimated_total_seconds: Optional[float] = None
 
 

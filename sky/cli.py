@@ -2633,7 +2633,7 @@ def benchmark_launch(
         benchmark, config, candidates)
     # Show the benchmarking VM instances selected by the optimizer.
     # This also detects the case where the user requested infeasible resources.
-    benchmark_utils.print_benchmark_clusters(clusters, config,
+    benchmark_utils.print_benchmark_clusters(benchmark, clusters, config,
                                              candidate_configs)
     if not yes:
         plural = 's' if len(candidates) > 1 else ''
@@ -2642,9 +2642,10 @@ def benchmark_launch(
 
     # Configs that are only accepted by the CLI.
     commandline_args = {}
-    # Set the default idle minutes to autostop as 0.
+    # Set the default idle minutes to autostop as 5, mimicking
+    # the serverless execution.
     if idle_minutes_to_autostop is None:
-        idle_minutes_to_autostop = 0
+        idle_minutes_to_autostop = 5
     commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
     if len(env) > 0:
         commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
@@ -2748,9 +2749,10 @@ def benchmark_show(benchmark: str) -> None:
 
     click.echo(
         textwrap.dedent("""\
-        * #STEPS: Number of steps taken.
-        * SEC/STEP, $/STEP: Average time (cost) per step.
-        * EST(hr), EST($): Estimated total time (cost) to complete the benchmark.
+        Legend:
+        - #STEPS: Number of steps taken.
+        - SEC/STEP, $/STEP: Average time (cost) per step.
+        - EST(hr), EST($): Estimated total time (cost) to complete the benchmark.
     """))
     columns = [
         'CLUSTER',
@@ -2794,7 +2796,7 @@ def benchmark_show(benchmark: str) -> None:
         spent = num_nodes * resources.get_cost(duration)
         spent_str = f'{spent:.4f}'
 
-        num_steps = record.num_steps
+        num_steps = record.num_steps_so_far
         if num_steps is None:
             num_steps = '-'
 
@@ -2978,8 +2980,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
                                                   bucket_type)
             benchmark_state.delete_benchmark(benchmark)
-            message = (f'{colorama.Fore.GREEN}Benchmark report on {benchmark} '
-                       f'deleted.{colorama.Style.RESET_ALL}')
+            message = (f'{colorama.Fore.GREEN}Benchmark report for '
+                       f' {benchmark!r} deleted.{colorama.Style.RESET_ALL}')
             success = True
 
         progress.stop()

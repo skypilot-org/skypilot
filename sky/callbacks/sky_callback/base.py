@@ -50,8 +50,12 @@ class BaseCallback:
                                            self._step_begins, self._step_ends)
         self._worker.start()
 
-        # When the main process exits, the exit handler will call stop(),
-        # which will wait for the worker thread to gracefully exit.
+        # The writer thread is a daemon thread, which is automatically killed
+        # when the main process exits. The problem is, the training process
+        # (and the writer daemon) can exit before the logs of the last few steps
+        # are saved, because there is at most 1 sec (= save interval) time lag.
+        # The purpose of this exit handler is to block the main process until
+        # the daemon saves the up-to-date log and gracefully terminates.
         # Refer to: https://superfastpython.com/stop-daemon-thread/
         atexit.register(self._worker.stop)
 

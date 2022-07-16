@@ -66,8 +66,14 @@ def _generate_cluster_names(benchmark: str, num_clusters: int) -> List[str]:
     return names
 
 
-def _generate_script_with_timelogs(script: str, start_path: str,
-                                   end_path: str) -> str:
+def _make_script_with_timelogs(script: str, start_path: str,
+                               end_path: str) -> str:
+    """Add prologue and epilogue that log the start and end times of the script.
+
+    Using the logs, we can get the job status and duration even when the cluster
+    has stopped or terminated. Note that the end time is only logged when the
+    command finishes successfully.
+    """
     return textwrap.dedent(f"""\
         echo $(date +%s.%N) > {start_path}
         {script}
@@ -97,12 +103,13 @@ def _get_optimized_resources(
 
 
 def _print_candidate_resources(
-        clusters: List[str], config: _Config,
+        benchmark: str, clusters: List[str], config: _Config,
         candidate_resources: List['resources_lib.Resources']) -> None:
     task_str = config.get('name', 'a task')
     num_nodes = config.get('num_nodes', 1)
     logger.info(f'{colorama.Style.BRIGHT}Benchmarking {task_str} '
-                f'on candidate resources:{colorama.Style.RESET_ALL}')
+                f'on candidate resources (benchmark name: {benchmark}):'
+                f'{colorama.Style.RESET_ALL}')
 
     columns = [
         'CLUSTER', 'CLOUD', '# NODES', 'INSTANCE', 'ACCELERATORS',
@@ -177,8 +184,9 @@ def _parallel_run_with_interrupt_handling(func: Callable,
             sys.exit(1)
 
 
-def _launch_with_log(cluster: str, cmd: List[str],
-                     log_dir: str) -> Union[Tuple[int, str], Exception]:
+def _launch_with_log_suppress_exception(
+        cluster: str, cmd: List[str],
+        log_dir: str) -> Union[Tuple[int, str], Exception]:
     """Executes `sky launch` in a subprocess and returns normally.
 
     This function does not propagate any error so that failures in a
@@ -322,7 +330,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
         record = benchmark_state.BenchmarkRecord(
             start_time=start_time,
             last_time=last_time,
-            num_steps=summary['num_steps'],
+            num_steps_so_far=summary['num_steps'],
             seconds_per_step=summary['time_per_step'],
             estimated_total_seconds=summary['estimated_total_time'],
         )
@@ -392,7 +400,7 @@ def generate_benchmark_configs(
         # Log the start and end time of the benchmarking task.
         if 'run' not in candidate_config:
             candidate_config['run'] = ''
-        candidate_config['run'] = _generate_script_with_timelogs(
+        candidate_config['run'] = _make_script_with_timelogs(
             candidate_config['run'], os.path.join(benchmark_dir, _RUN_START),
             os.path.join(benchmark_dir, _RUN_END))
 
@@ -400,10 +408,11 @@ def generate_benchmark_configs(
     return clusters, candidate_configs
 
 
-def print_benchmark_clusters(clusters: List[str], config: _Config,
+def print_benchmark_clusters(benchmark: str, clusters: List[str],
+                             config: _Config,
                              candidate_configs: List[_Config]) -> None:
     candidate_resources = _get_optimized_resources(candidate_configs)
-    _print_candidate_resources(clusters, config, candidate_resources)
+    _print_candidate_resources(benchmark, clusters, config, candidate_resources)
 
 
 def launch_benchmark_clusters(benchmark: str, clusters: List[str],
@@ -439,6 +448,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
                                         suffix='.yaml')
         backend_utils.dump_yaml(f.name, candidate_config)
         yaml_fds.append(f)
+        logger.debug(f'Generated temporary yaml file: {f.name}')
 
     # Generate a common launch command.
     cmd = ['-d', '-y']
@@ -465,7 +475,8 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 
     # Launch the benchmarking clusters in parallel.
     outputs = _parallel_run_with_interrupt_handling(
-        lambda args: _launch_with_log(*args, log_dir=log_dir),
+        lambda args: _launch_with_log_suppress_exception(*args, log_dir=log_dir
+                                                        ),
         list(zip(clusters, launch_cmds)))
 
     # Handle the errors raised during the cluster launch.

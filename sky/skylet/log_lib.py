@@ -86,6 +86,10 @@ def process_subprocess_stream(
                         start_streaming_flag = True
                     if (end_streaming_at is not None and
                             end_streaming_at in line):
+                        # Keep executing the loop, only stop streaming.
+                        # E.g., this is used for `sky bench` to hide the
+                        # redundant messages of `sky launch` while
+                        # saving them in log files.
                         end_streaming_flag = True
                     if key.fileobj is out_io:
                         stdout += line
@@ -95,10 +99,7 @@ def process_subprocess_stream(
                         out_stream = sys.stderr
                     if (stream_logs and start_streaming_flag and
                             not end_streaming_flag):
-                        if streaming_prefix is None:
-                            out_stream.write(line)
-                        else:
-                            out_stream.write(streaming_prefix + line)
+                        out_stream.write(streaming_prefix + line)
                         out_stream.flush()
                     if log_path != '/dev/null':
                         fout.write(line)
