@@ -186,7 +186,8 @@ def _execute(
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
             time.sleep(0.5)
-            subprocess_utils.run(f'sky spot status | head -n {_MAX_SPOT_JOB_LENGTH}')
+            subprocess_utils.run(
+                f'sky spot status | head -n {_MAX_SPOT_JOB_LENGTH}')
         else:
             subprocess_utils.run('sky status')
         print()

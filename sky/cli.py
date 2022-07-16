@@ -1901,7 +1901,7 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         # Delete all storage objects.
         sky storage delete -a
     """
-    if sum(len(names) > 0, all) != 1:
+    if sum([len(names) > 0, all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
         click.echo('Deleting all storage objects.')

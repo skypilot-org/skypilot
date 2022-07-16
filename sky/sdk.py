@@ -297,15 +297,15 @@ def cancel(cluster_name: str,
         logger.info(f'{colorama.Fore.YELLOW}'
                     f'Cancelling all jobs on cluster {cluster_name!r}...'
                     f'{colorama.Style.RESET_ALL}')
-        jobs = None
+        job_ids = None
     else:
-        jobs_str = ', '.join(map(str, jobs))
+        jobs_str = ', '.join(map(str, job_ids))
         logger.info(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
 
-    backend.cancel_jobs(handle, jobs)
+    backend.cancel_jobs(handle, job_ids)
 
 
 # =======================
