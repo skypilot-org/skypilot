@@ -36,6 +36,7 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 OptimizeTarget = optimizer.OptimizeTarget
+_MAX_SPOT_JOB_LENGTH = 10
 
 
 class Stage(enum.Enum):
@@ -185,7 +186,7 @@ def _execute(
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
             time.sleep(0.5)
-            subprocess_utils.run('sky spot status')
+            subprocess_utils.run(f'sky spot status | head -n {_MAX_SPOT_JOB_LENGTH}')
         else:
             subprocess_utils.run('sky status')
         print()
