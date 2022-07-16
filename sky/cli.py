@@ -45,13 +45,14 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import sdk
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
+from sky.data import storage_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils import command_runner
@@ -937,7 +938,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    cluster_records = sky.sdk.status(all=all, refresh=refresh)
+    cluster_records = sdk.status(all=all, refresh=refresh)
     status_utils.show_status_table(cluster_records, refresh)
 
 
@@ -967,7 +968,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     for cluster in clusters:
         try:
-            sky.sdk.queue(cluster, skip_finished, all_users)
+            sdk.queue(cluster, skip_finished, all_users)
         except exceptions.NotSupportedError as e:
             unsupported_clusters.append(cluster)
             click.echo(str(e))
@@ -1069,7 +1070,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
     try:
-        sky.sdk.cancel(cluster, all, jobs)
+        sdk.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
 
@@ -1206,6 +1207,20 @@ def autostop(
               required=False,
               help='Skip confirmation prompt.')
 @click.option(
+    '--idle-minutes-to-autostop',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
+          'queue. Idleness starts counting after setup/file_mounts are done; '
+          'the clock gets reset whenever there are running/pending jobs in the '
+          'job queue. '
+          'Setting this flag is equivalent to '
+          'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
+          '. If not set, the cluster will not be auto-stopped.'))
+@click.option(
     '--retry-until-up',
     '-r',
     default=False,
@@ -1213,7 +1228,8 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if sky fails to start the cluster due to unavailability errors.'))
-def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
+def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
+          retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1300,7 +1316,10 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
             show_default=True)
 
     for name in to_start:
-        _start_cluster(name, retry_until_up=retry_until_up)
+        try:
+            sdk.start(name, idle_minutes_to_autostop, retry_until_up)
+        except exceptions.NotSupportedError as e:
+            click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
 
 
@@ -1470,7 +1489,7 @@ def _terminate_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                sky.sdk.autostop(name, idle_minutes_to_autostop)
+                sdk.autostop(name, idle_minutes_to_autostop)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -1489,9 +1508,9 @@ def _terminate_or_stop_clusters(
         else:
             try:
                 if terminate:
-                    sky.sdk.down(name, purge=purge)
+                    sdk.down(name, purge=purge)
                 else:
-                    sky.sdk.stop(name, purge=purge)
+                    sdk.stop(name, purge=purge)
             except RuntimeError:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -1857,44 +1876,20 @@ def storage():
 @storage.command('ls', cls=_DocumentedCodeCommand)
 def storage_ls():
     """List storage objects created."""
-    storage_stat = global_user_state.get_storage()
-    storage_table = log_utils.create_table([
-        'NAME',
-        'CREATED',
-        'STORE',
-        'COMMAND',
-        'STATUS',
-    ])
-
-    for row in storage_stat:
-        launched_at = row['launched_at']
-        storage_table.add_row([
-            # NAME
-            row['name'],
-            # LAUNCHED
-            log_utils.readable_time_duration(launched_at),
-            # CLOUDS
-            ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
-            # COMMAND
-            row['last_use'],
-            # STATUS
-            row['status'].value,
-        ])
-    if storage_stat:
-        click.echo(storage_table)
-    else:
-        click.echo('No existing storage.')
+    storages = sky.storage_ls()
+    storage_table = storage_utils.format_storage_table(storages)
+    click.echo(storage_table)
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
+@click.argument('names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Delete all storage objects.')
-@click.argument('name', required=False, type=str, nargs=-1)
-def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
+def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -1907,29 +1902,14 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         # Delete all storage objects.
         sky storage delete -a
     """
+    if sum(len(names) > 0, all) != 1:
+        raise click.UsageError('Either --all or a name must be specified.')
     if all:
         click.echo('Deleting all storage objects.')
-        storages = global_user_state.get_storage()
-        for row in storages:
-            store_object = data.Storage(name=row['name'],
-                                        source=row['handle'].source,
-                                        sync_on_reconstruction=False)
-            store_object.delete()
-    elif name:
-        for n in name:
-            handle = global_user_state.get_handle_from_storage_name(n)
-            if handle is None:
-                click.echo(f'Storage name {n} not found.')
-            else:
-                click.echo(f'Deleting storage object {n}.')
-                store_object = data.Storage(name=handle.storage_name,
-                                            source=handle.source,
-                                            sync_on_reconstruction=False)
-                store_object.delete()
-    else:
-        raise click.ClickException(
-            'Must pass in \'-a/--all\' or storage names to \'sky '
-            'storage delete\'.')
+        storages = sky.storage_ls()
+        names = [s['name'] for s in storages]
+    for name in names:
+        sky.storage_delete(name)
 
 
 # Managed Spot CLIs
@@ -2073,44 +2053,25 @@ def spot_status(all: bool, refresh: bool):
     log can be found with ``sky logs sky-spot-controller job_id``.
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    cache = spot_lib.load_job_table_cache()
-    stop_msg = ''
-    if not refresh:
-        stop_msg = 'To view the latest job table: sky spot status --refresh'
-    controller_status, handle = _is_spot_controller_up(stop_msg)
-
-    if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
-    ]):
-        click.secho('Restarting controller for latest status...', fg='yellow')
-        handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
-                                idle_minutes_to_autostop=spot_lib.
-                                SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
-
-    if handle is None:
-        job_table_str = 'No cached job status table found.'
+    try:
+        job_table = sdk.spot_status(refresh=refresh)
+    except exceptions.ClusterNotUpError:
+        cache = spot.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
-            job_table_str = (
+            job_table_json = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
                 f'{cache[1]}\n')
-        click.echo(job_table_str)
+        else:
+            job_table_json = 'No cached job status table found.'
+        logger.info(job_table_json)
         return
+    job_table = spot_lib.format_job_table(job_table, all)
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
-    code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
-    returncode, job_table_str, stderr = backend.run_on_head(
-        handle, code, require_outputs=True, stream_logs=False)
-    subprocess_utils.handle_returncode(returncode, code,
-                                       'Failed to fetch managed job statuses',
-                                       job_table_str + stderr)
-
-    spot_lib.dump_job_table_cache(job_table_str)
-    click.echo(f'Managed spot jobs:\n{job_table_str}')
+    # Dump cache
+    spot_lib.dump_job_table_cache(job_table)
+    click.echo(f'Managed spot jobs:\n{job_table}')
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
@@ -2174,27 +2135,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
             abort=True,
             show_default=True)
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    codegen = spot_lib.SpotCodeGen
-    if all:
-        code = codegen.cancel_jobs_by_id(None)
-    elif job_ids:
-        code = codegen.cancel_jobs_by_id(job_ids)
-    else:
-        code = codegen.cancel_job_by_name(name)
-    # The stderr is redirected to stdout
-    returncode, stdout, _ = backend.run_on_head(handle,
-                                                code,
-                                                require_outputs=True,
-                                                stream_logs=False)
-    subprocess_utils.handle_returncode(returncode, code,
-                                       'Failed to cancel managed spot job',
-                                       stdout)
-
-    click.echo(stdout)
-    if 'Multiple jobs found with name' in stdout:
-        click.echo('Please specify the job ID instead of the job name.')
+    sdk.spot_cancel(job_ids=job_ids, name=name, all=all)
 
 
 @spot.command('logs', cls=_DocumentedCodeCommand)

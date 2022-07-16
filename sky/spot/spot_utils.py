@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -255,10 +255,21 @@ def stream_logs_by_name(job_name: str) -> str:
     return ''
 
 
-def show_jobs(show_all: bool) -> str:
-    """Show all spot jobs."""
+def get_job_table_in_json() -> str:
     jobs = spot_state.get_spot_jobs()
 
+    for job in jobs:
+        job_duration = job['end_at'] - job['last_recovered_at'] + job[
+            'job_duration']
+        if job['status'] == spot_state.SpotStatus.RECOVERING:
+            # When job is recovering, the duration is exact job['job_duration']
+            job_duration = job['job_duration']
+        job['job_duration'] = job_duration
+    return json.dumps(jobs, indent=2)
+
+
+def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
+    """Show all spot jobs."""
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
         '#RECOVERIES', 'STATUS'
@@ -266,6 +277,7 @@ def show_jobs(show_all: bool) -> str:
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
+
     status_counts = collections.defaultdict(int)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
@@ -336,10 +348,10 @@ class SpotCodeGen:
     ]
 
     @classmethod
-    def show_jobs(cls, show_all: bool) -> str:
+    def get_job_table(cls) -> str:
         code = [
-            f'job_table = spot_utils.show_jobs({show_all})',
-            'print(job_table)',
+            'job_table = spot_utils.get_job_table_in_json()',
+            'print(job_table, flush=True)',
         ]
         return cls._build(code)
 

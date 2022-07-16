@@ -340,13 +340,13 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
                                              job['end_at'],
                                              absolute=True),
             job['resources'],
-            job['status'],
+            job['status'].value,
             job['log_path'],
         ])
     return job_table
 
 
-def get_job_queue(username: Optional[str], all_jobs: bool) -> str:
+def get_job_queue_in_json(username: Optional[str], all_jobs: bool) -> str:
     """Get the job queue in json format.
 
     Args:
@@ -359,7 +359,6 @@ def get_job_queue(username: Optional[str], all_jobs: bool) -> str:
 
     jobs = _get_jobs(username, status_list=status_list)
     for job in jobs:
-        job['status'] = job['status'].value
         job['log_path'] = os.path.join(SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
         job.pop('run_timestamp')
@@ -457,8 +456,8 @@ class JobLibCodeGen:
     @classmethod
     def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
         code = [
-            f'job_queue = job_lib.get_job_queue({username!r}, {all_jobs})',
-            'print(job_queue, flush=True)'
+            'job_queue = job_lib.get_job_queue_in_json('
+            f'{username!r}, {all_jobs})', 'print(job_queue, flush=True)'
         ]
         return cls._build(code)
 
