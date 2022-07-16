@@ -16,7 +16,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.utils import ux_utils
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib

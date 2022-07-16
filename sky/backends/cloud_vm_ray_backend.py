@@ -35,7 +35,7 @@ from sky.backends import wheel_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -157,7 +157,7 @@ class RayCodeGen:
             import ray.util as ray_util
 
             from sky.skylet import job_lib
-            from sky.skylet.utils import log_utils
+            from sky.utils import log_utils
 
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)

@@ -16,7 +16,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 from sky.spot import constants
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
@@ -255,17 +255,28 @@ def stream_logs_by_name(job_name: str) -> str:
     return ''
 
 
-def get_job_table_in_json() -> str:
+def dump_spot_job_queue() -> str:
     jobs = spot_state.get_spot_jobs()
 
     for job in jobs:
-        job_duration = job['end_at'] - job['last_recovered_at'] + job[
-            'job_duration']
+        end_at = job['end_at']
+        if end_at is None:
+            end_at = time.time()
+        job_duration = end_at - job['last_recovered_at'] + job['job_duration']
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
         job['job_duration'] = job_duration
+        job['status'] = job['status'].value
     return json.dumps(jobs, indent=2)
+
+
+def load_spot_job_queue(json_str: str) -> List[Dict[str, Any]]:
+    """Load job queue from json string."""
+    jobs = json.loads(json_str)
+    for job in jobs:
+        job['status'] = spot_state.SpotStatus(job['status'])
+    return jobs
 
 
 def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
@@ -350,7 +361,7 @@ class SpotCodeGen:
     @classmethod
     def get_job_table(cls) -> str:
         code = [
-            'job_table = spot_utils.get_job_table_in_json()',
+            'job_table = spot_utils.dump_spot_job_queue()',
             'print(job_table, flush=True)',
         ]
         return cls._build(code)

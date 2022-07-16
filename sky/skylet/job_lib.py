@@ -14,8 +14,8 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky.skylet.utils import db_utils
-from sky.skylet.utils import log_utils
+from sky.utils import db_utils
+from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -346,7 +346,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
     return job_table
 
 
-def get_job_queue_in_json(username: Optional[str], all_jobs: bool) -> str:
+def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
     """Get the job queue in json format.
 
     Args:
@@ -359,10 +359,22 @@ def get_job_queue_in_json(username: Optional[str], all_jobs: bool) -> str:
 
     jobs = _get_jobs(username, status_list=status_list)
     for job in jobs:
+        job['status'] = job['status'].value
         job['log_path'] = os.path.join(SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-        job.pop('run_timestamp')
     return json.dumps(jobs, indent=2)
+
+
+def load_job_queue(json_str: str) -> List[Dict[str, Any]]:
+    """Load the job queue from json format.
+
+    Args:
+        json_str: The json string to load.
+    """
+    jobs = json.loads(json_str)
+    for job in jobs:
+        job['status'] = JobStatus(job['status'])
+    return jobs
 
 
 def cancel_jobs(jobs: Optional[List[int]]) -> None:
@@ -456,7 +468,7 @@ class JobLibCodeGen:
     @classmethod
     def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
         code = [
-            'job_queue = job_lib.get_job_queue_in_json('
+            'job_queue = job_lib.dump_job_queue('
             f'{username!r}, {all_jobs})', 'print(job_queue, flush=True)'
         ]
         return cls._build(code)

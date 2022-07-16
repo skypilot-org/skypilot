@@ -11,9 +11,10 @@ from sky.resources import Resources
 from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StoreType
-from sky.data.storage_utils import storage_ls, storage_delete
 from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
+from sky.sdk import (status, start, stop, down, autostop, queue, cancel,
+                     spot_status, spot_cancel, storage_ls, storage_delete)
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
@@ -44,6 +45,15 @@ __all__ = [
     'launch',
     'exec',
     'spot_launch',
+    'status',
+    'start',
+    'stop',
+    'down',
+    'autostop',
+    'queue',
+    'cancel',
+    'spot_status',
+    'spot_cancel',
     'storage_ls',
     'storage_delete',
 ]

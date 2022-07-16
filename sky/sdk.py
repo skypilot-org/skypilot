@@ -1,7 +1,6 @@
 """SDK functions for cluster/job management."""
 import colorama
 import getpass
-import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag
@@ -240,15 +239,15 @@ def queue(cluster_name: str,
             f'Cluster {cluster_name} has been stopped or not properly set up. '
             'Please re-launch it with `sky launch` to view the job queue.')
 
-    returncode, job_records, stderr = backend.run_on_head(handle,
-                                                          code,
-                                                          require_outputs=True)
+    returncode, jobs_json, stderr = backend.run_on_head(handle,
+                                                        code,
+                                                        require_outputs=True)
     if returncode != 0:
-        raise RuntimeError(f'{job_records + stderr}\n{colorama.Fore.RED}'
+        raise RuntimeError(f'{jobs_json + stderr}\n{colorama.Fore.RED}'
                            f'Failed to get job queue on cluster {cluster_name}.'
                            f'{colorama.Style.RESET_ALL}')
-    job_records = json.loads(job_records)
-    return job_records
+    jobs = job_lib.load_job_queue(jobs_json)
+    return jobs
 
 
 # pylint: disable=redefined-builtin
@@ -389,8 +388,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     except exceptions.CommandError as e:
         raise RuntimeError(e.message) from e
 
-    job_table = json.loads(job_table_json)
-    return job_table
+    jobs = spot.load_spot_job_queue(job_table_json)
+    return jobs
 
 
 # pylint: disable=redefined-builtin

@@ -16,7 +16,7 @@ import colorama
 
 from sky import sky_logging
 from sky.skylet import job_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 
 SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1

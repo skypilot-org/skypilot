@@ -29,7 +29,6 @@ each other.
 """
 import functools
 import getpass
-import json
 import os
 import shlex
 import sys
@@ -54,7 +53,7 @@ from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.skylet import job_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -968,7 +967,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     for cluster in clusters:
         try:
-            sdk.queue(cluster, skip_finished, all_users)
+            job_table = sdk.queue(cluster, skip_finished, all_users)
         except exceptions.NotSupportedError as e:
             unsupported_clusters.append(cluster)
             click.echo(str(e))
@@ -976,7 +975,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         except (RuntimeError, exceptions.ClusterNotUpError) as e:
             click.echo(str(e))
             continue
-        job_table = job_lib.format_job_table(json.loads(job_table))
+        job_table = job_lib.format_job_queue(job_table)
         click.echo(f'{job_table}')
 
     if unsupported_clusters:
@@ -1469,7 +1468,7 @@ def _terminate_or_stop_clusters(
 
     if not no_confirm and len(clusters) > 0:
         cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
-        cluster_list = ', '.join([r['name'] for r in clusters])
+        cluster_list = ', '.join(clusters)
         click.confirm(
             f'{operation} {len(clusters)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
@@ -2056,7 +2055,7 @@ def spot_status(all: bool, refresh: bool):
     try:
         job_table = sdk.spot_status(refresh=refresh)
     except exceptions.ClusterNotUpError:
-        cache = spot.load_job_table_cache()
+        cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
             job_table_json = (
@@ -2065,7 +2064,7 @@ def spot_status(all: bool, refresh: bool):
                 f'{cache[1]}\n')
         else:
             job_table_json = 'No cached job status table found.'
-        logger.info(job_table_json)
+        click.echo(job_table_json)
         return
     job_table = spot_lib.format_job_table(job_table, all)
 

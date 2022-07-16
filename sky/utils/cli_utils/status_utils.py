@@ -4,7 +4,7 @@ import click
 
 from sky import backends
 from sky.utils.cli_utils import cli_utils
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 
 
 class StatusColumn:
