@@ -82,7 +82,7 @@ def dump_yaml_str(config):
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn, **cls_kwargs):
+def make_decorator(cls, name_or_fn, **ctx_kwargs):
     """Make the cls a decorator.
 
     class cls:
@@ -104,7 +104,7 @@ def make_decorator(cls, name_or_fn, **cls_kwargs):
             @functools.wraps(f)
             def _record(*args, **kwargs):
                 nonlocal name_or_fn
-                with cls(name_or_fn, **cls_kwargs):
+                with cls(name_or_fn, **ctx_kwargs):
                     return f(*args, **kwargs)
 
             return _record
@@ -125,7 +125,7 @@ def make_decorator(cls, name_or_fn, **cls_kwargs):
                 full_name = f'{module_name}.{func_name}'
             else:
                 full_name = func_name
-            with cls(full_name, **cls_kwargs):
+            with cls(full_name, **ctx_kwargs):
                 return f(*args, **kwargs)
 
         return _record

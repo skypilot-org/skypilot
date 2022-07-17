@@ -661,6 +661,10 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()
 
+    @usage_lib.entrypoint('sky.cli', fallback=True)
+    def resolve_command(self, ctx, args):
+        return super().resolve_command(ctx, args)
+
 
 class _DocumentedCodeCommand(click.Command):
     """Corrects help strings for documented commands such that --help displays
@@ -671,6 +675,14 @@ class _DocumentedCodeCommand(click.Command):
         help_str = ctx.command.help
         ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
         return super().get_help(ctx)
+
+    @usage_lib.entrypoint(name_or_fn='sky.cli.cli', fallback=True)
+    def parse_args(self, ctx, args):
+        return super().parse_args(ctx, args)
+
+    @usage_lib.entrypoint(name_or_fn='sky.cli.cli', fallback=True)
+    def invoke(self, ctx):
+        return super().invoke(ctx)
 
 
 @click.group(cls=_NaturalOrderGroup)

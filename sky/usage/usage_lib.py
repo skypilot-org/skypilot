@@ -38,11 +38,27 @@ class MessageType(enum.Enum):
     # TODO(zhwu): Add more types, e.g., cluster_lifecycle.
 
 
-class UsageMessageToReport:
+class MessageToReport:
+    """Abstract class for messages to be sent to Loki."""
+
+    def __init__(self, schema_version: str):
+        self.schema_version = schema_version
+        self.message_sent: bool = False
+
+    def get_properties(self) -> Dict[str, Any]:
+        properties = self.__dict__.copy()
+        properties.pop('message_sent')
+        return properties
+
+    def __repr__(self):
+        raise NotImplementedError
+
+
+class UsageMessageToReport(MessageToReport):
     """Message to be reported to Grafana Loki for each run"""
 
     def __init__(self) -> None:
-        self.schema_version: str = usage_constants.USAGE_MESSAGE_SCHEMA_VERSION
+        super().__init__(usage_constants.USAGE_MESSAGE_SCHEMA_VERSION)
         self.user: str = utils.get_logging_user_hash()
         self.run_id: str = utils.get_logging_run_id()
         self.time: str = str(time.time())
@@ -64,7 +80,7 @@ class UsageMessageToReport:
         self.stacktrace: Optional[str] = None
 
     def __repr__(self) -> str:
-        d = self.__dict__.copy()
+        d = self.get_properties()
         return json.dumps(d)
 
     def update_entrypoint(self, msg: str):
@@ -111,6 +127,8 @@ class UsageMessageToReport:
 
 
 usage_message = UsageMessageToReport()
+
+messages = {MessageType.USAGE: usage_message}
 
 
 def _make_labels_str(d):
@@ -183,14 +201,15 @@ def prepare_yaml(yaml_config_or_path: Union[Dict, str]):
 
 
 @contextlib.contextmanager
-def entrypoint_context(name: str):
+def entrypoint_context(name: str, fallback: bool = False):
     is_outermost = usage_message.entrypoint is None
-    if is_outermost:
+    if is_outermost and not fallback:
         usage_message.update_entrypoint(name)
     if env_options.Options.DISABLE_LOGGING.get() or not is_outermost:
         yield
         return
 
+    # Should be the outermost entrypoint or the fallback entrypoint.
     try:
         yield
     except (Exception, SystemExit, KeyboardInterrupt):
@@ -198,13 +217,22 @@ def entrypoint_context(name: str):
         usage_message.stacktrace = trace
         raise
     finally:
+        if fallback and usage_message.entrypoint is None:
+            usage_message.update_entrypoint(name)
         if is_outermost:
-            try:
-                _send_message(str(usage_message), MessageType.USAGE)
-            except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-                logger.warning(
-                    f'Usage logging exception caught: {type(e)}({e})')
+            for msg_type, message in messages.items():
+                if not message.message_sent:
+                    # Avoid the fallback entrypoint to send the message again
+                    # in normal case.
+                    try:
+                        _send_message(str(message), msg_type)
+                        message.message_sent = True
+                    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                        logger.warning(f'Usage logging for {msg_type.value} '
+                                       f'exception caught: {type(e)}({e})')
 
 
-def entrypoint(name_or_fn: str):
-    return common_utils.make_decorator(entrypoint_context, name_or_fn)
+def entrypoint(name_or_fn: str, fallback: bool = False):
+    return common_utils.make_decorator(entrypoint_context,
+                                       name_or_fn,
+                                       fallback=fallback)
