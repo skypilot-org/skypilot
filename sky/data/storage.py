@@ -798,18 +798,17 @@ class S3Store(AbstractStore):
                 f'[green]{self.source} to s3://{self.name}/'):
             # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
             # to a log file.
-            with subprocess.Popen(
-                    sync_command.split(' '),
-                    stderr=subprocess.PIPE,
-            ) as process:
+            with subprocess.Popen(sync_command.split(' '),
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.PIPE) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
-                    stderr.append(line)
                     str_line = line.decode('utf-8')
                     logger.info(str_line)
+                    stderr.append(line)
                     if 'Access Denied' in str_line:
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
@@ -822,7 +821,8 @@ class S3Store(AbstractStore):
                 if returncode != 0:
                     stderr = '\n'.join(stderr)
                     with ux_utils.print_exception_no_traceback():
-                        logger.error(f'{process.stdout}\n{stderr}')
+                        logger.error(
+                            f'{process.stdout.decode("utf-8")}\n{stderr}')
                         raise exceptions.StorageUploadError(
                             f'Upload to S3 failed for store {self.name} and '
                             f'source {self.source}. Please check the logs.')
@@ -1050,13 +1050,16 @@ class GcsStore(AbstractStore):
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to gs://{self.name}/'):
             with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE) as process:
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.PIPE) as process:
+                stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
                     str_line = line.decode('utf-8')
                     logger.info(str_line)
+                    stderr.append(str_line)
                     if 'AccessDeniedException' in str_line:
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
@@ -1068,6 +1071,9 @@ class GcsStore(AbstractStore):
                 returncode = process.wait()
                 if returncode != 0:
                     with ux_utils.print_exception_no_traceback():
+                        stderr = '\n'.join(stderr)
+                        logger.error(
+                            f'{process.stdout.decode("utf-8")}\n{stderr}')
                         raise exceptions.StorageUploadError(
                             f'Upload to GCS failed for store {self.name} and '
                             f'source {self.source}. Please check logs.')
