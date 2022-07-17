@@ -1517,7 +1517,7 @@ def down(
     Terminating a cluster will delete all associated resources (all billing
     stops), and any data on the attached disks will be lost. For local clusters,
     `sky down` does not terminate the local cluster, but instead removes the
-    cluster from `sky status` and terminates all running jobs.
+    cluster from `sky status` and terminates the calling user's running jobs.
 
     Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
 
@@ -1582,7 +1582,7 @@ def _terminate_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
-        if not terminate and idle_minutes_to_autostop is None:
+        if not terminate:
             # Local clusters are allowed to `sky down`, but not
             # `sky start/stop`. `sky down` unregisters the local cluster
             # from sky.
@@ -1590,7 +1590,7 @@ def _terminate_or_stop_clusters(
                 c for c in names
                 if _warn_if_local_cluster(c, local_clusters, (
                     f'Skipping local cluster {c}, as it does not support '
-                    '`sky stop`.'))
+                    '`sky stop/autostop`.'))
             ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
@@ -2193,7 +2193,7 @@ def admin_deploy(clusterspec_yaml: str):
     backend_utils.check_local_installation(ips, auth_config)
     steps += 1
 
-    # Detect what GPUs the Cluster has (must be homogeneous)
+    # Detect what GPUs the cluster has (which can be heterogeneous)
     click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
                 fg='green',
                 nl=False)
@@ -2202,7 +2202,7 @@ def admin_deploy(clusterspec_yaml: str):
     steps += 1
 
     # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching sky service\n', fg='green', nl=False)
+    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
     backend_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
     steps += 1
 
@@ -2214,6 +2214,9 @@ def admin_deploy(clusterspec_yaml: str):
         local_cluster_name)
     backend_utils.save_distributable_yaml(yaml_config)
     click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
+    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
+                fg='green',
+                nl=False)
 
 
 # Managed Spot CLIs
