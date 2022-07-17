@@ -175,7 +175,7 @@ class RayCodeGen:
             inspect.getsource(log_lib.process_subprocess_stream),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
-            inspect.getsource(log_lib.add_sudo_env_vars),
+            inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
