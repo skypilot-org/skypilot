@@ -451,7 +451,7 @@ def test_use_spot():
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
