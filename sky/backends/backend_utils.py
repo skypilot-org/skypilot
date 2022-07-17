@@ -686,7 +686,7 @@ def check_if_local_cloud(cluster: str) -> bool:
     if not os.path.exists(config_path):
         # Public clouds go through no error checking.
         return False
-    # Hack: go through check again, to raise errors for local clusters.
+    # Go through local cluster check to raise potential errors.
     check_and_get_local_clusters(suppress_error=False)
     return True
 
@@ -1484,7 +1484,9 @@ def get_node_ips(cluster_yaml: str,
             # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
             # Workaround: List of IPs are shown in Stderr
             cluster_name = os.path.basename(cluster_yaml).split('.')[0]
-            if check_if_local_cloud(cluster_name):
+            if ((handle is not None and hasattr(handle, 'local_handle') and
+                 handle.local_handle is not None) or
+                    check_if_local_cloud(cluster_name)):
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 # Remove head ip from worker ip list.

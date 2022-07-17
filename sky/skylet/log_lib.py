@@ -239,7 +239,8 @@ def make_task_bash_script(codegen: str,
     return script
 
 
-def add_sudo_env_vars(env_vars: Dict[str, str] = None) -> Dict[str, str]:
+def add_ray_env_vars(
+        env_vars: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     # Adds Ray-related environment variables.
     if env_vars is None:
         env_vars = {}
@@ -265,7 +266,7 @@ def run_bash_command_with_log(bash_command: str,
     with tempfile.NamedTemporaryFile('w', prefix='sky_app_',
                                      delete=False) as fp:
         if use_sudo:
-            env_vars = add_sudo_env_vars(env_vars)
+            env_vars = add_ray_env_vars(env_vars)
         bash_command = make_task_bash_script(bash_command, env_vars=env_vars)
         fp.write(bash_command)
         fp.flush()
@@ -276,7 +277,7 @@ def run_bash_command_with_log(bash_command: str,
 
         if use_sudo:
             subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
-            subprocess_cmd = job_lib.make_switch_user_command(
+            subprocess_cmd = job_lib.make_job_command_with_user_switching(
                 job_owner, inner_command)
         else:
             subprocess_cmd = inner_command
