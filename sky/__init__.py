@@ -13,7 +13,7 @@ from sky.optimizer import Optimizer, OptimizeTarget
 from sky.data import Storage, StoreType
 from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
-from sky.sdk import (status, start, stop, down, autostop, queue, cancel,
+from sky.core import (status, start, stop, down, autostop, queue, cancel,
                      spot_status, spot_cancel, storage_ls, storage_delete)
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))

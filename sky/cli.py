@@ -48,7 +48,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky import sdk
+from sky import core
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
@@ -937,7 +937,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    cluster_records = sdk.status(all=all, refresh=refresh)
+    cluster_records = core.status(all=all, refresh=refresh)
     status_utils.show_status_table(cluster_records, refresh)
 
 
@@ -967,7 +967,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     unsupported_clusters = []
     for cluster in clusters:
         try:
-            job_table = sdk.queue(cluster, skip_finished, all_users)
+            job_table = core.queue(cluster, skip_finished, all_users)
         except exceptions.NotSupportedError as e:
             unsupported_clusters.append(cluster)
             click.echo(str(e))
@@ -1069,7 +1069,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
     try:
-        sdk.cancel(cluster, all, jobs)
+        core.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
 
@@ -1316,7 +1316,7 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
 
     for name in to_start:
         try:
-            sdk.start(name, idle_minutes_to_autostop, retry_until_up)
+            core.start(name, idle_minutes_to_autostop, retry_until_up)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
@@ -1488,7 +1488,7 @@ def _terminate_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                sdk.autostop(name, idle_minutes_to_autostop)
+                core.autostop(name, idle_minutes_to_autostop)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -1507,9 +1507,9 @@ def _terminate_or_stop_clusters(
         else:
             try:
                 if terminate:
-                    sdk.down(name, purge=purge)
+                    core.down(name, purge=purge)
                 else:
-                    sdk.stop(name, purge=purge)
+                    core.stop(name, purge=purge)
             except RuntimeError:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -2053,7 +2053,7 @@ def spot_status(all: bool, refresh: bool):
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
-        job_table = sdk.spot_status(refresh=refresh)
+        job_table = core.spot_status(refresh=refresh)
     except exceptions.ClusterNotUpError:
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
@@ -2134,7 +2134,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
             abort=True,
             show_default=True)
 
-    sdk.spot_cancel(job_ids=job_ids, name=name, all=all)
+    core.spot_cancel(job_ids=job_ids, name=name, all=all)
 
 
 @spot.command('logs', cls=_DocumentedCodeCommand)
