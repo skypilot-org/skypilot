@@ -7,7 +7,7 @@ index 6e3b058..8c61ed4 100755
      has_wandb = False
  
 +import sky_callback
-+from sky_callback import timer
++from sky_callback import step_iterator
 +
  torch.backends.cudnn.benchmark = True
  _logger = logging.getLogger('train')
@@ -29,7 +29,7 @@ index 6e3b058..8c61ed4 100755
      last_idx = len(loader) - 1
      num_updates = epoch * len(loader)
 -    for batch_idx, (input, target) in enumerate(loader):
-+    for batch_idx, (input, target) in timer(enumerate(loader)):
++    for batch_idx, (input, target) in step_iterator(enumerate(loader)):
          last_batch = batch_idx == last_idx
          data_time_m.update(time.time() - end)
          if not args.prefetcher:
