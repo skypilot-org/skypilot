@@ -47,5 +47,3 @@ To visualize the logs collected, we can connect Grafana to our Loki service:
 3. Use the following settings.
 ![docs](figures/grafana-loki-setup.png)
 
-## Notes
-* Time shown in Grafana is the time when the message was received by Loki, not when the command was run. The `time` field (containing the unix timestamp) is the actual time when the command was first run.
