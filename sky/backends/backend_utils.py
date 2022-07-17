@@ -863,9 +863,12 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
 def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     """Checks if the Sky dependencies are properly installed on the machine.
 
-    Checks if python3, Ray, and Sky have been installed correctly. This method
-    assumes that the user is a system administrator and has sudo access to the
-    machines.
+    This function checks for the following dependencies on the root user:
+        - Sky
+        - Ray
+        - Python3 (>=3.6)
+    This function assumes that the user is a system administrator and has sudo
+    access to the machines.
 
     Args:
         ips: List of ips in the local cluster. 0-index corresponds to the head
@@ -874,7 +877,6 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     """
     ssh_user = auth_config['ssh_user']
     ssh_key = auth_config['ssh_private_key']
-    get_python_cmd = 'python3 --version | awk \'{{print $2}}\''
     ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ips, *ssh_credentials)
@@ -885,27 +887,6 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
             runner,
             'sudo python3 --version',
             failure_message=f'Python3 is not installed on {runner.ip}.')
-
-        # Checks if user python and the root user (sudo) base python are the
-        # same version.
-        base_python = run_command_and_handle_ssh_failure(
-            runner,
-            get_python_cmd,
-            failure_message=f'Check python installation on {runner.ip}.')
-
-        sudo_python = run_command_and_handle_ssh_failure(
-            runner,
-            f'sudo {get_python_cmd}',
-            failure_message=
-            f'Check `sudo {get_python_cmd}` can be run on {runner.ip}.')
-
-        base_python = base_python.strip()
-        sudo_python = sudo_python.strip()
-        if base_python != sudo_python:
-            raise RuntimeError(
-                f'User\'s base python version {base_python} differs '
-                f'from that of the root user\'s python version {sudo_python} '
-                f'(on node: {runner.ip}).')
 
         # Checks for global Ray installation (accessible by all users).
         run_command_and_handle_ssh_failure(
