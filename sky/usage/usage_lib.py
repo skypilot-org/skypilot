@@ -8,26 +8,30 @@ import json
 import os
 import time
 import traceback
+import typing
 from typing import Any, Dict, List, Optional, Union
 
 import requests
 
 from sky import sky_logging
+from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.usage import usage_constants
 from sky.usage import utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources as resources_lib
+    from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
 # An indicator for PRIVACY_POLICY has already been shown.
-privacy_policy_indicator = os.path.expanduser(
-    usage_constants.PRIVACY_POLICY_PATH)
+privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
 if not env_options.Options.DISABLE_LOGGING.get():
     os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
     try:
         with open(privacy_policy_indicator, 'x'):
-            click.secho(usage_constants.USAGE_POLICY_MESSAGE, fg='yellow')
+            click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
     except FileExistsError:
         pass
 
@@ -58,26 +62,70 @@ class UsageMessageToReport(MessageToReport):
     """Message to be reported to Grafana Loki for each run"""
 
     def __init__(self) -> None:
-        super().__init__(usage_constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        # Message identifier.
         self.user: str = utils.get_logging_user_hash()
         self.run_id: str = utils.get_logging_run_id()
+
+        # Entry
         self.time: str = str(time.time())
         self.cmd: str = common_utils.get_pretty_entry_point()
-        self.entrypoint: Optional[str] = None
-        self.cluster_names: List[str] = []
-        self.new_cluster: bool = False
+        self.entrypoint: Optional[str] = None  # entrypoint_context
+
+        # Basic info for the clusters.
+        #: Clusters operated by the command.
+        self.cluster_names: List[str] = []  # update_cluster_name
         #: Number of clusters in the cluster_names list.
-        self.num_related_clusters: Optional[int] = None
-        self.region: Optional[str] = None
-        self.cluster_nodes: Optional[int] = None
-        self.task_nodes: Optional[int] = None
-        self.user_task_yaml: Optional[str] = None
-        self.actual_task: Optional[Dict[str, Any]] = None
+        self.num_related_clusters: Optional[int] = None  # update_cluster_name
+        #: The final cloud of the cluster.
+        self.cloud: Optional[str] = None  # update_cluster_resources
+        #: The final region of the cluster.
+        self.region: Optional[str] = None  # update_cluster_resources
+        #: The final instance_type of the cluster.
+        self.instance_type: Optional[str] = None  # update_cluster_resources
+        #: The final accelerators the cluster.
+        self.accelerators: Optional[str] = None  # update_cluster_resources
+        #: Number of accelerators per node.
+        self.num_accelerators: Optional[int] = None  # update_cluster_resources
+        #: Use spot
+        self.use_spot: Optional[bool] = None  # update_cluster_resources
+        #: Resources of the cluster.
+        self.cluster_resources: Optional[Dict[
+            str, Any]] = None  # update_cluster_resources
+        #: The number of nodes in the cluster.
+        self.cluster_nodes: Optional[int] = None  # update_cluster_resources
+        #: Whether the cluster is alive.
+        self.cluster_is_launched: bool = False  # update_cluster_resources
+        #: Whether the cluster is newly launched.
+        self.is_new_cluster: bool = False  # set_new_cluster
+
+        # Task requested
+        #: The number of nodes requested by the task.
+        #: Requested cloud
+        self.task_cloud: Optional[str] = None  # update_actual_task
+        #: Requested region
+        self.task_region: Optional[str] = None  # update_actual_task
+        #: Requested instance_type
+        self.task_instance_type: Optional[str] = None  # update_actual_task
+        #: Requested accelerators
+        self.task_accelerators: Optional[str] = None  # update_actual_task
+        #: Requested number of accelerators per node
+        self.task_num_accelerators: Optional[int] = None  # update_actual_task
+        #: Requested use_spot
+        self.task_use_spot: Optional[bool] = None  # update_actual_task
+        #: Requested resources
+        self.task_resources: Optional[Dict[str,
+                                           Any]] = None  # update_actual_task
+        #: Requested number of nodes
+        self.task_nodes: Optional[int] = None  # update_actual_task
+        # YAMLs converted to JSON.
+        self.user_task_yaml: Optional[str] = None  # update_user_task_yaml
+        self.actual_task: Optional[Dict[str, Any]] = None  # update_actual_task
         self.ray_yamls: List[Dict[str, Any]] = []
         #: Number of Ray YAML files.
-        self.num_tried_regions: Optional[int] = None
-        self.runtimes: Dict[str, int] = {}
-        self.stacktrace: Optional[str] = None
+        self.num_tried_regions: Optional[int] = None  # update_ray_yaml
+        self.runtimes: Dict[str, int] = {}  # update_runtime
+        self.stacktrace: Optional[str] = None  # entrypoint_context
 
     def __repr__(self) -> str:
         d = self.get_properties()
@@ -87,14 +135,37 @@ class UsageMessageToReport(MessageToReport):
         self.entrypoint = msg
 
     def update_user_task_yaml(self, yaml_config_or_path: Union[Dict, str]):
-        self.user_task_yaml = prepare_yaml(yaml_config_or_path)
+        self.user_task_yaml = prepare_json_from_yaml_config(yaml_config_or_path)
 
-    def update_actual_task(self, config: Dict[str, Any]):
-        self.actual_task = prepare_yaml(config)
-        self.task_nodes = config['num_nodes']
+    def update_actual_task(self, task: 'task_lib.Task'):
+        self.actual_task = prepare_json_from_yaml_config(task.to_yaml_config())
+        self.task_nodes = task.num_nodes
+        if task.resources:
+            # resources is not None or empty.
+            if len(task.resources) > 1:
+                logger.debug('Multiple resources are specified in actual_task: '
+                             f'{task.resources}.')
+            resources = list(task.resources)[0]
+
+            self.task_resources = resources.to_yaml_config()
+
+            self.task_cloud = str(resources.cloud)
+            self.task_region = resources.region
+            self.task_instance_type = resources.instance_type
+            self.task_use_spot = resources.use_spot
+            # Update accelerators.
+            if resources.accelerators:
+                # Not None and not empty.
+                if len(resources.accelerators) > 1:
+                    logger.debug('Multiple accelerators are not supported: '
+                                 f'{resources.accelerators}.')
+                self.task_accelerators = list(resources.accelerators.keys())[0]
+                self.task_num_accelerators = resources.accelerators[
+                    self.task_accelerators]
 
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
-        self.ray_yamls.append(prepare_yaml(yaml_config_or_path))
+        self.ray_yamls.append(
+            prepare_json_from_yaml_config(yaml_config_or_path))
         self.num_tried_regions = len(self.ray_yamls)
 
     def update_cluster_name(self, cluster_name: Union[List[str], str]):
@@ -104,14 +175,30 @@ class UsageMessageToReport(MessageToReport):
             self.cluster_names = cluster_name
         self.num_related_clusters = len(self.cluster_names)
 
-    def update_region(self, region: str):
-        self.region = region
+    def update_cluster_resources(self,
+                                 num_nodes: int,
+                                 resources: 'resources_lib.Resources',
+                                 launched: bool = False):
+        self.cloud = str(resources.cloud)
+        self.region = resources.region
+        self.instance_type = resources.instance_type
+        self.use_spot = resources.use_spot
 
-    def update_cluster_nodes(self, num_nodes: int):
+        # Update accelerators.
+        if resources.accelerators:
+            # Not None and not empty.
+            if len(resources.accelerators) > 1:
+                logger.debug('Multiple accelerators are not supported: '
+                             f'{resources.accelerators}.')
+            self.accelerators = list(resources.accelerators.keys())[0]
+            self.num_accelerators = resources.accelerators[self.accelerators]
+
+        self.cluster_is_launched = launched
         self.cluster_nodes = num_nodes
+        self.cluster_resources = resources.to_yaml_config()
 
     def set_new_cluster(self):
-        self.new_cluster = True
+        self.is_new_cluster = True
 
     @contextlib.contextmanager
     def update_runtime_context(self, name: str):
@@ -131,33 +218,25 @@ usage_message = UsageMessageToReport()
 messages = {MessageType.USAGE: usage_message}
 
 
-def _make_labels_str(d):
-    dict_str = ','.join(f'{k}="{v}"' for k, v in d.items())
-    dict_str = '{' + dict_str + '}'
-    return dict_str
-
-
-def _send_message(message: str, message_type: MessageType):
+def _send_to_loki(message: str, message_type: MessageType):
     """Send the message to the Grafana Loki."""
     if env_options.Options.DISABLE_LOGGING.get():
         return
 
-    log_timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat('T')
+    log_timestamp = int(
+        datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
 
     prom_labels = {'type': message_type.value}
 
     headers = {'Content-type': 'application/json'}
     payload = {
         'streams': [{
-            'labels': _make_labels_str(prom_labels),
-            'entries': [{
-                'ts': log_timestamp,
-                'line': str(message),
-            }]
+            'stream': prom_labels,
+            'values': [[str(log_timestamp), str(message)]]
         }]
     }
     payload = json.dumps(payload)
-    response = requests.post(usage_constants.LOG_URL,
+    response = requests.post(constants.LOG_URL,
                              data=payload,
                              headers=headers,
                              timeout=0.5)
@@ -168,7 +247,7 @@ def _send_message(message: str, message_type: MessageType):
 def _clean_yaml(yaml_info: Dict[str, str]):
     """Remove sensitive information from user YAML."""
     cleaned_yaml_info = yaml_info.copy()
-    for redact_type in ['setup', 'run', 'envs']:
+    for redact_type in constants.USAGE_MESSAGE_REDACT_KEYS:
         if redact_type in cleaned_yaml_info:
             contents = cleaned_yaml_info[redact_type]
             if not contents:
@@ -184,7 +263,7 @@ def _clean_yaml(yaml_info: Dict[str, str]):
     return cleaned_yaml_info
 
 
-def prepare_yaml(yaml_config_or_path: Union[Dict, str]):
+def prepare_json_from_yaml_config(yaml_config_or_path: Union[Dict, str]):
     """Upload safe contents of YAML file to Loki."""
     if isinstance(yaml_config_or_path, dict):
         yaml_info = yaml_config_or_path
@@ -200,12 +279,35 @@ def prepare_yaml(yaml_config_or_path: Union[Dict, str]):
     return yaml_info
 
 
+def _send_local_messages():
+    """Send all messages not been uploaded to Loki."""
+    for msg_type, message in messages.items():
+        if not message.message_sent:
+            # Avoid the fallback entrypoint to send the message again
+            # in normal case.
+            try:
+                _send_to_loki(str(message), msg_type)
+                message.message_sent = True
+            except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                logger.debug(f'Usage logging for {msg_type.value} '
+                             f'exception caught: {type(e)}({e})')
+
+
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):
-    is_outermost = usage_message.entrypoint is None
-    if is_outermost and not fallback:
+    """Context manager for entrypoint.
+
+    The context manager will send the usage message to Loki when exiting.
+    The message will only be sent at the outermost level of the context.
+
+    When the outermost context does not cover all the codepaths, an
+    additional entrypoint_context with fallback=True can be used to wrap
+    the global entrypoint to catch any exceptions that are not caught.
+    """
+    is_entry = usage_message.entrypoint is None
+    if is_entry and not fallback:
         usage_message.update_entrypoint(name)
-    if env_options.Options.DISABLE_LOGGING.get() or not is_outermost:
+    if env_options.Options.DISABLE_LOGGING.get() or not is_entry:
         yield
         return
 
@@ -217,19 +319,9 @@ def entrypoint_context(name: str, fallback: bool = False):
         usage_message.stacktrace = trace
         raise
     finally:
-        if fallback and usage_message.entrypoint is None:
+        if fallback:
             usage_message.update_entrypoint(name)
-        if is_outermost:
-            for msg_type, message in messages.items():
-                if not message.message_sent:
-                    # Avoid the fallback entrypoint to send the message again
-                    # in normal case.
-                    try:
-                        _send_message(str(message), msg_type)
-                        message.message_sent = True
-                    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-                        logger.warning(f'Usage logging for {msg_type.value} '
-                                       f'exception caught: {type(e)}({e})')
+        _send_local_messages()
 
 
 def entrypoint(name_or_fn: str, fallback: bool = False):

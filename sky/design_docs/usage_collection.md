@@ -1,5 +1,5 @@
 # Usage Collection
-This doc is for sky team only to set up the usage collection service. Instead of using the Grafana's hosted Loki, we host our own Loki service to make sure the data is always available without retention and query limitation. 
+This doc is for sky team only to set up the usage collection service. Instead of using the Grafana's hosted Loki, we host our own Loki service to make sure the data is always available without retention and query limitation. For the message schema, please refer to the [sky/usage/usage_lib.py](sky/usage/usage_lib.py)::UsageMessageToReport.
 
 ## Sky Host Loki
 To set up the service, following steps should be applied.
@@ -40,9 +40,12 @@ To set up the service, following steps should be applied.
     docker run --name loki -d -v ~/loki-config:/mnt/config -p 9090:9090 grafana/loki:2.6.0 -config.file=/mnt/config/loki-s3-config.yaml
     ```
 
-## Connect to Grafana
+### Connect to Grafana
 To visualize the logs collected, we can connect Grafana to our Loki service:
 1. click the `Connect data` button in the home page
 2. Search for the "Loki" and select the `Loki`
 3. Use the following settings.
 ![docs](figures/grafana-loki-setup.png)
+
+## Notes
+* Time shown in Grafana is the time when the message was received by Loki, not when the command was run. The `time` field (containing the unix timestamp) is the actual time when the command was first run.

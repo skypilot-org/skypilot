@@ -4,7 +4,7 @@ import hashlib
 import time
 import uuid
 
-from sky.usage import usage_constants
+from sky.usage import constants
 
 from sky.utils import common_utils
 
@@ -31,6 +31,6 @@ def get_base_labels():
         'user': get_logging_user_hash(),
         'run_id': get_logging_run_id(),
         'time': time.time(),
-        'schema_version': usage_constants.USAGE_MESSAGE_SCHEMA_VERSION
+        'schema_version': constants.USAGE_MESSAGE_SCHEMA_VERSION
     }
     return labels

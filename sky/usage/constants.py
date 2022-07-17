@@ -1,8 +1,9 @@
 """Constants for usage collection."""
 
-LOG_URL = 'http://54.218.118.250:9090/api/prom/push'  # pylint: disable=line-too-long
+LOG_URL = 'http://54.218.118.250:9090/loki/api/v1/push'  # pylint: disable=line-too-long
 
-USAGE_MESSAGE_SCHEMA_VERSION = 6
+# USAGE_MESSAGE_SCHEMA_VERSION = 8
+USAGE_MESSAGE_SCHEMA_VERSION = 'DEBUG'
 
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 
@@ -12,3 +13,5 @@ USAGE_POLICY_MESSAGE = (
     'ensure privacy.\n'
     'Usage logging can be disabled by setting '
     'environment variable SKY_DISABLE_USAGE_COLLECTION=1 when invoking sky.')
+
+USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']

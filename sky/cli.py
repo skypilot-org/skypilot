@@ -662,8 +662,8 @@ class _NaturalOrderGroup(click.Group):
         return self.commands.keys()
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
-    def resolve_command(self, ctx, args):
-        return super().resolve_command(ctx, args)
+    def invoke(self, ctx):
+        return super().invoke(ctx)
 
 
 class _DocumentedCodeCommand(click.Command):
@@ -675,14 +675,6 @@ class _DocumentedCodeCommand(click.Command):
         help_str = ctx.command.help
         ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
         return super().get_help(ctx)
-
-    @usage_lib.entrypoint(name_or_fn='sky.cli.cli', fallback=True)
-    def parse_args(self, ctx, args):
-        return super().parse_args(ctx, args)
-
-    @usage_lib.entrypoint(name_or_fn='sky.cli.cli', fallback=True)
-    def invoke(self, ctx):
-        return super().invoke(ctx)
 
 
 @click.group(cls=_NaturalOrderGroup)

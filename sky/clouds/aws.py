@@ -157,9 +157,6 @@ class AWS(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def __repr__(self):
-        return AWS._REPR
-
     def is_same_cloud(self, other: clouds.Cloud):
         return isinstance(other, AWS)
 

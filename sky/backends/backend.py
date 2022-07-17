@@ -45,7 +45,7 @@ class Backend:
         if cluster_name is None:
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
         usage_lib.usage_message.update_cluster_name(cluster_name)
-        usage_lib.usage_message.update_actual_task(task.to_yaml_config())
+        usage_lib.usage_message.update_actual_task(task)
         return self._provision(task, to_provision, dryrun, stream_logs,
                                cluster_name, retry_until_up)
 
@@ -77,7 +77,7 @@ class Backend:
     def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
                 detach_run: bool) -> None:
         usage_lib.usage_message.update_cluster_name(handle.get_cluster_name())
-        usage_lib.usage_message.update_actual_task(task.to_yaml_config())
+        usage_lib.usage_message.update_actual_task(task)
         return self._execute(handle, task, detach_run)
 
     @timeline.event

@@ -1267,7 +1267,8 @@ class CloudVmRayBackend(backends.Backend):
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
-        usage_lib.usage_message.update_cluster_nodes(handle.launched_nodes)
+        usage_lib.usage_message.update_cluster_resources(
+            handle.launched_nodes, handle.launched_resources, launched=True)
 
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
@@ -1318,10 +1319,10 @@ class CloudVmRayBackend(backends.Backend):
                 prev_cluster_status, _ = (
                     backend_utils.refresh_cluster_status_handle(
                         cluster_name, acquire_per_cluster_status_lock=False))
-            usage_lib.usage_message.update_cluster_nodes(
-                to_provision_config.num_nodes)
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+            usage_lib.usage_message.update_cluster_resources(
+                to_provision_config.num_nodes, to_provision_config.resources)
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             with timeline.Event('backend.provision.wheel_build'):
@@ -1406,8 +1407,8 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
-            usage_lib.usage_message.update_region(
-                handle.launched_resources.region)
+            usage_lib.usage_message.update_cluster_resources(
+                handle.launched_nodes, handle.launched_resources, launched=True)
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
@@ -1667,7 +1668,8 @@ class CloudVmRayBackend(backends.Backend):
         task: task_lib.Task,
         detach_run: bool,
     ) -> None:
-        usage_lib.usage_message.update_region(handle.launched_resources.region)
+        usage_lib.usage_message.update_cluster_resources(
+            handle.launched_nodes, handle.launched_resources, launched=True)
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)
