@@ -15,11 +15,11 @@ Example:
     2. Mark the start and end of each step with SkyCallback APIs.
        Select one of the three equivalent methods.
 
-    1) Wrap your iterable (e.g., dataloader) with `timer`.
+    1) Wrap your iterable (e.g., dataloader) with `step_iterator`.
     ```python
-    from sky_callback import timer
+    from sky_callback import step_iterator
 
-    for batch in timer(train_dataloader):
+    for batch in step_iterator(train_dataloader):
         ...
     ```
 
@@ -119,8 +119,8 @@ def step():
     step_end()
 
 
-class timer:
-    """Wraps an iterable with timer."""
+class step_iterator:
+    """Wraps an iterable with SkyCallback APIs."""
 
     def __init__(self, iterable: collections.Iterable) -> None:
         self._iterable = iterable

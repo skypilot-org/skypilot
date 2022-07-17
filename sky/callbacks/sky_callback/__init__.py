@@ -3,7 +3,7 @@ from sky_callback.api import (
     step_begin,
     step_end,
     step,
-    timer,
+    step_iterator,
 )
 from sky_callback.base import BaseCallback
 from sky_callback.utils import CallbackLoader as _CallbackLoader
@@ -18,7 +18,7 @@ __all__ = [
     'step_begin',
     'step_end',
     'step',
-    'timer',
+    'step_iterator',
     # Callbacks
     'BaseCallback',
     'SkyKerasCallback',

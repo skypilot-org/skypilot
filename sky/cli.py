@@ -2981,7 +2981,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                                                   bucket_type)
             benchmark_state.delete_benchmark(benchmark)
             message = (f'{colorama.Fore.GREEN}Benchmark report for '
-                       f' {benchmark!r} deleted.{colorama.Style.RESET_ALL}')
+                       f'{benchmark} deleted.{colorama.Style.RESET_ALL}')
             success = True
 
         progress.stop()
