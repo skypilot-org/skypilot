@@ -2,8 +2,8 @@ import copy
 import random
 
 import numpy as np
+import pandas as pd
 import sky
-from sky.clouds.service_catalog import gcp_catalog
 
 CLOUDS = {
     'AWS': sky.AWS(),
@@ -11,7 +11,6 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_INSTANCE_TYPES = list(gcp_catalog._ON_DEMAND_PRICES.keys())
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -65,8 +64,8 @@ def generate_random_dag(
                 sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
                     instance_type=candidate.instance_type \
-                        if candidate.cloud != 'GCP' \
-                        else random.choice(GCP_INSTANCE_TYPES),
+                        if not pd.isna(candidate.instance_type) \
+                        else CLOUDS['GCP'].get_default_instance_type(),
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count},
                 )
