@@ -1995,7 +1995,6 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         storages = global_user_state.get_storage()
         for row in storages:
             store_object = data.Storage(name=row['name'],
-                                        source=row['handle'].source,
                                         sync_on_reconstruction=False)
             store_object.delete()
     elif name:
@@ -2006,7 +2005,6 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             else:
                 click.echo(f'Deleting storage object {n}.')
                 store_object = data.Storage(name=handle.storage_name,
-                                            source=handle.source,
                                             sync_on_reconstruction=False)
                 store_object.delete()
     else:

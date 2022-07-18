@@ -485,6 +485,11 @@ class Storage(object):
                     f'Supported paths: local, s3://, gs://. Got: {source}')
         return source, is_local_source
 
+    @staticmethod
+    def _generate_name(source):
+        """Generates a name for the given source"""
+        return urllib.parse.urlsplit(source).netloc
+
     def _validate_storage_spec(self) -> None:
         """
         Validates the storage spec and updates local fields if necessary.
@@ -495,9 +500,6 @@ class Storage(object):
         """
         source, is_local_source = Storage._validate_source(
             self.source, self.mode, self.sync_on_reconstruction)
-        if self.sync_on_reconstruction:
-            # Reconstructed storages need only source validation.
-            return
         if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
@@ -534,7 +536,7 @@ class Storage(object):
                             'local.')
                 else:
                     # Set name to source bucket name and continue
-                    self.name = urllib.parse.urlsplit(source).netloc
+                    self.name = self._generate_name(self.source)
                     return
             else:
                 if is_local_source:
