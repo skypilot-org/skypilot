@@ -197,7 +197,7 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
         1: (8, 52),
         2: (16, 104),
         4: (32, 208),
-        8: (64, 416),  # exception: asia-east1-a, us-east1-d
+        8: (64, 416),  # except for asia-east1-a, us-east1-d
     },
     'V100': {
         1: (12, 78),
@@ -218,7 +218,7 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
     'P100': {
         1: (16, 104),
         2: (32, 208),
-        4: (96, 624),  # exception: us-east1-c, europe-west1-d, europe-west1-b
+        4: (96, 624),  # except for us-east1-c, europe-west1-d, europe-west1-b
     }
 }
 
