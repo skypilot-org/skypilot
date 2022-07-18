@@ -30,30 +30,23 @@ setup: |
   sudo apt install -y fio
 
 run: |
-  purge_io () {
-   echo 'hello, world'
-  }
-  echo "Purging I/O caches..."
-  echo 3 | sudo tee /proc/sys/vm/drop_caches
+  purge_io () { echo "Purging I/O caches..."; sync && echo 3 > sudo tee /proc/sys/vm/drop_caches; }
+  purge_io
   echo "Running EBS read benchmark..."
   fio --name=64kseqreads --rw=read --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/tmp/ --output-format=json > /skystorage-mount/perf_read_ebs.json
-  echo "Purging I/O caches..."
-  echo 3 | sudo tee /proc/sys/vm/drop_caches
+  purge_io
   echo "Running S3 read benchmark..."
   fio --name=64kseqreads --rw=read --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_read_s3.json
-  echo "Purging I/O caches..."
-  echo 3 | sudo tee /proc/sys/vm/drop_caches
+  purge_io
   echo "Running EBS write benchmark..."
   fio --name=64kseqwrites --rw=write --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/tmp/ --output-format=json > /skystorage-mount/perf_write_ebs.json
-  echo "Purging I/O caches..."
-  echo 3 | sudo tee /proc/sys/vm/drop_caches
+  purge_io
   echo "Running S3 write benchmark..."
   fio --name=64kseqwrites --rw=write --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_write_s3.json
   
   # Change the s3 path here to the storage bucket name used above
   echo "Running S3 read benchmark with aws s3 cp (COPY mode setup bandwidth)..."
-  echo "Purging I/O caches..."
-  echo 3 | sudo tee /proc/sys/vm/drop_caches
+  purge_io
   /usr/bin/time -o /skystorage-mount/perf_copymode_time.txt -f "%e" aws s3 cp s3://sky-romil-benchmark/64kseqreads.0.0 ~/ > /skystorage-mount/perf_copymode_log.txt
   sed -i -e 's/\r/\n/g' /skystorage-mount/perf_copymode_log.txt
   
