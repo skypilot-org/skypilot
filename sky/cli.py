@@ -1000,40 +1000,41 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
-@click.argument('job_id', required=False, type=str)
+@click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
-def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
+def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
 
     If JOB_ID is not provided, tails the logs of the last job on the cluster.
     """
-
     if sync_down and status:
         raise click.UsageError(
             'Both sync_down and status are specified '
             '(ambiguous). To fix: specify at most one of them.')
 
-    if job_id is not None and len(job_id) > 1 and not sync_down:
-        raise click.UsageError('Cannot stream logs of multiple jobs. '
-                               'Set --sync_down to download them.')
+    if len(job_ids) > 1 and not sync_down:
+        raise click.UsageError(
+            f'Cannot stream logs of multiple jobs {job_ids}. '
+            'Set --sync_down to download them.')
+
+    job_ids = None if not job_ids else job_ids
 
     if sync_down:
-        job_id = [job_id] if job_id is not None else None
-        core.download_logs(cluster, job_id)
+        core.download_logs(cluster, job_ids)
         return
     if status:
-        job_id = [job_id] if job_id is not None else None
-        job_status = core.job_status(cluster, job_id)[0]
+        job_status = core.job_status(cluster, job_ids)[0]
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
             click.secho(
-                f'Job {job_id} status failed with status '
+                f'Job {job_ids} status failed with status '
                 f'{job_status.value}',
                 fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id)
+    job_ids = job_ids[0] if job_ids else None
+    core.tail_logs(cluster, job_ids)
 
 
 @cli.command()

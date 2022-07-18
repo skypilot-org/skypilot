@@ -341,7 +341,7 @@ def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> List[str]:
         List[str]: local log paths.
     """
     # Check the status of the cluster.
-    handle = _check_cluster_available(cluster_name, 'tailing logs')
+    handle = _check_cluster_available(cluster_name, 'downloading logs')
     backend = backend_utils.get_backend_from_handle(handle)
 
     if job_ids is not None and len(job_ids) == 0:

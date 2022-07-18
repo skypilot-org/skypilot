@@ -304,12 +304,16 @@ class SSHCommandRunner:
             ])
         command = ' '.join(rsync_command)
 
-        returncode = log_lib.run_with_log(command,
-                                          log_path=log_path,
-                                          stream_logs=stream_logs,
-                                          shell=True)
+        returncode, _, stderr = log_lib.run_with_log(command,
+                                                     log_path=log_path,
+                                                     stream_logs=stream_logs,
+                                                     shell=True,
+                                                     require_outputs=True)
+
         direction = 'up' if up else 'down'
         subprocess_utils.handle_returncode(
-            returncode, command,
-            f'Failed to rsync {direction}: {source} -> {target}, '
-            f'see {log_path} for details.')
+            returncode,
+            command,
+            f'Failed to rsync {direction}: {source} -> {target}',
+            stderr=stderr,
+            stream_logs=stream_logs)

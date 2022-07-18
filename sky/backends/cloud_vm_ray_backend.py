@@ -1809,6 +1809,7 @@ class CloudVmRayBackend(backends.Backend):
             """
             (runner, local_log_dir, remote_log_dir) = args
             try:
+                os.makedirs(local_log_dir, exist_ok=True)
                 runner.rsync(
                     source=f'{remote_log_dir}/*',
                     target=local_log_dir,
