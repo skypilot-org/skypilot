@@ -1022,19 +1022,25 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
     if sync_down:
         core.download_logs(cluster, job_ids)
         return
+
+    assert len(job_ids) <= 1, job_ids
+    job_id = job_ids[0] if job_ids else None
     if status:
         job_status = core.job_status(cluster, job_ids)[0]
+        click.echo(job_status)
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
+            if job_status is None:
+                id_str = '' if job_id is None else f'{job_id} '
+                click.secho(f'Job {id_str}not found', fg='red')
             click.secho(
                 f'Job {job_ids} status failed with status '
                 f'{job_status.value}',
                 fg='red')
             sys.exit(1)
 
-    job_ids = job_ids[0] if job_ids else None
-    core.tail_logs(cluster, job_ids)
+    core.tail_logs(cluster, job_id)
 
 
 @cli.command()

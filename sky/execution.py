@@ -177,8 +177,8 @@ def _execute(
 
         if stages is None or Stage.TEARDOWN in stages:
             if teardown:
-                backend.teardown(handle)
                 backend.teardown_ephemeral_storage(task)
+                backend.teardown(handle, terminate=True)
     finally:
         # UX: print live clusters to make users aware (to save costs).
         # Needed because this finally doesn't always get executed on errors.
