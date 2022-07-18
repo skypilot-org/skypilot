@@ -1,0 +1,24 @@
+# Demo to show the use of force_managed argument in sky.Storage.
+#
+# force_managed field in a Storage allows Sky to "take ownership" of an existing
+# store object. This is useful when you have an existing bucket and want to be
+# able to manage it using sky (e.g., use sky storage delete) to delete the bucket.
+#
+# Usage:
+#   sky launch -c force force_managed.yaml
+#   sky storage ls
+#   sky storage delete my-external-bucket
+
+name: force_managed
+
+resources:
+  cloud: aws
+
+file_mounts:
+  /mymount2:
+    source: s3://my-external-bucket  # Make sure this bucket already exists.
+    force_managed: true
+    mode: MOUNT
+
+run: |
+  echo "my-external-bucket should now show up in your sky storage ls"

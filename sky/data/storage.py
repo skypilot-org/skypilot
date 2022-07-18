@@ -170,11 +170,11 @@ class AbstractStore:
             # If is_sky_managed is specified, then we take no action.
             self.is_sky_managed = is_new_bucket
 
-    def _get_client(self):
+    def _get_client(self) -> Any:
         """Returns a client for the cloud storage API."""
         raise NotImplementedError()
 
-    def _check_permissions(self):
+    def _check_permissions(self) -> bool:
         """Checks if the user has read/write/delete permission on the bucket.
 
         This is used as adequacy check for the is_sky_managed property. The
@@ -187,6 +187,7 @@ class AbstractStore:
         Raises:
             exceptions.StorageInitError: If the user does not have permissions to check the bucket ACL or fetching the user id fails.
         """
+        raise NotImplementedError()
 
     def _validate(self) -> None:
         """Runs validation checks on class args"""
@@ -389,7 +390,7 @@ class Storage(object):
                         f'loading Storage: {self.name}')
             for s_type, s_metadata in self.handle.sky_stores.items():
                 # When initializing from global_user_state, we override the
-                # source and force_managed from the YAML
+                # source from the YAML
                 if s_type == StoreType.S3:
                     store = S3Store.from_metadata(s_metadata,
                                                   source=self.source)
@@ -581,7 +582,9 @@ class Storage(object):
         # Initialize store object and get/create bucket
         is_sky_managed = True if self.force_managed else None
         try:
-            store = store_cls(name=self.name, source=self.source, is_sky_managed=is_sky_managed)
+            store = store_cls(name=self.name,
+                              source=self.source,
+                              is_sky_managed=is_sky_managed)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -652,8 +655,8 @@ class Storage(object):
         else:
             for _, store in self.stores.items():
                 if store.is_sky_managed:
-                    store.delete()
                     self.handle.remove_store(store)
+                    store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
             global_user_state.remove_storage(self.name)
@@ -688,6 +691,7 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+        force_managed = config.pop('force_managed', False)
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
@@ -703,7 +707,8 @@ class Storage(object):
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
-                          mode=mode)
+                          mode=mode,
+                          force_managed=force_managed)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
         return storage_obj
@@ -729,6 +734,7 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
+        add_if_not_none('force_managed', self.force_managed)
         return config
 
 
@@ -760,11 +766,11 @@ class S3Store(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
 
-    def _get_client(self):
+    def _get_client(self) -> Any:
         """Returns a client for the S3 API."""
         return data_utils.create_s3_client(self.region)
 
-    def _check_permissions(self):
+    def _check_permissions(self) -> bool:
         """Checks if the user has read/write/delete permission on the bucket.
 
         This is used as adequacy check for the is_sky_managed property. The

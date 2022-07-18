@@ -11,6 +11,7 @@ import colorama
 import pytest
 
 import sky
+from sky import exceptions
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
@@ -649,16 +650,19 @@ class TestStorageWithCredentials:
     def yield_storage_object(
             name: Optional[str] = None,
             source: Optional[storage_lib.Path] = None,
-            stores: Optional[Dict[storage_lib.StoreType,
-                                  storage_lib.AbstractStore]] = None,
             persistent: Optional[bool] = True,
-            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT):
+            mode: storage_lib.StorageMode = storage_lib.StorageMode.MOUNT,
+            force_managed: bool = False,
+            add_stores: Optional[List[storage_lib.StoreType]] = None):
         # Creates a temporary storage object. Stores must be added in the test.
         storage_obj = storage_lib.Storage(name=name,
                                           source=source,
-                                          stores=stores,
                                           persistent=persistent,
-                                          mode=mode)
+                                          mode=mode,
+                                          force_managed=force_managed)
+        if add_stores:
+            for store in add_stores:
+                storage_obj.add_store(store)
         yield storage_obj
         handle = global_user_state.get_handle_from_storage_name(
             storage_obj.name)
@@ -711,7 +715,8 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_public_storage_obj(self, request):
         # Initializes a storage object with a public bucket
-        storage_obj = storage_lib.Storage(source=request.param)
+        storage_obj = storage_lib.Storage(source=request.param.get('source'),
+                                          force_managed=request.param.get('force_managed', False))
         yield storage_obj
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
@@ -738,8 +743,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
-        [('s3://tcga-2-open', storage_lib.StoreType.S3),
-         ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
+        [({'source': 's3://tcga-2-open'}, storage_lib.StoreType.S3),
+         ({'source': 'gs://gcp-public-data-sentinel-2'}, storage_lib.StoreType.GCS)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
         # Creates a new bucket with a public source and verifies that it is not
@@ -798,6 +803,117 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
+    # ---------- Storage force_managed tests ----------
+
+    @pytest.fixture(params=[{'store_type': storage_lib.StoreType.S3}])
+    def forcemanaged_localsrc_storage_obj(self, request, tmp_bucket_name, tmp_source):
+        # Create an external bucket
+        store_type = request.param['store_type']
+        if store_type == storage_lib.StoreType.S3:
+            subprocess.check_call(['aws', 's3', 'mb', f's3://{tmp_bucket_name}'])
+        elif store_type == storage_lib.StoreType.GCS:
+            subprocess.check_call(['gsutil', 'mb', f'gs://{tmp_bucket_name}'])
+        else:
+            raise ValueError(f'Unknown store type: {store_type}')
+        # Try to initialize a storage with the bucket created above and using local source.
+        # With force_managed=True, this should succeed.
+        yield from self.yield_storage_object(name=tmp_bucket_name,
+                                             source=tmp_source,
+                                             force_managed=True,
+                                             add_stores=[store_type])
+
+    @pytest.fixture(params=[{'store_type': storage_lib.StoreType.S3}])
+    def forcemanaged_bucketsrc_storage_obj(self, request, tmp_bucket_name):
+        # Create an external bucket
+        store_type = request.param['store_type']
+        if store_type == storage_lib.StoreType.S3:
+            source = f's3://{tmp_bucket_name}'
+            subprocess.check_call(['aws', 's3', 'mb', source])
+        elif store_type == storage_lib.StoreType.GCS:
+            source = f'gs://{tmp_bucket_name}'
+            subprocess.check_call(['gsutil', 'mb', source])
+        else:
+            raise ValueError(f'Unknown store type: {store_type}')
+        # Try to initialize a storage with the bucket created above as source.
+        # With force_managed=True, this should succeed.
+        yield from self.yield_storage_object(source=source,
+                                             force_managed=True,
+                                             add_stores=[store_type])
+
+    @pytest.mark.parametrize(
+        'public_bucket, store_type',
+        [('s3://tcga-2-open', storage_lib.StoreType.S3)])
+    def test_forcemanaged_public_bucket(self, public_bucket, store_type):
+        # Attempts to initialize a public bucket storage in force_managed mode.
+        # This should fail because bucket is public and cannot be sky managed.
+        with pytest.raises(exceptions.StorageInitError) as e:
+            storage_obj = storage_lib.Storage(source=public_bucket,
+                                              force_managed=True)
+            storage_obj.add_store(store_type)
+        assert 'Unable to assert ownership of bucket' in str(e)
+
+    def test_forcemanaged_existing_localsource(self, forcemanaged_localsrc_storage_obj):
+        # Uses force_manage to take ownership of an existing bucket.
+        # The storage object is specified with a local source - the file should
+        # be uploaded and the bucket should show up in sky storage ls.
+        storage_obj = forcemanaged_localsrc_storage_obj
+        store_type = list(storage_obj.stores.keys())[0]
+
+        # Check if tmp_source/tmp-file exists in the bucket using aws cli
+
+        out = subprocess.check_output(self.cli_ls_cmd(store_type, storage_obj.name))
+        assert 'tmp-file' in out.decode('utf-8'), \
+            'File not found in bucket - output was : {}'.format(out.decode
+                                                                ('utf-8'))
+
+        # Run sky storage ls to check if storage object exists in the output.
+        # It should exist because the storage had force_managed=True.
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert storage_obj.name in out.decode('utf-8')
+
+    def test_forcemanaged_existing_bucketsource(self, forcemanaged_bucketsrc_storage_obj):
+        # Uses force_managed to take ownership of an existing user owned bucket.
+        # The storage object is specified with an existing bucket as the source.
+        # The storage object should show up in sky storage ls.
+        storage_obj = forcemanaged_bucketsrc_storage_obj
+        store_type = list(storage_obj.stores.keys())[0]
+
+        # Run sky storage ls to check if storage object exists in the output.
+        # It should exist because the storage had force_managed=True.
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert storage_obj.name in out.decode('utf-8')
+
+    def test_forcemanaged_reinit(self, forcemanaged_localsrc_storage_obj):
+        # Uses force_manage to take ownership of an existing bucket.
+        # Then ensures that re-initialization of the storage object succeeds.
+        storage_obj = forcemanaged_localsrc_storage_obj
+
+        storage_obj_2 = storage_lib.Storage(name=storage_obj.name,
+                                            mode=storage_lib.StorageMode.COPY)
+
+        # Run sky storage ls to ensure only one storage object exists.
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert out.decode('utf-8').count(storage_obj.name) == 1
+
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3])
+    def test_forcemanaged_idempotency(self, tmp_local_storage_obj, store_type):
+        # Checks idempotency of force_managed storage objects.
+        # Then ensures that a storage object can be initialized with or without
+        # force_managed multiple times without error.
+        name = tmp_local_storage_obj.name
+        tmp_local_storage_obj.add_store(store_type)
+
+        storage_obj_2 = storage_lib.Storage(name=name,
+                                            force_managed=True)
+        storage_obj_3 = storage_lib.Storage(name=name,
+                                            force_managed=False)
+        storage_obj_4 = storage_lib.Storage(name=name,
+                                            force_managed=True)
+
+        # Run sky storage ls to ensure only one storage object exists.
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert out.decode('utf-8').count(name) == 1
 
 # ---------- Testing YAML Specs ----------
 # Our sky storage requires credentials to check the bucket existance when

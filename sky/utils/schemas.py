@@ -96,7 +96,10 @@ def get_storage_schema():
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
-            }
+            },
+            'force_managed': {
+                'type': 'boolean',
+            },
         }
     }
 
