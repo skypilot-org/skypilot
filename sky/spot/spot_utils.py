@@ -220,9 +220,7 @@ def stream_logs_by_id(job_id: int) -> str:
             # SUCCEEDED or FAILED), we can safely break the loop. We use the
             # status in job queue to show the information, as the spot_state is
             # not updated yet.
-            job_status = backend.get_job_status(handle,
-                                                job_ids=None,
-                                                stream_logs=False)[0]
+            job_status = backend.get_job_status(handle, stream_logs=False)[0]
             logger.info(f'Logs finished for job {job_id} '
                         f'(status: {job_status.value}).')
             break

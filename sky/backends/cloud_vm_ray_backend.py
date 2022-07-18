@@ -1748,8 +1748,10 @@ class CloudVmRayBackend(backends.Backend):
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stdout)
         statuses = job_lib.load_statuses_json(stdout)
-        status_list = [statuses.get(job_id, None) for job_id in job_ids]
-        return status_list
+        if job_ids is None:
+            return list(statuses.values())
+        assert len(statuses) == len(job_ids)
+        return [statuses[job_id] for job_id in job_ids]
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
         code = job_lib.JobLibCodeGen.cancel_jobs(jobs)

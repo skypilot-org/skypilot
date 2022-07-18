@@ -137,7 +137,7 @@ def get_statuses_json(job_ids: List[int]) -> str:
     rows = _CURSOR.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
         job_ids)
-    statuses = {}
+    statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
     return json.dumps(statuses)
@@ -145,7 +145,10 @@ def get_statuses_json(job_ids: List[int]) -> str:
 
 def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
     statuses = json.loads(statuses_json)
-    return {job_id: JobStatus[status] for (job_id, status) in statuses.items()}
+    for job_id, status in statuses.items():
+        if status is not None:
+            statuses[job_id] = JobStatus[status]
+    return statuses
 
 
 def get_latest_job_id() -> Optional[int]:
