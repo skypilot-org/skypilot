@@ -2921,6 +2921,9 @@ def benchmark_down(
 def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                      yes: bool) -> None:
     """Delete benchmark reports from the history."""
+    if not benchmarks and all is None:
+        raise click.BadParameter(
+            'Either specify benchmarks or use --all to delete all benchmarks.')
     to_delete = []
     if len(benchmarks) > 0:
         for benchmark in benchmarks:
