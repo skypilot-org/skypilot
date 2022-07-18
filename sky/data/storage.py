@@ -164,8 +164,7 @@ class AbstractStore:
                     raise exceptions.StorageInitError(
                         f'Unable to assert ownership of bucket {self.name} - '
                         'insufficient permissions. Cannot use '
-                        'force_managed=True for this store.'
-                    )
+                        'force_managed=True for this store.')
 
         elif self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
