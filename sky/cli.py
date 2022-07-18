@@ -1024,7 +1024,12 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
         return
 
     assert len(job_ids) <= 1, job_ids
-    job_id = job_ids[0] if job_ids else None
+    job_id = None
+    if job_ids:
+        job_id = job_ids[0]
+        if not job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {job_id}. '
+                                   'Job ID must be integers.')
     if status:
         job_status = core.job_status(cluster, job_ids)[0]
         click.echo(job_status)
