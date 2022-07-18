@@ -1069,17 +1069,17 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
         return
     job_id = int(job_id) if job_id is not None else job_id
     if status:
-        # FIXME(zongheng,zhwu): non-existent job ids throw:
-        # TypeError: expected str, bytes or os.PathLike object, not tuple
         job_status = backend.get_job_status(handle, job_id)
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
+        if job_status is None:
+            message = 'Job not found'
+        elif job_id is None:
+            message = f'Job failed with status: {job_status.value}'
         else:
-            click.secho(
-                f'Job {job_id} status failed with status '
-                f'{job_status.value}',
-                fg='red')
-            sys.exit(1)
+            message = f'Job {job_id} failed with status: {job_status.value}'
+        click.secho(message, fg='red')
+        sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)
 
