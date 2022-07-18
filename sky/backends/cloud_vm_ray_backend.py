@@ -1734,10 +1734,11 @@ class CloudVmRayBackend(backends.Backend):
 
     # --- CloudVMRayBackend Specific APIs ---
 
-    def get_job_status(self,
-                       handle: ResourceHandle,
-                       job_ids: Optional[List[str]] = None,
-                       stream_logs: bool = True) -> List[Optional[job_lib.JobStatus]]:
+    def get_job_status(
+            self,
+            handle: ResourceHandle,
+            job_ids: Optional[List[str]] = None,
+            stream_logs: bool = True) -> List[Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
@@ -1800,7 +1801,7 @@ class CloudVmRayBackend(backends.Backend):
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
-            
+
             Args:
                 args: A tuple of (runner, local_log_dir, remote_log_dir)
             """

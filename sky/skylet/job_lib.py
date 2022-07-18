@@ -131,6 +131,7 @@ def get_status(job_id: int) -> Optional[JobStatus]:
             return None
         return JobStatus[status]
 
+
 def get_statuses_json(job_ids: List[int]) -> str:
     query_str = ','.join(['?'] * len(job_ids))
     rows = _CURSOR.execute(
@@ -141,9 +142,11 @@ def get_statuses_json(job_ids: List[int]) -> str:
         statuses[job_id] = status
     return json.dumps(statuses)
 
+
 def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
     statuses = json.loads(statuses_json)
     return {job_id: JobStatus[status] for (job_id, status) in statuses.items()}
+
 
 def get_latest_job_id() -> Optional[int]:
     rows = _CURSOR.execute(

@@ -29,7 +29,6 @@ each other.
 """
 import functools
 import getpass
-from operator import le
 import os
 import shlex
 import sys
@@ -1011,12 +1010,12 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
 
     if sync_down and status:
         raise click.UsageError(
-                'Both sync_down and status are specified '
-                '(ambiguous). To fix: specify at most one of them.')
-    
+            'Both sync_down and status are specified '
+            '(ambiguous). To fix: specify at most one of them.')
+
     if job_id is not None and len(job_id) > 1 and not sync_down:
         raise click.UsageError('Cannot stream logs of multiple jobs. '
-                        'Set --sync_down to download them.')
+                               'Set --sync_down to download them.')
 
     if sync_down:
         job_id = [job_id] if job_id is not None else None
@@ -1035,7 +1034,6 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
             sys.exit(1)
 
     core.tail_logs(cluster, job_id)
-
 
 
 @cli.command()

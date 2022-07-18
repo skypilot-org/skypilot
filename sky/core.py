@@ -299,17 +299,17 @@ def cancel(cluster_name: str,
     backend.cancel_jobs(handle, job_ids)
 
 
-def tail_logs(cluster_name: str,
-              job_id: Optional[str],
-              status: bool = False) -> Union[None, List[str], job_lib.JobStatus]:
+def tail_logs(
+        cluster_name: str,
+        job_id: Optional[str]) -> Union[None, List[str], job_lib.JobStatus]:
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
-    
+
     Returns:
         Union[None, List[str], job_lib.JobStatus]:
-        - When `sync_down` and `status` are False, returns None, and the logs will
-            be printed to stdout.
+        - When `sync_down` and `status` are False, returns None, and the logs
+        will be printed to stdout.
         - When `sync_down` is True, returns a list of local log paths.
         - When `status` is True, returns the job status.
     Raises:
@@ -330,9 +330,10 @@ def tail_logs(cluster_name: str,
 
     backend.tail_logs(handle, job_id)
 
+
 def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> List[str]:
     """Download the logs of jobs.
-    
+
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids.
@@ -345,22 +346,25 @@ def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> List[str]:
 
     if job_ids is not None and len(job_ids) == 0:
         return []
-    
+
     logger.info(f'{colorama.Fore.YELLOW}'
                 'Syncing down logs to local...'
                 f'{colorama.Style.RESET_ALL}')
     local_log_dirs = backend.sync_down_logs(handle, job_ids)
     return local_log_dirs
 
-def job_status(cluster_name: str, job_ids: Optional[List[str]], stream_logs: bool=False) -> List[Optional[job_lib.JobStatus]]:
+
+def job_status(cluster_name: str,
+               job_ids: Optional[List[str]],
+               stream_logs: bool = False) -> List[Optional[job_lib.JobStatus]]:
     """Get the status of jobs.
-    
+
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
     Returns:
-        List[job_lib.JobStatus]: job statuses. The status will be None if the job
-            does not exist.
+        List[job_lib.JobStatus]: job statuses. The status will be None if the
+        job does not exist.
     """
     # Check the status of the cluster.
     handle = _check_cluster_available(cluster_name, 'getting job status')
@@ -368,7 +372,7 @@ def job_status(cluster_name: str, job_ids: Optional[List[str]], stream_logs: boo
 
     if job_ids is not None and len(job_ids) == 0:
         return []
-    
+
     logger.info(f'{colorama.Fore.YELLOW}'
                 'Getting job status...'
                 f'{colorama.Style.RESET_ALL}')
