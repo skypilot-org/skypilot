@@ -161,7 +161,11 @@ class AbstractStore:
             # mark it as is_sky_managed=True.
             if not self._check_permissions():
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageInitError(f'Unable to assert ownership of bucket {self.name} - insufficient permissions. Cannot use force_managed=True for this store.')
+                    raise exceptions.StorageInitError(
+                        f'Unable to assert ownership of bucket {self.name} - '
+                        'insufficient permissions. Cannot use '
+                        'force_managed=True for this store.'
+                    )
 
         elif self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -185,7 +189,8 @@ class AbstractStore:
             True if the user has read/write/delete permissions on the bucket.
             False otherwise.
         Raises:
-            exceptions.StorageInitError: If the user does not have permissions to check the bucket ACL or fetching the user id fails.
+            exceptions.StorageInitError: If the user does not have permissions
+            to check the bucket ACL or fetching the user id fails.
         """
         raise NotImplementedError()
 
@@ -297,10 +302,7 @@ class Storage(object):
         - (required) Source
         """
 
-        def __init__(self,
-                     *,
-                     storage_name: str,
-                     source: str):
+        def __init__(self, *, storage_name: str, source: str):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
@@ -431,9 +433,10 @@ class Storage(object):
         """Validates the source path.
 
         Args:
-          source: str or None; File path where the data is initially stored. Can be a
-            local path or a cloud URI (s3://, gs://, etc.). Local paths do not
-            need to be absolute. Can be None, in which case it is a valid source.
+          source: str or None; File path where the data is initially stored.
+            Can be a local path or a cloud URI (s3://, gs://, etc.). Local
+            paths do not need to be absolute. Can be None, in which case it is
+            a valid source.
           mode: StorageMode; StorageMode of the storage object
 
         Returns:
@@ -537,7 +540,7 @@ class Storage(object):
                             'local.')
                 else:
                     # Set name to source bucket name and continue
-                    self.name = self._generate_name(self.source)
+                    self.name = self._generate_name(source)
                     return
             else:
                 if is_local_source:
@@ -781,7 +784,8 @@ class S3Store(AbstractStore):
             True if the user has read/write/delete permissions on the bucket.
             False otherwise.
         Raises:
-            exceptions.StorageInitError: If the user does not have permissions to check the bucket ACL or fetching the user id fails.
+            exceptions.StorageInitError: If the user does not have permissions
+              to check the bucket ACL or fetching the user id fails.
         """
         # TODO(romilb): User may have sufficient permissions even though the
         #  user may not be the owner of the bucket. This is hard to check
@@ -792,16 +796,17 @@ class S3Store(AbstractStore):
             user_id = self.client.list_buckets()['Owner']['ID']
         except (aws.client_exception(), KeyError) as e:
             raise exceptions.StorageInitError(
-                f'Failed to get user id for checking permissions.') from e
+                'Failed to get user id for checking permissions.') from e
         # Get the bucket owner's canonical id
         try:
-            owner_id = self.client.get_bucket_acl(Bucket=self.name)['Owner']['ID']
+            owner_id = self.client.get_bucket_acl(
+                Bucket=self.name)['Owner']['ID']
         except aws.client_exception() as e:
             raise exceptions.StorageInitError(
                 f'Failed to get bucket ACL for bucket {self.name}.') from e
         except KeyError as e:
             raise exceptions.StorageInitError(
-                f'Owner or ID field not found in bucket ACL response.') from e
+                'Owner or ID field not found in bucket ACL response.') from e
         return user_id == owner_id
 
     def upload(self):
