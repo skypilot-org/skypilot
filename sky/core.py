@@ -518,6 +518,29 @@ def spot_cancel(name: Optional[str] = None,
                 'Please specify the job ID instead of the job name.')
 
 
+def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
+    """Tail logs of managed spot jobs.
+
+    Please refer to the sky.cli.spot_logs for the document.
+
+    Raises:
+        ValueError: invalid arguments.
+        sky.exceptions.ClusterNotUpError: the spot controller is not up.
+    """
+    # TODO(zhwu): Automatically restart the spot controller
+    _, handle = _is_spot_controller_up(
+        'Please restart the spot controller with '
+        '`sky start sky-spot-controller -i 5`.')
+    if handle is None or handle.head_ip is None:
+        raise exceptions.ClusterNotUpError('All jobs finished.')
+
+    if name is not None and job_id is not None:
+        raise ValueError('Cannot specify both name and job_id.')
+    backend = backend_utils.get_backend_from_handle(handle)
+    # Stream the realtime logs
+    backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+
+
 # ======================
 # = Storage Management =
 # ======================

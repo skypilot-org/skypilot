@@ -2125,18 +2125,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 @click.argument('job_id', required=False, type=int)
 def spot_logs(name: Optional[str], job_id: Optional[int]):
     """Tail the log of a managed spot job."""
-    # TODO(zhwu): Automatically restart the spot controller
-    _, handle = _is_spot_controller_up(
-        'Please restart the spot controller with '
-        '`sky start sky-spot-controller`.')
-    if handle is None:
-        return
-
-    if name is not None and job_id is not None:
-        click.UsageError('Cannot specify both --name and --job-id.')
-    backend = backend_utils.get_backend_from_handle(handle)
-    # Stream the realtime logs
-    backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+    core.spot_tail_logs(name=name, job_id=job_id)
 
 
 def main():
