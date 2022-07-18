@@ -114,8 +114,11 @@ class AbstractStore:
         self.name = name
         self.source = source
         self.region = region
-        self.is_sky_managed = is_sky_managed
         # Whether sky is responsible for the lifecycle of the Store.
+        self.is_sky_managed = is_sky_managed
+
+        self.client = None
+        self.bucket = None
         self._validate()
         self.initialize()
 
@@ -149,7 +152,41 @@ class AbstractStore:
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        pass
+        self.client = self._get_client()
+        self.bucket, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed:
+            # If is_sky_managed, either the object is being reconstructed from
+            # global_user_state or force_managed was used for storage init.
+            # Check that we have required permissions on the store object to
+            # mark it as is_sky_managed=True.
+            if not self._check_permissions():
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageInitError(f'Unable to assert ownership of bucket {self.name} - insufficient permissions. Cannot use force_managed=True for this store.')
+
+        elif self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def _get_client(self):
+        """Returns a client for the cloud storage API."""
+        raise NotImplementedError()
+
+    def _check_permissions(self):
+        """Checks if the user has read/write/delete permission on the bucket.
+
+        This is used as adequacy check for the is_sky_managed property. The
+        permissions are checked by verifying if the user is the owner of
+        the bucket.
+
+        Returns:
+            True if the user has read/write/delete permissions on the bucket.
+            False otherwise.
+        Raises:
+            exceptions.StorageInitError: If the user does not have permissions to check the bucket ACL or fetching the user id fails.
+        """
 
     def _validate(self) -> None:
         """Runs validation checks on class args"""
@@ -257,22 +294,18 @@ class Storage(object):
 
         - (required) Storage name.
         - (required) Source
-        - (optional) Set of stores managed by sky added to the Storage object
         """
 
-        def __init__(
-            self,
-            *,
-            storage_name: str,
-            source: str,
-            sky_stores: Optional[Dict[StoreType,
-                                      AbstractStore.StoreMetadata]] = None):
+        def __init__(self,
+                     *,
+                     storage_name: str,
+                     source: str):
             assert storage_name is not None or source is not None
             self.storage_name = storage_name
             self.source = source
             # Only stores managed by sky are stored here in the
             # global_user_state
-            self.sky_stores = {} if sky_stores is None else sky_stores
+            self.sky_stores = {}
 
         def __repr__(self):
             return (f'StorageMetadata('
@@ -292,10 +325,10 @@ class Storage(object):
     def __init__(self,
                  name: Optional[str] = None,
                  source: Optional[Path] = None,
-                 stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 force_managed: bool = False):
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -324,7 +357,6 @@ class Storage(object):
           source: str; File path where the data is initially stored. Can be a
             local path or a cloud URI (s3://, gs://, etc.). Local paths do not
             need to be absolute.
-          stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
           mode: StorageMode; Specify how the storage object is manifested on
             the remote VM. Can be either MOUNT or COPY. Defaults to MOUNT.
@@ -332,6 +364,9 @@ class Storage(object):
             object is found in the global_user_state and reconstructed from
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for sky storage delete.
+          force_managed: bool; If set to true, forces all added stores to be
+            sky managed. This is useful when the storage's buckets were created
+            externally but the user wants to manage their lifecycle through sky.
         """
         self.name = name
         self.source = source
@@ -339,13 +374,12 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
+        self.force_managed = force_managed
 
         # Validate and correct inputs if necessary
         self._validate_storage_spec()
 
-        # Sky optimizer either adds a storage object instance or selects
-        # from existing ones
-        self.stores = {} if stores is None else stores
+        self.stores = {}
 
         # Logic to rebuild Storage if it is in global user state
         self.handle = global_user_state.get_handle_from_storage_name(self.name)
@@ -355,7 +389,7 @@ class Storage(object):
                         f'loading Storage: {self.name}')
             for s_type, s_metadata in self.handle.sky_stores.items():
                 # When initializing from global_user_state, we override the
-                # source from the YAML
+                # source and force_managed from the YAML
                 if s_type == StoreType.S3:
                     store = S3Store.from_metadata(s_metadata,
                                                   source=self.source)
@@ -380,15 +414,8 @@ class Storage(object):
 
         else:
             # Storage does not exist in global_user_state, create new stores
-            sky_managed_stores = {
-                t: s.get_metadata()
-                for t, s in self.stores.items()
-                if s.is_sky_managed()
-            }
             self.handle = self.StorageMetadata(storage_name=self.name,
-                                               source=self.source,
-                                               sky_stores=sky_managed_stores)
-
+                                               source=self.source)
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
@@ -398,14 +425,14 @@ class Storage(object):
                     self.add_store(StoreType.GCS)
 
     @staticmethod
-    def _validate_source(source: str, mode: StorageMode,
+    def _validate_source(source: Optional[str], mode: StorageMode,
                          sync_on_reconstruction: bool) -> Tuple[str, bool]:
         """Validates the source path.
 
         Args:
-          source: str; File path where the data is initially stored. Can be a
+          source: str or None; File path where the data is initially stored. Can be a
             local path or a cloud URI (s3://, gs://, etc.). Local paths do not
-            need to be absolute.
+            need to be absolute. Can be None, in which case it is a valid source.
           mode: StorageMode; StorageMode of the storage object
 
         Returns:
@@ -413,6 +440,9 @@ class Storage(object):
           source: str; The source path.
           is_local_path: bool; Whether the source is a local path. False if URI.
         """
+        # None is a valid source for MOUNT mode buckets initialized by sky.
+        if source is None:
+            return source, False
         # Check if source is a valid local/remote URL
         split_path = urllib.parse.urlsplit(source)
         if split_path.scheme == '':
@@ -458,7 +488,16 @@ class Storage(object):
     def _validate_storage_spec(self) -> None:
         """
         Validates the storage spec and updates local fields if necessary.
+
+        Has two logical branches - if the storage is being reconstructed, then
+        it verifies only if the source is correct and still exists. Otherwise,
+        it runs the full validation including checking the source and name.
         """
+        source, is_local_source = Storage._validate_source(
+            self.source, self.mode, self.sync_on_reconstruction)
+        if self.sync_on_reconstruction:
+            # Reconstructed storages need only source validation.
+            return
         if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
@@ -487,9 +526,6 @@ class Storage(object):
                     # Create bucket and mount
                     return
         elif self.source is not None:
-            source, is_local_source = Storage._validate_source(
-                self.source, self.mode, self.sync_on_reconstruction)
-
             if not self.name:
                 if is_local_source:
                     with ux_utils.print_exception_no_traceback():
@@ -541,8 +577,9 @@ class Storage(object):
                     f'{store_type} not supported as a Store.')
 
         # Initialize store object and get/create bucket
+        is_sky_managed = True if self.force_managed else None
         try:
-            store = store_cls(name=self.name, source=self.source)
+            store = store_cls(name=self.name, source=self.source, is_sky_managed=is_sky_managed)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
@@ -613,8 +650,8 @@ class Storage(object):
         else:
             for _, store in self.stores.items():
                 if store.is_sky_managed:
-                    self.handle.remove_store(store)
                     store.delete()
+                    self.handle.remove_store(store)
             self.stores = {}
             # Remove storage from global_user_state if present
             global_user_state.remove_storage(self.name)
@@ -721,25 +758,43 @@ class S3Store(AbstractStore):
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
 
-    def initialize(self):
-        """Initializes the S3 store object on the cloud.
+    def _get_client(self):
+        """Returns a client for the S3 API."""
+        return data_utils.create_s3_client(self.region)
 
-        Initialization involves fetching bucket if exists, or creating it if
-        it does not.
+    def _check_permissions(self):
+        """Checks if the user has read/write/delete permission on the bucket.
 
+        This is used as adequacy check for the is_sky_managed property. The
+        permissions are checked by verifying if the user is the owner of
+        the bucket.
+
+        Returns:
+            True if the user has read/write/delete permissions on the bucket.
+            False otherwise.
         Raises:
-          StorageBucketCreateError: If bucket creation fails
-          StorageBucketGetError: If fetching existing bucket fails
-          StorageInitError: If general initialization fails.
+            exceptions.StorageInitError: If the user does not have permissions to check the bucket ACL or fetching the user id fails.
         """
-        self.client = data_utils.create_s3_client(self.region)
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+        # TODO(romilb): User may have sufficient permissions even though the
+        #  user may not be the owner of the bucket. This is hard to check
+        #  without actually performing r/w/d operations on the bucket.
+        #  Ownership check is simpler and used for now.
+        # First get the user's canonical id for s3
+        try:
+            user_id = self.client.list_buckets()['Owner']['ID']
+        except (aws.client_exception(), KeyError) as e:
+            raise exceptions.StorageInitError(
+                f'Failed to get user id for checking permissions.') from e
+        # Get the bucket owner's canonical id
+        try:
+            owner_id = self.client.get_bucket_acl(Bucket=self.name)['Owner']['ID']
+        except aws.client_exception() as e:
+            raise exceptions.StorageInitError(
+                f'Failed to get bucket ACL for bucket {self.name}.') from e
+        except KeyError as e:
+            raise exceptions.StorageInitError(
+                f'Owner or ID field not found in bucket ACL response.') from e
+        return user_id == owner_id
 
     def upload(self):
         """Uploads source to store bucket.
@@ -972,25 +1027,9 @@ class GcsStore(AbstractStore):
                     'GCS Bucket is specified as path, the name should be the '
                     'same as GCS bucket.')
 
-    def initialize(self):
-        """Initializes the GCS store object on the cloud.
-
-        Initialization involves fetching bucket if exists, or creating it if
-        it does not.
-
-        Raises:
-          StorageBucketCreateError: If bucket creation fails
-          StorageBucketGetError: If fetching existing bucket fails
-          StorageInitError: If general initialization fails.
-        """
-        self.client = gcp.storage_client()
-        self.bucket, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+    def _get_client(self):
+        """Returns a client for the GCS API."""
+        return gcp.storage_client()
 
     def upload(self):
         """Uploads source to store bucket.
