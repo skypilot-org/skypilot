@@ -2215,8 +2215,7 @@ def admin_deploy(clusterspec_yaml: str):
     backend_utils.save_distributable_yaml(yaml_config)
     click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
     click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
-                fg='green',
-                nl=False)
+                fg='green')
 
 
 # Managed Spot CLIs

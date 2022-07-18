@@ -899,6 +899,7 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
         # Ray cluster to prepare the user's job. Due to Ray's limitations,
         # this is ran under the admin's environment, which requires Sky to be
         # installed globally.
+        # TODO(mluo): Make Sky admin only.
         run_command_and_handle_ssh_failure(
             runner,
             'sudo sky --help',
