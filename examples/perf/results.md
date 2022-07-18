@@ -1,4 +1,4 @@
-# Sky Benchmarks
+# Performance benchmarks for Sky
 
 This directory is a collection of YAMLs used to benchmark Sky's performance. 
 

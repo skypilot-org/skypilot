@@ -30,6 +30,9 @@ setup: |
   sudo apt install -y fio
 
 run: |
+  purge_io () {
+   echo 'hello, world'
+  }
   echo "Purging I/O caches..."
   echo 3 | sudo tee /proc/sys/vm/drop_caches
   echo "Running EBS read benchmark..."
