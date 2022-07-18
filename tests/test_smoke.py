@@ -119,6 +119,7 @@ def test_minimal():
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky logs {name} --status | grep "Job 1 SUCCEEDED"',  # Equivalent.
         ],
         f'sky down -y {name}',
     )
