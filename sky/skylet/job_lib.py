@@ -131,6 +131,19 @@ def get_status(job_id: int) -> Optional[JobStatus]:
             return None
         return JobStatus[status]
 
+def get_statuses_json(job_ids: List[int]) -> str:
+    query_str = ','.join(['?'] * len(job_ids))
+    rows = _CURSOR.execute(
+        f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
+        job_ids)
+    statuses = {}
+    for (job_id, status) in rows:
+        statuses[job_id] = status
+    return json.dumps(statuses)
+
+def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
+    statuses = json.loads(statuses_json)
+    return {job_id: JobStatus[status] for (job_id, status) in statuses.items()}
 
 def get_latest_job_id() -> Optional[int]:
     rows = _CURSOR.execute(
@@ -496,14 +509,13 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: Optional[int] = None) -> str:
+    def get_job_status(cls, job_ids: Optional[List[int]] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
         code = [
-            f'job_id = {job_id} if {job_id} is not None '
-            'else job_lib.get_latest_job_id()',
-            'job_status = job_lib.get_status(job_id)',
-            'status_str = None if job_status is None else job_status.value',
-            'print("Job", job_id, status_str, flush=True)',
+            f'job_ids = {job_ids} if {job_ids} is not None '
+            'else [job_lib.get_latest_job_id()]',
+            'job_statuses = job_lib.get_statuses_json(job_ids)',
+            'print(job_statuses, flush=True)',
         ]
         return cls._build(code)
 

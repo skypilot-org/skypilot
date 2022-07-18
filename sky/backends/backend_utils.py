@@ -804,7 +804,7 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
     return ssh_user, ssh_private_key, ssh_control_name
 
 
-def parallel_data_transfer_to_nodes(
+def parallel_data_transfer_with_nodes(
     runners: List[command_runner.SSHCommandRunner],
     source: str,
     target: str,
@@ -853,7 +853,7 @@ def parallel_data_transfer_to_nodes(
         if run_rsync:
             # TODO(zhwu): Optimize for large amount of files.
             # zip / transfer/ unzip
-            runner.rsync_up(
+            runner.rsync(
                 source=source,
                 target=target,
                 log_path=log_path,

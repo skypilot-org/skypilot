@@ -261,11 +261,12 @@ class SSHCommandRunner:
                                     executable=executable,
                                     **kwargs)
 
-    def rsync_up(
+    def rsync(
         self,
         source: str,
         target: str,
         *,
+        up: bool = True,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
@@ -291,16 +292,24 @@ class SSHCommandRunner:
         ssh_options = ' '.join(
             _ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{self.ssh_user}@{self.ip}:{target}',
-        ])
+        if up:
+            rsync_command.extend([
+                source,
+                f'{self.ssh_user}@{self.ip}:{target}',
+            ])
+        else:
+            rsync_command.extend([
+                f'{self.ssh_user}@{self.ip}:{source}',
+                target,
+            ])
         command = ' '.join(rsync_command)
 
         returncode = log_lib.run_with_log(command,
                                           log_path=log_path,
                                           stream_logs=stream_logs,
                                           shell=True)
+        direction = 'up' if up else 'down'
         subprocess_utils.handle_returncode(
-            returncode, command, f'Failed to rsync up {source} -> {target}, '
+            returncode, command,
+            f'Failed to rsync {direction}: {source} -> {target}, '
             f'see {log_path} for details.')

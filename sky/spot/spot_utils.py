@@ -53,7 +53,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     status = None
     try:
         logger.info('=== Checking the job status... ===')
-        status = backend.get_job_status(handle, stream_logs=False)
+        status = backend.get_job_status(handle, stream_logs=False)[0]
         logger.info(f'Job status: {status}')
     except exceptions.CommandError:
         logger.info('Failed to connect to the cluster.')
@@ -222,7 +222,7 @@ def stream_logs_by_id(job_id: int) -> str:
             # not updated yet.
             job_status = backend.get_job_status(handle,
                                                 job_id=None,
-                                                stream_logs=False)
+                                                stream_logs=False)[0]
             logger.info(f'Logs finished for job {job_id} '
                         f'(status: {job_status.value}).')
             break

@@ -29,6 +29,7 @@ each other.
 """
 import functools
 import getpass
+from operator import le
 import os
 import shlex
 import sys
@@ -1007,44 +1008,23 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
 
     If JOB_ID is not provided, tails the logs of the last job on the cluster.
     """
-    cluster_name = cluster
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
-                                 ' (see `sky status`).')
-    backend = backend_utils.get_backend_from_handle(handle)
-    if isinstance(backend, backends.LocalDockerBackend):
-        raise click.UsageError('Sky logs is not available with '
-                               'LocalDockerBackend.')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        click.secho(
-            f'Cluster {cluster_name} is not up '
-            f'(status: {cluster_status.value}).',
-            fg='yellow')
-        return
 
     if sync_down and status:
         raise click.UsageError(
-            'Both --sync_down and --status are specified '
-            '(ambiguous). To fix: specify at most one of them.')
+                'Both sync_down and status are specified '
+                '(ambiguous). To fix: specify at most one of them.')
+    
+    if job_id is not None and len(job_id) > 1 and not sync_down:
+        raise click.UsageError('Cannot stream logs of multiple jobs. '
+                        'Set --sync_down to download them.')
 
     if sync_down:
-        click.secho('Syncing down logs to local...', fg='yellow')
-        backend.sync_down_logs(handle, job_id)
+        job_id = [job_id] if job_id is not None else None
+        core.download_logs(cluster, job_id)
         return
-
-    if job_id is not None and not job_id.isdigit():
-        click.secho(
-            'Only single job ID supported for streaming or status check, '
-            'consider using --sync_down to download logs for multiple jobs.',
-            fg='yellow')
-        return
-    job_id = int(job_id) if job_id is not None else job_id
     if status:
-        # FIXME(zongheng,zhwu): non-existent job ids throw:
-        # TypeError: expected str, bytes or os.PathLike object, not tuple
-        job_status = backend.get_job_status(handle, job_id)
+        job_id = [job_id] if job_id is not None else None
+        job_status = core.job_status(cluster, job_id)[0]
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
@@ -1053,8 +1033,9 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
                 f'{job_status.value}',
                 fg='red')
             sys.exit(1)
-    else:
-        backend.tail_logs(handle, job_id)
+
+    core.tail_logs(cluster, job_id)
+
 
 
 @cli.command()

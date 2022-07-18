@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import colorama
 import getpass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sky import dag
 from sky import task
@@ -186,6 +186,30 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
 # ==================
 
 
+def _check_cluster_available(cluster_name: str,
+                             operation: str) -> backends.Backend.ResourceHandle:
+    """Check if the cluster is available."""
+    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+        cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    if isinstance(backend, backends.LocalDockerBackend):
+        # LocalDockerBackend does not support job queues
+        raise exceptions.NotSupportedError(
+            f'Cluster {cluster_name} with LocalDockerBackend does '
+            f'not support {operation}.')
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        raise exceptions.ClusterNotUpError(
+            f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
+            f'(status: {cluster_status.value}); skipped.'
+            f'{colorama.Style.RESET_ALL}')
+
+    if handle.head_ip is None:
+        raise exceptions.ClusterNotUpError(
+            f'Cluster {cluster_name!r} has been stopped or not properly set up.'
+            ' Please re-launch it with `sky start`.')
+    return handle
+
+
 def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False):
@@ -219,26 +243,10 @@ def queue(cluster_name: str,
         username = None
     code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
 
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
+    handle = _check_cluster_available(cluster_name, 'getting the job queue')
     backend = backend_utils.get_backend_from_handle(handle)
-    if isinstance(backend, backends.LocalDockerBackend):
-        # LocalDockerBackend does not support job queues
-        raise exceptions.NotSupportedError(
-            f'Cluster {cluster_name} with LocalDockerBackend does '
-            'not support job queues')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        raise exceptions.ClusterNotUpError(
-            f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
-            f'(status: {cluster_status.value}); skipped.'
-            f'{colorama.Style.RESET_ALL}')
 
     logger.info(f'\nSky Job Queue of Cluster {cluster_name}')
-    if handle.head_ip is None:
-        raise exceptions.ClusterNotUpError(
-            f'Cluster {cluster_name} has been stopped or not properly set up. '
-            'Please re-launch it with `sky launch` to view the job queue.')
-
     returncode, jobs_json, stderr = backend.run_on_head(handle,
                                                         code,
                                                         require_outputs=True)
@@ -262,7 +270,6 @@ def cancel(cluster_name: str,
         ValueError: arguments are invalid or the cluster is not supported.
         sky.exceptions.ClusterNotUpError: the cluster is not up.
         sky.exceptions.NotSupportedError: the feature is not supported.
-        # TODO(zhwu): more exceptions from the backend.
     """
     job_ids = [] if job_ids is None else job_ids
     if len(job_ids) == 0 and not all:
@@ -274,24 +281,8 @@ def cancel(cluster_name: str,
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
-    if handle is None:
-        raise ValueError(f'Cluster {cluster_name!r} not found'
-                         ' (see `sky status`).')
+    handle = _check_cluster_available(cluster_name, 'cancelling jobs')
     backend = backend_utils.get_backend_from_handle(handle)
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Job cancelling is only supported for '
-                f'{backends.CloudVmRayBackend.NAME}, but cluster '
-                f'{cluster_name!r} is created by {backend.NAME}.')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(
-                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
-                f'(status: {cluster_status.value}); skipped.'
-                f'{colorama.Style.RESET_ALL}')
 
     if all:
         logger.info(f'{colorama.Fore.YELLOW}'
@@ -306,6 +297,84 @@ def cancel(cluster_name: str,
             f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
+
+
+def tail_logs(cluster_name: str,
+              job_id: Optional[str],
+              status: bool = False) -> Union[None, List[str], job_lib.JobStatus]:
+    """Tail the logs of a job.
+
+    Please refer to the sky.cli.tail_logs for the document.
+    
+    Returns:
+        Union[None, List[str], job_lib.JobStatus]:
+        - When `sync_down` and `status` are False, returns None, and the logs will
+            be printed to stdout.
+        - When `sync_down` is True, returns a list of local log paths.
+        - When `status` is True, returns the job status.
+    Raises:
+        ValueError: arguments are invalid or the cluster is not supported.
+        sky.exceptions.ClusterNotUpError: the cluster is not up.
+        sky.exceptions.NotSupportedError: the feature is not supported.
+    """
+    # Check the status of the cluster.
+    handle = _check_cluster_available(cluster_name, 'tailing logs')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    job_str = f'job {job_id}'
+    if job_id is None:
+        job_str = 'the last job'
+    logger.info(f'{colorama.Fore.YELLOW}'
+                f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
+                f'{colorama.Style.RESET_ALL}')
+
+    backend.tail_logs(handle, job_id)
+
+def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> List[str]:
+    """Download the logs of jobs.
+    
+    Args:
+        cluster_name: (str) name of the cluster.
+        job_ids: (List[str]) job ids.
+    Returns:
+        List[str]: local log paths.
+    """
+    # Check the status of the cluster.
+    handle = _check_cluster_available(cluster_name, 'tailing logs')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    if job_ids is not None and len(job_ids) == 0:
+        return []
+    
+    logger.info(f'{colorama.Fore.YELLOW}'
+                'Syncing down logs to local...'
+                f'{colorama.Style.RESET_ALL}')
+    local_log_dirs = backend.sync_down_logs(handle, job_ids)
+    return local_log_dirs
+
+def job_status(cluster_name: str, job_ids: Optional[List[str]], stream_logs: bool=False) -> List[Optional[job_lib.JobStatus]]:
+    """Get the status of jobs.
+    
+    Args:
+        cluster_name: (str) name of the cluster.
+        job_ids: (List[str]) job ids. If None, get the status of the last job.
+    Returns:
+        List[job_lib.JobStatus]: job statuses. The status will be None if the job
+            does not exist.
+    """
+    # Check the status of the cluster.
+    handle = _check_cluster_available(cluster_name, 'getting job status')
+    backend = backend_utils.get_backend_from_handle(handle)
+
+    if job_ids is not None and len(job_ids) == 0:
+        return []
+    
+    logger.info(f'{colorama.Fore.YELLOW}'
+                'Getting job status...'
+                f'{colorama.Style.RESET_ALL}')
+    # FIXME(zongheng,zhwu): non-existent job ids throw:
+    # TypeError: expected str, bytes or os.PathLike object, not tuple
+    return backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
 
 
 # =======================
