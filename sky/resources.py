@@ -305,8 +305,13 @@ class Resources:
 
     def _try_validate_accelerators(self) -> None:
         """Try-validates accelerators against the instance type."""
-        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
-            # GCP attaches accelerators to VMs, so no need for this check.
+        if not self.is_launchable():
+            return
+
+        if isinstance(self.cloud, clouds.GCP):
+            self.cloud.check_host_accelerator_compatibility(
+                self._instance_type, self.accelerators)
+        else:
             acc_requested = self.accelerators
             if acc_requested is None:
                 return

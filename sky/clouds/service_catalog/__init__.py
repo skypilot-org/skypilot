@@ -159,6 +159,15 @@ def get_region_zones_for_accelerators(
                                acc_name, acc_count, use_spot)
 
 
+def check_host_accelerator_compatibility(instance_type: str,
+                                         accelerators: Optional[Dict[str, int]],
+                                         zone: Optional[str] = None,
+                                         clouds: CloudFilter = None) -> None:
+    """Check if GCP host VM type is compatible with the accelerators."""
+    _map_clouds_catalog(clouds, 'check_host_accelerator_compatibility',
+                        instance_type, accelerators, zone)
+
+
 def get_common_gpus() -> List[str]:
     """Returns a list of commonly used GPU names."""
     return [
