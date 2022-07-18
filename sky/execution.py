@@ -206,11 +206,9 @@ def launch(
     cluster_name: Optional[str] = None,
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
-    is_spot_controller_task: bool = False,
 ) -> None:
-    if not is_spot_controller_task:
-        backend_utils.check_cluster_name_not_reserved(
-            cluster_name, operation_str='sky.launch')
+    backend_utils.check_cluster_name_not_reserved(cluster_name,
+                                                  operation_str='sky.launch')
     _execute(
         dag=dag,
         dryrun=dryrun,
@@ -265,6 +263,7 @@ def exec(  # pylint: disable=redefined-builtin
 def spot_launch(
     dag: sky.Dag,
     name: Optional[str] = None,
+    stream_logs: bool = True,
     detach_run: bool = False,
 ) -> None:
     """Launch a managed spot job.
@@ -372,10 +371,11 @@ def spot_launch(
                     f'Launching managed spot job {name} from spot controller...'
                     f'{colorama.Style.RESET_ALL}')
         logger.info('Launching spot controller...')
-        sky.launch(spot_dag,
-                   stream_logs=True,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=spot.
-                   SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   is_spot_controller_task=True)
+        _execute(
+            dag=dag,
+            stream_logs=stream_logs,
+            cluster_name=controller_name,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=spot.
+            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+        )
