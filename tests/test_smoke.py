@@ -175,6 +175,28 @@ def test_file_mounts():
     run_one_test(test)
 
 
+# ---------- CLI logs ----------
+def test_cli_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'cli_logs',
+        [
+            f'sky launch -y -c {name} --num-nodes 2 "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 def test_job_queue():
     name = _get_cluster_name()

@@ -1023,7 +1023,7 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
         core.download_logs(cluster, job_ids)
         return
 
-    assert len(job_ids) <= 1, job_ids
+    assert job_ids is None or len(job_ids) <= 1, job_ids
     job_id = None
     if job_ids:
         job_id = job_ids[0]
