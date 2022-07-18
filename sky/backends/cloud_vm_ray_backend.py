@@ -1735,10 +1735,11 @@ class CloudVmRayBackend(backends.Backend):
     # --- CloudVMRayBackend Specific APIs ---
 
     def get_job_status(
-            self,
-            handle: ResourceHandle,
-            job_ids: Optional[List[str]] = None,
-            stream_logs: bool = True) -> List[Optional[job_lib.JobStatus]]:
+        self,
+        handle: ResourceHandle,
+        job_ids: Optional[List[str]] = None,
+        stream_logs: bool = True
+    ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
@@ -1748,10 +1749,7 @@ class CloudVmRayBackend(backends.Backend):
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stdout)
         statuses = job_lib.load_statuses_json(stdout)
-        if job_ids is None:
-            return list(statuses.values())
-        assert len(statuses) == len(job_ids)
-        return [statuses[job_id] for job_id in job_ids]
+        return statuses
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
         code = job_lib.JobLibCodeGen.cancel_jobs(jobs)
@@ -1766,7 +1764,12 @@ class CloudVmRayBackend(backends.Backend):
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
     def sync_down_logs(self, handle: ResourceHandle,
-                       job_ids: Optional[str]) -> None:
+                       job_ids: Optional[str]) -> Dict[str, str]:
+        """Sync down logs for the given job_ids.
+
+        Returns:
+            A dictionary mapping job_id to log path.
+        """
         code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
         returncode, log_dirs, stderr = self.run_on_head(handle,
                                                         code,
@@ -1774,18 +1777,18 @@ class CloudVmRayBackend(backends.Backend):
                                                         require_outputs=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        log_dirs = ast.literal_eval(log_dirs)
-        if not log_dirs or len(log_dirs) == 0:
+        log_dirs = json.loads(log_dirs)
+        if not log_dirs:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
             return
 
-        job_ids = [log_dir[0] for log_dir in log_dirs]
+        job_ids = list(log_dirs.keys())
+        remote_log_dirs = list(log_dirs.values())
         local_log_dirs = [
-            os.path.expanduser(log_dir[1]) for log_dir in log_dirs
+            os.path.expanduser(log_dir) for log_dir in remote_log_dirs
         ]
-        remote_log_dirs = [log_dir[1] for log_dir in log_dirs]
 
         style = colorama.Style
         fore = colorama.Fore
@@ -1828,7 +1831,7 @@ class CloudVmRayBackend(backends.Backend):
                          for item in zip(local_log_dirs, remote_log_dirs)
                          for runner in runners]
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
-        return local_log_dirs
+        return log_dirs
 
     def tail_logs(self,
                   handle: ResourceHandle,

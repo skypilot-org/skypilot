@@ -176,7 +176,7 @@ def test_file_mounts():
 
 
 # ---------- CLI logs ----------
-def test_cli_logs():
+def test_logs():
     name = _get_cluster_name()
     timestamp = time.time()
     test = Test(

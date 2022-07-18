@@ -132,7 +132,7 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return JobStatus[status]
 
 
-def get_statuses_json(job_ids: List[int]) -> str:
+def get_statuses_json(job_ids: List[Optional[int]]) -> str:
     query_str = ','.join(['?'] * len(job_ids))
     rows = _CURSOR.execute(
         f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
@@ -421,7 +421,7 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 
-def log_dir(job_id: int) -> Optional[str]:
+def log_dir(job_id: Optional[int]) -> Optional[str]:
     """Returns the relative path to the log file for a job."""
     _CURSOR.execute(
         """\
@@ -434,7 +434,7 @@ def log_dir(job_id: int) -> Optional[str]:
     return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
 
 
-def log_dirs_with_globbing(job_ids: List[str]) -> List[str]:
+def log_dirs_with_globbing_json(job_ids: List[Optional[str]]) -> Dict[str, str]:
     """Returns the relative paths to the log files for job with globbing."""
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
     _CURSOR.execute(
@@ -442,15 +442,13 @@ def log_dirs_with_globbing(job_ids: List[str]) -> List[str]:
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _CURSOR.fetchall()
-    if len(rows) == 0:
-        return None
-    log_paths = []
+    log_paths = dict()
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         log_path = os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
-        log_paths.append((job_id, log_path))
-    return log_paths
+        log_paths[str(job_id)] = log_path
+    return json.dumps(log_paths)
 
 
 class JobLibCodeGen:
@@ -551,7 +549,7 @@ class JobLibCodeGen:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.log_dirs_with_globbing(job_ids)',
+            'log_dirs = job_lib.log_dirs_with_globbing_json(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

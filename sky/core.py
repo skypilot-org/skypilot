@@ -1,7 +1,7 @@
 """SDK functions for cluster/job management."""
 import colorama
 import getpass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag
 from sky import task
@@ -24,7 +24,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool):
+def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
     """Get the cluster status in dict.
 
     Please refer to the sky.cli.status for the document.
@@ -46,16 +46,10 @@ def status(all: bool, refresh: bool):
     return cluster_records
 
 
-def start(cluster_name: str,
-          idle_minutes_to_autostop: Optional[int] = None,
-          retry_until_up: bool = False):
-    """Start the cluster.
+def _start(cluster_name: str,
+           idle_minutes_to_autostop: Optional[int] = None,
+           retry_until_up: bool = False) -> backends.Backend.ResourceHandle:
 
-    Please refer to the sky.cli.start for the document.
-
-    Raises:
-        sky.exceptions.NotSupportedError: the cluster is not supported.
-    """
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if cluster_status == global_user_state.ClusterStatus.UP:
@@ -82,6 +76,19 @@ def start(cluster_name: str,
     if idle_minutes_to_autostop is not None:
         backend.set_autostop(handle, idle_minutes_to_autostop)
     return handle
+
+
+def start(cluster_name: str,
+          idle_minutes_to_autostop: Optional[int] = None,
+          retry_until_up: bool = False):
+    """Start the cluster.
+
+    Please refer to the sky.cli.start for the document.
+
+    Raises:
+        sky.exceptions.NotSupportedError: the cluster is not supported.
+    """
+    _start(cluster_name, idle_minutes_to_autostop, retry_until_up)
 
 
 def stop(cluster_name: str, purge: bool = False):
@@ -299,19 +306,11 @@ def cancel(cluster_name: str,
     backend.cancel_jobs(handle, job_ids)
 
 
-def tail_logs(
-        cluster_name: str,
-        job_id: Optional[str]) -> Union[None, List[str], job_lib.JobStatus]:
+def tail_logs(cluster_name: str, job_id: Optional[str]):
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
 
-    Returns:
-        Union[None, List[str], job_lib.JobStatus]:
-        - When `sync_down` and `status` are False, returns None, and the logs
-        will be printed to stdout.
-        - When `sync_down` is True, returns a list of local log paths.
-        - When `status` is True, returns the job status.
     Raises:
         ValueError: arguments are invalid or the cluster is not supported.
         sky.exceptions.ClusterNotUpError: the cluster is not up.
@@ -331,14 +330,15 @@ def tail_logs(
     backend.tail_logs(handle, job_id)
 
 
-def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> List[str]:
+def download_logs(cluster_name: str,
+                  job_ids: Optional[List[str]]) -> Dict[str, str]:
     """Download the logs of jobs.
 
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids.
     Returns:
-        List[str]: local log paths.
+        Dict[str, str]: a mapping of job_id to local log path.
     """
     # Check the status of the cluster.
     handle = _check_cluster_available(cluster_name, 'downloading logs')
@@ -354,17 +354,20 @@ def download_logs(cluster_name: str, job_ids: Optional[List[str]]) -> List[str]:
     return local_log_dirs
 
 
-def job_status(cluster_name: str,
-               job_ids: Optional[List[str]],
-               stream_logs: bool = False) -> List[Optional[job_lib.JobStatus]]:
+def job_status(
+        cluster_name: str,
+        job_ids: Optional[List[str]],
+        stream_logs: bool = False) -> Dict[str, Optional[job_lib.JobStatus]]:
     """Get the status of jobs.
 
     Args:
         cluster_name: (str) name of the cluster.
         job_ids: (List[str]) job ids. If None, get the status of the last job.
     Returns:
-        List[job_lib.JobStatus]: job statuses. The status will be None if the
-        job does not exist.
+        Dict[str, Optional[job_lib.JobStatus]]: A mapping of job_id to job
+        statuses. The status will be None if the job does not exist.
+        If job_ids is None and there is no job on the cluster, it will return
+        {None: None}.
     """
     # Check the status of the cluster.
     handle = _check_cluster_available(cluster_name, 'getting job status')
@@ -376,9 +379,9 @@ def job_status(cluster_name: str,
     logger.info(f'{colorama.Fore.YELLOW}'
                 'Getting job status...'
                 f'{colorama.Style.RESET_ALL}')
-    # FIXME(zongheng,zhwu): non-existent job ids throw:
-    # TypeError: expected str, bytes or os.PathLike object, not tuple
-    return backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
+
+    statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
+    return statuses
 
 
 # =======================
@@ -441,9 +444,9 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
                     'Restarting controller for latest status...'
                     f'{colorama.Style.RESET_ALL}')
 
-        handle = start(spot.SPOT_CONTROLLER_NAME,
-                       idle_minutes_to_autostop=spot.
-                       SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+        handle = _start(spot.SPOT_CONTROLLER_NAME,
+                        idle_minutes_to_autostop=spot.
+                        SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
     if handle is None or handle.head_ip is None:
         raise exceptions.ClusterNotUpError('Spot controller is not up.')
@@ -564,7 +567,7 @@ def storage_ls() -> List[Dict[str, Any]]:
     return storages
 
 
-def storage_delete(name: Optional[str] = None) -> None:
+def storage_delete(name: Optional[str] = None):
     """Delete a storage.
 
     Raises:
