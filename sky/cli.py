@@ -240,6 +240,14 @@ _TASK_OPTIONS = [
          'config in the YAML if both are supplied. '
          'Passing "none" resets the config.')),
     click.option(
+        '--instance-type',
+        required=False,
+        type=str,
+        help=('The instance type to use. If specified, overrides the '
+              '"resources.instance_type" config. Passing "none" resets the '
+              'config.'),
+    ),
+    click.option(
         '--num-nodes',
         required=False,
         type=int,
@@ -545,6 +553,7 @@ def _make_dag_from_entrypoint_with_overrides(
     cloud: Optional[str] = None,
     region: Optional[str] = None,
     gpus: Optional[str] = None,
+    instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
@@ -590,6 +599,11 @@ def _make_dag_from_entrypoint_with_overrides(
                 override_params['accelerators'] = None
             else:
                 override_params['accelerators'] = gpus
+        if instance_type is not None:
+            if instance_type.lower() == 'none':
+                override_params['instance_type'] = None
+            else:
+                override_params['instance_type'] = instance_type
         if use_spot is not None:
             override_params['use_spot'] = use_spot
         if disk_size is not None:
@@ -741,6 +755,7 @@ def launch(
     cloud: Optional[str],
     region: Optional[str],
     gpus: Optional[str],
+    instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -770,6 +785,7 @@ def launch(
         cloud=cloud,
         region=region,
         gpus=gpus,
+        instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
         image_id=image_id,
@@ -817,6 +833,7 @@ def exec(
     region: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
+    instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -893,6 +910,7 @@ def exec(
         cloud=cloud,
         region=region,
         gpus=gpus,
+        instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
         num_nodes=num_nodes,
@@ -1963,6 +1981,7 @@ def spot_launch(
     cloud: Optional[str],
     region: Optional[str],
     gpus: Optional[str],
+    instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -1985,6 +2004,7 @@ def spot_launch(
         cloud=cloud,
         region=region,
         gpus=gpus,
+        instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
         image_id=image_id,
