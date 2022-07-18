@@ -66,6 +66,14 @@ _ON_DEMAND_PRICES = {
     'n1-highmem-32': 1.892848,
     'n1-highmem-64': 3.785696,
     'n1-highmem-96': 5.678544,
+    # N1 highcpu
+    'n1-highcpu-2': 0.0708486,
+    'n1-highcpu-4': 0.1416972,
+    'n1-highcpu-8': 0.2833944,
+    'n1-highcpu-16': 0.5667888,
+    'n1-highcpu-32': 1.1335776,
+    'n1-highcpu-64': 2.2671552,
+    'n1-highcpu-96': 3.4007328,
     # n2 standard
     'n2-standard-2': 0.097118,
     'n2-standard-4': 0.194236,
@@ -86,6 +94,16 @@ _ON_DEMAND_PRICES = {
     'n2-highmem-48': 3.541104,
     'n2-highmem-64': 4.721472,
     'n2-highmem-80': 5.90184,
+    # n2 highcpu
+    'n2-highcpu-2': 0.071696,
+    'n2-highcpu-4': 0.143392,
+    'n2-highcpu-8': 0.286784,
+    'n2-highcpu-16': 0.573568,
+    'n2-highcpu-32': 1.147136,
+    'n2-highcpu-48': 1.720704,
+    'n2-highcpu-64': 2.294272,
+    'n2-highcpu-80': 2.86784,
+    'n2-highcpu-96': 3.441408,
     # A2 highgpu for A100
     'a2-highgpu-1g': 0.749750,
     'a2-highgpu-2g': 1.499500,
@@ -116,6 +134,14 @@ _SPOT_PRICES = {
     'n1-highmem-32': 0.398496,
     'n1-highmem-64': 0.796992,
     'n1-highmem-96': 1.195488,
+    # N1 highcpu
+    'n1-highcpu-2': 0.0149156,
+    'n1-highcpu-4': 0.0298312,
+    'n1-highcpu-8': 0.0596624,
+    'n1-highcpu-16': 0.1193248,
+    'n1-highcpu-32': 0.2386496,
+    'n1-highcpu-64': 0.4772992,
+    'n1-highcpu-96': 0.7159488,
     # n2 standard
     'n2-standard-2': 0.02354,
     'n2-standard-4': 0.04708,
@@ -136,6 +162,16 @@ _SPOT_PRICES = {
     'n2-highmem-48': 0.81408,
     'n2-highmem-64': 1.08544,
     'n2-highmem-80': 1.3568,
+    # n2 highcpu
+    'n2-highcpu-2': 0.01736,
+    'n2-highcpu-4': 0.03472,
+    'n2-highcpu-8': 0.06944,
+    'n2-highcpu-16': 0.13888,
+    'n2-highcpu-32': 0.27776,
+    'n2-highcpu-48': 0.41664,
+    'n2-highcpu-64': 0.55552,
+    'n2-highcpu-80': 0.6944,
+    'n2-highcpu-96': 0.83328,
     # A2 highgpu for A100
     'a2-highgpu-1g': 0.224930,
     'a2-highgpu-2g': 0.449847,
