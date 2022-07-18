@@ -1073,12 +1073,8 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         if job_status is None:
-            message = 'Job not found'
-        elif job_id is None:
-            message = f'Job failed with status: {job_status.value}'
-        else:
-            message = f'Job {job_id} failed with status: {job_status.value}'
-        click.secho(message, fg='red')
+            id_str = '' if job_id is None else str(job_id) + ' '
+            click.secho(f'Job {id_str}not found', fg='red')
         sys.exit(1)
     else:
         backend.tail_logs(handle, job_id)
