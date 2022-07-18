@@ -382,6 +382,7 @@ class RayCodeGen:
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
+                time.sleep(1)
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
             """)
         ]
