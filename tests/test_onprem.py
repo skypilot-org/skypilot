@@ -307,6 +307,7 @@ class TestOnprem:
                 # User 1 should not cancel user 2's jobs.
                 f'sky queue {second_cluster_name} | grep "^2\\b" | grep -v CANCELLED',
                 f'sky cancel {second_cluster_name} 2',
+                f'sleep 5',
                 f'sky queue {second_cluster_name} | grep "^2\\b" | grep CANCELLED',
                 f'sky logs {first_cluster_name} 1',
                 f'sky logs {second_cluster_name} 1'

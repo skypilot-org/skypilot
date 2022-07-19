@@ -798,7 +798,8 @@ def run_command_and_handle_ssh_failure(
         raise RuntimeError(
             f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
             f'to {runner.ip} failed. This is most likely due to incorrect '
-            'credentials. Check your credentials and try again.')
+            'credentials or incorrect permissions for the key file. Check '
+            'your credentials and try again.')
     subprocess_utils.handle_returncode(rc,
                                        command,
                                        failure_message,
