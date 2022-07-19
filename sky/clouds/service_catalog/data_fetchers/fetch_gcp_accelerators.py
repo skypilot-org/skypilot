@@ -48,7 +48,10 @@ _ZONE_TO_AVAILABLE_GPUS = {
 # https://cloud.google.com/tpu/docs/regions-zones
 _TPU_TO_AVAILABLE_ZONES = {
     'tpu-v2-8': [
-        'us-central1-b', 'us-central1-c', 'us-central1-f', 'europe-west4-a',
+        'us-central1-b',
+        'us-central1-c',
+        'us-central1-f',
+        'europe-west4-a',
         'asia-east1-c',
     ],
     'tpu-v2-32': ['us-central1-a', 'europe-west4-a'],
@@ -158,7 +161,6 @@ def get_gpu_tpu_df():
             [1],
             [('us-central1', 2048, np.nan), ('europe-west4', 2048, np.nan)],
         ),
-
     }
     acc_data = dict(**gpu_data, **tpu_data)
     rows = []
