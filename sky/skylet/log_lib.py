@@ -351,7 +351,7 @@ def _follow_job_logs(file,
                     time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(f'SKY INFO: Job finished (status: {status.value}).')
+                print(f'INFO: Job finished (status: {status.value}).')
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
@@ -392,11 +392,11 @@ def tail_logs(job_owner: str,
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
             print(
-                f'{colorama.Fore.RED}SKY ERROR: Logs for '
+                f'{colorama.Fore.RED}ERROR: Logs for '
                 f'{job_str} (status: {status.value}) does not exist '
                 f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return
-        print(f'SKY INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+        print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.query_job_status(job_owner, [job_id])[0]
@@ -410,7 +410,7 @@ def tail_logs(job_owner: str,
             for line in _follow_job_logs(
                     log_file,
                     job_id=job_id,
-                    start_streaming_at='SKY INFO: Tip: use Ctrl-C to exit log'):
+                    start_streaming_at='INFO: Tip: use Ctrl-C to exit log'):
                 print(line, end='', flush=True)
     else:
         try:
@@ -418,5 +418,5 @@ def tail_logs(job_owner: str,
                 print(f.read())
         except FileNotFoundError:
             print(
-                f'{colorama.Fore.RED}SKY ERROR: Logs for job {job_id} (status:'
+                f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                 f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

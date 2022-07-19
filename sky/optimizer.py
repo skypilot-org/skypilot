@@ -26,8 +26,8 @@ logger = sky_logging.init_logger(__name__)
 
 Task = task_lib.Task
 
-_DUMMY_SOURCE_NAME = '__dummy-source'
-_DUMMY_SINK_NAME = '__dummy-sink'
+_DUMMY_SOURCE_NAME = 'skypilot-dummy-source'
+_DUMMY_SINK_NAME = 'skypilot-dummy-sink'
 
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[Task, Dict[resources_lib.Resources, float]]
