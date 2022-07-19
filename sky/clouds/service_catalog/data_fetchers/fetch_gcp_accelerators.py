@@ -45,25 +45,26 @@ _ZONE_TO_AVAILABLE_GPUS = {
     'asia-east1-c': [],  # T4, V100, P100
 }
 
+# https://cloud.google.com/tpu/docs/regions-zones
 _TPU_TO_AVAILABLE_ZONES = {
     'tpu-v2-8': [
         'us-central1-b', 'us-central1-c', 'us-central1-f', 'europe-west4-a',
-        'asia-east1-c'
+        'asia-east1-c',
     ],
     'tpu-v2-32': ['us-central1-a', 'europe-west4-a'],
     'tpu-v2-128': ['us-central1-a', 'europe-west4-a'],
     'tpu-v2-256': ['us-central1-a', 'europe-west4-a'],
     'tpu-v2-512': ['us-central1-a', 'europe-west4-a'],
     'tpu-v3-8': [
-        'us-central1-b', 'us-central1-b', 'us-central1-f', 'europe-west4-a'
+        'us-central1-a', 'us-central1-b', 'us-central1-f', 'europe-west4-a'
     ],
-    'tpu-v3-32': ['eruope-west4-a', 'us-east1-d'],
-    'tpu-v3-64': ['eruope-west4-a', 'us-east1-d'],
-    'tpu-v3-128': ['eruope-west4-a', 'us-east1-d'],
-    'tpu-v3-256': ['eruope-west4-a', 'us-east1-d'],
-    'tpu-v3-512': ['eruope-west4-a', 'us-east1-d'],
-    'tpu-v3-1024': ['eruope-west4-a', 'us-east1-d'],
-    'tpu-v3-2048': ['eruope-west4-a', 'us-east1-d'],
+    'tpu-v3-32': ['europe-west4-a', 'us-east1-d'],
+    'tpu-v3-64': ['europe-west4-a', 'us-east1-d'],
+    'tpu-v3-128': ['europe-west4-a', 'us-east1-d'],
+    'tpu-v3-256': ['europe-west4-a', 'us-east1-d'],
+    'tpu-v3-512': ['europe-west4-a', 'us-east1-d'],
+    'tpu-v3-1024': ['europe-west4-a', 'us-east1-d'],
+    'tpu-v3-2048': ['europe-west4-a', 'us-east1-d'],
 }
 
 
@@ -117,10 +118,47 @@ def get_gpu_tpu_df():
             [1],
             [('us-central1', 96, np.nan), ('europe-west4', 96, np.nan)],
         ),
+        'tpu-v2-256': (
+            [1],
+            [('us-central1', 192, np.nan), ('europe-west4', 192, np.nan)],
+        ),
+        'tpu-v2-512': (
+            [1],
+            [('us-central1', 384, np.nan), ('europe-west4', 384, np.nan)],
+        ),
         'tpu-v3-8': (
             [1],
             [('us-central1', 8.00, 2.40), ('europe-west4', 8.80, 2.64)],
         ),
+        'tpu-v3-32': (
+            [1],
+            [('us-central1', 32, np.nan), ('europe-west4', 32, np.nan)],
+        ),
+        'tpu-v3-64': (
+            [1],
+            [('us-central1', 64, np.nan), ('europe-west4', 64, np.nan)],
+        ),
+        'tpu-v3-128': (
+            [1],
+            [('us-central1', 128, np.nan), ('europe-west4', 128, np.nan)],
+        ),
+        'tpu-v3-256': (
+            [1],
+            [('us-central1', 256, np.nan), ('europe-west4', 256, np.nan)],
+        ),
+        'tpu-v3-512': (
+            [1],
+            [('us-central1', 512, np.nan), ('europe-west4', 512, np.nan)],
+        ),
+        'tpu-v3-1024': (
+            [1],
+            [('us-central1', 1024, np.nan), ('europe-west4', 1024, np.nan)],
+        ),
+        'tpu-v3-2048': (
+            [1],
+            [('us-central1', 2048, np.nan), ('europe-west4', 2048, np.nan)],
+        ),
+
     }
     acc_data = dict(**gpu_data, **tpu_data)
     rows = []
