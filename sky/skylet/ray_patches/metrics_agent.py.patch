@@ -1,0 +1,22 @@
+0a1,3
+> # Adapted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/_private/metrics_agent.py
+> # Fixed the problem in https://github.com/sky-proj/sky/issues/990, by adding exception catch for creating the metrics agent.
+> 
+74,79c77,86
+<         self.view_manager.register_exporter(
+<             prometheus_exporter.new_stats_exporter(
+<                 prometheus_exporter.Options(
+<                     namespace="ray",
+<                     port=metrics_export_port,
+<                     address=metrics_export_address)))
+---
+>         try:
+>             stats_exporter = prometheus_exporter.new_stats_exporter(
+>                     prometheus_exporter.Options(
+>                         namespace="ray",
+>                         port=metrics_export_port,
+>                         address=metrics_export_address))
+>         except Exception:
+>             self.view_manager = None
+>         else:
+>             self.view_manager.register_exporter(stats_exporter)
