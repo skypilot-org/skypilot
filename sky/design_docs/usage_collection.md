@@ -47,3 +47,6 @@ To visualize the logs collected, we can connect Grafana to our Loki service:
 3. Use the following settings.
 ![docs](figures/grafana-loki-setup.png)
 
+
+### Notes
+1. The Log Timestamp is the start time of sky entrypoint being called. There is also an `send_time` in the message indicating the time the message is constructed and send to loki (at the end of the call).

@@ -48,6 +48,9 @@ class MessageToReport:
 
     def __init__(self, schema_version: str):
         self.schema_version = schema_version
+        self.start_time: int = int(
+            datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
+        self.send_time: int = None
         self.message_sent: bool = False
 
     def get_properties(self) -> Dict[str, Any]:
@@ -69,7 +72,6 @@ class UsageMessageToReport(MessageToReport):
         self.run_id: str = utils.get_logging_run_id()
 
         # Entry
-        self.time: str = str(time.time())
         self.cmd: str = common_utils.get_pretty_entry_point()
         self.entrypoint: Optional[str] = None  # entrypoint_context
 
@@ -228,17 +230,19 @@ usage_message = UsageMessageToReport()
 messages = {MessageType.USAGE: usage_message}
 
 
-def _send_to_loki(message: str, message_type: MessageType):
+def _send_to_loki(message: MessageToReport, message_type: MessageType):
     """Send the message to the Grafana Loki."""
     if env_options.Options.DISABLE_LOGGING.get():
         return
 
-    log_timestamp = int(
+    message.send_time = int(
         datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
-    enviroment = 'production'
+    log_timestamp = message.start_time
+
+    environment = 'production'
     if env_options.Options.IS_DEVELOPER.get():
-        enviroment = 'development'
-    prom_labels = {'type': message_type.value, 'environment': enviroment}
+        environment = 'development'
+    prom_labels = {'type': message_type.value, 'environment': environment}
 
     headers = {'Content-type': 'application/json'}
     payload = {
@@ -298,7 +302,7 @@ def _send_local_messages():
             # Avoid the fallback entrypoint to send the message again
             # in normal case.
             try:
-                _send_to_loki(str(message), msg_type)
+                _send_to_loki(message, msg_type)
                 message.message_sent = True
             except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                 logger.debug(f'Usage logging for {msg_type.value} '
