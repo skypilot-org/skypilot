@@ -1937,7 +1937,8 @@ class CloudVmRayBackend(backends.Backend):
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stdout)
         result = stdout.strip()
-        if result == 'None':
+        if result.endswith(' None'):
+            # "Job 9876 None"
             return None
         return job_lib.JobStatus(result.split(' ')[-1])
 
