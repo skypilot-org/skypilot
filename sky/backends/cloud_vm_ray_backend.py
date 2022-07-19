@@ -852,6 +852,8 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision.copy(region=region.name),
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+            usage_lib.usage_message.update_final_cluster_status(
+                global_user_state.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
             global_user_state.add_or_update_cluster(cluster_name,
@@ -1268,7 +1270,10 @@ class CloudVmRayBackend(backends.Backend):
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
         usage_lib.usage_message.update_cluster_resources(
-            handle.launched_nodes, handle.launched_resources, launched=True)
+            handle.launched_nodes, launched_resources)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is not None:
+            usage_lib.usage_message.update_cluster_status(record['status'])
 
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
@@ -1321,8 +1326,11 @@ class CloudVmRayBackend(backends.Backend):
                         cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+
             usage_lib.usage_message.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
+            usage_lib.usage_message.update_cluster_status(prev_cluster_status)
+
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             with timeline.Event('backend.provision.wheel_build'):
@@ -1356,6 +1364,8 @@ class CloudVmRayBackend(backends.Backend):
                         # Clean up the cluster's entry in `sky status`.
                         global_user_state.remove_cluster(cluster_name,
                                                          terminate=True)
+                        usage_lib.usage_message.update_final_cluster_status(
+                            None)
                         error_message = (
                             'Failed to provision all possible launchable '
                             'resources.'
@@ -1408,7 +1418,9 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
             usage_lib.usage_message.update_cluster_resources(
-                handle.launched_nodes, handle.launched_resources, launched=True)
+                handle.launched_nodes, handle.launched_resources)
+            usage_lib.usage_message.update_final_cluster_status(
+                global_user_state.ClusterStatus.UP)
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
@@ -1668,8 +1680,6 @@ class CloudVmRayBackend(backends.Backend):
         task: task_lib.Task,
         detach_run: bool,
     ) -> None:
-        usage_lib.usage_message.update_cluster_resources(
-            handle.launched_nodes, handle.launched_resources, launched=True)
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)

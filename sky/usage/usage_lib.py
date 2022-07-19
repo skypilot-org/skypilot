@@ -20,6 +20,7 @@ from sky.utils import env_options
 from sky.usage import utils
 
 if typing.TYPE_CHECKING:
+    from sky import global_user_state
     from sky import resources as resources_lib
     from sky import task as task_lib
 
@@ -74,7 +75,7 @@ class UsageMessageToReport(MessageToReport):
 
         # Basic info for the clusters.
         #: Clusters operated by the command.
-        self.cluster_names: List[str] = []  # update_cluster_name
+        self.cluster_names: Optional[List[str]] = None  # update_cluster_name
         #: Number of clusters in the cluster_names list.
         self.num_related_clusters: Optional[int] = None  # update_cluster_name
         #: The final cloud of the cluster.
@@ -90,12 +91,14 @@ class UsageMessageToReport(MessageToReport):
         #: Use spot
         self.use_spot: Optional[bool] = None  # update_cluster_resources
         #: Resources of the cluster.
-        self.cluster_resources: Optional[Dict[
-            str, Any]] = None  # update_cluster_resources
+        self.resources: Optional[Dict[str,
+                                      Any]] = None  # update_cluster_resources
         #: The number of nodes in the cluster.
-        self.cluster_nodes: Optional[int] = None  # update_cluster_resources
-        #: Whether the cluster is alive.
-        self.cluster_is_launched: bool = False  # update_cluster_resources
+        self.num_nodes: Optional[int] = None  # update_cluster_resources
+        #: The status of the cluster.
+        self.original_cluster_status: Optional[
+            str] = None  # update_original_cluster_status
+        self.final_cluster_status: Optional[str] = None  # update_cluster_status
         #: Whether the cluster is newly launched.
         self.is_new_cluster: bool = False  # set_new_cluster
 
@@ -117,7 +120,7 @@ class UsageMessageToReport(MessageToReport):
         self.task_resources: Optional[Dict[str,
                                            Any]] = None  # update_actual_task
         #: Requested number of nodes
-        self.task_nodes: Optional[int] = None  # update_actual_task
+        self.task_num_nodes: Optional[int] = None  # update_actual_task
         # YAMLs converted to JSON.
         self.user_task_yaml: Optional[str] = None  # update_user_task_yaml
         self.actual_task: Optional[Dict[str, Any]] = None  # update_actual_task
@@ -139,7 +142,7 @@ class UsageMessageToReport(MessageToReport):
 
     def update_actual_task(self, task: 'task_lib.Task'):
         self.actual_task = prepare_json_from_yaml_config(task.to_yaml_config())
-        self.task_nodes = task.num_nodes
+        self.task_num_nodes = task.num_nodes
         if task.resources:
             # resources is not None or empty.
             if len(task.resources) > 1:
@@ -175,10 +178,8 @@ class UsageMessageToReport(MessageToReport):
             self.cluster_names = cluster_name
         self.num_related_clusters = len(self.cluster_names)
 
-    def update_cluster_resources(self,
-                                 num_nodes: int,
-                                 resources: 'resources_lib.Resources',
-                                 launched: bool = False):
+    def update_cluster_resources(self, num_nodes: int,
+                                 resources: 'resources_lib.Resources'):
         self.cloud = str(resources.cloud)
         self.region = resources.region
         self.instance_type = resources.instance_type
@@ -193,9 +194,18 @@ class UsageMessageToReport(MessageToReport):
             self.accelerators = list(resources.accelerators.keys())[0]
             self.num_accelerators = resources.accelerators[self.accelerators]
 
-        self.cluster_is_launched = launched
-        self.cluster_nodes = num_nodes
-        self.cluster_resources = resources.to_yaml_config()
+        self.num_nodes = num_nodes
+        self.resources = resources.to_yaml_config()
+
+    def update_cluster_status(
+            self, original_status: Optional['global_user_state.ClusterStatus']):
+        status = original_status.value if original_status else None
+        self.original_cluster_status = status
+        self.final_cluster_status = status
+
+    def update_final_cluster_status(
+            self, status: Optional['global_user_state.ClusterStatus']):
+        self.final_cluster_status = status.value if status is not None else None
 
     def set_new_cluster(self):
         self.is_new_cluster = True
