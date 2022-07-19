@@ -1,8 +1,8 @@
 """Constants for usage collection."""
 
-LOG_URL = 'http://54.218.118.250:9090/loki/api/v1/push'  # pylint: disable=line-too-long
+LOG_URL = 'http://54.68.242.202:9090/loki/api/v1/push'  # pylint: disable=line-too-long
 
-USAGE_MESSAGE_SCHEMA_VERSION = 8
+USAGE_MESSAGE_SCHEMA_VERSION = 1
 
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 
