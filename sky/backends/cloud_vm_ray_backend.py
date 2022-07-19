@@ -371,8 +371,8 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             returncodes = ray.get(futures)
             if sum(returncodes) != 0:
-                # This waits for all streaming logs to finish.
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
+                # This waits for all streaming logs to finish.
                 time.sleep(1)
                 print('SKY ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
@@ -382,8 +382,9 @@ class RayCodeGen:
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
-                time.sleep(1)
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
+                # This waits for all streaming logs to finish.
+                time.sleep(1)
             """)
         ]
 
