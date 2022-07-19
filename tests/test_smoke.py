@@ -544,8 +544,8 @@ def test_spot_recovery():
             f'--filters Name=tag:ray-cluster-name,Values={name}* '
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
-            'sleep 40',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
+            'sleep 50',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
         ],
@@ -644,6 +644,15 @@ def test_azure_start_stop_two_nodes():
         timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
     )
     run_one_test(test)
+
+
+# ------- Testing the core API --------
+# Most of the core APIs have been tested in the CLI tests.
+# These tests are for testing the return value of the APIs not fully used in CLI.
+def test_core_api():
+    name = _get_cluster_name()
+    sky.launch
+    # TODO(zhwu): Add a test for core api.
 
 
 # ---------- Testing Storage ----------
