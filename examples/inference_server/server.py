@@ -56,7 +56,8 @@ def run_inference():
     )
 
     cmd_output = run_output(f"sky logs {cluster_name}")
-    inference_result = re.findall(rf'{INFERENCE_RESULT_MARKER}((?:[^\n])+)', cmd_output)
+    inference_result = re.findall(rf'{INFERENCE_RESULT_MARKER}((?:[^\n])+)',
+                                  cmd_output)
 
     # Down the cluster in the background
     subprocess.Popen(f"sky down -y {cluster_name}", shell=True)
