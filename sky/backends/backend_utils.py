@@ -43,7 +43,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
-from sky.onprem import onprem_utils
+from sky.backends import onprem_utils
 from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import subprocess_utils

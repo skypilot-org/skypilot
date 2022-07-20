@@ -50,10 +50,10 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
+from sky.backends import onprem_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
-from sky.onprem import onprem_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils import command_runner
