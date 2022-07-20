@@ -520,7 +520,7 @@ def test_spot_recovery():
             f'--filters Name=tag:ray-cluster-name,Values={name}* '
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
-            'sleep 40',
+            'sleep 50',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
