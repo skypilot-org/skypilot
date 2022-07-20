@@ -37,7 +37,7 @@ class SkyLightningCallback(pl.Callback):
         if self._total_steps is not None:
             return self._total_steps
 
-        total_steps = trainer.estimated_stepping_batches()
+        total_steps = trainer.estimated_stepping_batches
         if total_steps == float('inf') or total_steps < 0:
             return None
         return total_steps
