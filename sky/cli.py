@@ -57,6 +57,7 @@ from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -2215,6 +2216,8 @@ def spot_launch(
                 'spot_controller': controller_name,
                 'cluster_name': name,
                 'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
+                'is_dev': env_options.Options.IS_DEVELOPER.get(),
+                'logging_user_hash': usage_lib.get_logging_user_hash()
             },
             output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as dag:

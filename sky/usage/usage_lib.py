@@ -4,6 +4,7 @@ import enum
 import click
 import contextlib
 import datetime
+import hashlib
 import inspect
 import json
 import os
@@ -11,6 +12,7 @@ import time
 import traceback
 import typing
 from typing import Any, Dict, List, Optional, Union
+import uuid
 
 import requests
 
@@ -18,7 +20,6 @@ from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
-from sky.usage import utils
 
 if typing.TYPE_CHECKING:
     from sky import global_user_state
@@ -36,6 +37,25 @@ if not env_options.Options.DISABLE_LOGGING.get():
             click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
     except FileExistsError:
         pass
+
+_run_id = None
+
+
+def _get_logging_run_id():
+    """Returns a unique run id for this logging."""
+    global _run_id
+    if _run_id is None:
+        _run_id = str(uuid.uuid4())
+    return _run_id
+
+
+def get_logging_user_hash():
+    """Returns a unique user-machine specific hash as a user id."""
+    user_id = os.getenv(constants.USAGE_USER_ENV)
+    if user_id and len(user_id) == 8:
+        return user_id
+    hash_str = common_utils.user_and_hostname_hash()
+    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
 
 
 class MessageType(enum.Enum):
@@ -69,8 +89,8 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = utils.get_logging_user_hash()
-        self.run_id: str = utils.get_logging_run_id()
+        self.user: str = get_logging_user_hash()
+        self.run_id: str = _get_logging_run_id()
 
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()
@@ -281,7 +301,7 @@ def _clean_yaml(yaml_info: Dict[str, str]):
                 if callable(contents):
                     contents = inspect.getsource(contents)
 
-                if isinstance(contents, str):
+                if type(contents) in constants.USAGE_MESSAGE_REDACT_TYPES:
                     lines = common_utils.dump_yaml_str({
                         redact_type: contents
                     }).strip().split('\n')

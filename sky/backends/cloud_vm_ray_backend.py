@@ -333,15 +333,16 @@ class RayCodeGen:
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
+            sky_env_vars_dict_str,
             textwrap.dedent(f"""\
         script = {bash_script!r}
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, ip_list)
-
+        
         if script is not None:
             sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
-            {sky_env_vars_dict_str}
+            
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(

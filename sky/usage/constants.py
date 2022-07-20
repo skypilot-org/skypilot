@@ -14,3 +14,6 @@ USAGE_POLICY_MESSAGE = (
     'environment variable SKY_DISABLE_USAGE_COLLECTION=1 when invoking sky.')
 
 USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
+USAGE_MESSAGE_REDACT_TYPES = {str, dict}
+
+USAGE_USER_ENV = 'SKY_USAGE_USER_ID'

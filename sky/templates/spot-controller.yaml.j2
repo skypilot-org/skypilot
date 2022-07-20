@@ -34,3 +34,9 @@ run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID
+
+envs:
+  SKY_USAGE_USER_ID: {{logging_user_hash}}
+{% if is_dev %}
+  SKY_DEV: 1
+{% endif %}
