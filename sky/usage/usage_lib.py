@@ -49,6 +49,10 @@ def _get_logging_run_id():
     return _run_id
 
 
+def _get_current_timestamp_ns() -> int:
+    return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
+
+
 def get_logging_user_hash():
     """Returns a unique user-machine specific hash as a user id."""
     user_id = os.getenv(constants.USAGE_USER_ENV)
@@ -69,14 +73,26 @@ class MessageToReport:
 
     def __init__(self, schema_version: str):
         self.schema_version = schema_version
-        self.start_time: int = int(
-            datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
+        self.reset()
+
+    def reset(self):
+        self.start_time: int = None
         self.send_time: int = None
-        self.message_sent: bool = False
+        self._reset()
+
+    def _reset(self):
+        raise NotImplementedError
+
+    def start(self):
+        if self.start_time is None:
+            self.start_time: int = _get_current_timestamp_ns()
+
+    @property
+    def message_sent(self):
+        return self.send_time is not None or self.start_time is None
 
     def get_properties(self) -> Dict[str, Any]:
         properties = self.__dict__.copy()
-        properties.pop('message_sent')
         return {k: v for k, v in properties.items() if not k.startswith('_')}
 
     def __repr__(self):
@@ -88,6 +104,8 @@ class UsageMessageToReport(MessageToReport):
 
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+
+    def _reset(self):
         # Message identifier.
         self.user: str = get_logging_user_hash()
         self.run_id: str = _get_logging_run_id()
@@ -95,6 +113,8 @@ class UsageMessageToReport(MessageToReport):
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()
         self.entrypoint: Optional[str] = None  # entrypoint_context
+        #: Whether entrypoint is called by sky internal code.
+        self.internal: bool = False  # set_internal
 
         # Basic info for the clusters.
         #: Clusters operated by the command.
@@ -150,7 +170,7 @@ class UsageMessageToReport(MessageToReport):
         # YAMLs converted to JSON.
         self.user_task_yaml: Optional[str] = None  # update_user_task_yaml
         self.actual_task: Optional[Dict[str, Any]] = None  # update_actual_task
-        self.ray_yamls: List[Dict[str, Any]] = []
+        self.ray_yamls: Optional[List[Dict[str, Any]]] = None
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
         self.runtimes: Dict[str, int] = {}  # update_runtime
@@ -162,6 +182,9 @@ class UsageMessageToReport(MessageToReport):
 
     def update_entrypoint(self, msg: str):
         self.entrypoint = msg
+
+    def set_internal(self):
+        self.internal = True
 
     def update_user_task_yaml(self, yaml_config_or_path: Union[Dict, str]):
         self.user_task_yaml = prepare_json_from_yaml_config(yaml_config_or_path)
@@ -193,6 +216,8 @@ class UsageMessageToReport(MessageToReport):
                     self.task_accelerators]
 
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
+        if self.ray_yamls is None:
+            self.ray_yamls = []
         self.ray_yamls.append(
             prepare_json_from_yaml_config(yaml_config_or_path))
         self.num_tried_regions = len(self.ray_yamls)
@@ -261,8 +286,7 @@ def _send_to_loki(message: MessageToReport, message_type: MessageType):
     if env_options.Options.DISABLE_LOGGING.get():
         return
 
-    message.send_time = int(
-        datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
+    message.send_time = _get_current_timestamp_ns()
     log_timestamp = message.start_time
 
     environment = 'prod'
@@ -283,7 +307,9 @@ def _send_to_loki(message: MessageToReport, message_type: MessageType):
                              headers=headers,
                              timeout=0.5)
     if response.status_code != 204:
-        logger.debug(f'Grafana Loki failed with response: {response.text}')
+        logger.debug(
+            f'Grafana Loki failed with response: {response.text}\n{payload}')
+    message.reset()
 
 
 def _clean_yaml(yaml_info: Dict[str, str]):
@@ -345,7 +371,6 @@ def _send_local_messages():
             # in normal case.
             try:
                 _send_to_loki(message, msg_type)
-                message.message_sent = True
             except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
@@ -364,6 +389,8 @@ def entrypoint_context(name: str, fallback: bool = False):
     """
     is_entry = usage_message.entrypoint is None
     if is_entry and not fallback:
+        for message in messages.values():
+            message.start()
         usage_message.update_entrypoint(name)
     if env_options.Options.DISABLE_LOGGING.get() or not is_entry:
         yield

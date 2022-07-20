@@ -10,6 +10,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
+from sky.usage import usage_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -73,6 +74,7 @@ class StrategyExecutor:
         while True:
             retry_cnt += 1
             try:
+                usage_lib.usage_message.set_internal()
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
                            detach_run=True)
