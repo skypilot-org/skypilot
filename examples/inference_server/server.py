@@ -67,7 +67,7 @@ def run_inference():
             task.set_resources(resources)
             task.set_file_mounts({
                 # Copy model weights to the cluster
-                # Instead of local path, can also specify cloud object store URI
+                # Instead of local path, can also specify a cloud object store URI
                 '/remote/path/to/model-weights': 'local/path/to/model-weights',
                 # Copy image to the cluster
                 remote_image_path: local_image_path,
