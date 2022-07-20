@@ -29,6 +29,7 @@ from sky.benchmark import benchmark_state
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -180,7 +181,9 @@ def _parallel_run_with_interrupt_handling(func: Callable,
             return list(p.imap(func, args))
         except KeyboardInterrupt:
             print()
-            logger.error(_format_err_msg('Interrupted by user.'))
+            logger.error(
+                _format_err_msg('Interrupted by user.'))
+            subprocess_utils.run('sky status')
             sys.exit(1)
 
 
@@ -307,12 +310,18 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
           (job_status is not None and job_status.is_terminal())):
         # The cluster has terminated or stopped, or
         # the cluster is UP and the job has terminated.
-        if end_time is None:
-            # If the end timestamp is not found, it means the benchmarking job
-            # has terminated with non-zero exit code.
-            benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
-        else:
+        if end_time is not None:
+            # The job has terminated with zero exit code.
             benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+        elif job_status == job_lib.JobStatus.SUCCEEDED:
+            # Since we download the benchmark logs before checking the cluster
+            # status, there is a chance that the end timestamp is saved
+            # and the cluster is stopped AFTER we download the logs.
+            # In this case, we consider the current timestamp as the end time.
+            end_time = time.time()
+            benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
+        else:
+            benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
 
     callback_log_dirs = glob.glob(os.path.join(local_dir, 'sky-callback-*'))
     if callback_log_dirs:
@@ -526,10 +535,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 
 def update_benchmark_state(benchmark: str) -> None:
     benchmark_results = benchmark_state.get_benchmark_results(benchmark)
-    if all(result['status'] in [
-            benchmark_state.BenchmarkStatus.TERMINATED,
-            benchmark_state.BenchmarkStatus.FINISHED,
-    ] for result in benchmark_results):
+    if all(result['status'].is_terminal() for result in benchmark_results):
         return
 
     bucket_name = benchmark_state.get_benchmark_from_name(benchmark)['bucket']
