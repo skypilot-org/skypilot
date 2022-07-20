@@ -57,7 +57,7 @@ class MessageToReport:
     def get_properties(self) -> Dict[str, Any]:
         properties = self.__dict__.copy()
         properties.pop('message_sent')
-        return properties
+        return {k: v for k, v in properties.items() if not k.startswith('_')}
 
     def __repr__(self):
         raise NotImplementedError
@@ -101,7 +101,10 @@ class UsageMessageToReport(MessageToReport):
         #: The status of the cluster.
         self.original_cluster_status: Optional[
             str] = None  # update_original_cluster_status
-        self.final_cluster_status: Optional[str] = None  # update_cluster_status
+        self._original_cluster_status_specified: Optional[
+            bool] = False  # update_original_cluster_status
+        self.final_cluster_status: Optional[
+            str] = None  # update_final_cluster_status
         #: Whether the cluster is newly launched.
         self.is_new_cluster: bool = False  # set_new_cluster
 
@@ -203,7 +206,9 @@ class UsageMessageToReport(MessageToReport):
     def update_cluster_status(
             self, original_status: Optional['global_user_state.ClusterStatus']):
         status = original_status.value if original_status else None
-        self.original_cluster_status = status
+        if not self._original_cluster_status_specified:
+            self.original_cluster_status = status
+            self._original_cluster_status_specified = True
         self.final_cluster_status = status
 
     def update_final_cluster_status(
