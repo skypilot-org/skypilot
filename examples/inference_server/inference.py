@@ -1,3 +1,4 @@
+import os
 import sys
 
 INFERENCE_RESULT_MARKER = "INFERENCE RESULT:"
@@ -9,7 +10,7 @@ def run_inference(image_path):
     # Instead of returning the result,
     # print it to stdout so that the server can retrieve the result from the logs
     print(
-        f"{INFERENCE_RESULT_MARKER}This is the result of running inference on the image at '{image_path}'"
+        f"{INFERENCE_RESULT_MARKER}Ran inference on the image at '{image_path}' with size {os.path.getsize(image_path)}B."
     )
 
 
