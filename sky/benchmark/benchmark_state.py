@@ -69,8 +69,19 @@ _BENCHMARK_DB = _BenchmarkSQLiteConn()
 
 
 class BenchmarkStatus(enum.Enum):
-    """Benchmark job status."""
-    # Job status: INIT, PENDING, RUNNING.
+    """Benchmark job status.
+
+    This is different from the job status maintained by the job queue in the
+    following aspects:
+    1. There is no PENDING state, as the benchmarking job is the first job of
+        the cluster.
+    2. The TERMINATED state includes the CANCELLED and FAILED states, as we
+        cannot distinguish the two states when the cluster is not alive.
+    """
+    # Corresponding job status: INIT.
+    INIT = 'INIT'
+
+    # Corresponding job status: RUNNING.
     RUNNING = 'RUNNING'
 
     # Job status: CANCELLED, FAILED.
@@ -130,7 +141,7 @@ def add_benchmark_result(
     _BENCHMARK_DB.cursor.execute(
         'INSERT INTO benchmark_results'
         '(cluster, status, num_nodes, resources, record, benchmark) '
-        'VALUES (?, ?, ?, ?, NULL, ?)', (name, BenchmarkStatus.RUNNING.value,
+        'VALUES (?, ?, ?, ?, NULL, ?)', (name, BenchmarkStatus.INIT.value,
                                          num_nodes, resources, benchmark_name))
     _BENCHMARK_DB.conn.commit()
 

@@ -283,24 +283,33 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
     # Get the status of the benchmarking cluster and job.
     record = global_user_state.get_cluster_from_name(cluster)
     cluster_status = None
+    job_status = None
     if record is not None:
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
             cluster)
         backend = backend_utils.get_backend_from_handle(handle)
         assert isinstance(backend, backends.CloudVmRayBackend)
-    job_status = None
-    if cluster_status == global_user_state.ClusterStatus.UP:
-        # NOTE: The id of the benchmarking job must be 1.
-        # TODO(woosuk): Handle exceptions.
-        job_status = backend.get_job_status(handle, job_id=1, stream_logs=False)
+
+        if cluster_status == global_user_state.ClusterStatus.UP:
+            # NOTE: The id of the benchmarking job must be 1.
+            # TODO(woosuk): Handle exceptions.
+            job_status = backend.get_job_status(handle,
+                                                job_id=1,
+                                                stream_logs=False)
 
     # Update the benchmark status.
-    if (cluster_status is None or
-            cluster_status == global_user_state.ClusterStatus.STOPPED or
-        (job_status is not None and job_status.is_terminal())):
+    if cluster_status == global_user_state.ClusterStatus.INIT:
+        benchmark_status = benchmark_state.BenchmarkStatus.INIT
+    elif job_status == job_lib.JobStatus.RUNNING:
+        benchmark_status = benchmark_state.BenchmarkStatus.RUNNING
+    elif (cluster_status is None or
+          cluster_status == global_user_state.ClusterStatus.STOPPED or
+          (job_status is not None and job_status.is_terminal())):
         # The cluster has terminated or stopped, or
         # the cluster is UP and the job has terminated.
         if end_time is None:
+            # If the end timestamp is not found, it means the benchmarking job
+            # has terminated with non-zero exit code.
             benchmark_status = benchmark_state.BenchmarkStatus.TERMINATED
         else:
             benchmark_status = benchmark_state.BenchmarkStatus.FINISHED
@@ -324,9 +333,11 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
         else:
             last_time = end_time
         if last_time is None:
-            message = (f'No duration information found for {cluster}. '
-                       'Check if sky_callback.on_step_end has been called.')
-
+            if job_status == job_lib.JobStatus.RUNNING:
+                last_time = time.time()
+            else:
+                message = (f'No duration information found for {cluster}. '
+                           'Check if at least 1 step has finished.')
         record = benchmark_state.BenchmarkRecord(
             start_time=start_time,
             last_time=last_time,
@@ -347,7 +358,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
                                                  last_time=time.time())
     elif benchmark_status == benchmark_state.BenchmarkStatus.TERMINATED:
         # (4) The benchmarking job has terminated abnormally.
-        message = f'Benchmarking on {cluster} has terminated abnormally.'
+        message = (f'The benchmarking job on {cluster} has terminated with '
+                   'non-zero exit code.')
         record = benchmark_state.BenchmarkRecord(start_time=start_time,
                                                  last_time=None)
     else:
@@ -368,6 +380,7 @@ def generate_benchmark_configs(
     # Generate a config for each cluster.
     clusters = _generate_cluster_names(benchmark, len(candidates))
     candidate_configs = []
+    # TODO(woosuk): Use a jinja template.
     for cluster, candidate in zip(clusters, candidates):
         # Re-override the config with each candidate config.
         candidate_config = copy.deepcopy(config)
