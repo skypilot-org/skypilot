@@ -33,6 +33,7 @@ from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.onprem import onprem_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
@@ -1083,7 +1084,7 @@ class RetryingVmProvisioner(object):
         # nodes. Hence, this method here replicates what the Ray autoscaler
         # would do were it for public cloud.
         if isinstance(to_provision_cloud, clouds.Local):
-            backend_utils.do_filemounts_and_setup_on_local_workers(
+            onprem_utils.do_filemounts_and_setup_on_local_workers(
                 cluster_config_file)
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
@@ -1304,7 +1305,7 @@ class CloudVmRayBackend(backends.Backend):
             """
             self.local_handle = None
             local_file = os.path.expanduser(
-                backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+                onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
                     self.cluster_name))
             # Local cluster case requires several modifications:
             #   1) Create local_handle to store local cluster IPs and
@@ -1314,7 +1315,7 @@ class CloudVmRayBackend(backends.Backend):
             #   3) Replace launched_nodes to represent the total nodes in the
             #      local cluster.
             if os.path.isfile(local_file):
-                config = backend_utils.get_local_cluster_config_or_error(
+                config = onprem_utils.get_local_cluster_config_or_error(
                     self.cluster_name)
                 self.local_handle = {}
                 cluster_config = config['cluster']
@@ -1327,7 +1328,7 @@ class CloudVmRayBackend(backends.Backend):
                     cloud=clouds.Local(), region=local_region)
                 self.launched_nodes = len(ips)
                 self.local_handle['ips'] = ips
-                cluster_accs = backend_utils.get_local_cluster_accelerators(
+                cluster_accs = onprem_utils.get_local_cluster_accelerators(
                     ips, auth_config)
                 self.local_handle['cluster_resources'] = [
                     resources_lib.Resources(
@@ -1548,7 +1549,7 @@ class CloudVmRayBackend(backends.Backend):
                 # update_status will query the ray job status for all INIT /
                 # PENDING / RUNNING jobs for the real status, since we do not
                 # know the actual previous status of the cluster.
-                job_owner = backend_utils.get_job_owner(handle.cluster_yaml)
+                job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
                 cmd = job_lib.JobLibCodeGen.update_status(job_owner)
                 with backend_utils.safe_console_status(
                         '[bold cyan]Preparing Job Queue'):
@@ -1943,7 +1944,7 @@ class CloudVmRayBackend(backends.Backend):
         return job_lib.JobStatus(result.split(' ')[-1])
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
-        job_owner = backend_utils.get_job_owner(handle.cluster_yaml)
+        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.cancel_jobs(job_owner, jobs)
 
         # All error messages should have been redirected to stdout.
@@ -2024,7 +2025,7 @@ class CloudVmRayBackend(backends.Backend):
                   handle: ResourceHandle,
                   job_id: Optional[int],
                   spot_job_id: Optional[int] = None) -> int:
-        job_owner = backend_utils.get_job_owner(handle.cluster_yaml)
+        job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
                                                spot_job_id=spot_job_id)
@@ -2353,7 +2354,7 @@ class CloudVmRayBackend(backends.Backend):
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
             # The field ssh_user is specified in the cluster config file.
-            ssh_user = backend_utils.get_local_cluster_config_or_error(
+            ssh_user = onprem_utils.get_local_cluster_config_or_error(
                 cluster_name)['auth']['ssh_user']
             logger.info(f'{colorama.Fore.CYAN}Connecting to local cluster: '
                         f'{cluster_name!r} [Username: {ssh_user}].'

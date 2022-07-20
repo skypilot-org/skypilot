@@ -577,13 +577,13 @@ def _check_cluster_config(yaml_config: dict):
     auth = yaml_config['auth']
     cluster = yaml_config['cluster']['name']
 
-    if (auth['ssh_user'] == backend_utils.AUTH_PLACEHOLDER or
-            auth['ssh_private_key'] == backend_utils.AUTH_PLACEHOLDER):
+    if (auth['ssh_user'] == onprem_utils.AUTH_PLACEHOLDER or
+            auth['ssh_private_key'] == onprem_utils.AUTH_PLACEHOLDER):
         raise ValueError(
             'Authentication into local cluster requires specifying '
             '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
             'Please fill aforementioned fields in '
-            f'{backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
+            f'{onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
 
 
 # TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
@@ -2187,29 +2187,29 @@ def admin_deploy(clusterspec_yaml: str):
     click.secho(f'[{steps}/4] Checking on-premise environment\n',
                 fg='green',
                 nl=False)
-    backend_utils.check_local_installation(ips, auth_config)
+    onprem_utils.check_local_installation(ips, auth_config)
     steps += 1
 
     # Detect what GPUs the cluster has (which can be heterogeneous)
     click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
                 fg='green',
                 nl=False)
-    custom_resources = backend_utils.get_local_cluster_accelerators(
+    custom_resources = onprem_utils.get_local_cluster_accelerators(
         ips, auth_config)
     steps += 1
 
     # Launching Ray Autoscaler service
     click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
-    backend_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
+    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
     steps += 1
 
     # Generate sanitized yaml file to be sent to non-admin users
     click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
                 fg='green',
                 nl=False)
-    sanitized_yaml_path = backend_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
         local_cluster_name)
-    backend_utils.save_distributable_yaml(yaml_config)
+    onprem_utils.save_distributable_yaml(yaml_config)
     click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
     click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
                 fg='green')
