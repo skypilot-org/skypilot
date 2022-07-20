@@ -302,7 +302,7 @@ class TestOnprem:
                 f'sky exec {first_cluster_name} -d -- "sleep 300"',
                 f'sky exec {second_cluster_name} -d -- "sleep 300"',
                 f'sky cancel {first_cluster_name} 2',
-                f'sleep 5',
+                'sleep 5',
                 f'sky queue {first_cluster_name} | grep "^2\\b" | grep CANCELLED',
                 # User 1 should not cancel user 2's jobs.
                 f'sky queue {second_cluster_name} | grep "^2\\b" | grep -v CANCELLED',

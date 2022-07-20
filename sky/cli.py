@@ -53,6 +53,7 @@ from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
+from sky.onprem import onprem_utils
 from sky.skylet import job_lib
 from sky.skylet.utils import log_utils
 from sky.utils import command_runner
@@ -98,7 +99,7 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            if backend_utils.check_if_local_cloud(cluster):
+            if onprem_utils.check_if_local_cloud(cluster):
                 click.echo(
                     _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
             else:
@@ -453,7 +454,7 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
-    if backend_utils.check_if_local_cloud(cluster_name):
+    if onprem_utils.check_if_local_cloud(cluster_name):
         raise click.BadParameter(
             f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
@@ -596,7 +597,7 @@ def _check_local_cloud_args(cloud: Optional[str] = None,
         yaml_cloud = yaml_config['resources'].get('cloud')
 
     if (cluster_name is not None and
-            backend_utils.check_if_local_cloud(cluster_name)):
+            onprem_utils.check_if_local_cloud(cluster_name)):
         if cloud is not None and cloud != 'local':
             raise click.UsageError(f'Local cluster {cluster_name} is '
                                    f'not part of cloud: {cloud}.')
@@ -886,7 +887,7 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
-        is_local_cloud=backend_utils.check_if_local_cloud(cluster))
+        is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -974,7 +975,7 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
-        if backend_utils.check_if_local_cloud(cluster):
+        if onprem_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
@@ -1033,7 +1034,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    local_clusters = backend_utils.check_and_get_local_clusters()
+    local_clusters = onprem_utils.check_and_get_local_clusters()
     status_utils.show_status_table(all, refresh)
     status_utils.show_local_status_table(local_clusters)
 
@@ -1068,7 +1069,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
-    local_clusters = backend_utils.check_and_get_local_clusters()
+    local_clusters = onprem_utils.check_and_get_local_clusters()
 
     unsupported_clusters = []
     for cluster in clusters:
@@ -1145,7 +1146,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
-        if backend_utils.check_if_local_cloud(cluster):
+        if onprem_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster_name))
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
@@ -1213,7 +1214,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
     if handle is None:
-        if backend_utils.check_if_local_cloud(cluster):
+        if onprem_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
                 _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found'
@@ -1410,7 +1411,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
-        local_clusters = backend_utils.check_and_get_local_clusters()
+        local_clusters = onprem_utils.check_and_get_local_clusters()
         clusters = [
             c for c in clusters
             if _warn_if_local_cluster(c, local_clusters, (
@@ -1568,7 +1569,7 @@ def _terminate_or_stop_clusters(
         operation = f'{verb} auto-stop on'
 
     if len(names) > 0:
-        local_clusters = backend_utils.check_and_get_local_clusters()
+        local_clusters = onprem_utils.check_and_get_local_clusters()
         reserved_clusters = [
             name for name in names
             if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES

@@ -45,6 +45,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky.onprem import onprem_utils
 from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
@@ -673,85 +674,6 @@ def write_cluster_config(to_provision: 'resources.Resources',
         config_dict['tpu-delete-script'] = scripts[1]
         config_dict['tpu_name'] = tpu_name
     return config_dict
-
-
-def check_if_local_cloud(cluster: str) -> bool:
-    """Checks if cluster name is a local cloud.
-
-    If cluster is a public cloud, this function will not check local
-    cluster configs. If this cluster is a private cloud, this function
-    will run correctness tests for cluster configs.
-    """
-    config_path = os.path.expanduser(SKY_USER_LOCAL_CONFIG_PATH.format(cluster))
-    if not os.path.exists(config_path):
-        # Public clouds go through no error checking.
-        return False
-    # Go through local cluster check to raise potential errors.
-    check_and_get_local_clusters(suppress_error=False)
-    return True
-
-
-def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
-    """Lists all local clusters and checks cluster config validity.
-
-    Args:
-        suppress_error: Whether to suppress any errors raised.
-    """
-    local_dir = os.path.expanduser(os.path.dirname(SKY_USER_LOCAL_CONFIG_PATH))
-    os.makedirs(local_dir, exist_ok=True)
-    local_cluster_paths = [
-        os.path.join(local_dir, f) for f in os.listdir(local_dir)
-    ]
-    # Filter out folders.
-    local_cluster_paths = [
-        path for path in local_cluster_paths
-        if os.path.isfile(path) and path.endswith('.yml')
-    ]
-
-    local_cluster_names = []
-    name_to_path_dict = {}
-    for path in local_cluster_paths:
-        # TODO(mluo): Define a scheme for cluster config to check if YAML
-        # schema is correct.
-        with open(path, 'r') as f:
-            yaml_config = yaml.safe_load(f)
-            user_config = yaml_config['auth']
-            cluster_name = yaml_config['cluster']['name']
-        if (AUTH_PLACEHOLDER
-                in (user_config['ssh_user'], user_config['ssh_private_key']) and
-                not suppress_error):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Authentication into local cluster requires specifying '
-                    '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
-                    'Please fill aforementioned fields in '
-                    f'{SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)}.')
-        if cluster_name in local_cluster_names:
-            if not suppress_error:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Multiple configs in ~/.sky/local/ have the same '
-                        f'cluster name {cluster_name!r}. '
-                        'Fix the duplication and retry:'
-                        f'\nCurrent config: {path}'
-                        f'\nExisting config: {name_to_path_dict[cluster_name]}')
-        else:
-            name_to_path_dict[cluster_name] = path
-            local_cluster_names.append(cluster_name)
-
-    # Remove clusters that are in global user state but are not in
-    # ~/.sky/local.
-    records = get_clusters(include_reserved=False,
-                           refresh=False,
-                           cloud_filter=CloudFilter.LOCAL)
-    saved_clusters = [r['name'] for r in records]
-    for cluster_name in saved_clusters:
-        if cluster_name not in local_cluster_names:
-            logger.warning(f'Removing local cluster {cluster_name} from '
-                           '`sky status`. No config found in ~/.sky/local.')
-            global_user_state.remove_cluster(cluster_name, terminate=True)
-
-    return local_cluster_names
 
 
 def get_local_ips(cluster_name: str) -> List[str]:
@@ -1488,7 +1410,7 @@ def get_node_ips(cluster_yaml: str,
             cluster_name = os.path.basename(cluster_yaml).split('.')[0]
             if ((handle is not None and hasattr(handle, 'local_handle') and
                  handle.local_handle is not None) or
-                    check_if_local_cloud(cluster_name)):
+                    onprem_utils.check_if_local_cloud(cluster_name)):
                 out = proc.stderr.decode()
                 worker_ips = re.findall(IP_ADDR_REGEX, out)
                 # Remove head ip from worker ip list.
