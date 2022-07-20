@@ -65,7 +65,7 @@ def init(global_rank: int = 0,
         global_rank: global rank of the calling process. In non-distributed tasks,
             the rank should be 0. In distributed tasks, only one process should
             have rank 0. Check your framework API to query the global rank
-            (e.g., torch.distributed.get_rank()).
+            (e.g., torch.distributed.get_rank() or hvd.rank()).
         log_dir: A directory to store the logs.
         total_steps: A total number of steps. If None, SkyCallback will not
             estimate the total time to complete the task.
@@ -73,11 +73,12 @@ def init(global_rank: int = 0,
     if _DISABLE_CALLBACK:
         return
 
-    global _sky_callback, _initialized
+    global _initialized
     if _initialized:
         raise RuntimeError('sky_callback is already initialized. '
                            'Please call `sky_callback.init` only once.')
 
+    global _sky_callback
     if global_rank == 0:
         _sky_callback = base.BaseCallback(log_dir=log_dir,
                                           total_steps=total_steps)
@@ -86,7 +87,11 @@ def init(global_rank: int = 0,
 
 
 def step_begin() -> None:
-    """Marks the beginning of a step."""
+    """Marks the beginning of a step.
+
+    NOTE: This function is not thread-safe. Only one thread per process should
+        call this function.
+    """
     if _DISABLE_CALLBACK:
         return
     if not _initialized:
@@ -99,7 +104,11 @@ def step_begin() -> None:
 
 
 def step_end() -> None:
-    """Marks the end of a step."""
+    """Marks the end of a step.
+
+    NOTE: This function is not thread-safe. Only one thread per process should
+        call this function.
+    """
     if _DISABLE_CALLBACK:
         return
     if not _initialized:
@@ -113,14 +122,22 @@ def step_end() -> None:
 
 @contextlib.contextmanager
 def step():
-    """Marks the beginning and end of a step."""
+    """Marks the beginning and end of a step.
+
+    NOTE: This function is not thread-safe. Only one thread per process should
+        call this function.
+    """
     step_begin()
     yield
     step_end()
 
 
 class step_iterator:
-    """Wraps an iterable with SkyCallback APIs."""
+    """Wraps an iterable with SkyCallback APIs.
+
+    NOTE: This class is not thread-safe. Only one thread per process should
+        create/use this class.
+    """
 
     def __init__(self, iterable: collections.Iterable) -> None:
         self._iterable = iterable
