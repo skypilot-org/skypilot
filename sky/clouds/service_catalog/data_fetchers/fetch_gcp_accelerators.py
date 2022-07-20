@@ -135,31 +135,31 @@ def get_gpu_tpu_df():
         ),
         'tpu-v3-32': (
             [1],
-            [('us-central1', 32, np.nan), ('europe-west4', 32, np.nan)],
+            [('us-east1', 32, np.nan), ('europe-west4', 32, np.nan)],
         ),
         'tpu-v3-64': (
             [1],
-            [('us-central1', 64, np.nan), ('europe-west4', 64, np.nan)],
+            [('us-east1', 64, np.nan), ('europe-west4', 64, np.nan)],
         ),
         'tpu-v3-128': (
             [1],
-            [('us-central1', 128, np.nan), ('europe-west4', 128, np.nan)],
+            [('us-east1', 128, np.nan), ('europe-west4', 128, np.nan)],
         ),
         'tpu-v3-256': (
             [1],
-            [('us-central1', 256, np.nan), ('europe-west4', 256, np.nan)],
+            [('us-east1', 256, np.nan), ('europe-west4', 256, np.nan)],
         ),
         'tpu-v3-512': (
             [1],
-            [('us-central1', 512, np.nan), ('europe-west4', 512, np.nan)],
+            [('us-east1', 512, np.nan), ('europe-west4', 512, np.nan)],
         ),
         'tpu-v3-1024': (
             [1],
-            [('us-central1', 1024, np.nan), ('europe-west4', 1024, np.nan)],
+            [('us-east1', 1024, np.nan), ('europe-west4', 1024, np.nan)],
         ),
         'tpu-v3-2048': (
             [1],
-            [('us-central1', 2048, np.nan), ('europe-west4', 2048, np.nan)],
+            [('us-east1', 2048, np.nan), ('europe-west4', 2048, np.nan)],
         ),
     }
     acc_data = dict(**gpu_data, **tpu_data)

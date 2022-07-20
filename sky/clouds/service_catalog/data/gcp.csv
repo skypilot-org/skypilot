@@ -179,10 +179,17 @@ InstanceType,AcceleratorName,AcceleratorCount,MemoryGiB,GpuInfo,Price,SpotPrice,
 ,tpu-v3-8,1,0,tpu-v3-8,8.0,2.4,us-central1,us-central1-b
 ,tpu-v3-8,1,0,tpu-v3-8,8.0,2.4,us-central1,us-central1-f
 ,tpu-v3-8,1,0,tpu-v3-8,8.8,2.64,europe-west4,europe-west4-a
+,tpu-v3-32,1,0,tpu-v3-32,32.0,,us-east1,us-east1-d
 ,tpu-v3-32,1,0,tpu-v3-32,32.0,,europe-west4,europe-west4-a
+,tpu-v3-64,1,0,tpu-v3-64,64.0,,us-east1,us-east1-d
 ,tpu-v3-64,1,0,tpu-v3-64,64.0,,europe-west4,europe-west4-a
+,tpu-v3-128,1,0,tpu-v3-128,128.0,,us-east1,us-east1-d
 ,tpu-v3-128,1,0,tpu-v3-128,128.0,,europe-west4,europe-west4-a
+,tpu-v3-256,1,0,tpu-v3-256,256.0,,us-east1,us-east1-d
 ,tpu-v3-256,1,0,tpu-v3-256,256.0,,europe-west4,europe-west4-a
+,tpu-v3-512,1,0,tpu-v3-512,512.0,,us-east1,us-east1-d
 ,tpu-v3-512,1,0,tpu-v3-512,512.0,,europe-west4,europe-west4-a
+,tpu-v3-1024,1,0,tpu-v3-1024,1024.0,,us-east1,us-east1-d
 ,tpu-v3-1024,1,0,tpu-v3-1024,1024.0,,europe-west4,europe-west4-a
+,tpu-v3-2048,1,0,tpu-v3-2048,2048.0,,us-east1,us-east1-d
 ,tpu-v3-2048,1,0,tpu-v3-2048,2048.0,,europe-west4,europe-west4-a
