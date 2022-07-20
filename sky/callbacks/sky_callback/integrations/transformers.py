@@ -22,7 +22,7 @@ class SkyTransformersCallback(transformers.TrainerCallback):
 
     Args:
         log_dir: A directory to store the logs.
-        total_steps: A total number of steps. If None, it is inferred from
+        total_steps: The total number of steps. If None, it is inferred from
             the trainer state.
     """
 
@@ -35,9 +35,12 @@ class SkyTransformersCallback(transformers.TrainerCallback):
 
     def _infer_total_steps(self, args: transformers.TrainingArguments,
                            state: transformers.TrainerState) -> Optional[int]:
+        """Infer the total number of steps from the trainer state."""
         if self._total_steps is not None:
             return self._total_steps
-        total_steps = args.gradient_accumulation_steps * state.max_steps
+        total_steps = state.max_steps
+        if total_steps is None or total_steps < 0:
+            return None
         return total_steps
 
     def on_train_begin(self, args: transformers.TrainingArguments,

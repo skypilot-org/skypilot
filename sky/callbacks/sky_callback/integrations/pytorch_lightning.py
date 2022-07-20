@@ -22,7 +22,7 @@ class SkyLightningCallback(pl.Callback):
 
     Args:
         log_dir: A directory to store the logs.
-        total_steps: A total number of steps. If None, it is inferred from
+        total_steps: The total number of steps. If None, it is inferred from
             the trainer.
     """
 
@@ -37,25 +37,9 @@ class SkyLightningCallback(pl.Callback):
         if self._total_steps is not None:
             return self._total_steps
 
-        max_epochs = trainer.max_epochs
-        max_steps = trainer.max_steps
-        # This is safe because `on_train_start` is always called after
-        # `reset_train_dataloader` which sets `num_training_batches`.
-        num_training_batches = trainer.num_training_batches
-
-        # TODO(woosuk): Check the early stopping flag.
-        # If it is set, total_steps should be None.
-        if max_epochs == -1 and max_steps == -1:
-            # Infinite training.
-            total_steps = None
-        elif num_training_batches == float('inf'):
-            # Iterable dataset. `total_steps` is known only if
-            # `max_steps` is set.
-            total_steps = max_steps if max_steps != -1 else None
-        else:
-            total_steps = num_training_batches * max(max_epochs, 1)
-            if max_steps != -1:
-                total_steps = min(total_steps, max_steps)
+        total_steps = trainer.estimated_stepping_batches()
+        if total_steps == float('inf') or total_steps < 0:
+            return None
         return total_steps
 
     def on_train_start(self, trainer: pl.Trainer,
