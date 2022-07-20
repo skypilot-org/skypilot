@@ -47,8 +47,9 @@ run: |
   # Change the s3 path here to the storage bucket name used above
   echo "Running S3 read benchmark with aws s3 cp (COPY mode setup bandwidth)..."
   purge_io
-  /usr/bin/time -o /skystorage-mount/perf_copymode_time.txt -f "%e" aws s3 cp s3://sky-romil-benchmark/64kseqreads.0.0 ~/ > /skystorage-mount/perf_copymode_log.txt
-  sed -i -e 's/\r/\n/g' /skystorage-mount/perf_copymode_log.txt
+  /usr/bin/time -o /skystorage-mount/perf_copymode_time.txt -f "%e" /bin/bash -c "aws s3 cp s3://sky-romil-benchmark/64kseqreads.0.0 ~/ > /tmp/perf_copymode_log.txt; sync && echo 3 > sudo tee /proc/sys/vm/drop_caches; "
+  sed -i -e 's/\r/\n/g' /tmp/perf_copymode_log.txt
+  cp /tmp/perf_copymode_log.txt /skystorage-mount/perf_copymode_log.txt && rm /tmp/perf_copymode_log.txt 
   
   echo -e '\n===== Benchmark Results ====='
   echo 'All results are reported as (bandwidth, IOPS)'
