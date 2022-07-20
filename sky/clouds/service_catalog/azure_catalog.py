@@ -3,8 +3,8 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
-from typing import Dict, List, Optional, Tuple
 import ast
+from typing import Dict, List, Optional, Tuple
 
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common

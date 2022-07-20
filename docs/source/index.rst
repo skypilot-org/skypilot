@@ -52,6 +52,7 @@ Key features:
    reference/yaml-spec
    reference/interactive-nodes
    reference/storage
+   reference/local/index
    reference/quota
    reference/faq
 

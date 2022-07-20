@@ -35,11 +35,11 @@ import sys
 import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple
-import yaml
 
 import click
 import colorama
 from rich import progress as rich_progress
+import yaml
 
 import sky
 from sky import backends
@@ -50,6 +50,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import backend_utils
+from sky.backends import onprem_utils
 from sky.clouds import service_catalog
 from sky.data import data_utils
 from sky.data.storage import StoreType
@@ -90,6 +91,11 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
 }
 
+# TODO(mluo): Make explicit `sky launch -c <name> ''` optional.
+_UNINITIALIZED_CLUSTER_MESSAGE = (
+    'Found uninitialized local cluster {cluster}. Run this '
+    'command to initialize it locally: sky launch -c {cluster} \'\'')
+
 
 def _get_glob_clusters(clusters: List[str]) -> List[str]:
     """Returns a list of clusters that match the glob pattern."""
@@ -97,9 +103,22 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            print(f'Cluster {cluster} not found.')
+            if onprem_utils.check_if_local_cloud(cluster):
+                click.echo(
+                    _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
+            else:
+                click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
+
+
+def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
+                           message: str) -> bool:
+    """Raises warning if the cluster name is a local cluster."""
+    if cluster in local_clusters:
+        click.echo(message)
+        return False
+    return True
 
 
 def _interactive_node_cli_command(cli_func):
@@ -365,6 +384,7 @@ def _launch_with_confirm(
     idle_minutes_to_autostop: int = -1,
     retry_until_up: bool = False,
     node_type: Optional[str] = None,
+    is_local_cloud: Optional[bool] = False,
 ):
     """Launch a cluster with a DAG."""
     if cluster is None:
@@ -384,7 +404,10 @@ def _launch_with_confirm(
         prompt = None
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+            if is_local_cloud:
+                prompt = f'Initializing local cluster{cluster_str}. Proceed?'
+            else:
+                prompt = f'Launching a new cluster{cluster_str}. Proceed?'
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -435,6 +458,10 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
+    if onprem_utils.check_if_local_cloud(cluster_name):
+        raise click.BadParameter(
+            f'Name {cluster_name!r} taken by a local cluster and cannot '
+            f'be used for a {node_type}.')
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -501,9 +528,14 @@ def _create_and_ssh_into_node(
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
-def _check_yaml(entrypoint: str) -> bool:
-    """Checks if entrypoint is a readable YAML file."""
+def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
+    """Checks if entrypoint is a readable YAML file.
+
+    Args:
+        entrypoint: Path to a YAML file.
+    """
     is_yaml = True
+    config = None
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = len(shell_splits) == 1 and \
         (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
@@ -539,13 +571,64 @@ def _check_yaml(entrypoint: str) -> bool:
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
-    return is_yaml
+    return is_yaml, config
+
+
+# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
+# this.
+def _check_cluster_config(yaml_config: dict):
+    """Checks if the cluster config has filled-in user credentials."""
+    auth = yaml_config['auth']
+    cluster = yaml_config['cluster']['name']
+
+    if (auth['ssh_user'] == onprem_utils.AUTH_PLACEHOLDER or
+            auth['ssh_private_key'] == onprem_utils.AUTH_PLACEHOLDER):
+        raise ValueError(
+            'Authentication into local cluster requires specifying '
+            '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
+            'Please fill aforementioned fields in '
+            f'{onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
+
+
+# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
+# this.
+def _check_local_cloud_args(cloud: Optional[str] = None,
+                            cluster_name: Optional[str] = None,
+                            yaml_config: Optional[dict] = None) -> bool:
+    """Checks if user-provided arguments satisfies local cloud specs."""
+    yaml_cloud = None
+    if yaml_config is not None and 'resources' in yaml_config:
+        yaml_cloud = yaml_config['resources'].get('cloud')
+
+    if (cluster_name is not None and
+            onprem_utils.check_if_local_cloud(cluster_name)):
+        if cloud is not None and cloud != 'local':
+            raise click.UsageError(f'Local cluster {cluster_name} is '
+                                   f'not part of cloud: {cloud}.')
+        if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
+            raise ValueError(
+                f'Detected Local cluster {cluster_name}. Must specify '
+                '`cloud: local` or no cloud in YAML or CLI args.')
+        return True
+    else:
+        if cloud == 'local' or yaml_cloud == 'local':
+            if cluster_name is not None:
+                raise click.UsageError(
+                    f'Local cluster \'{cluster_name}\' does not exist. \n'
+                    'See `sky status` for local cluster name(s).')
+            else:
+                raise click.UsageError(
+                    'Specify -c [local_cluster] to launch on a local cluster.\n'
+                    'See `sky status` for local cluster name(s).')
+
+        return False
 
 
 def _make_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
+    cluster: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
     region: Optional[str] = None,
@@ -561,12 +644,11 @@ def _make_dag_from_entrypoint_with_overrides(
     entrypoint = ' '.join(entrypoint)
 
     with sky.Dag() as dag:
-        if _check_yaml(entrypoint):
+        is_yaml, yaml_config = _check_yaml(entrypoint)
+        if is_yaml:
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            usage_lib.usage_message.update_user_task_yaml(entrypoint)
-            task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
                 entrypoint = None
@@ -574,8 +656,17 @@ def _make_dag_from_entrypoint_with_overrides(
                 # Treat entrypoint as a bash command.
                 click.secho('Task from command: ', fg='yellow', nl=False)
                 click.secho(entrypoint, bold=True)
+
+        if _check_local_cloud_args(cloud, cluster, yaml_config):
+            cloud = 'local'
+
+        if is_yaml:
+            usage_lib.usage_message.update_user_task_yaml(entrypoint)
+            task = sky.Task.from_yaml(entrypoint)
+        else:
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
+
         # Override.
         if workdir is not None:
             task.workdir = workdir
@@ -777,6 +868,7 @@ def launch(
     dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
+        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -805,7 +897,7 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
-    )
+        is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -894,6 +986,9 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
+        if onprem_utils.check_if_local_cloud(cluster):
+            raise click.BadParameter(
+                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -901,6 +996,7 @@ def exec(
     dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
+        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
@@ -950,7 +1046,9 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
+    local_clusters = onprem_utils.check_and_get_local_clusters()
     status_utils.show_status_table(all, refresh)
+    status_utils.show_local_status_table(local_clusters)
 
 
 @cli.command()
@@ -984,6 +1082,8 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
+    local_clusters = onprem_utils.check_and_get_local_clusters()
+
     unsupported_clusters = []
     for cluster in clusters:
         cluster_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -1000,6 +1100,14 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
                 fg='yellow')
             continue
         _show_job_queue_on_cluster(cluster, handle, backend, code)
+
+    for local_cluster in local_clusters:
+        if local_cluster not in clusters:
+            click.secho(
+                f'Local cluster {local_cluster} is uninitialized;'
+                ' skipped.',
+                fg='yellow')
+
     if unsupported_clusters:
         click.secho(
             f'Note: Job queues are not supported on clusters: '
@@ -1052,6 +1160,9 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
+        if onprem_utils.check_if_local_cloud(cluster):
+            raise click.BadParameter(
+                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster_name))
         raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
                                  ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1118,6 +1229,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster)
     if handle is None:
+        if onprem_utils.check_if_local_cloud(cluster):
+            raise click.BadParameter(
+                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found'
                                  ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1315,6 +1429,13 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
+        local_clusters = onprem_utils.check_and_get_local_clusters()
+        clusters = [
+            c for c in clusters
+            if _warn_if_local_cluster(c, local_clusters, (
+                f'Skipping local cluster {c}, as it does not support '
+                '`sky start`.'))
+        ]
 
         for name in clusters:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -1353,7 +1474,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
                 #    zombied (remains as stopped in the cloud's UI).
                 #
                 #    This is dangerous and unwanted behavior!
-                print(f'Cluster {name} already has status UP.')
+                click.echo(f'Cluster {name} already has status UP.')
                 continue
             assert cluster_status in (
                 global_user_state.ClusterStatus.INIT,
@@ -1410,7 +1531,9 @@ def down(
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Terminating a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost.
+    stops), and any data on the attached disks will be lost. For local clusters,
+    `sky down` does not terminate the local cluster, but instead removes the
+    cluster from `sky status` and terminates the calling user's running jobs.
 
     Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
 
@@ -1465,6 +1588,7 @@ def _terminate_or_stop_clusters(
         operation = f'{verb} auto-stop on'
 
     if len(names) > 0:
+        local_clusters = onprem_utils.check_and_get_local_clusters()
         reserved_clusters = [
             name for name in names
             if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES
@@ -1474,6 +1598,16 @@ def _terminate_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
+        if not terminate:
+            # Local clusters are allowed to `sky down`, but not
+            # `sky start/stop`. `sky down` unregisters the local cluster
+            # from sky.
+            names = [
+                c for c in names
+                if _warn_if_local_cluster(c, local_clusters, (
+                    f'Skipping local cluster {c}, as it does not support '
+                    '`sky stop/autostop`.'))
+            ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
@@ -1497,8 +1631,9 @@ def _terminate_or_stop_clusters(
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
-            print(f'Both --all and cluster(s) specified for sky {command}. '
-                  'Letting --all take effect.')
+            click.echo(
+                f'Both --all and cluster(s) specified for sky {command}. '
+                'Letting --all take effect.')
         # We should not remove reserved clusters when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a reserved
         # cluster.
@@ -1521,7 +1656,7 @@ def _terminate_or_stop_clusters(
         [cluster['name'] for cluster in clusters])
 
     if not clusters:
-        print('\nCluster(s) not found (tip: see `sky status`).')
+        click.echo('\nCluster(s) not found (tip: see `sky status`).')
         return
 
     if not no_confirm and len(clusters) > 0:
@@ -2039,9 +2174,76 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
             'storage delete\'.')
 
 
+@cli.group(cls=_NaturalOrderGroup)
+def admin():
+    """Sky administrator commands for local clusters."""
+    pass
+
+
+@admin.command('deploy', cls=_DocumentedCodeCommand)
+@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
+def admin_deploy(clusterspec_yaml: str):
+    """Launches Sky on a local cluster.
+
+    Performs preflight checks (environment setup, cluster resources)
+    and launches Ray to serve sky tasks on the cluster. Finally
+    generates a distributable YAML that can be used by multiple
+    users sharing the cluster.
+
+    This command should be run once by the cluster admin, not cluster users.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky admin deploy examples/local/cluster-config.yaml
+    """
+    steps = 1
+    clusterspec_yaml = ' '.join(clusterspec_yaml)
+    assert clusterspec_yaml
+    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
+    if not is_yaml:
+        raise ValueError('Must specify cluster config')
+
+    auth_config = yaml_config['auth']
+    ips = yaml_config['cluster']['ips']
+    if not isinstance(ips, list):
+        ips = [ips]
+    local_cluster_name = yaml_config['cluster']['name']
+
+    # Check for Ray
+    click.secho(f'[{steps}/4] Checking on-premise environment\n',
+                fg='green',
+                nl=False)
+    onprem_utils.check_local_installation(ips, auth_config)
+    steps += 1
+
+    # Detect what GPUs the cluster has (which can be heterogeneous)
+    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
+                fg='green',
+                nl=False)
+    custom_resources = onprem_utils.get_local_cluster_accelerators(
+        ips, auth_config)
+    steps += 1
+
+    # Launching Ray Autoscaler service
+    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
+    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
+    steps += 1
+
+    # Generate sanitized yaml file to be sent to non-admin users
+    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
+                fg='green',
+                nl=False)
+    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+        local_cluster_name)
+    onprem_utils.save_distributable_yaml(yaml_config)
+    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
+    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
+                fg='green')
+
+
 # Managed Spot CLIs
-
-
 def _is_spot_controller_up(
     stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],

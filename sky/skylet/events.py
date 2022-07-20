@@ -1,11 +1,13 @@
 """skylet events"""
+import getpass
 import math
 import os
-import psutil
 import re
 import subprocess
 import time
 import traceback
+
+import psutil
 import yaml
 
 from sky import sky_logging
@@ -60,7 +62,9 @@ class JobUpdateEvent(SkyletEvent):
     _SUBMITTED_GAP_SECONDS = 60
 
     def _run(self):
-        job_lib.update_status(submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
+        job_owner = getpass.getuser()
+        job_lib.update_status(job_owner,
+                              submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 
 
 class AutostopEvent(SkyletEvent):
