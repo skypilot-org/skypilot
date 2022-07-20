@@ -181,8 +181,7 @@ def _parallel_run_with_interrupt_handling(func: Callable,
             return list(p.imap(func, args))
         except KeyboardInterrupt:
             print()
-            logger.error(
-                _format_err_msg('Interrupted by user.'))
+            logger.error(_format_err_msg('Interrupted by user.'))
             subprocess_utils.run('sky status')
             sys.exit(1)
 
