@@ -2850,7 +2850,7 @@ def benchmark_show(benchmark: str) -> None:
             'Consider using SkyCallback to get more detailed information '
             'in real time.',
             fg='yellow')
-    elif any(row[5] != '-' and row[-1] == '-' for row in rows):
+    elif any(row[6] != '-' and row[-1] == '-' for row in rows):
         # No EST($). total_steps is not specified and cannot be inferred.
         click.secho(
             'Cannot estimate total time and cost because '
