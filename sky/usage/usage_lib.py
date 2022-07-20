@@ -265,9 +265,9 @@ def _send_to_loki(message: MessageToReport, message_type: MessageType):
         datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
     log_timestamp = message.start_time
 
-    environment = 'production'
+    environment = 'prod'
     if env_options.Options.IS_DEVELOPER.get():
-        environment = 'development'
+        environment = 'dev'
     prom_labels = {'type': message_type.value, 'environment': environment}
 
     headers = {'Content-type': 'application/json'}
