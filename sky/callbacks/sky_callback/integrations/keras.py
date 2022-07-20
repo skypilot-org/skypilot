@@ -23,7 +23,7 @@ class SkyKerasCallback(keras.callbacks.Callback):
 
     Args:
         log_dir: A directory to store the logs.
-        total_steps: A total number of steps. If None, it is inferred from
+        total_steps: The total number of steps. If None, it is inferred from
             the parameters passed in model.fit().
     """
 
