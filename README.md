@@ -106,3 +106,18 @@ pip install tuna # Tuna for viz
 python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
 tuna sky.prof
 ```
+
+### Publish Release
+The package can be published to PyPi with the following steps:
+1. Install prerequisites:
+```
+pip install --upgrade build
+pip install --upgrade twine
+```
+2. Increase the version number in [pyproject.toml](pyproject.toml)
+3. Build the package and upload it to Pypi:
+```
+cd $(git rev-parse --show-toplevel)
+python -m build
+twine upload dist/*
+```

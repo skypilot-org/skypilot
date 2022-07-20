@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skypilot"
+version = "0.0.0"
+authors = []
+description = "An intercloud broker above the cloud"
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+"Homepage" = "https://sky-proj-sky.readthedocs-hosted.com/en/latest/"
+"Bug Tracker" = "https://github.com/sky-proj/sky/issues"
