@@ -283,9 +283,8 @@ def _clean_yaml(yaml_info: Dict[str, str]):
                     message = (f'{len(lines)} lines {redact_type.upper()}'
                                ' redacted')
                 else:
-                    message = (
-                        f'Error: Unexpected type for {redact_type}: {type(contents)}'
-                    )
+                    message = (f'Error: Unexpected type for {redact_type}: '
+                               f'{type(contents)}')
                     logger.debug(message)
             except Exception:  # pylint: disable=broad-except
                 message = (
