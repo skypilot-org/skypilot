@@ -1455,6 +1455,8 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.add_or_update_cluster(cluster_name,
                                                         handle,
                                                         ready=True)
+                usage_lib.usage_message.update_final_cluster_status(
+                    global_user_state.ClusterStatus.UP)
                 auth_config = common_utils.read_yaml(
                     handle.cluster_yaml)['auth']
                 backend_utils.SSHConfigHelper.add_cluster(

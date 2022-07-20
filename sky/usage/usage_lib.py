@@ -4,6 +4,7 @@ import enum
 import click
 import contextlib
 import datetime
+import inspect
 import json
 import os
 import time
@@ -269,12 +270,29 @@ def _clean_yaml(yaml_info: Dict[str, str]):
             if not contents:
                 cleaned_yaml_info[redact_type] = None
                 continue
-            lines = common_utils.dump_yaml_str({
-                redact_type: contents
-            }).strip().split('\n')
-            cleaned_yaml_info[redact_type] = (
-                f'{len(lines)} lines {redact_type.upper()}'
-                ' redacted')
+
+            message = None
+            try:
+                if callable(contents):
+                    contents = inspect.getsource(contents)
+
+                if isinstance(contents, str):
+                    lines = common_utils.dump_yaml_str({
+                        redact_type: contents
+                    }).strip().split('\n')
+                    message = (f'{len(lines)} lines {redact_type.upper()}'
+                               ' redacted')
+                else:
+                    message = (
+                        f'Error: Unexpected type for {redact_type}: {type(contents)}'
+                    )
+                    logger.debug(message)
+            except Exception:  # pylint: disable=broad-except
+                message = (
+                    f'Error: Failed to dump lines for {redact_type.upper()}')
+                logger.debug(message)
+
+            cleaned_yaml_info[redact_type] = message
 
     return cleaned_yaml_info
 
