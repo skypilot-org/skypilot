@@ -2,6 +2,7 @@ import tempfile
 import textwrap
 
 from click import testing as cli_testing
+import pytest
 
 import sky
 from sky import clouds

@@ -2,6 +2,7 @@ import copy
 import random
 
 import numpy as np
+
 import sky
 from sky.clouds.service_catalog import gcp_catalog
 
