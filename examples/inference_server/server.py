@@ -17,7 +17,7 @@ import sky
 
 from inference import INFERENCE_RESULT_MARKER
 
-LOCAL_UPLOAD_FOLDER = '/local/path/to/folder'
+LOCAL_UPLOAD_FOLDER = '/Users/isaac/Dropbox/Berkeley/Sky/sky/examples/inference_server/uploads'
 REMOTE_UPLOAD_FOLDER = '/remote/path/to/folder'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
@@ -68,7 +68,7 @@ def run_inference():
             task.set_file_mounts({
                 # Copy model weights to the cluster
                 # Instead of local path, can also specify a cloud object store URI
-                '/remote/path/to/model-weights': 'local/path/to/model-weights',
+                # '/remote/path/to/model-weights': 'local/path/to/model-weights',
                 # Copy image to the cluster
                 remote_image_path: local_image_path,
             })
