@@ -2764,7 +2764,7 @@ def benchmark_launch(
     if not entrypoint:
         raise click.BadParameter('Please specify a task to benchmark.')
 
-    is_yaml = _check_yaml(entrypoint)
+    is_yaml, config = _check_yaml(entrypoint)
     if is_yaml:
         # Treat entrypoint as a yaml.
         click.secho('Benchmarking a task from YAML spec: ',
@@ -2825,9 +2825,6 @@ def benchmark_launch(
     if candidates is None:
         candidates = [{}]
 
-    config = None
-    if is_yaml:
-        config = common_utils.read_yaml(os.path.expanduser(entrypoint))
     if config is None:
         config = {}
     if 'resources' not in config:
