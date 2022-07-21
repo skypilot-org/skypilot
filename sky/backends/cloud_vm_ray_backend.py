@@ -1100,6 +1100,14 @@ class RetryingVmProvisioner(object):
         while provision_failed:
             provision_failed = False
             try:
+                try:
+                    # Recheck cluster name as the 'except:' block below may
+                    # change the cloud assignment.
+                    backend_utils.check_cluster_name_is_valid(
+                        cluster_name, to_provision.cloud)
+                except ValueError:
+                    # Let failover below handle this (i.e., block this cloud).
+                    raise exceptions.ResourcesUnavailableError()
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,

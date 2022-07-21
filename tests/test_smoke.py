@@ -461,11 +461,9 @@ def test_use_spot():
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
-            'sleep 10',  # Guard against line below failing w/ PENDING.
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
-            'sleep 10',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
