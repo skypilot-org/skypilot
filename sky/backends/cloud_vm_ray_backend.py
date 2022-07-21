@@ -86,7 +86,7 @@ _TEARDOWN_PURGE_WARNING = (
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
-_MAX_RAY_UP_RETRY = 3
+_MAX_RAY_UP_RETRY = 5
 
 
 def _get_cluster_config_template(cloud):
@@ -996,33 +996,48 @@ class RetryingVmProvisioner(object):
         logger.info(f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                     f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
         start = time.time()
-        returncode, stdout, stderr = ray_up()
-        if returncode != 0:
-            # Retry ray up, due to the following reasons:
-            # 1. Failed due to timeout when fetching head node for Azure.
-            # 2. Failed due to file mounts, because it is probably has too
-            # many ssh connections and can be fixed by retrying.
-            # This is required when using custom image for GCP.
-            retry_cnt = 1
-            while ('Head node fetch timed out. Failed to create head node.'
-                   in stderr and
-                   isinstance(to_provision_cloud, clouds.Azure) and
-                   retry_cnt < _MAX_RAY_UP_RETRY):
+
+        # Launch the cluster with ray up
+
+        # Retry if the any of the following happens:
+        # 1. Failed due to timeout when fetching head node for Azure.
+        # 2. Failed due to file mounts, because it is probably has too
+        # many ssh connections and can be fixed by retrying.
+        # This is required when using custom image for GCP.
+        def need_retry(
+                ray_up_return_value: Optional[Tuple[int, str, str]]) -> bool:
+            if ray_up_return_value is None:
+                return True
+
+            returncode, stdout, stderr = ray_up_return_value
+            if returncode == 0:
+                return False
+
+            if ('Head node fetch timed out. Failed to create head node.'
+                    in stderr and isinstance(to_provision_cloud, clouds.Azure)):
                 logger.info(
                     'Retrying head node provisioning due to head fetching '
                     'timeout.')
-                returncode, stdout, stderr = ray_up()
-
-            retry_cnt = 1
-            while ('Processing file mounts' in stdout and
-                   'Running setup commands' not in stdout and
-                   'Failed to setup head node.' in stderr and
-                   retry_cnt < _MAX_RAY_UP_RETRY):
+                return True
+            if ('Processing file mounts' in stdout and
+                    'Running setup commands' not in stdout and
+                    'Failed to setup head node.' in stderr):
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
-                returncode, stdout, stderr = ray_up()
+                return True
+            return False
 
-        logger.debug(f'Ray up takes {time.time() - start} seconds.')
+        retry_cnt = 0
+        ray_up_return_value = None
+        while retry_cnt < _MAX_RAY_UP_RETRY and need_retry(ray_up_return_value):
+            retry_cnt += 1
+            ray_up_return_value = ray_up()
+
+        assert ray_up_return_value is not None
+        returncode, stdout, stderr = ray_up_return_value
+
+        logger.debug(f'Ray up takes {time.time() - start} seconds with '
+                     f'{retry_cnt} retries.')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
