@@ -1676,6 +1676,14 @@ def _terminate_or_stop_clusters(
                 '  To terminate the cluster instead, run: '
                 f'{colorama.Style.BRIGHT}sky down {name}'
                 f'{colorama.Style.RESET_ALL}')
+        elif handle.launched_resources.use_tpu_pod and not terminate:
+            message = (
+                f'{colorama.Fore.YELLOW}Stopping cluster {name}... skipped.'
+                f'{colorama.Style.RESET_ALL}\n'
+                '  Stopping TPU pod is not supported.\n'
+                '  To terminate the cluster instead, run: '
+                f'{colorama.Style.BRIGHT}sky down {name}'
+                f'{colorama.Style.RESET_ALL}')
         elif idle_minutes_to_autostop is not None:
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(name)
