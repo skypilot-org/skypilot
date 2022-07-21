@@ -2667,7 +2667,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
         - {instance_type: g4dn.2xlarge}
         - {cloud: gcp, accelerators: V100} # overrides cloud
     """
-    config = backend_utils.read_yaml(os.path.expanduser(yaml_path))
+    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
     if not isinstance(config, dict):
         raise ValueError(f'Invalid YAML file: {yaml_path}. '
                          'The YAML file should be parsed into a dictionary.')
@@ -2827,7 +2827,7 @@ def benchmark_launch(
 
     config = None
     if is_yaml:
-        config = backend_utils.read_yaml(os.path.expanduser(entrypoint))
+        config = common_utils.read_yaml(os.path.expanduser(entrypoint))
     if config is None:
         config = {}
     if 'resources' not in config:

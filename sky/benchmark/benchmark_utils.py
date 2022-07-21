@@ -29,6 +29,7 @@ from sky.benchmark import benchmark_state
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -468,7 +469,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
         f = tempfile.NamedTemporaryFile('w',
                                         prefix=f'{cluster}-',
                                         suffix='.yaml')
-        backend_utils.dump_yaml(f.name, candidate_config)
+        common_utils.dump_yaml(f.name, candidate_config)
         yaml_fds.append(f)
         logger.debug(f'Generated temporary yaml file: {f.name}')
 
