@@ -38,7 +38,6 @@ tool_version_check "pylint" $PYLINT_VERSION "2.8.2"
 tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "0.2.3"
 
 YAPF_FLAGS=(
-    '--style' "$ROOT/.style.yapf"
     '--recursive'
     '--parallel'
 )

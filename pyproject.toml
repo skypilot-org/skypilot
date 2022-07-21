@@ -19,3 +19,7 @@ classifiers = [
 [project.urls]
 "Homepage" = "https://sky-proj-sky.readthedocs-hosted.com/en/latest/"
 "Bug Tracker" = "https://github.com/sky-proj/sky/issues"
+
+[tool.yapf]
+based_on_style = "google"
+allow_split_before_dict_value = false
