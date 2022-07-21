@@ -5,13 +5,11 @@ import datetime
 import difflib
 import enum
 import getpass
-import hashlib
 import json
 import os
 import pathlib
 import random
 import re
-import socket
 import subprocess
 import textwrap
 import threading
@@ -45,11 +43,13 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import log_lib
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -616,7 +616,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account cloud providers. Using uuid.getnode()
                 # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{user_and_hostname_hash()}',
+                'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region_name}',
@@ -643,6 +643,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -692,30 +693,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         # in the local cluster config (in ~/.sky/local/...). There is no need
         # for Sky to generate authentication.
         pass
-    dump_yaml(cluster_config_file, config)
-
-
-def read_yaml(path):
-    with open(path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def dump_yaml(path, config):
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    with open(path, 'w') as f:
-        yaml.dump(config,
-                  f,
-                  Dumper=LineBreakDumper,
-                  sort_keys=False,
-                  default_flow_style=False)
+    common_utils.dump_yaml(cluster_config_file, config)
 
 
 def get_run_timestamp() -> str:
@@ -841,7 +819,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
-    config = read_yaml(cluster_yaml)
+    config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
@@ -937,35 +915,6 @@ def check_local_gpus() -> bool:
                                          check=False)
         is_functional = execution_check.returncode == 0
     return is_functional
-
-
-def user_and_hostname_hash() -> str:
-    """Returns a string containing <user>-<hostname hash last 4 chars>.
-
-    For uniquefying user clusters on shared-account cloud providers. Also used
-    for AWS security group.
-
-    Using uuid.getnode() instead of gethostname() is incorrect; observed to
-    collide on Macs.
-
-    NOTE: BACKWARD INCOMPATIBILITY NOTES
-
-    Changing this string will render AWS clusters shown in `sky status`
-    unreusable and potentially cause leakage:
-
-    - If a cluster is STOPPED, any command restarting it (`sky launch`, `sky
-      start`) will launch a NEW cluster.
-    - If a cluster is UP, a `sky launch` command reusing it will launch a NEW
-      cluster. The original cluster will be stopped and thus leaked from Sky's
-      perspective.
-    - `sky down/stop/exec` on these pre-change clusters still works, if no new
-      clusters with the same name have been launched.
-
-    The reason is AWS security group names are derived from this string, and
-    thus changing the SG name makes these clusters unrecognizable.
-    """
-    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    return f'{getpass.getuser()}-{hostname_hash}'
 
 
 def generate_cluster_name():
@@ -1314,7 +1263,7 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_config = read_yaml(handle.cluster_yaml)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
@@ -1412,7 +1361,7 @@ def _update_cluster_status(
 
     The function will update the cached cluster status in the global state. For the
     design of the cluster status and transition, please refer to the
-    sky/design_docs/cluster_states.md
+    sky/design_docs/cluster_status.md
 
     Returns:
       If the cluster is terminated or does not exist, return None.

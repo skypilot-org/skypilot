@@ -12,14 +12,14 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.backends import backend_utils
 from sky.data import storage as storage_lib
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
 # Take first 10 chars to guard against long user name -> long cluster name.
-_smoke_test_hash = backend_utils.user_and_hostname_hash()[:10]
+_smoke_test_hash = common_utils.user_and_hostname_hash()[:10]
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_spot_recovery to make sure the manual
@@ -848,7 +848,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = backend_utils.read_yaml(yaml_path)
+        origin_task_config = common_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()
