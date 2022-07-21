@@ -2858,9 +2858,6 @@ def benchmark_launch(
             '\nTo see the benchmark results: '
             f'{backend_utils.BOLD}sky bench show '
             f'{benchmark}{backend_utils.RESET_BOLD}'
-            '\nTo stop the clusters: '
-            f'{backend_utils.BOLD}sky bench stop '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
             '\nTo teardown the clusters: '
             f'{backend_utils.BOLD}sky bench down '
             f'{benchmark}{backend_utils.RESET_BOLD}')
