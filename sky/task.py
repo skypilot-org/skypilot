@@ -4,6 +4,7 @@ import os
 import re
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
 import yaml
 
 import sky
@@ -139,7 +140,6 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-
         # Check if the task is legal.
         self._validate()
 
@@ -281,6 +281,7 @@ class Task:
 
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
+
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task

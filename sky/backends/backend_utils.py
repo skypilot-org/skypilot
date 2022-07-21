@@ -3,9 +3,10 @@ import contextlib
 import copy
 import datetime
 import difflib
+import enum
+import getpass
 import hashlib
 import json
-import getpass
 import os
 import pathlib
 import random
@@ -42,6 +43,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky.backends import onprem_utils
 from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
@@ -72,6 +74,7 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
+_LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
@@ -562,6 +565,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
+                         auth_config: Optional[Dict[str, str]] = None,
                          dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -588,7 +592,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
-    region_name = resources_vars['region']
+
+    ip_list = None
+    auth_config = None
+    if isinstance(cloud, clouds.Local):
+        ip_list = onprem_utils.get_local_ips(cluster_name)
+        auth_config = onprem_utils.get_local_auth_config(cluster_name)
+    region_name = resources_vars.get('region')
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -616,6 +626,14 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                # Local IP handling (optional).
+                'head_ip': None if ip_list is None else ip_list[0],
+                'worker_ips': None if ip_list is None else ip_list[1:],
+                # Authentication (optional).
+                'ssh_user':
+                    (None if auth_config is None else auth_config['ssh_user']),
+                'ssh_private_key': (None if auth_config is None else
+                                    auth_config['ssh_private_key']),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
@@ -663,9 +681,14 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_aws_authentication(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    else:
-        assert isinstance(cloud, clouds.Azure), cloud
+    elif isinstance(cloud, clouds.Azure):
         config = auth.setup_azure_authentication(config)
+    else:
+        assert isinstance(cloud, clouds.Local), cloud
+        # Local cluster case, authentication is already filled by the user
+        # in the local cluster config (in ~/.sky/local/...). There is no need
+        # for Sky to generate authentication.
+        pass
     dump_yaml(cluster_config_file, config)
 
 
@@ -698,10 +721,12 @@ def get_run_timestamp() -> str:
 
 @timeline.event
 def wait_until_ray_cluster_ready(
-        cluster_config_file: str,
-        num_nodes: int,
-        log_path: str,
-        nodes_launching_progress_timeout: Optional[int] = None) -> bool:
+    cluster_config_file: str,
+    num_nodes: int,
+    log_path: str,
+    is_local_cloud: bool = False,
+    nodes_launching_progress_timeout: Optional[int] = None,
+) -> bool:
     """Returns whether the entire ray cluster is ready."""
     if num_nodes <= 1:
         return
@@ -732,11 +757,24 @@ def wait_until_ray_cluster_ready(
             logger.debug(output)
 
             # Workers that are ready
-            result = _LAUNCHED_WORKER_PATTERN.findall(output)
             ready_workers = 0
-            if result:
-                assert len(result) == 1, result
-                ready_workers = int(result[0])
+            # On-prem/local case is handled differently.
+            # `ray status` produces different output for local case, and
+            # we poll for number of nodes launched instead of counting for
+            # head and number of worker nodes separately (it is impossible
+            # to distinguish between head and worker node for local case).
+            if is_local_cloud:
+                result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
+                # In the local case, ready_workers mean the total number
+                # of nodes launched, including head.
+                ready_workers = len(result)
+            else:
+                result = _LAUNCHED_WORKER_PATTERN.findall(output)
+                if len(result) == 0:
+                    ready_workers = 0
+                else:
+                    assert len(result) == 1, result
+                    ready_workers = int(result[0])
 
             result = _LAUNCHED_HEAD_PATTERN.findall(output)
             ready_head = 0
@@ -749,6 +787,8 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
+            # In the local case, ready_head=0 and ready_workers=num_nodes
+            # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
             if ready_head + ready_workers == num_nodes:
                 # All nodes are up.
                 break
@@ -974,7 +1014,6 @@ def get_node_ips(cluster_yaml: str,
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
-
     if expected_num_nodes > 1:
         try:
             proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
@@ -982,6 +1021,19 @@ def get_node_ips(cluster_yaml: str,
                                         stderr=subprocess.PIPE)
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
+            # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
+            # Workaround: List of IPs are shown in Stderr
+            cluster_name = os.path.basename(cluster_yaml).split('.')[0]
+            if ((handle is not None and hasattr(handle, 'local_handle') and
+                 handle.local_handle is not None) or
+                    onprem_utils.check_if_local_cloud(cluster_name)):
+                out = proc.stderr.decode()
+                worker_ips = re.findall(IP_ADDR_REGEX, out)
+                # Remove head ip from worker ip list.
+                for i, ip in enumerate(worker_ips):
+                    if ip == head_ip[0]:
+                        del worker_ips[i]
+                        break
         except subprocess.CalledProcessError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.WORKER) from e
@@ -1405,24 +1457,58 @@ def refresh_cluster_status_handle(
     return record['status'], record['handle']
 
 
-def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
+class CloudFilter(enum.Enum):
+    # Filter for all types of clouds.
+    ALL = 'all'
+    # Filter for Sky's main clouds (aws, gcp, azure, docker).
+    CLOUDS_AND_DOCKER = 'clouds-and-docker'
+    # Filter for only local clouds.
+    LOCAL = 'local'
+
+
+def get_clusters(
+        include_reserved: bool,
+        refresh: bool,
+        cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER
+) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
+
+    Combs through the Sky database (in ~/.sky/state.db) to get a list of records
+    corresponding to launched clusters.
 
     Args:
         include_reserved: Whether to include sky-reserved clusters, e.g. spot
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
+        cloud_filter: Sets which clouds to filer through from the global user
+            state. Supports three values, 'all' for all clouds, 'public' for public
+            clouds only, and 'local' for only local clouds.
 
     Returns:
         A list of cluster records.
     """
     records = global_user_state.get_clusters()
+
     if not include_reserved:
         records = [
             record for record in records
             if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
         ]
+
+    def _is_local_cluster(record):
+        cluster_resources = record['handle'].launched_resources
+        return isinstance(cluster_resources.cloud, clouds.Local)
+
+    if cloud_filter == CloudFilter.LOCAL:
+        records = [record for record in records if _is_local_cluster(record)]
+    elif cloud_filter == CloudFilter.CLOUDS_AND_DOCKER:
+        records = [
+            record for record in records if not _is_local_cluster(record)
+        ]
+    elif cloud_filter not in CloudFilter:
+        raise ValueError(f'{cloud_filter} is not part of CloudFilter.')
+
     if not refresh:
         return records
 
