@@ -10,7 +10,7 @@ We will **not** sell data or buy data about you.
 What data is collected?
 -----------------------
 
-We collect non-sensitive data that helps us understand how Sky is used. We will redact your :code:`setup`` and :code:`run`` codes from the collected data.
+We collect non-sensitive data that helps us understand how Sky is used. We will redact your ``setup``, ``run``, and ``env`` from the collected data.
 
 .. _usage-disable:
 
@@ -26,6 +26,6 @@ When a Sky CLI or entrypoint function is called, Sky will do the following:
 
 #. Check the environment variable ``SKY_DISABLE_USAGE_COLLECTION`` is set: 1 means disabled and 0 means enabled.
 
-#. If the environment variable is not set or set to 0, it will collect the cluster and task resources and send them to a hosted server.
+#. If the environment variable is not set or set to 0, it will collect information about the cluster and task resource requirements 
 
 #. If the environment variable is set to 1, it will skip any message sending.

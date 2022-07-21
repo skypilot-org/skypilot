@@ -274,7 +274,7 @@ class UsageMessageToReport(MessageToReport):
                                            name_or_fn)
 
 
-class MessageCollections:
+class MessageCollection:
     """A collection of messages."""
 
     def __init__(self):
@@ -297,7 +297,7 @@ class MessageCollections:
         return self._messages.values()
 
 
-messages = MessageCollections()
+messages = MessageCollection()
 
 
 def _send_to_loki(message_type: MessageType):

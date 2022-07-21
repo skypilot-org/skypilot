@@ -31,8 +31,8 @@ storage_config:
   aws:
     bucketnames: sky-host-loki
     region: us-west-2
-    access_key_id: AKIAZ4UVK4B75VZYOPNM
-    secret_access_key: HM2T0J9967AEk2raZBcOWsZGN/n8FeKisPhNswuR
+    access_key_id: PLACEHOLDER
+    secret_access_key: PLACEHOLDER
     s3forcepathstyle: true
   boltdb_shipper:
     active_index_directory: /loki/index
