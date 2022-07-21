@@ -59,7 +59,7 @@ logger = sky_logging.init_logger(__name__)
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
