@@ -32,7 +32,7 @@ IMPORTANT: Please `export SKY_DEV=1` before running the sky commands in the term
 
 
 ### Environment Variable Options
-- `export SKY_DEV=1` to show debugging logs (logging.DEBUG).
+- `export SKY_DEV=1` to show debugging logs (logging.DEBUG) and send the logs to dev space.
 - `export SKY_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
 - `export SKY_MINIMIZE_LOGGING=1` to minimize the sky outputs for demo purpose.
 
@@ -48,12 +48,12 @@ from utils import timeline
 
 
 # record a function in the timeline with the function path name
-@timeline.Event.decorator
+@timeline.event
 def f(): ...
 
 
 # record a function in the timeline using name='my_name'
-@timeline.Event.decorator(name='event_name')
+@timeline.event(name='event_name')
 def f(): ...
 
 
@@ -114,6 +114,3 @@ pip install tuna # Tuna for viz
 python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
 tuna sky.prof
 ```
-
-
-### 
