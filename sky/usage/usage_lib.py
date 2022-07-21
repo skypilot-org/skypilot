@@ -275,28 +275,30 @@ class UsageMessageToReport(MessageToReport):
 
 
 class MessageCollections:
+    """A collection of messages."""
+
     def __init__(self):
-        self._messages= {
-            MessageType.USAGE: UsageMessageToReport()
-        }
-        
+        self._messages = {MessageType.USAGE: UsageMessageToReport()}
+
     @property
     def usage(self):
         return self._messages[MessageType.USAGE]
 
     def reset(self, message_type: MessageType):
         self._messages[message_type] = self._messages[message_type].__class__()
-    
+
     def __getitem__(self, key):
         return self._messages[key]
 
     def items(self):
         return self._messages.items()
-    
+
     def values(self):
         return self._messages.values()
 
+
 messages = MessageCollections()
+
 
 def _send_to_loki(message_type: MessageType):
     """Send the message to the Grafana Loki."""

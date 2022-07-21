@@ -2212,7 +2212,8 @@ def admin_deploy(clusterspec_yaml: str):
         ips = [ips]
     local_cluster_name = yaml_config['cluster']['name']
     usage_lib.messages.usage.update_cluster_name(local_cluster_name)
-    usage_lib.messages.usage.update_cluster_resources(len(ips), sky.Resources(sky.Local()))
+    usage_lib.messages.usage.update_cluster_resources(
+        len(ips), sky.Resources(sky.Local()))
 
     # Check for Ray
     click.secho(f'[{steps}/4] Checking on-premise environment\n',
