@@ -2762,23 +2762,18 @@ def benchmark_launch(
 
     entrypoint = ' '.join(entrypoint)
     if not entrypoint:
-        raise click.BadParameter('Please specify a task to benchmark.')
+        raise click.BadParameter('Please specify a task yaml to benchmark.')
 
     is_yaml, config = _check_yaml(entrypoint)
-    if is_yaml:
-        # Treat entrypoint as a yaml.
-        click.secho('Benchmarking a task from YAML spec: ',
-                    fg='yellow',
-                    nl=False)
-    else:
-        # Treat entrypoint as a bash command.
-        click.secho('Benchmarking a task from command: ', fg='yellow', nl=False)
+    if not is_yaml:
+        raise click.BadParameter(
+            'Sky Benchmark does not support command line tasks. '
+            'Please provide a YAML file.')
+
+    click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
     click.secho(entrypoint, bold=True)
 
-    candidates = None
-    if is_yaml:
-        candidates = _get_candidate_configs(entrypoint)
-
+    candidates = _get_candidate_configs(entrypoint)
     # Check if the candidate configs are specified in both CLI and YAML.
     if candidates is not None:
         message = ('is specified in both CLI and resources.candidates '
@@ -2825,8 +2820,6 @@ def benchmark_launch(
     if candidates is None:
         candidates = [{}]
 
-    if config is None:
-        config = {}
     if 'resources' not in config:
         config['resources'] = {}
     resources_config = config['resources']
