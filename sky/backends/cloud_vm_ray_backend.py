@@ -1461,7 +1461,6 @@ class CloudVmRayBackend(backends.Backend):
         # Try to launch the exiting cluster first
         if cluster_name is None:
             cluster_name = backend_utils.generate_cluster_name()
-        backend_utils.check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
