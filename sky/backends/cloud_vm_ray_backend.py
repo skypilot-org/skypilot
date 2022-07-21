@@ -38,6 +38,8 @@ from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.skylet.utils import log_utils
+from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -337,6 +339,7 @@ class RayCodeGen:
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
+            sky_env_vars_dict_str,
             textwrap.dedent(f"""\
         script = {bash_script!r}
         if run_fn is not None:
@@ -347,7 +350,7 @@ class RayCodeGen:
         if script is not None:
             sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
-            {sky_env_vars_dict_str}
+            
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
@@ -671,7 +674,7 @@ class RetryingVmProvisioner(object):
             cluster_name, acquire_per_cluster_status_lock=False)
         if handle is not None:
             try:
-                config = backend_utils.read_yaml(handle.cluster_yaml)
+                config = common_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
@@ -898,6 +901,8 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision.copy(region=region.name),
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+            usage_lib.messages.usage.update_final_cluster_status(
+                global_user_state.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
             global_user_state.add_or_update_cluster(cluster_name,
@@ -1102,9 +1107,9 @@ class RetryingVmProvisioner(object):
             # ready to ensure cluster will not scale up after preemption (spot).
             # Skip for non-spot as this takes extra time to provision (~1min).
             if use_spot:
-                ray_config = backend_utils.read_yaml(cluster_config_file)
+                ray_config = common_utils.read_yaml(cluster_config_file)
                 ray_config['upscaling_speed'] = 0
-                backend_utils.dump_yaml(cluster_config_file, ray_config)
+                common_utils.dump_yaml(cluster_config_file, ray_config)
                 start = time.time()
                 returncode, stdout, stderr = ray_up()
                 logger.debug(
@@ -1341,7 +1346,7 @@ class CloudVmRayBackend(backends.Backend):
             if self.launched_resources.region is not None:
                 return
 
-            config = backend_utils.read_yaml(self.cluster_yaml)
+            config = common_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
             if cloud.is_same_cloud(sky.Azure()):
@@ -1395,6 +1400,12 @@ class CloudVmRayBackend(backends.Backend):
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
+        usage_lib.messages.usage.update_cluster_resources(
+            handle.launched_nodes, launched_resources)
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        if record is not None:
+            usage_lib.messages.usage.update_cluster_status(record['status'])
+
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
         assert launched_resources.region is not None, handle
@@ -1403,6 +1414,8 @@ class CloudVmRayBackend(backends.Backend):
                         f'existing cluster first: sky down {cluster_name}')
         if hasattr(handle, 'local_handle') and handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
+            usage_lib.messages.usage.update_local_cluster_resources(
+                launched_resources)
             mismatch_str = ('To fix: use accelerators/number of nodes that can '
                             'be satisfied by the local cluster')
         # Requested_resources <= actual_resources.
@@ -1433,12 +1446,10 @@ class CloudVmRayBackend(backends.Backend):
                    to_provision: Optional[resources_lib.Resources],
                    dryrun: bool,
                    stream_logs: bool,
-                   cluster_name: Optional[str] = None,
+                   cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         """Provisions using 'ray up'."""
         # Try to launch the exiting cluster first
-        if cluster_name is None:
-            cluster_name = backend_utils.generate_cluster_name()
         backend_utils.check_cluster_name_is_valid(cluster_name)
         # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
@@ -1458,6 +1469,11 @@ class CloudVmRayBackend(backends.Backend):
                         cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+
+            usage_lib.messages.usage.update_cluster_resources(
+                to_provision_config.num_nodes, to_provision_config.resources)
+            usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
+
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
             with timeline.Event('backend.provision.wheel_build'):
@@ -1491,6 +1507,8 @@ class CloudVmRayBackend(backends.Backend):
                         # Clean up the cluster's entry in `sky status`.
                         global_user_state.remove_cluster(cluster_name,
                                                          terminate=True)
+                        usage_lib.messages.usage.update_final_cluster_status(
+                            None)
                         error_message = (
                             'Failed to provision all possible launchable '
                             'resources.'
@@ -1542,6 +1560,10 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+            usage_lib.messages.usage.update_cluster_resources(
+                handle.launched_nodes, handle.launched_resources)
+            usage_lib.messages.usage.update_final_cluster_status(
+                global_user_state.ClusterStatus.UP)
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
@@ -1577,7 +1599,9 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.add_or_update_cluster(cluster_name,
                                                         handle,
                                                         ready=True)
-                auth_config = backend_utils.read_yaml(
+                usage_lib.messages.usage.update_final_cluster_status(
+                    global_user_state.ClusterStatus.UP)
+                auth_config = common_utils.read_yaml(
                     handle.cluster_yaml)['auth']
                 backend_utils.SSHConfigHelper.add_cluster(
                     cluster_name, ip_list, auth_config)
@@ -2095,7 +2119,7 @@ class CloudVmRayBackend(backends.Backend):
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
-        config = backend_utils.read_yaml(handle.cluster_yaml)
+        config = common_utils.read_yaml(handle.cluster_yaml)
         prev_status, _ = backend_utils.refresh_cluster_status_handle(
             handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
@@ -2172,7 +2196,7 @@ class CloudVmRayBackend(backends.Backend):
                                              prefix='sky_',
                                              delete=False,
                                              suffix='.yml') as f:
-                backend_utils.dump_yaml(f.name, config)
+                common_utils.dump_yaml(f.name, config)
                 f.flush()
 
                 teardown_verb = 'Terminating' if terminate else 'Stopping'
@@ -2256,7 +2280,7 @@ class CloudVmRayBackend(backends.Backend):
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
-        config = backend_utils.read_yaml(handle.cluster_yaml)
+        config = common_utils.read_yaml(handle.cluster_yaml)
         auth_config = config['auth']
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
@@ -2351,6 +2375,7 @@ class CloudVmRayBackend(backends.Backend):
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
+        usage_lib.messages.usage.set_new_cluster()
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
             # The field ssh_user is specified in the cluster config file.
