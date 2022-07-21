@@ -18,7 +18,8 @@ from sky.utils import subprocess_utils
 
 # (username, last 4 chars of hash of hostname): for uniquefying users on
 # shared-account cloud providers.
-_smoke_test_hash = backend_utils.user_and_hostname_hash()
+# Take first 10 chars to guard against long user name -> long cluster name.
+_smoke_test_hash = backend_utils.user_and_hostname_hash()[:10]
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_spot_recovery to make sure the manual
@@ -532,7 +533,7 @@ def test_spot_recovery():
             f'--filters Name=tag:ray-cluster-name,Values={name}* '
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
-            'sleep 40',
+            'sleep 50',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',

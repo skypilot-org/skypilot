@@ -89,10 +89,13 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 _TEST_IP = 'https://8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
-# characters. Through testing, 37 chars is the maximum length for the Sky
-# cluster name on GCP.  Ref:
+# characters. Through testing, this is the maximum length for the Sky cluster
+# name on GCP.  Ref:
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-_MAX_CLUSTER_NAME_LEN = 37
+# NOTE: actually 37 is maximum for a single-node cluster which gets the suffix
+# '-head', but 35 for a multinode cluster because workers get the suffix
+# '-worker'. Here we do not distinguish these cases and take the lower limit.
+_MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -818,7 +821,7 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out when waiting for workers to be provisioned '
+                    'Timed out: waited for workers to be provisioned '
                     f'for more than {nodes_launching_progress_timeout} seconds.'
                 )
                 return False  # failed
@@ -1629,11 +1632,12 @@ def check_cluster_name_is_valid(cluster_name: str,
     if isinstance(cloud, clouds.GCP):
         # GCP has too restrictive of a length limit. Don't check for other
         # clouds.
-        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
+        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
+                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP}'
+                    ' chars.')
 
 
 def check_cluster_name_not_reserved(
