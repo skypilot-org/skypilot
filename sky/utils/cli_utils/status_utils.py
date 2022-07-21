@@ -6,6 +6,7 @@ import colorama
 
 from sky import backends
 from sky.backends import backend_utils
+from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
@@ -108,7 +109,7 @@ def show_local_status_table(local_clusters: List[str]):
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
         config_path = handle.cluster_yaml
-        config = backend_utils.read_yaml(config_path)
+        config = common_utils.read_yaml(config_path)
         username = config['auth']['ssh_user']
 
         if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):

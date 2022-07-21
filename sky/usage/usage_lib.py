@@ -136,6 +136,9 @@ class UsageMessageToReport(MessageToReport):
         #: Resources of the cluster.
         self.resources: Optional[Dict[str,
                                       Any]] = None  # update_cluster_resources
+        #: Resources of the local cluster.
+        self.local_resources: Optional[Dict[
+            str, Any]] = None  # update_local_cluster_resources
         #: The number of nodes in the cluster.
         self.num_nodes: Optional[int] = None  # update_cluster_resources
         #: The status of the cluster.
@@ -247,6 +250,10 @@ class UsageMessageToReport(MessageToReport):
 
         self.num_nodes = num_nodes
         self.resources = resources.to_yaml_config()
+
+    def update_local_cluster_resources(
+            self, local_resources: List['resources_lib.Resources']):
+        self.local_resources = [r.to_yaml_config() for r in local_resources]
 
     def update_cluster_status(
             self, original_status: Optional['global_user_state.ClusterStatus']):

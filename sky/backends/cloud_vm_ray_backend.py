@@ -1414,6 +1414,8 @@ class CloudVmRayBackend(backends.Backend):
                         f'existing cluster first: sky down {cluster_name}')
         if hasattr(handle, 'local_handle') and handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
+            usage_lib.usage_message.update_local_cluster_resources(
+                launched_resources)
             mismatch_str = ('To fix: use accelerators/number of nodes that can '
                             'be satisfied by the local cluster')
         # Requested_resources <= actual_resources.

@@ -2182,6 +2182,7 @@ def admin():
 
 @admin.command('deploy', cls=_DocumentedCodeCommand)
 @click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
+@usage_lib.entrypoint
 def admin_deploy(clusterspec_yaml: str):
     """Launches Sky on a local cluster.
 
@@ -2210,6 +2211,7 @@ def admin_deploy(clusterspec_yaml: str):
     if not isinstance(ips, list):
         ips = [ips]
     local_cluster_name = yaml_config['cluster']['name']
+    usage_lib.usage_message.update_cluster_name(local_cluster_name)
 
     # Check for Ray
     click.secho(f'[{steps}/4] Checking on-premise environment\n',

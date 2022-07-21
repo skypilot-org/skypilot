@@ -693,7 +693,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     common_utils.dump_yaml(cluster_config_file, config)
 
 
-
 def get_run_timestamp() -> str:
     return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
