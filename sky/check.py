@@ -13,14 +13,16 @@ def check(quiet: bool = False) -> None:
 
     enabled_clouds = []
     for cloud in clouds.CLOUD_REGISTRY.values():
-        echo(f'  Checking {cloud}...', nl=False)
+        if not isinstance(cloud, clouds.Local):
+            echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         status_color = 'green' if ok else 'red'
-        echo('  ' +
-             click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-             ' ' * 10)
+        if not isinstance(cloud, clouds.Local):
+            echo('  ' + click.style(
+                f'{cloud}: {status_msg}', fg=status_color, bold=True) +
+                 ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
             if reason is not None:
