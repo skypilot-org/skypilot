@@ -388,8 +388,7 @@ def tail_logs(job_owner: str,
             for line in _follow_job_logs(
                     log_file,
                     job_id=job_id,
-                    start_streaming_at='SKY INFO: Waiting for task resources on'
-            ):
+                    start_streaming_at='SKY INFO: Tip: use Ctrl-C to exit log'):
                 print(line, end='', flush=True)
     else:
         try:
