@@ -901,7 +901,7 @@ class RetryingVmProvisioner(object):
                 launched_resources=to_provision.copy(region=region.name),
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
-            usage_lib.usage_message.update_final_cluster_status(
+            usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
@@ -1400,11 +1400,11 @@ class CloudVmRayBackend(backends.Backend):
         launched_resources = handle.launched_resources
         task_resources = list(task.resources)[0]
         cluster_name = handle.cluster_name
-        usage_lib.usage_message.update_cluster_resources(
+        usage_lib.messages.usage.update_cluster_resources(
             handle.launched_nodes, launched_resources)
         record = global_user_state.get_cluster_from_name(cluster_name)
         if record is not None:
-            usage_lib.usage_message.update_cluster_status(record['status'])
+            usage_lib.messages.usage.update_cluster_status(record['status'])
 
         # Backward compatibility: the old launched_resources without region info
         # was handled by ResourceHandle._update_cluster_region.
@@ -1414,7 +1414,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'existing cluster first: sky down {cluster_name}')
         if hasattr(handle, 'local_handle') and handle.local_handle is not None:
             launched_resources = handle.local_handle['cluster_resources']
-            usage_lib.usage_message.update_local_cluster_resources(
+            usage_lib.messages.usage.update_local_cluster_resources(
                 launched_resources)
             mismatch_str = ('To fix: use accelerators/number of nodes that can '
                             'be satisfied by the local cluster')
@@ -1470,9 +1470,9 @@ class CloudVmRayBackend(backends.Backend):
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
 
-            usage_lib.usage_message.update_cluster_resources(
+            usage_lib.messages.usage.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
-            usage_lib.usage_message.update_cluster_status(prev_cluster_status)
+            usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
 
             # TODO(suquark): once we have sky on PYPI, we should directly
             # install sky from PYPI.
@@ -1507,7 +1507,7 @@ class CloudVmRayBackend(backends.Backend):
                         # Clean up the cluster's entry in `sky status`.
                         global_user_state.remove_cluster(cluster_name,
                                                          terminate=True)
-                        usage_lib.usage_message.update_final_cluster_status(
+                        usage_lib.messages.usage.update_final_cluster_status(
                             None)
                         error_message = (
                             'Failed to provision all possible launchable '
@@ -1560,9 +1560,9 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
-            usage_lib.usage_message.update_cluster_resources(
+            usage_lib.messages.usage.update_cluster_resources(
                 handle.launched_nodes, handle.launched_resources)
-            usage_lib.usage_message.update_final_cluster_status(
+            usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
 
             # Update job queue to avoid stale jobs (when restarted), before
@@ -1599,7 +1599,7 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.add_or_update_cluster(cluster_name,
                                                         handle,
                                                         ready=True)
-                usage_lib.usage_message.update_final_cluster_status(
+                usage_lib.messages.usage.update_final_cluster_status(
                     global_user_state.ClusterStatus.UP)
                 auth_config = common_utils.read_yaml(
                     handle.cluster_yaml)['auth']
@@ -2375,7 +2375,7 @@ class CloudVmRayBackend(backends.Backend):
             return RetryingVmProvisioner.ToProvisionConfig(
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
-        usage_lib.usage_message.set_new_cluster()
+        usage_lib.messages.usage.set_new_cluster()
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
             # The field ssh_user is specified in the cluster config file.

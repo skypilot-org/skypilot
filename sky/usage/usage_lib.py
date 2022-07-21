@@ -73,15 +73,8 @@ class MessageToReport:
 
     def __init__(self, schema_version: str):
         self.schema_version = schema_version
-        self.reset()
-
-    def reset(self):
         self.start_time: int = None
         self.send_time: int = None
-        self._reset()
-
-    def _reset(self):
-        raise NotImplementedError
 
     def start(self):
         if self.start_time is None:
@@ -104,8 +97,6 @@ class UsageMessageToReport(MessageToReport):
 
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
-
-    def _reset(self):
         # Message identifier.
         self.user: str = get_logging_user_hash()
         self.run_id: str = _get_logging_run_id()
@@ -143,9 +134,9 @@ class UsageMessageToReport(MessageToReport):
         self.num_nodes: Optional[int] = None  # update_cluster_resources
         #: The status of the cluster.
         self.original_cluster_status: Optional[
-            str] = None  # update_original_cluster_status
+            str] = None  # update_cluster_status
         self._original_cluster_status_specified: Optional[
-            bool] = False  # update_original_cluster_status
+            bool] = False  # update_cluster_status
         self.final_cluster_status: Optional[
             str] = None  # update_final_cluster_status
         #: Whether the cluster is newly launched.
@@ -283,15 +274,36 @@ class UsageMessageToReport(MessageToReport):
                                            name_or_fn)
 
 
-usage_message = UsageMessageToReport()
+class MessageCollections:
+    def __init__(self):
+        self._messages= {
+            MessageType.USAGE: UsageMessageToReport()
+        }
+        
+    @property
+    def usage(self):
+        return self._messages[MessageType.USAGE]
 
-messages = {MessageType.USAGE: usage_message}
+    def reset(self, message_type: MessageType):
+        self._messages[message_type] = self._messages[message_type].__class__()
+    
+    def __getitem__(self, key):
+        return self._messages[key]
 
+    def items(self):
+        return self._messages.items()
+    
+    def values(self):
+        return self._messages.values()
 
-def _send_to_loki(message: MessageToReport, message_type: MessageType):
+messages = MessageCollections()
+
+def _send_to_loki(message_type: MessageType):
     """Send the message to the Grafana Loki."""
     if env_options.Options.DISABLE_LOGGING.get():
         return
+
+    message = messages[message_type]
 
     message.send_time = _get_current_timestamp_ns()
     log_timestamp = message.start_time
@@ -316,7 +328,7 @@ def _send_to_loki(message: MessageToReport, message_type: MessageType):
     if response.status_code != 204:
         logger.debug(
             f'Grafana Loki failed with response: {response.text}\n{payload}')
-    message.reset()
+    messages.reset(message_type)
 
 
 def _clean_yaml(yaml_info: Dict[str, str]):
@@ -377,7 +389,7 @@ def _send_local_messages():
             # Avoid the fallback entrypoint to send the message again
             # in normal case.
             try:
-                _send_to_loki(message, msg_type)
+                _send_to_loki(msg_type)
             except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
@@ -394,11 +406,11 @@ def entrypoint_context(name: str, fallback: bool = False):
     additional entrypoint_context with fallback=True can be used to wrap
     the global entrypoint to catch any exceptions that are not caught.
     """
-    is_entry = usage_message.entrypoint is None
+    is_entry = messages.usage.entrypoint is None
     if is_entry and not fallback:
         for message in messages.values():
             message.start()
-        usage_message.update_entrypoint(name)
+        messages.usage.update_entrypoint(name)
     if env_options.Options.DISABLE_LOGGING.get() or not is_entry:
         yield
         return
@@ -408,11 +420,11 @@ def entrypoint_context(name: str, fallback: bool = False):
         yield
     except (Exception, SystemExit, KeyboardInterrupt):
         trace = traceback.format_exc()
-        usage_message.stacktrace = trace
+        messages.usage.stacktrace = trace
         raise
     finally:
         if fallback:
-            usage_message.update_entrypoint(name)
+            messages.usage.update_entrypoint(name)
         _send_local_messages()
 
 

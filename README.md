@@ -21,6 +21,8 @@ Use editable mode (`-e`) when installing:
 pip install -e ".[all]"
 pip install -r requirements-dev.txt
 ```
+IMPORTANT: Please `export SKY_DEV=1` before running the sky commands in the terminal, so that the developing log will not pollute the actual user logs.
+
 
 ### Submitting pull requests
 - After you commit, format your code with [`format.sh`](./format.sh).
@@ -112,3 +114,6 @@ pip install tuna # Tuna for viz
 python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
 tuna sky.prof
 ```
+
+
+### 

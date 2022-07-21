@@ -74,7 +74,7 @@ class StrategyExecutor:
         while True:
             retry_cnt += 1
             try:
-                usage_lib.usage_message.set_internal()
+                usage_lib.messages.usage.set_internal()
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
                            detach_run=True)

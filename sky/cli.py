@@ -661,7 +661,7 @@ def _make_dag_from_entrypoint_with_overrides(
             cloud = 'local'
 
         if is_yaml:
-            usage_lib.usage_message.update_user_task_yaml(entrypoint)
+            usage_lib.messages.usage.update_user_task_yaml(entrypoint)
             task = sky.Task.from_yaml(entrypoint)
         else:
             task = sky.Task(name='sky-cmd', run=entrypoint)
@@ -1652,7 +1652,7 @@ def _terminate_or_stop_clusters(
             # should've been printed by _get_glob_clusters() above.
             continue
         clusters.append({'name': name, 'handle': handle})
-    usage_lib.usage_message.update_cluster_name(
+    usage_lib.messages.usage.update_cluster_name(
         [cluster['name'] for cluster in clusters])
 
     if not clusters:
@@ -2211,7 +2211,8 @@ def admin_deploy(clusterspec_yaml: str):
     if not isinstance(ips, list):
         ips = [ips]
     local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.usage_message.update_cluster_name(local_cluster_name)
+    usage_lib.messages.usage.update_cluster_name(local_cluster_name)
+    usage_lib.messages.usage.update_cluster_resources(len(ips), sky.Resources(sky.Local()))
 
     # Check for Ray
     click.secho(f'[{steps}/4] Checking on-premise environment\n',
