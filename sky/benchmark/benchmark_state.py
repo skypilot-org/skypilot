@@ -71,14 +71,15 @@ _BENCHMARK_DB = _BenchmarkSQLiteConn()
 class BenchmarkStatus(enum.Enum):
     """Benchmark job status.
 
-    This is different from the job status maintained by the job queue in the
-    following aspects:
-    1. There is no PENDING state, as the benchmarking job is the first job of
-        the cluster.
+    This is slightly different from the job status maintained by the job queue
+    in the following aspects:
+    1. THE INIT state includes both INIT and PENDING states, because
+        the benchmarking job is always the first job of the cluster.
     2. The TERMINATED state includes the CANCELLED and FAILED states, as we
         cannot distinguish the two states when the cluster is not alive.
+    3. The SUCCEEDED state is renamed to FINISHED.
     """
-    # Corresponding job status: INIT.
+    # Corresponding job status: INIT, PENDING.
     INIT = 'INIT'
 
     # Corresponding job status: RUNNING.
