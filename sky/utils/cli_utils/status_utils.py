@@ -6,6 +6,7 @@ import colorama
 
 from sky import backends
 from sky.backends import backend_utils
+from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils
 from sky.skylet.utils import log_utils
 
@@ -32,7 +33,7 @@ class StatusColumn:
         return val
 
 
-def show_status_table(show_all: bool, refresh: bool):
+def show_status_table(show_all: bool = False, refresh: bool = False):
     """Compute cluster table values and display."""
     # TODO(zhwu): Update the information for auto-stop clusters.
     cluster_records = backend_utils.get_clusters(show_all, refresh)
@@ -108,7 +109,7 @@ def show_local_status_table(local_clusters: List[str]):
     for cluster_status in clusters_status:
         handle = cluster_status['handle']
         config_path = handle.cluster_yaml
-        config = backend_utils.read_yaml(config_path)
+        config = common_utils.read_yaml(config_path)
         username = config['auth']['ssh_user']
 
         if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):

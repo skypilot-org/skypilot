@@ -54,6 +54,7 @@ Key features:
    reference/storage
    reference/local/index
    reference/quota
+   reference/logging
    reference/faq
 
 .. toctree::

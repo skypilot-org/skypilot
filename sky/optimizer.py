@@ -15,6 +15,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.utils import env_options
 from sky.utils import ux_utils
 from sky.skylet.utils import log_utils
 
@@ -608,7 +609,7 @@ class Optimizer:
                 ordered_best_plan[node] = best_plan[node]
 
         is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
-        if not is_trivial and not sky_logging.MINIMIZE_LOGGING:
+        if not is_trivial and not env_options.Options.MINIMIZE_LOGGING.get():
             metric_str = 'cost' if minimize_cost else 'run time'
             logger.info(
                 f'{colorama.Style.BRIGHT}Target:{colorama.Style.RESET_ALL}'
@@ -765,7 +766,7 @@ class Optimizer:
         Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
                                        total_cost, node_to_cost_map,
                                        minimize_cost)
-        if not sky_logging.MINIMIZE_LOGGING:
+        if not env_options.Options.MINIMIZE_LOGGING.get():
             Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
 

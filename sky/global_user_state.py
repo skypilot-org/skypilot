@@ -12,7 +12,6 @@ import os
 import pathlib
 import pickle
 import sqlite3
-import sys
 import threading
 import time
 import typing
@@ -20,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import clouds
 from sky.skylet.utils import db_utils
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -114,24 +114,6 @@ class StorageStatus(enum.Enum):
     READY = 'READY'
 
 
-def _get_pretty_entry_point() -> str:
-    """Returns the prettified entry point of this process (sys.argv).
-
-    Example return values:
-
-        $ sky launch app.yaml  # 'sky launch app.yaml'
-        $ sky gpunode  # 'sky gpunode'
-        $ python examples/app.py  # 'app.py'
-    """
-    argv = sys.argv
-    basename = os.path.basename(argv[0])
-    if basename == 'sky':
-        # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
-        # things like 'examples/app.py'.
-        argv[0] = basename
-    return ' '.join(argv)
-
-
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool,
@@ -140,7 +122,7 @@ def add_or_update_cluster(cluster_name: str,
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
-    last_use = _get_pretty_entry_point() if is_launch else None
+    last_use = common_utils.get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -187,7 +169,7 @@ def add_or_update_cluster(cluster_name: str,
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
-                       (_get_pretty_entry_point(), cluster_name))
+                       (common_utils.get_pretty_entry_point(), cluster_name))
     _DB.conn.commit()
 
 
@@ -331,7 +313,7 @@ def add_or_update_storage(storage_name: str,
                           storage_status: StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
-    last_use = _get_pretty_entry_point()
+    last_use = common_utils.get_pretty_entry_point()
 
     def status_check(status):
         return status in StorageStatus

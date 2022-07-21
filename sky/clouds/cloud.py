@@ -52,6 +52,8 @@ CLOUD_REGISTRY = _CloudRegistry()
 class Cloud:
     """A cloud provider."""
 
+    _REPR = '<Cloud>'
+
     #### Regions/Zones ####
 
     @classmethod
@@ -184,3 +186,6 @@ class Cloud:
     def region_exists(self, region: str) -> bool:
         """Returns whether the region is valid for this cloud."""
         raise NotImplementedError
+
+    def __repr__(self):
+        return self._REPR
