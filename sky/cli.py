@@ -2730,6 +2730,7 @@ def bench():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 def benchmark_launch(
     entrypoint: str,
     benchmark: str,
@@ -2905,6 +2906,7 @@ def benchmark_launch(
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
 def benchmark_ls() -> None:
     """List the benchmark history."""
     benchmarks = benchmark_state.get_benchmarks()
@@ -2970,6 +2972,7 @@ def benchmark_ls() -> None:
 @click.argument('benchmark', required=True, type=str)
 # TODO(woosuk): Add --all option to show all the collected information
 # (e.g., setup time, warmup steps, total steps, etc.).
+@usage_lib.entrypoint
 def benchmark_show(benchmark: str) -> None:
     """Show a benchmark report."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
@@ -3109,6 +3112,7 @@ def benchmark_show(benchmark: str) -> None:
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 def benchmark_down(
     benchmark: str,
     clusters_to_exclude: List[str],
@@ -3147,6 +3151,7 @@ def benchmark_down(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                      yes: bool) -> None:
