@@ -2417,6 +2417,7 @@ def spot_launch(
                 'cluster_name': name,
                 'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
                 'is_dev': env_options.Options.IS_DEVELOPER.get(),
+                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
                 'logging_user_hash': usage_lib.get_logging_user_hash()
             },
             output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
