@@ -32,7 +32,7 @@ To set up the service, following steps should be applied.
 3. Replace the `access_key_id` and `secret_access_key` in [loki-s3-config.yaml](sky/usage/loki-s3-config.yaml) with the keys of that IAM role. (For our current keys, please refer to the private doc [here](https://docs.google.com/document/d/1a0xVfjmIw-g-Jtpux5hXUtVGvNQMbBT-XweLwY2Gvuo/edit#).)
 
 ### Launch hosting instance
-1. Create a CPU instance for hosting the Loki service: `sky launch --cloud aws --region us-west-2 -c sky-host-loki`
+1. Create a CPU instance for hosting the Loki service: `sky launch --cloud aws --region us-west-2 -c sky-host-loki ''`
 2. Change the security group setting of the instance to allow custom TCP inbound 9090.
 3. Copy the config file to server `rsync -Pavz sky/usage/loki-s3-config.yaml sky-host-loki:~/loki-config/`
 4. Start the loki service with the following command on the server
