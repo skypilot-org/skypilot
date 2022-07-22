@@ -91,7 +91,8 @@ class Optimizer:
     def optimize(dag: 'dag_lib.Dag',
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
-                     resources_lib.Resources]] = None):
+                     resources_lib.Resources]] = None,
+                 quiet: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
@@ -99,7 +100,8 @@ class Optimizer:
             unused_best_plan = Optimizer._optimize_objective(
                 dag,
                 minimize_cost=minimize == OptimizeTarget.COST,
-                blocked_launchable_resources=blocked_launchable_resources)
+                blocked_launchable_resources=blocked_launchable_resources,
+                quiet=quiet)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
             # optimization fails.
@@ -676,9 +678,9 @@ class Optimizer:
             rows = []
             for resources, cost in v.items():
                 if minimize_cost:
-                    cost = round(cost, 2)
+                    cost = f'{cost:.2f}'
                 else:
-                    cost = round(cost / 3600, 2)
+                    cost = f'{cost / 3600:.2f}'
 
                 row = [*_get_resources_element_list(resources), cost, '']
                 if resources == best_plan[task]:
@@ -728,6 +730,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
+        quiet: bool = False,
     ) -> Dict[Task, resources_lib.Resources]:
         """Finds the optimal task-resource mapping for the entire DAG.
 
@@ -763,11 +766,12 @@ class Optimizer:
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
-        Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
-                                       total_cost, node_to_cost_map,
-                                       minimize_cost)
-        if not env_options.Options.MINIMIZE_LOGGING.get():
-            Optimizer._print_candidates(node_to_candidate_map)
+        if not quiet:
+            Optimizer.print_optimized_plan(graph, topo_order, best_plan,
+                                           total_time, total_cost,
+                                           node_to_cost_map, minimize_cost)
+            if not env_options.Options.MINIMIZE_LOGGING.get():
+                Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
 
 
