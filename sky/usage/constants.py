@@ -11,7 +11,7 @@ USAGE_POLICY_MESSAGE = (
     '`setup` and `run` commands are not collected to '
     'ensure privacy.\n'
     'Usage logging can be disabled by setting '
-    'environment variable SKY_DISABLE_USAGE_COLLECTION=1 when invoking sky.')
+    'environment variable SKYPILOT_DISABLE_USAGE_COLLECTION=1 when invoking sky.')
 
 USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
 USAGE_MESSAGE_REDACT_TYPES = {str, dict}

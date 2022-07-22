@@ -16,7 +16,7 @@ We collect non-sensitive data that helps us understand how SkyPilot is used. We 
 
 How to disable it
 -----------------
-To disable usage collection, set the ``SKY_DISABLE_USAGE_COLLECTION`` environment variable by :code:`export SKY_DISABLE_USAGE_COLLECTION=1`.
+To disable usage collection, set the ``SKYPILOT_DISABLE_USAGE_COLLECTION`` environment variable by :code:`export SKYPILOT_DISABLE_USAGE_COLLECTION=1`.
 
 
 How does it work?
@@ -24,7 +24,7 @@ How does it work?
 
 When a SkyPilot CLI or entrypoint function is called, SkyPilot will do the following:
 
-#. Check the environment variable ``SKY_DISABLE_USAGE_COLLECTION`` is set: 1 means disabled and 0 means enabled.
+#. Check the environment variable ``SKYPILOT_DISABLE_USAGE_COLLECTION`` is set: 1 means disabled and 0 means enabled.
 
 #. If the environment variable is not set or set to 0, it will collect information about the cluster and task resource requirements 
 
