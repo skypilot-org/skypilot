@@ -1,11 +1,12 @@
 .. _local-job:
+
 Submitting On-prem Jobs
-======================
+=============================
 
 Registering local clusters
--------------------
+--------------------------------------
 
-To register a local cluster in Sky, users should follow two steps.
+To register a local cluster in SkyPilot, users should follow two steps.
 
 For the first step, regular users should obtain a **distributable** cluster YAML from the system administrator or follow the steps in the :ref:`prior section <local-setup>`.
 
@@ -17,10 +18,10 @@ For the second step, regular users should run the following command:
 
   $ sky launch -c my-local-cluster -- ''
 
-This ensures that Sky can fully register and profile the local cluster.
+This ensures that SkyPilot can fully register and profile the local cluster.
 
 Listing registered clusters
--------------------
+--------------------------------------
 
 To list all registered local clusters, run:
 
@@ -42,7 +43,7 @@ Local clusters that have ben ran with ``sky launch`` have all table columns popu
 
 
 Launching task YAML
--------------------
+--------------------------------------
 
 Let's define a simple task to be submitted to the local cluster :code:`my-local-cluster`.
 
@@ -68,7 +69,7 @@ Copy the following YAML into a ``local_example.yaml`` file:
 
   # Invoked under the workdir (i.e., can use its files).
   run: |
-    echo "Hello, Sky On-prem!"
+    echo "Hello, SkyPilot On-prem!"
     conda env list
 
 This defines a task to be run. The task takes up 1 V100 GPU.
@@ -79,13 +80,13 @@ To connect to the local cluster ``my-local-cluster`` and run a task, use :code:`
 
   $ sky launch -c my-local-cluster local_example.yaml
 
-Here, the name of the cluster **must match** the name of the local cluster. The cloud field in the YAML is optional. Sky will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
+Here, the name of the cluster **must match** the name of the local cluster. The cloud field in the YAML is optional. SkyPilot will automatically detect if the cloud is local when the user specifies the name of the local cluster in `sky launch`.
 
 
 Executing multiple jobs
--------------------
+--------------------------------------
 
-Tasks can be quickly submitted via :code:`sky exec`. Each task submitted by :code:`sky exec` is automatically managed by Sky's cluster manager.
+Tasks can be quickly submitted via :code:`sky exec`. Each task submitted by :code:`sky exec` is automatically managed by SkyPilot's cluster manager.
 
 .. code-block:: bash
 
@@ -96,8 +97,3 @@ Tasks can be quickly submitted via :code:`sky exec`. Each task submitted by :cod
    sky exec my-local-cluster task.yaml -d --gpus=V100:2
 
 Refer to :ref:`Job Queue <job-queue>` for more details regarding job submission.
-
-
-
-
-

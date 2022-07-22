@@ -3,14 +3,14 @@
 Usage Collection
 =================
 
-Sky collects usage stats by default. This data will only be used by the Sky team to improve its services and for research purpose.
+SkyPilot collects usage stats by default. This data will only be used by the SkyPilot team to improve its services and for research purpose.
 We will **not** sell data or buy data about you.
 
 
 What data is collected?
 -----------------------
 
-We collect non-sensitive data that helps us understand how Sky is used. We will redact your ``setup``, ``run``, and ``env`` from the collected data.
+We collect non-sensitive data that helps us understand how SkyPilot is used. We will redact your ``setup``, ``run``, and ``env`` from the collected data.
 
 .. _usage-disable:
 
@@ -22,7 +22,7 @@ To disable usage collection, set the ``SKY_DISABLE_USAGE_COLLECTION`` environmen
 How does it work?
 -----------------
 
-When a Sky CLI or entrypoint function is called, Sky will do the following:
+When a SkyPilot CLI or entrypoint function is called, SkyPilot will do the following:
 
 #. Check the environment variable ``SKY_DISABLE_USAGE_COLLECTION`` is set: 1 means disabled and 0 means enabled.
 

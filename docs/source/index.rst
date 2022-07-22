@@ -1,7 +1,7 @@
-Sky reference documentation
+SkyPilot
 ===================================
 
-Sky is a framework for easily running machine learning projects on any cloud through a unified interface.
+SkyPilot is a framework for easily running machine learning projects on any cloud through a unified interface.
 
 Key features:
 
@@ -42,9 +42,6 @@ Key features:
    reference/auto-stop
    examples/spot-jobs
 
-.. Additional Examples <https://github.com/concretevitamin/sky-experiments/tree/master/prototype/examples>
-
-
 .. toctree::
    :maxdepth: 1
    :caption: User Guides
@@ -59,14 +56,14 @@ Key features:
 
 .. toctree::
    :maxdepth: 1
-   :caption: Sky CLI
+   :caption: SkyPilot CLI
 
    reference/cli
 
 
 .. .. toctree::
 ..   :maxdepth: 1
-..   :caption: Advanced Sky Tutorials
+..   :caption: Advanced SkyPilot Tutorials
 
 ..   .. advanced/distributed
 ..   advanced/python-control
