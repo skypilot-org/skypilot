@@ -1,9 +1,9 @@
-"""Sky global user state, backed by a sqlite database.
+"""Global user state, backed by a sqlite database.
 
 Concepts:
 - Cluster name: a user-supplied or auto-generated unique name to identify a
   cluster.
-- Cluster handle: (non-user facing) an opaque backend handle for Sky to
+- Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
 import enum
@@ -51,7 +51,7 @@ class _SQLiteConn(threading.local):
             last_use TEXT,
             status TEXT,
             autostop INTEGER DEFAULT -1)""")
-        # Table for Sky Config (e.g. enabled clouds)
+        # Table for configs (e.g. enabled clouds)
         self.cursor.execute("""\
             CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY, value TEXT)""")
@@ -65,7 +65,7 @@ class _SQLiteConn(threading.local):
             status TEXT)""")
         # For backward compatibility.
         # TODO(zhwu): Remove this function after all users have migrated to
-        # the latest version of Sky.
+        # the latest version of SkyPilot.
         # Add autostop column to clusters table
         db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
                                      'autostop', 'INTEGER DEFAULT -1')

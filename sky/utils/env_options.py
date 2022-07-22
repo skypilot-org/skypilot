@@ -6,7 +6,7 @@ import os
 class Options(enum.Enum):
     IS_DEVELOPER = 'SKY_DEV'
     DISABLE_LOGGING = 'SKY_DISABLE_USAGE_COLLECTION'
-    MINIMIZE_LOGGING = 'SKY_MINIMIZE_LOGGING'
+    MINIMIZE_LOGGING = 'SKYPILOT_MINIMIZE_LOGGING'
 
     def get(self):
         """Check if an environment variable is set to True."""

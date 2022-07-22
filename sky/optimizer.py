@@ -1,4 +1,4 @@
-"""The Sky optimizer: assigns best resources to user tasks."""
+"""Optimizer: assigns best resources to user tasks."""
 import collections
 import enum
 import typing
@@ -26,8 +26,8 @@ logger = sky_logging.init_logger(__name__)
 
 Task = task_lib.Task
 
-_DUMMY_SOURCE_NAME = 'sky-dummy-source'
-_DUMMY_SINK_NAME = 'sky-dummy-sink'
+_DUMMY_SOURCE_NAME = '__dummy-source'
+_DUMMY_SINK_NAME = '__dummy-sink'
 
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[Task, Dict[resources_lib.Resources, float]]
@@ -54,7 +54,7 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
 
 
 class Optimizer:
-    """The Sky optimizer: assigns best resources to user tasks."""
+    """Optimizer: assigns best resources to user tasks."""
 
     @staticmethod
     def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
@@ -407,9 +407,9 @@ class Optimizer:
         import pulp  # pylint: disable=import-outside-toplevel
 
         if minimize_cost:
-            prob = pulp.LpProblem('Sky-Cost-Optimization', pulp.LpMinimize)
+            prob = pulp.LpProblem('Cost-Optimization', pulp.LpMinimize)
         else:
-            prob = pulp.LpProblem('Sky-Runtime-Optimization', pulp.LpMinimize)
+            prob = pulp.LpProblem('Runtime-Optimization', pulp.LpMinimize)
 
         # Prepare the constants.
         V = topo_order  # pylint: disable=invalid-name
