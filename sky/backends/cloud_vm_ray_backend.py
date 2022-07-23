@@ -1187,6 +1187,15 @@ class RetryingVmProvisioner(object):
         while provision_failed:
             provision_failed = False
             try:
+                try:
+                    # Recheck cluster name as the 'except:' block below may
+                    # change the cloud assignment.
+                    backend_utils.check_cluster_name_is_valid(
+                        cluster_name, to_provision.cloud)
+                except ValueError as value_error:
+                    # Let failover below handle this (i.e., block this cloud).
+                    raise exceptions.ResourcesUnavailableError(
+                    ) from value_error
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1449,12 +1458,8 @@ class CloudVmRayBackend(backends.Backend):
                    cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         """Provisions using 'ray up'."""
-        # Try to launch the exiting cluster first
-        backend_utils.check_cluster_name_is_valid(cluster_name)
-        # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
-
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
@@ -1462,6 +1467,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
+                # Try to launch the exiting cluster first
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
@@ -1469,6 +1475,8 @@ class CloudVmRayBackend(backends.Backend):
                         cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+            backend_utils.check_cluster_name_is_valid(
+                cluster_name, to_provision_config.resources.cloud)
 
             usage_lib.messages.usage.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
