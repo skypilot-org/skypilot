@@ -1,4 +1,4 @@
-"""Logging events to Grafana Loki"""
+"""Logging events to Grafana Loki."""
 
 import enum
 import click
