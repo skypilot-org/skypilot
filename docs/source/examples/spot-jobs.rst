@@ -9,7 +9,7 @@ This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making
 To maximize availability, Sky automatically finds available spot resources across regions and clouds.
 Here is an example of BERT training job failing over different regions across AWS and GCP.
 
-.. image:: ../imgs/spot-training.png
+.. image:: ../images/spot-training.png
   :width: 600
   :alt: BERT training on Spot V100
 

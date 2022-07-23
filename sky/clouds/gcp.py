@@ -140,9 +140,6 @@ class GCP(clouds.Cloud):
         else:
             return 0.08 * num_gigabytes
 
-    def __repr__(self):
-        return GCP._REPR
-
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 

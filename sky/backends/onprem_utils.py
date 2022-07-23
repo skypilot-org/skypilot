@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import log_lib
 from sky.utils import command_runner
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -127,7 +128,7 @@ def get_local_auth_config(cluster_name: str) -> List[str]:
 
 def get_job_owner(cluster_yaml: dict) -> str:
     """Get the owner of the job."""
-    cluster_config = backend_utils.read_yaml(os.path.expanduser(cluster_yaml))
+    cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
     # User name is guaranteed to exist (on all jinja files)
     return cluster_config['auth']['ssh_user']
 
@@ -137,7 +138,7 @@ def get_local_cluster_config_or_error(cluster_name: str) -> Dict[str, Any]:
     local_file = os.path.expanduser(
         SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name))
     if os.path.isfile(local_file):
-        return backend_utils.read_yaml(local_file)
+        return common_utils.read_yaml(local_file)
     raise ValueError(f'Cluster config {local_file} not found.')
 
 
@@ -489,4 +490,4 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     yaml_path = SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)
     abs_yaml_path = os.path.expanduser(yaml_path)
     os.makedirs(os.path.dirname(abs_yaml_path), exist_ok=True)
-    backend_utils.dump_yaml(abs_yaml_path, cluster_config)
+    common_utils.dump_yaml(abs_yaml_path, cluster_config)

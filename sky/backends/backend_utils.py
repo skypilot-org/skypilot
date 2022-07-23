@@ -5,13 +5,11 @@ import datetime
 import difflib
 import enum
 import getpass
-import hashlib
 import json
 import os
 import pathlib
 import random
 import re
-import socket
 import subprocess
 import textwrap
 import threading
@@ -45,11 +43,13 @@ from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import log_lib
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -89,10 +89,13 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 _TEST_IP = 'https://8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
-# characters. Through testing, 37 chars is the maximum length for the Sky
-# cluster name on GCP.  Ref:
+# characters. Through testing, this is the maximum length for the Sky cluster
+# name on GCP.  Ref:
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-_MAX_CLUSTER_NAME_LEN = 37
+# NOTE: actually 37 is maximum for a single-node cluster which gets the suffix
+# '-head', but 35 for a multinode cluster because workers get the suffix
+# '-worker'. Here we do not distinguish these cases and take the lower limit.
+_MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -613,7 +616,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account cloud providers. Using uuid.getnode()
                 # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{user_and_hostname_hash()}',
+                'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region_name}',
@@ -640,6 +643,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -689,30 +693,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         # in the local cluster config (in ~/.sky/local/...). There is no need
         # for Sky to generate authentication.
         pass
-    dump_yaml(cluster_config_file, config)
-
-
-def read_yaml(path):
-    with open(path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def dump_yaml(path, config):
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    with open(path, 'w') as f:
-        yaml.dump(config,
-                  f,
-                  Dumper=LineBreakDumper,
-                  sort_keys=False,
-                  default_flow_style=False)
+    common_utils.dump_yaml(cluster_config_file, config)
 
 
 def get_run_timestamp() -> str:
@@ -818,7 +799,9 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out when waiting for workers to be provisioned.')
+                    'Timed out: waited for workers to be provisioned '
+                    f'for more than {nodes_launching_progress_timeout} seconds.'
+                )
                 return False  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
@@ -836,7 +819,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
-    config = read_yaml(cluster_yaml)
+    config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
@@ -934,35 +917,6 @@ def check_local_gpus() -> bool:
     return is_functional
 
 
-def user_and_hostname_hash() -> str:
-    """Returns a string containing <user>-<hostname hash last 4 chars>.
-
-    For uniquefying user clusters on shared-account cloud providers. Also used
-    for AWS security group.
-
-    Using uuid.getnode() instead of gethostname() is incorrect; observed to
-    collide on Macs.
-
-    NOTE: BACKWARD INCOMPATIBILITY NOTES
-
-    Changing this string will render AWS clusters shown in `sky status`
-    unreusable and potentially cause leakage:
-
-    - If a cluster is STOPPED, any command restarting it (`sky launch`, `sky
-      start`) will launch a NEW cluster.
-    - If a cluster is UP, a `sky launch` command reusing it will launch a NEW
-      cluster. The original cluster will be stopped and thus leaked from Sky's
-      perspective.
-    - `sky down/stop/exec` on these pre-change clusters still works, if no new
-      clusters with the same name have been launched.
-
-    The reason is AWS security group names are derived from this string, and
-    thus changing the SG name makes these clusters unrecognizable.
-    """
-    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    return f'{getpass.getuser()}-{hostname_hash}'
-
-
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
@@ -971,6 +925,7 @@ def generate_cluster_name():
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
+    backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
             out = subprocess_utils.run(
@@ -986,7 +941,7 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
                 raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
-            time.sleep(5)
+            time.sleep(backoff.current_backoff())
     return head_ip
 
 
@@ -1309,7 +1264,7 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_config = read_yaml(handle.cluster_yaml)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
@@ -1407,7 +1362,7 @@ def _update_cluster_status(
 
     The function will update the cached cluster status in the global state. For the
     design of the cluster status and transition, please refer to the
-    sky/design_docs/cluster_states.md
+    sky/design_docs/cluster_status.md
 
     Returns:
       If the cluster is terminated or does not exist, return None.
@@ -1606,7 +1561,8 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     return resources_str
 
 
-def check_cluster_name_is_valid(cluster_name: str) -> None:
+def check_cluster_name_is_valid(cluster_name: str,
+                                cloud: Optional[clouds.Cloud] = None) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
 
     Bans (including but not limited to) names that:
@@ -1615,7 +1571,7 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     """
     if cluster_name is None:
         return
-    # GCP errors return this exact regex.  An informal description is also at:
+    # GCP errors return this exact regex.  An informal description is at:
     # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
@@ -1623,11 +1579,15 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
             raise ValueError(
                 f'Cluster name "{cluster_name}" is invalid; '
                 f'ensure it is fully matched by regex: {valid_regex}')
-    if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-                f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
+    if isinstance(cloud, clouds.GCP):
+        # GCP has too restrictive of a length limit. Don't check for other
+        # clouds.
+        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP}'
+                    ' chars.')
 
 
 def check_cluster_name_not_reserved(

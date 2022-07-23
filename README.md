@@ -21,12 +21,21 @@ Use editable mode (`-e`) when installing:
 pip install -e ".[all]"
 pip install -r requirements-dev.txt
 ```
+IMPORTANT: Please `export SKY_DEV=1` before running the sky commands in the terminal, so that the developing log will not pollute the actual user logs.
+
 
 ### Submitting pull requests
 - After you commit, format your code with [`format.sh`](./format.sh).
 - In the PR description, write a `Tested:` section to describe relevant tests performed.
 - For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
+
+
+### Environment Variable Options
+- `export SKY_DEV=1` to send the logs to dev space.
+- `export SKY_DEBUG=1` to show debugging logs (logging.DEBUG).
+- `export SKY_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
+- `export SKY_MINIMIZE_LOGGING=1` to minimize the sky outputs for demo purpose.
 
 ### Dump timeline
 

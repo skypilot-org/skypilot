@@ -31,9 +31,11 @@ def process_subprocess_stream(
     log_path: str,
     stream_logs: bool,
     start_streaming_at: str = '',
+    end_streaming_at: Optional[str] = None,
     skip_lines: Optional[List[str]] = None,
     replace_crlf: bool = False,
-    line_processor: Optional[log_utils.LineProcessor] = None
+    line_processor: Optional[log_utils.LineProcessor] = None,
+    streaming_prefix: Optional[str] = None,
 ) -> Tuple[str, str]:
     """Redirect the process's filtered stdout/stderr to both stream and file"""
     if line_processor is None:
@@ -55,7 +57,11 @@ def process_subprocess_stream(
     stdout = ''
     stderr = ''
 
+    if streaming_prefix is None:
+        streaming_prefix = ''
+
     start_streaming_flag = False
+    end_streaming_flag = False
     with line_processor:
         with open(log_path, 'a') as fout:
             while len(sel.get_map()) > 0:
@@ -77,14 +83,22 @@ def process_subprocess_stream(
                         continue
                     if start_streaming_at in line:
                         start_streaming_flag = True
+                    if (end_streaming_at is not None and
+                            end_streaming_at in line):
+                        # Keep executing the loop, only stop streaming.
+                        # E.g., this is used for `sky bench` to hide the
+                        # redundant messages of `sky launch` while
+                        # saving them in log files.
+                        end_streaming_flag = True
                     if key.fileobj is out_io:
                         stdout += line
                         out_stream = sys.stdout
                     else:
                         stderr += line
                         out_stream = sys.stderr
-                    if stream_logs and start_streaming_flag:
-                        out_stream.write(line)
+                    if (stream_logs and start_streaming_flag and
+                            not end_streaming_flag):
+                        out_stream.write(streaming_prefix + line)
                         out_stream.flush()
                     if log_path != '/dev/null':
                         fout.write(line)
@@ -98,11 +112,14 @@ def run_with_log(
     log_path: str,
     stream_logs: bool = False,
     start_streaming_at: str = '',
+    end_streaming_at: Optional[str] = None,
+    skip_lines: Optional[List[str]] = None,
     require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
+    streaming_prefix: Optional[str] = None,
     ray_job_id: Optional[str] = None,
     use_sudo: bool = False,
     **kwargs,
@@ -188,6 +205,16 @@ def run_with_log(
         stderr = ''
 
         if process_stream:
+            if skip_lines is None:
+                skip_lines = []
+            # Skip these lines caused by `-i` option of bash. Failed to
+            # find other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            # `ssh -T -i -tt` still cause the problem.
+            skip_lines += [
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ]
             # We need this even if the log_path is '/dev/null' to ensure the
             # progress bar is shown.
             # NOTE: Lines are printed only when '\r' or '\n' is found.
@@ -196,17 +223,12 @@ def run_with_log(
                 log_path,
                 stream_logs,
                 start_streaming_at=start_streaming_at,
-                # Skip these lines caused by `-i` option of bash. Failed to
-                # find other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # `ssh -T -i -tt` still cause the problem.
-                skip_lines=[
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ],
+                end_streaming_at=end_streaming_at,
+                skip_lines=skip_lines,
                 line_processor=line_processor,
                 # Replace CRLF when the output is logged to driver by ray.
                 replace_crlf=with_ray,
+                streaming_prefix=streaming_prefix,
             )
         proc.wait()
         if require_outputs:
@@ -388,8 +410,7 @@ def tail_logs(job_owner: str,
             for line in _follow_job_logs(
                     log_file,
                     job_id=job_id,
-                    start_streaming_at='SKY INFO: Waiting for task resources on'
-            ):
+                    start_streaming_at='SKY INFO: Tip: use Ctrl-C to exit log'):
                 print(line, end='', flush=True)
     else:
         try:
