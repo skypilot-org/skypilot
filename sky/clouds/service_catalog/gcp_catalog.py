@@ -105,6 +105,7 @@ def get_hourly_cost(
 ) -> float:
     """Returns the hourly price for a given instance type and region."""
     if instance_type == 'TPU-VM':
+        # Currently the host VM of TPU does not cost extra.
         return 0
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
