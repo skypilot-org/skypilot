@@ -1,0 +1,92 @@
+Zones,Location,GPU platforms,NVIDIA RTX virtual workstations
+asia-east1-a,"Changhua County, Taiwan, APAC","T4, P100, K80","T4, P100"
+asia-east1-b,"Changhua County, Taiwan, APAC",K80,
+asia-east1-c,"Changhua County, Taiwan, APAC","T4, V100, P100","T4, P100"
+asia-east2-a,"Hong Kong, APAC",,
+asia-east2-b,"Hong Kong, APAC",,
+asia-east2-c,"Hong Kong, APAC",,
+asia-northeast1-a,"Tokyo, Japan, APAC","A100, T4",T4
+asia-northeast1-b,"Tokyo, Japan, APAC",,
+asia-northeast1-c,"Tokyo, Japan, APAC","A100, T4",T4
+asia-northeast2-a,"Osaka, Japan, APAC",,
+asia-northeast2-b,"Osaka, Japan, APAC",,
+asia-northeast2-c,"Osaka, Japan, APAC",,
+asia-northeast3-a,"Seoul, South Korea, APAC",A100,
+asia-northeast3-b,"Seoul, South Korea, APAC","A100, T4",T4
+asia-northeast3-c,"Seoul, South Korea, APAC",T4,T4
+asia-south1-a,"Mumbai, India, APAC",T4,T4
+asia-south1-b,"Mumbai, India, APAC",T4,T4
+asia-south1-c,"Mumbai, India, APAC",,
+asia-southeast1-a,"Jurong West, Singapore, APAC",T4,T4
+asia-southeast1-b,"Jurong West, Singapore, APAC","A100, T4, P4","T4, P4"
+asia-southeast1-c,"Jurong West, Singapore, APAC","A100, T4, P4","T4, P4"
+asia-southeast2-a,"Jakarta, Indonesia, APAC",T4,T4
+asia-southeast2-b,"Jakarta, Indonesia, APAC",T4,T4
+asia-southeast2-c,"Jakarta, Indonesia, APAC",,
+australia-southeast1-a,"Sydney, Australia, APAC","T4, P4","T4, P4"
+australia-southeast1-b,"Sydney, Australia, APAC",P4,P4
+australia-southeast1-c,"Sydney, Australia, APAC","T4, P100","T4, P100"
+europe-central2-a,"Warsaw, Poland, Europe",,
+europe-central2-b,,,
+europe-central2-c,,,
+europe-north1-a,"Hamina, Finland, Europe",,
+europe-north1-b,"Hamina, Finland, Europe",,
+europe-north1-c,"Hamina, Finland, Europe",,
+europe-southwest1-a,"Madrid, Spain, Europe",,
+europe-southwest1-b,"Madrid, Spain, Europe",,
+europe-southwest1-c,"Madrid, Spain, Europe",,
+europe-west1-b,"St. Ghislain, Belgium, Europe","P100, K80, T4","P100, T4"
+europe-west1-c,"St. Ghislain, Belgium, Europe",T4,T4
+europe-west1-d,"St. Ghislain, Belgium, Europe","P100, K80, T4","P100, T4"
+europe-west2-a,"London, England, Europe",T4,T4
+europe-west2-b,"London, England, Europe",T4,T4
+europe-west2-c,"London, England, Europe",,
+europe-west3-a,"Frankfurt, Germany, Europe",,
+europe-west3-b,"Frankfurt, Germany, Europe",T4,T4
+europe-west3-c,"Frankfurt, Germany, Europe",,
+europe-west4-a,"Eemshaven, Netherlands, Europe","A100, T4, V100, P100","P100, T4"
+europe-west4-b,"Eemshaven, Netherlands, Europe","A100, T4, P4, V100","T4, P4"
+europe-west4-c,"Eemshaven, Netherlands, Europe","T4, P4, V100","T4, P4"
+europe-west6-a,"Zurich, Switzerland, Europe",,
+europe-west6-b,"Zurich, Switzerland, Europe",,
+europe-west6-c,"Zurich, Switzerland, Europe",,
+europe-west8-a,"Milan, Italy, Europe",,
+europe-west8-b,"Milan, Italy, Europe",,
+europe-west8-c,"Milan, Italy, Europe",,
+europe-west9-a,"Paris, France, Europe",,
+europe-west9-b,"Paris, France, Europe",,
+europe-west9-c,"Paris, France, Europe",,
+northamerica-northeast1-a,"Montréal, Québec, North America",P4,P4
+northamerica-northeast1-b,"Montréal, Québec, North America",P4,P4
+northamerica-northeast1-c,"Montréal, Québec, North America","T4, P4","T4, P4"
+southamerica-east1-a,"Osasco, São Paulo, Brazil, South America",,
+southamerica-east1-b,"Osasco, São Paulo, Brazil, South America",T4,T4
+southamerica-east1-c,"Osasco, São Paulo, Brazil, South America",T4,T4
+us-central1-a,"Council Bluffs, Iowa, North America","A100, T4, P4, V100, K80","T4, P4"
+us-central1-b,"Council Bluffs, Iowa, North America","A100, T4, V100",T4
+us-central1-c,"Council Bluffs, Iowa, North America","A100, T4, P4, V100, P100, K80","T4, P4, P100"
+us-central1-f,"Council Bluffs, Iowa, North America","A100, T4, V100, P100","T4, P100"
+us-east1-b,"Moncks Corner, South Carolina, North America","A100, P100",P100
+us-east1-c,"Moncks Corner, South Carolina, North America","T4, V100, P100, K80","T4, P100"
+us-east1-d,"Moncks Corner, South Carolina, North America","T4, K80",T4
+us-east4-a,"Ashburn, Virginia, North America",P4,P4
+us-east4-b,"Ashburn, Virginia, North America","T4, P4","T4, P4"
+us-east4-c,"Ashburn, Virginia, North America","T4, P4","T4, P4"
+us-east5-a,"Columbus, Ohio, North America",,
+us-east5-b,"Columbus, Ohio, North America",,
+us-east5-c,"Columbus, Ohio, North America",,
+us-south1-a,"Dallas, Texas, North America",,
+us-south1-b,"Dallas, Texas, North America",,
+us-south1-c,"Dallas, Texas, North America",,
+us-west1-a,"The Dalles, Oregon, North America","T4, V100, P100",T4
+us-west1-b,"The Dalles, Oregon, North America","A100, T4, V100, P100, K80","T4, P100"
+us-west1-c,"The Dalles, Oregon, North America",,
+us-west2-a,"Los Angeles, California, North America",,
+us-west2-b,"Los Angeles, California, North America","P4, T4","P4, T4"
+us-west2-c,"Los Angeles, California, North America","P4, T4","P4, T4"
+us-west3-a,"Salt Lake City, Utah, North America",,
+us-west3-b,"Salt Lake City, Utah, North America",,
+us-west3-c,"Salt Lake City, Utah, North America",,
+us-west4-a,"Las Vegas, Nevada, North America",T4,T4
+us-west4-b,"Las Vegas, Nevada, North America","A100, T4",T4
+us-west4-c,"Las Vegas, Nevada, North America",,
