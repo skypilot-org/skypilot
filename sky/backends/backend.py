@@ -2,7 +2,9 @@
 import typing
 from typing import Dict, Optional
 
+import sky
 from sky.utils import timeline
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -32,6 +34,7 @@ class Backend:
         raise NotImplementedError
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('provision')
     def provision(self,
                   task: 'task_lib.Task',
                   to_provision: Optional['resources.Resources'],
@@ -39,14 +42,20 @@ class Backend:
                   stream_logs: bool,
                   cluster_name: Optional[str] = None,
                   retry_until_up: bool = False) -> ResourceHandle:
+        if cluster_name is None:
+            cluster_name = sky.backends.backend_utils.generate_cluster_name()
+        usage_lib.messages.usage.update_cluster_name(cluster_name)
+        usage_lib.messages.usage.update_actual_task(task)
         return self._provision(task, to_provision, dryrun, stream_logs,
                                cluster_name, retry_until_up)
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('sync_workdir')
     def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
         return self._sync_workdir(handle, workdir)
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('sync_file_mounts')
     def sync_file_mounts(
         self,
         handle: ResourceHandle,
@@ -56,6 +65,7 @@ class Backend:
         return self._sync_file_mounts(handle, all_file_mounts, storage_mounts)
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
         return self._setup(handle, task)
 
@@ -63,8 +73,11 @@ class Backend:
         raise NotImplementedError
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('execute')
     def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
                 detach_run: bool) -> None:
+        usage_lib.messages.usage.update_cluster_name(handle.get_cluster_name())
+        usage_lib.messages.usage.update_actual_task(task)
         return self._execute(handle, task, detach_run)
 
     @timeline.event
@@ -77,6 +90,7 @@ class Backend:
         return self._teardown_ephemeral_storage(task)
 
     @timeline.event
+    @usage_lib.messages.usage.update_runtime('teardown')
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
@@ -93,7 +107,7 @@ class Backend:
                    to_provision: Optional['resources.Resources'],
                    dryrun: bool,
                    stream_logs: bool,
-                   cluster_name: Optional[str] = None,
+                   cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         raise NotImplementedError
 
