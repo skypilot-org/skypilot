@@ -10,6 +10,11 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/sky-proj/skypilot-catalog/master/catalogs'  # pylint: disable=line-too-long
+_CATALOG_SCHEMA_VERSION = 'v1'
+_CATALOG_DIR = os.path.expanduser(f'~/sky_catalogs/{_CATALOG_SCHEMA_VERSION}/')
+os.makedirs(_CATALOG_DIR, exist_ok=True)
+
 
 class InstanceTypeInfo(NamedTuple):
     """Instance type information.
@@ -32,13 +37,24 @@ class InstanceTypeInfo(NamedTuple):
     spot_price: float
 
 
-def get_data_path(filename: str) -> str:
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data',
-                        filename)
+def get_catalog_path(filename: str) -> str:
+    return os.path.join(_CATALOG_DIR, filename)
 
 
 def read_catalog(filename: str) -> pd.DataFrame:
-    return pd.read_csv(get_data_path(filename))
+    """Reads the catalog from a local CSV file.
+
+    If the file does not exist, download the up-to-date catalog that matches
+    the schema version.
+    """
+    catalog_path = get_catalog_path(filename)
+    if os.path.exists(catalog_path):
+        return pd.read_csv(catalog_path)
+
+    url = f'{_HOSTED_CATALOG_DIR_URL}/{_CATALOG_SCHEMA_VERSION}/{filename}'
+    catalog_df = pd.read_csv(url)
+    catalog_df.to_csv(catalog_path, index=False)
+    return catalog_df
 
 
 def _get_instance_type(
