@@ -1458,13 +1458,8 @@ class CloudVmRayBackend(backends.Backend):
                    cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         """Provisions using 'ray up'."""
-        # Try to launch the exiting cluster first
-        if cluster_name is None:
-            cluster_name = backend_utils.generate_cluster_name()
-        # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
-
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
@@ -1472,6 +1467,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
+                # Try to launch the exiting cluster first
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
