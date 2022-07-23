@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import pathlib
 import subprocess
@@ -16,10 +17,10 @@ from sky.data import storage as storage_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
-# (username, last 4 chars of hash of hostname): for uniquefying users on
-# shared-account cloud providers.
-# Take first 10 chars to guard against long user name -> long cluster name.
-_smoke_test_hash = common_utils.user_and_hostname_hash()[:10]
+# For uniquefying users on shared-account cloud providers. Used as part of the
+# cluster names.
+_smoke_test_hash = hashlib.md5(
+    common_utils.user_and_hostname_hash().encode()).hexdigest()[:8]
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_spot_recovery to make sure the manual
@@ -47,16 +48,14 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_cluster_name(with_test_id: bool = True) -> str:
+def _get_cluster_name() -> str:
     """Returns a user-unique cluster name for each test_<name>().
 
     Must be called from each test_<name>().
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    if with_test_id:
-        return f'{test_name}-{_smoke_test_hash}-{test_id}'
-    return f'{test_name}-{_smoke_test_hash}'
+    return f'{test_name}-{_smoke_test_hash}-{test_id}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
@@ -222,12 +221,11 @@ def test_n_node_job_queue():
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
-    name = _get_cluster_name(
-        with_test_id=False)  # Keep consistent with the py script.
+    name = _get_cluster_name()
     test = Test(
         'multi_echo',
         [
-            'python examples/multi_echo.py',
+            f'python examples/multi_echo.py {name}',
             'sleep 20',
         ] +
         # Ensure jobs succeeded.
@@ -315,13 +313,12 @@ def test_multi_hostname():
 
 # ---------- Task: n=2 nodes with setups. ----------
 def test_distributed_tf():
-    name = _get_cluster_name(
-        with_test_id=False)  # Keep consistent with the py script.
+    name = _get_cluster_name()
     test = Test(
         'resnet_distributed_tf_app',
         [
             # NOTE: running it twice will hang (sometimes?) - an app-level bug.
-            'python examples/resnet_distributed_tf_app.py',
+            f'python examples/resnet_distributed_tf_app.py {name}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
