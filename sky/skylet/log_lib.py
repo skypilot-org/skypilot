@@ -417,6 +417,5 @@ def tail_logs(job_owner: str,
             with open(log_path, 'r') as f:
                 print(f.read())
         except FileNotFoundError:
-            print(
-                f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
-                f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
+            print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
+                  f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')
