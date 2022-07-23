@@ -133,11 +133,12 @@ def get_tpu_df():
 def get_vm_df():
     """Generates the GCP service catalog for host VMs."""
     vm_pricing = pd.read_csv(VM_PRICING)
-    vm_pricing = vm_pricing.rename(columns={
-        'Machine type': 'InstanceType',
-        'Memory': 'MemoryGiB',
-        'Spot price': 'SpotPrice',
-    })
+    vm_pricing = vm_pricing.rename(
+        columns={
+            'Machine type': 'InstanceType',
+            'Memory': 'MemoryGiB',
+            'Spot price': 'SpotPrice',
+        })
     vm_pricing.drop(columns=['vCPU'], inplace=True)
 
     # Remove suffix 'GB'
