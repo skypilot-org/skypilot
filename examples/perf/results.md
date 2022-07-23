@@ -1,9 +1,9 @@
-# Performance benchmarks for Sky
+# Performance benchmarks for SkyPilot
 
-This directory is a collection of YAMLs used to benchmark Sky's performance. 
+This directory is a collection of YAMLs used to benchmark SkyPilot's performance. 
 
-## Sky Storage Benchmarks
-We benchmark the performance of Sky Storage using fio, a popular storage
+## SkyPilot Storage Benchmarks
+We benchmark the performance of SkyPilot Storage using fio, a popular storage
 benchmarking utility. For fio, we use recommended parameters from [Azure's 
 disk benchmarking guide](https://docs.microsoft.com/en-us/azure/virtual-machines/disks-benchmarks).
 Please refer to `storage_rawperf.yaml` for more details.
@@ -12,7 +12,7 @@ All benchmarks on run on AWS m5.8xlarge with default EBS volume attached with
 
 ### Disk Bandwidth (MB/s)
 
-|                  | EBS | Sky Storage<br/>(S3, MOUNT mode) |
+|                  | EBS | SkyPilot Storage<br/>(S3, MOUNT mode) |
 |------------------|-----|----------------------------------|
 | Sequential Read  | 130 | 642                              |
 | Sequential Write | 129 | 1828                             |
@@ -20,7 +20,7 @@ All benchmarks on run on AWS m5.8xlarge with default EBS volume attached with
 
 ### Disk IOPS
 
-|                  | EBS  | Sky Storage<br/>(S3, MOUNT mode) |
+|                  | EBS  | SkyPilot Storage<br/>(S3, MOUNT mode) |
 |------------------|------|----------------------------------|
 | Sequential Read  | 2051 | 8462                             |
 | Sequential Write | 2055 | 27899                            |
@@ -38,10 +38,10 @@ We copy a 1 GB file from S3 to EBS using `aws s3 cp` command.
 * These benchmarks use the default EBS gp3 volume with the standard 125MB/s 
   throughput and 16000 IOPS. It is possible to achieve higher performance by 
   paying more.
-* Sky Storage offers higher **read** performance than EBS because it can directly
+* SkyPilot Storage offers higher **read** performance than EBS because it can directly
   stream files from S3 to memory.
-* Sky Storage **write** performance is significantly higher than EBS because it
-  writes to memory and then asynchronously uploads to S3. Sky Storage offers 
+* SkyPilot Storage **write** performance is significantly higher than EBS because it
+  writes to memory and then asynchronously uploads to S3. SkyPilot Storage offers 
   only eventual consistency, so a write operation to sky storage may not reflect 
   immediately on the S3 storage.
 * These benchmarks are run on single large files. The performance of sky storage

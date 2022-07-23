@@ -1,7 +1,7 @@
 # Usage Collection
-This doc is for sky team only to set up the usage collection service. Instead of using the Grafana's hosted Loki, we host our own Loki service to make sure the data is always available without retention and query limitation. For the message schema, please refer to the [sky/usage/usage_lib.py](sky/usage/usage_lib.py)::UsageMessageToReport.
+This doc is for the developer team only to set up the usage collection service. Instead of using the Grafana's hosted Loki, we host our own Loki service to make sure the data is always available without retention and query limitation. For the message schema, please refer to the [sky/usage/usage_lib.py](sky/usage/usage_lib.py)::UsageMessageToReport.
 
-## Sky Host Loki
+## SkyPilot Host Loki
 To set up the service, following steps should be applied.
 ### Create a persistent storage for logging
 1. Create a S3 bucket for the logging storage (our current bucket: `s3://sky-host-loki` in us-west-2).
@@ -49,4 +49,4 @@ To visualize the logs collected, we can connect Grafana to our Loki service:
 
 
 ### Notes
-1. The Log Timestamp is the start time of sky entrypoint being called. There is also an `send_time` in the message indicating the time the message is constructed and send to loki (at the end of the call).
+1. The Log Timestamp is the start time of the entrypoint being called. There is also an `send_time` in the message indicating the time the message is constructed and send to loki (at the end of the call).

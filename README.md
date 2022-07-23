@@ -21,7 +21,7 @@ Use editable mode (`-e`) when installing:
 pip install -e ".[all]"
 pip install -r requirements-dev.txt
 ```
-IMPORTANT: Please `export SKYPILOT_DEV=1` before running the sky commands in the terminal, so that the developing log will not pollute the actual user logs.
+IMPORTANT: Please `export SKYPILOT_DEV=1` before running the CLI commands in the terminal, so that developers' usage logs do not pollute the actual user logs.
 
 
 ### Submitting pull requests
@@ -31,11 +31,11 @@ IMPORTANT: Please `export SKYPILOT_DEV=1` before running the sky commands in the
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 
 
-### Environment Variable Options
-- `export SKYPILOT_DEV=1` to send the logs to dev space.
-- `export SKYPILOT_DEBUG=1` to show debugging logs (logging.DEBUG).
+### Environment variables for developers
+- `export SKYPILOT_DEV=1` to send usage logs to dev space.
 - `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
-- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize the sky outputs for demo purpose.
+- `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
+- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize the logging for demo purpose.
 
 ### Dump timeline
 
