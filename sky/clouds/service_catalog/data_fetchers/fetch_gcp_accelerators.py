@@ -25,8 +25,9 @@ TPU_ZONES = GCP_DATA_DIR + 'zones/tpu.csv'
 # 1. We added us-east1, which is a region for TPU Research Cloud.
 # 2. We deleted TPU v3 pods from us-central1, because GCP does not actually
 #    support them in the region.
-# 3. We used estimated prices for tpu-v3-{128,...,2048} as their prices are
-#    not publicly open.
+# 3. We used estimated prices for on-demand tpu-v3-{64,...,2048} as their
+#    prices are not publicly open.
+# 4. We applied 70% discount to preemptible TPUs
 TPU_PRICING = GCP_DATA_DIR + 'pricing/tpu.csv'
 
 COLS = [
