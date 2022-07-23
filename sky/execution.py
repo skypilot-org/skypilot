@@ -187,10 +187,8 @@ def _execute(
             subprocess_utils.run('sky spot status', env=env)
         else:
             subprocess_utils.run('sky status', env=env)
-        print('just finished printing sky status')
         print()
         print('\x1b[?25h', end='')  # Show cursor.
-        print('exiting')
 
 
 @timeline.event
