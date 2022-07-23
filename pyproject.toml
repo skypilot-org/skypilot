@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "skypilot"
 version = "0.0.0"
 authors = []
-description = "An intercloud broker above the cloud"
+description = "An intercloud broker above the clouds"
 readme = "README.md"
 license = { file="LICENSE" }
 requires-python = ">=3.6"
@@ -14,6 +14,8 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Distributed Computing",
 ]
 
 [project.urls]
