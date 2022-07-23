@@ -32,9 +32,10 @@ IMPORTANT: Please `export SKYPILOT_DEV=1` before running the sky commands in the
 
 
 ### Environment Variable Options
-- `export SKYPILOT_DEV=1` to show debugging logs (logging.DEBUG) and send the logs to dev space.
+- `export SKYPILOT_DEV=1` to send the logs to dev space.
+- `export SKYPILOT_DEBUG=1` to show debugging logs (logging.DEBUG).
 - `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
-- `export SKY_MINIMIZE_LOGGING=1` to minimize the sky outputs for demo purpose.
+- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize the sky outputs for demo purpose.
 
 ### Dump timeline
 

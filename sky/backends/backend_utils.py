@@ -925,6 +925,7 @@ def generate_cluster_name():
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
+    backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
             out = subprocess_utils.run(
@@ -940,7 +941,7 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
                 raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
-            time.sleep(5)
+            time.sleep(backoff.current_backoff())
     return head_ip
 
 
