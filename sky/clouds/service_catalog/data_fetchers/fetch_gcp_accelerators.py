@@ -11,6 +11,9 @@ import pandas as pd
 
 GCP_DATA_DIR = './gcp_data/'
 
+# Source: https://cloud.google.com/compute/vm-instance-pricing
+VM_PRICING = GCP_DATA_DIR + 'pricing/vm.csv'
+
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
 GPU_ZONES = GCP_DATA_DIR + 'zones/gpu.csv'
 NO_A100_16G_ZONES = ['asia-northeast3-a', 'asia-northeast3-b', 'us-west4-b']
@@ -127,16 +130,39 @@ def get_tpu_df():
     return tpu_df
 
 
+def get_vm_df():
+    """Generates the GCP service catalog for host VMs."""
+    vm_pricing = pd.read_csv(VM_PRICING)
+    vm_pricing = vm_pricing.rename(columns={
+        'Machine type': 'InstanceType',
+        'Memory': 'MemoryGiB',
+        'Spot price': 'SpotPrice',
+    })
+    vm_pricing.drop(columns=['vCPU'], inplace=True)
+
+    # Remove suffix 'GB'
+    vm_pricing['MemoryGiB'] = vm_pricing['MemoryGiB'].apply(
+        lambda x: float(x[:-2]) if 'GB' in str(x) else x)
+
+    vm_df = vm_pricing
+    vm_df['AcceleratorName'] = None
+    vm_df['AcceleratorCount'] = None
+    vm_df['GpuInfo'] = None
+    vm_df['AvailabilityZone'] = None
+    return vm_df
+
+
 if __name__ == '__main__':
     gpu_df = get_gpu_df()
     tpu_df = get_tpu_df()
 
-    catalog_df = pd.concat([gpu_df, tpu_df])
+    acc_df = pd.concat([gpu_df, tpu_df])
+    acc_df['InstanceType'] = None
+    acc_df['GpuInfo'] = acc_df['AcceleratorName']
+    acc_df['MemoryGiB'] = 0
 
-    # Add remaining columns.
-    catalog_df['InstanceType'] = None
-    catalog_df['GpuInfo'] = catalog_df['AcceleratorName']
-    catalog_df['MemoryGiB'] = 0
+    vm_df = get_vm_df()
+    catalog_df = pd.concat([vm_df, acc_df])
 
     # Reorder the columns.
     catalog_df = catalog_df[COLS]
