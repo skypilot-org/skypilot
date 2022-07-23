@@ -1,7 +1,7 @@
 """A script that generates Google Cloud GPU catalog.
 
 Google Cloud does not have an API for querying TPU/GPU offerings, so this
-part is currently hard-coded.
+part is currently using hard-coded information in the gcp_data directory.
 
 TODO: Add support for regular VMs
 https://cloud.google.com/sdk/gcloud/reference/compute/machine-types/list
