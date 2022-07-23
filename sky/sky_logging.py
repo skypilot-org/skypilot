@@ -34,7 +34,7 @@ def init_logger(name: str):
 
     logger = logging.getLogger(name)
     logger.addHandler(h)
-    if env_options.Options.IS_DEVELOPER.get():
+    if env_options.Options.SHOW_DEBUG_INFO.get():
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
