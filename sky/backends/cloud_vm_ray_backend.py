@@ -1070,7 +1070,7 @@ class RetryingVmProvisioner(object):
         # This is required when using custom image for GCP.
         def need_ray_up(
                 ray_up_return_value: Optional[Tuple[int, str, str]]) -> bool:
-            
+
             # Indicates the first ray up.
             if ray_up_return_value is None:
                 return True
@@ -1095,7 +1095,8 @@ class RetryingVmProvisioner(object):
 
         retry_cnt = 0
         ray_up_return_value = None
-        while retry_cnt < _MAX_RAY_UP_RETRY and need_ray_up(ray_up_return_value):
+        while (retry_cnt < _MAX_RAY_UP_RETRY and
+               need_ray_up(ray_up_return_value)):
             retry_cnt += 1
             ray_up_return_value = ray_up()
 
