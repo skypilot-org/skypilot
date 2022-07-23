@@ -69,6 +69,9 @@ extras_require = {
 extras_require['all'] = sum(extras_require.values(), [])
 
 setuptools.setup(
+    # NOTE: this affects the package.whl wheel name. When changing this (if
+    # ever), you must grep for '.whl' and change all corresponding wheel paths
+    # (templates/*.j2 and wheel_utils.py).
     name='skypilot',
     version='0.1.0',
     packages=setuptools.find_packages(),
