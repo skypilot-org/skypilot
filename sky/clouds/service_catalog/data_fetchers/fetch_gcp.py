@@ -26,14 +26,16 @@ TPU_ZONES = GCP_DATA_DIR + 'zones/tpu.csv'
 # NOTE: The CSV file does not completely align with the data in the website.
 # Differences are:
 # 1. We added us-east1 for TPU Research Cloud.
-# 2. We deleted TPU v3 pods from us-central1, because GCP does not actually
-#    support them in the region.
+# 2. We deleted TPU v3 pods from us-central1, because we found that GCP is not
+#    actually supporting them in the region.
 # 3. We used estimated prices for on-demand tpu-v3-{64,...,2048} as their
-#    prices are not publicly open.
-# 4. We applied 70% discount to all preemptible TPUs.
+#    prices are not publicly available.
+# 4. For preemptible TPUs whose prices are not publicly available, we applied
+#    70% discount to the on-demand prices because every known preemptible TPU
+#    price follows this pricing rule.
 TPU_PRICING = GCP_DATA_DIR + 'pricing/tpu.csv'
 
-COLS = [
+COLUMNS = [
     'InstanceType',  # None for accelerators
     'AcceleratorName',
     'AcceleratorCount',
@@ -166,7 +168,7 @@ if __name__ == '__main__':
     catalog_df = pd.concat([vm_df, acc_df])
 
     # Reorder the columns.
-    catalog_df = catalog_df[COLS]
+    catalog_df = catalog_df[COLUMNS]
 
     catalog_df.to_csv('gcp.csv', index=False)
     print('GCP Service Catalog saved to gcp.csv')
