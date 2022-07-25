@@ -153,6 +153,12 @@ def region_exists(region: str) -> bool:
     return common.region_exists_impl(_df, region)
 
 
+def get_region_zones_for_instance_type(instance_type: str,
+                                       use_spot: bool) -> List['cloud.Region']:
+    df = _df[_df['InstanceType'] == instance_type]
+    return common.get_region_zones(df, use_spot)
+
+
 def _get_accelerator(
     df: pd.DataFrame,
     accelerator: str,
