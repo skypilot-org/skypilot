@@ -474,8 +474,10 @@ if __name__ == '__main__':
     tpu_df = get_tpu_df()
     catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
 
-    # Remove unsupported VM instance types from the catalog.
-    catalog_df = catalog_df[~catalog_df['InstanceType'].isin(UNSUPPORTED_VMS)]
+    # Filter out unsupported VMs from the catalog.
+    for vm in UNSUPPORTED_VMS:
+        # NOTE: The `InstanceType` column can be NaN.
+        catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith(vm) != True]
 
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
