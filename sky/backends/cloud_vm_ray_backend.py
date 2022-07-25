@@ -68,7 +68,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching head IP address.
-_HEAD_IP_MAX_ATTEMPTS = 3
+_HEAD_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -88,6 +88,8 @@ _TEARDOWN_PURGE_WARNING = (
     f'{colorama.Style.RESET_ALL}')
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
+
+_MAX_RAY_UP_RETRY = 5
 
 
 def _get_cluster_config_template(cloud):
@@ -350,7 +352,7 @@ class RayCodeGen:
         if script is not None:
             sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
-            
+
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
@@ -1058,18 +1060,51 @@ class RetryingVmProvisioner(object):
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
         # cluster lock and cluster state.
         os.makedirs('/tmp/ray', exist_ok=True)
-        returncode, stdout, stderr = ray_up()
-        if (returncode != 0 and 'Processing file mounts' in stdout and
-                'Running setup commands' not in stdout):
-            # Retry ray up if it failed due to file mounts, because it is
-            # probably due to too many ssh connections issue and can be fixed
-            # by retrying.
-            # This is required when using custom image for GCP.
-            logger.info(
-                'Retrying sky runtime setup due to ssh connection issue.')
-            returncode, stdout, stderr = ray_up()
 
-        logger.debug(f'Ray up takes {time.time() - start} seconds.')
+        # Launch the cluster with ray up
+
+        # Retry if the any of the following happens:
+        # 1. Failed due to timeout when fetching head node for Azure.
+        # 2. Failed due to file mounts, because it is probably has too
+        # many ssh connections and can be fixed by retrying.
+        # This is required when using custom image for GCP.
+        def need_ray_up(
+                ray_up_return_value: Optional[Tuple[int, str, str]]) -> bool:
+
+            # Indicates the first ray up.
+            if ray_up_return_value is None:
+                return True
+
+            returncode, stdout, stderr = ray_up_return_value
+            if returncode == 0:
+                return False
+
+            if ('Head node fetch timed out. Failed to create head node.'
+                    in stderr and isinstance(to_provision_cloud, clouds.Azure)):
+                logger.info(
+                    'Retrying head node provisioning due to head fetching '
+                    'timeout.')
+                return True
+            if ('Processing file mounts' in stdout and
+                    'Running setup commands' not in stdout and
+                    'Failed to setup head node.' in stderr):
+                logger.info(
+                    'Retrying sky runtime setup due to ssh connection issue.')
+                return True
+            return False
+
+        retry_cnt = 0
+        ray_up_return_value = None
+        while (retry_cnt < _MAX_RAY_UP_RETRY and
+               need_ray_up(ray_up_return_value)):
+            retry_cnt += 1
+            ray_up_return_value = ray_up()
+
+        assert ray_up_return_value is not None
+        returncode, stdout, stderr = ray_up_return_value
+
+        logger.debug(f'Ray up takes {time.time() - start} seconds with '
+                     f'{retry_cnt} retries.')
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
@@ -1187,6 +1222,15 @@ class RetryingVmProvisioner(object):
         while provision_failed:
             provision_failed = False
             try:
+                try:
+                    # Recheck cluster name as the 'except:' block below may
+                    # change the cloud assignment.
+                    backend_utils.check_cluster_name_is_valid(
+                        cluster_name, to_provision.cloud)
+                except ValueError as value_error:
+                    # Let failover below handle this (i.e., block this cloud).
+                    raise exceptions.ResourcesUnavailableError(
+                    ) from value_error
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1449,12 +1493,8 @@ class CloudVmRayBackend(backends.Backend):
                    cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         """Provisions using 'ray up'."""
-        # Try to launch the exiting cluster first
-        backend_utils.check_cluster_name_is_valid(cluster_name)
-        # ray up: the VMs.
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
-
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
@@ -1462,6 +1502,7 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, to_provision, task.num_nodes)
             prev_cluster_status = None
             if not dryrun:  # dry run doesn't need to check existing cluster.
+                # Try to launch the exiting cluster first
                 to_provision_config = self._check_existing_cluster(
                     task, to_provision, cluster_name)
                 prev_cluster_status, _ = (
@@ -1469,6 +1510,8 @@ class CloudVmRayBackend(backends.Backend):
                         cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
+            backend_utils.check_cluster_name_is_valid(
+                cluster_name, to_provision_config.resources.cloud)
 
             usage_lib.messages.usage.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
@@ -1779,9 +1822,14 @@ class CloudVmRayBackend(backends.Backend):
                 f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
                 f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
-        returncode = self.run_on_head(handle, job_submit_cmd, stream_logs=False)
-        subprocess_utils.handle_returncode(returncode, job_submit_cmd,
-                                           f'Failed to submit job {job_id}.')
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      job_submit_cmd,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+        subprocess_utils.handle_returncode(returncode,
+                                           job_submit_cmd,
+                                           f'Failed to submit job {job_id}.',
+                                           stderr=stdout + stderr)
 
         logger.info('Job submitted with Job ID: '
                     f'{style.BRIGHT}{job_id}{style.RESET_ALL}')
