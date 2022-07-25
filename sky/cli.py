@@ -2002,8 +2002,17 @@ def check():
               default=None,
               type=str,
               help='Cloud provider to query.')
+@click.option('--refresh',
+              '-r',
+              is_flag=True,
+              default=False,
+              help='Refresh the service catalog.')
 @usage_lib.entrypoint
-def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
+def show_gpus(
+        gpu_name: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        cloud: Optional[str],
+        refresh: bool):
     """Show supported GPU/TPU/accelerators.
 
     To show the detailed information of a GPU/TPU type (which clouds offer it,
@@ -2012,9 +2021,22 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
     To show all GPUs, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
+    To refresh the service catalog, use ``sky show-gpus --refresh``.
+
     NOTE: The price displayed for each instance type is the lowest across all
     regions for both on-demand and spot instances.
     """
+    if refresh:
+        catalog_dir = (f'{service_catalog.LOCAL_CATALOG_DIR}/'
+                       f'{service_catalog.CATALOG_SCHEMA_VERSION}/')
+        if cloud is None:
+            catalog_path = f'{catalog_dir}/'
+        else:
+            catalog_path = f'{catalog_dir}/{cloud.lower()}.csv'
+        subprocess_utils.run(['rm', '-rf', catalog_path],
+                             check=False,
+                             shell=False)
+
     show_all = all
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
