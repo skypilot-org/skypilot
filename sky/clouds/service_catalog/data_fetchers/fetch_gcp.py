@@ -12,6 +12,7 @@ import requests
 
 GCP_URL = 'https://cloud.google.com'
 GCP_VM_PRICING_URL = 'https://cloud.google.com/compute/vm-instance-pricing'
+GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
 GCP_GPU_PRICING_URL = 'https://cloud.google.com/compute/gpus-pricing'
 GCP_GPU_ZONES_URL = 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones'
 
@@ -233,10 +234,26 @@ def get_vm_price_table(url):
         df['AcceleratorName'] = None
         df['AcceleratorCount'] = None
         df['GpuInfo'] = None
-        df['AvailabilityZone'] = None
     else:
         # Others (e.g., pricing rule table).
         df = df[['Item', 'Region', 'Price', 'SpotPrice']]
+    return df
+
+
+def get_vm_zones(url):
+    df = pd.read_html(url)[0]
+    column_remapping = {
+        'Zones': 'AvailabilityZone',
+        'Machine types': 'MachineType',  # Different from InstanceType
+    }
+    df.rename(columns=column_remapping, inplace=True)
+
+    # Remove unnecessary columns.
+    df = df[['AvailabilityZone', 'MachineType']]
+
+    # Explode the 'MachineType' column.
+    df['MachineType'] = df['MachineType'].str.split(', ')
+    df = df.explode('MachineType', ignore_index=True)
     return df
 
 
@@ -269,7 +286,6 @@ def get_a2_df():
     a2_df['AcceleratorName'] = None
     a2_df['AcceleratorCount'] = None
     a2_df['GpuInfo'] = None
-    a2_df['AvailabilityZone'] = None
     return a2_df
 
 
@@ -278,6 +294,7 @@ def get_vm_df():
     vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
     # Skip the table for "Suspended VM instances".
     vm_price_table_urls = vm_price_table_urls[:-1]
+
     vm_dfs = [get_vm_price_table(GCP_URL + url) for url in vm_price_table_urls]
     vm_dfs = [
         df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
@@ -286,6 +303,26 @@ def get_vm_df():
     # Handle A2 instance types separately.
     a2_df = get_a2_df()
     vm_df = pd.concat(vm_dfs + [a2_df])
+
+    vm_zones = get_vm_zones(GCP_VM_ZONES_URL)
+    # Remove regions not in the pricing data.
+    zone_to_region = lambda x: x[:-2]
+    vm_zones['Region'] = vm_zones['AvailabilityZone'].apply(zone_to_region)
+    regions = vm_df['Region'].unique()
+    vm_zones = vm_zones[vm_zones['Region'].isin(regions)]
+
+    # Define the MachineType column.
+    vm_df['MachineType'] = vm_df['InstanceType'].apply(
+        lambda x: x.split('-')[0].upper())
+    # The f1-micro and g1-small instances belong to the N1 machine family.
+    vm_df.loc[vm_df['InstanceType'].isin(['f1-micro', 'g1-small']),
+              'MachineType'] = 'N1'
+
+    # Merge the dataframes.
+    vm_df = pd.merge(vm_df, vm_zones, on=['Region', 'MachineType'])
+
+    # Remove the MachineType column.
+    vm_df.drop(columns=['MachineType'], inplace=True)
     return vm_df
 
 
