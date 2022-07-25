@@ -62,7 +62,7 @@ NO_A100_16G_ZONES = ['asia-northeast3-a', 'asia-northeast3-b', 'us-west4-b']
 # For the TPU catalog, we maintain our own location/pricing table.
 # NOTE: The CSV files do not completely align with the data in the websites.
 # The differences are:
-# 1. We added us-east1 for TPU Research Cloud.
+# 1. We added us-east1-d (a hidden zone) for TPU-v3 pods.
 # 2. We deleted TPU v3 pods in us-central1, because we found that GCP is not
 #    actually supporting them in the region.
 # 3. We used estimated prices for on-demand tpu-v3-{64,...,2048} as their
