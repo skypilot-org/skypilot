@@ -321,6 +321,10 @@ def get_vm_df():
 
     # Remove the MachineType column.
     vm_df.drop(columns=['MachineType'], inplace=True)
+
+    # Block non-US regions.
+    # FIXME(woosuk): Allow all regions.
+    vm_df = vm_df[vm_df['Region'].str.startswith('us-')]
     return vm_df
 
 
@@ -466,6 +470,10 @@ def get_gpu_df():
     gpu_df['InstanceType'] = None
     gpu_df['GpuInfo'] = gpu_df['AcceleratorName']
     gpu_df['MemoryGiB'] = 0
+
+    # Block non-US regions.
+    # FIXME(woosuk): Allow all regions.
+    gpu_df = gpu_df[gpu_df['Region'].str.startswith('us-')]
     return gpu_df
 
 
