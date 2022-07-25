@@ -209,6 +209,9 @@ def list_accelerators(
     if a100_infos is None:
         return results
 
+    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
+    # A100 GPUs can only be attached to fixed-size A2 VMs.
+    # Thus, we can show their exact cost including the host VM prices.
     new_infos = []
     for info in a100_infos:
         assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
