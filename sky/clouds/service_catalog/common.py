@@ -2,17 +2,19 @@
 import os
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+import requests
 import pandas as pd
 
 from sky import sky_logging
+from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
+from sky.clouds.service_catalog import constants
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_HOSTED_CATALOG_DIR_URL = 'https://raw.githubusercontent.com/sky-proj/skypilot-catalog/master/catalogs'  # pylint: disable=line-too-long
-_CATALOG_SCHEMA_VERSION = 'v1'
-_CATALOG_DIR = os.path.expanduser(f'~/sky_catalogs/{_CATALOG_SCHEMA_VERSION}/')
+_CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
+                            constants.CATALOG_SCHEMA_VERSION)
 os.makedirs(_CATALOG_DIR, exist_ok=True)
 
 
@@ -41,6 +43,7 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
+@ux_utils.print_exception_no_traceback()
 def read_catalog(filename: str) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
@@ -48,13 +51,29 @@ def read_catalog(filename: str) -> pd.DataFrame:
     the schema version.
     """
     catalog_path = get_catalog_path(filename)
-    if os.path.exists(catalog_path):
-        return pd.read_csv(catalog_path)
+    cloud = filename[:-4]
+    if not os.path.exists(catalog_path):
+        url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+        with backend_utils.safe_console_status(
+                f'Downloading {cloud} catalog...'):
+            try:
+                r = requests.get(url)
+                r.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                logger.error(f'Failed to download {cloud} catalog:')
+                raise e
+        # Save the catalog to a local file.
+        with open(catalog_path, 'w') as f:
+            f.write(r.text)
 
-    url = f'{_HOSTED_CATALOG_DIR_URL}/{_CATALOG_SCHEMA_VERSION}/{filename}'
-    catalog_df = pd.read_csv(url)
-    catalog_df.to_csv(catalog_path, index=False)
-    return catalog_df
+    try:
+        df = pd.read_csv(catalog_path)
+    except Exception as e:
+        # As users can manually modify the catalog, read_csv can fail.
+        logger.error(f'Failed to read {catalog_path}. '
+                     'To fix: delete the csv file and try again.')
+        raise e
+    return df
 
 
 def _get_instance_type(
