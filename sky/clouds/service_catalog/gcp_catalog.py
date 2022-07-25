@@ -197,7 +197,36 @@ def list_accelerators(
     name_filter: Optional[str] = None,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    return common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+
+    a100_infos = results.get('A100', None)
+    if a100_infos is None:
+        return results
+
+    new_infos = []
+    for info in a100_infos:
+        assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
+        a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
+        df = _df[_df['InstanceType'] == a100_host_vm_type]
+        memory = df['MemoryGiB'].iloc[0]
+        vm_price = common.get_hourly_cost_impl(_df,
+                                               a100_host_vm_type,
+                                               None,
+                                               use_spot=False)
+        vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                    a100_host_vm_type,
+                                                    None,
+                                                    use_spot=True)
+        new_infos.append(
+            info._replace(
+                instance_type=a100_host_vm_type,
+                memory=memory,
+                # total cost = VM instance + GPU.
+                price=info.price + vm_price,
+                spot_price=info.spot_price + vm_spot_price,
+            ))
+    results['A100'] = new_infos
+    return results
 
 
 def get_region_zones_for_accelerators(
