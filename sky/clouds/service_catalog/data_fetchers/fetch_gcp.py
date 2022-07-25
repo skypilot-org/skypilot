@@ -17,6 +17,9 @@ GCP_GPU_ZONES_URL = 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zone
 
 NOT_AVAILABLE_STR = 'Not available in this region'
 
+# Refer to: https://github.com/sky-proj/sky/issues/1006
+UNSUPPORTED_VMS = ['t2d-standard', 'f1-micro']
+
 # Supported GPU types and counts.
 GPU_TYPES_TO_COUNTS = {
     'A100': [1, 2, 4, 8, 16],
@@ -470,6 +473,9 @@ if __name__ == '__main__':
     gpu_df = get_gpu_df()
     tpu_df = get_tpu_df()
     catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
+
+    # Remove unsupported VM instance types from the catalog.
+    catalog_df = catalog_df[~catalog_df['InstanceType'].isin(UNSUPPORTED_VMS)]
 
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
