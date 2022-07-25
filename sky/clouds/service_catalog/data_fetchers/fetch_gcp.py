@@ -18,7 +18,7 @@ GCP_GPU_ZONES_URL = 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zone
 NOT_AVAILABLE_STR = 'Not available in this region'
 
 # Refer to: https://github.com/sky-proj/sky/issues/1006
-UNSUPPORTED_VMS = ['t2d-standard', 'f1-micro']
+UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
 
 # Supported GPU types and counts.
 GPU_TYPES_TO_COUNTS = {
