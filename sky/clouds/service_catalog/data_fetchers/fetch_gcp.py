@@ -236,9 +236,57 @@ def get_vm_price_table(url):
         df['AvailabilityZone'] = None
     else:
         # Others (e.g., pricing rule table).
-        # Currently, we do not use this table.
         df = df[['Item', 'Region', 'Price', 'SpotPrice']]
     return df
+
+
+def get_a2_df():
+    a2_pricing = get_vm_price_table(GCP_URL + A2_PRICING_URL)
+    cpu_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined vCPUs']
+    memory_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined Memory']
+
+    table = []
+    for region in a2_pricing['Region'].unique():
+        per_cpu_price = cpu_pricing[cpu_pricing['Region'] ==
+                                    region]['Price'].values[0]
+        per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] ==
+                                         region]['SpotPrice'].values[0]
+        per_memory_price = memory_pricing[memory_pricing['Region'] ==
+                                          region]['Price'].values[0]
+        per_memory_spot_price = memory_pricing[memory_pricing['Region'] ==
+                                               region]['SpotPrice'].values[0]
+
+        for instance_type, spec in A2_INSTANCE_TYPES.items():
+            cpu = spec['vCPU']
+            memory = spec['MemoryGiB']
+            price = per_cpu_price * cpu + per_memory_price * memory
+            spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
+            table.append([instance_type, memory, price, spot_price, region])
+    a2_df = pd.DataFrame(
+        table,
+        columns=['InstanceType', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
+
+    a2_df['AcceleratorName'] = None
+    a2_df['AcceleratorCount'] = None
+    a2_df['GpuInfo'] = None
+    a2_df['AvailabilityZone'] = None
+    return a2_df
+
+
+def get_vm_df():
+    """Generates the GCP service catalog for host VMs."""
+    vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
+    # Skip the table for "Suspended VM instances".
+    vm_price_table_urls = vm_price_table_urls[:-1]
+    vm_dfs = [get_vm_price_table(GCP_URL + url) for url in vm_price_table_urls]
+    vm_dfs = [
+        df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
+    ]
+
+    # Handle A2 instance types separately.
+    a2_df = get_a2_df()
+    vm_df = pd.concat(vm_dfs + [a2_df])
+    return vm_df
 
 
 def get_gpu_price_table(url):
@@ -417,55 +465,6 @@ def get_tpu_df():
     tpu_df['GpuInfo'] = tpu_df['AcceleratorName']
     tpu_df['MemoryGiB'] = 0
     return tpu_df
-
-
-def get_a2_df():
-    a2_pricing = get_vm_price_table(GCP_URL + A2_PRICING_URL)
-    cpu_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined vCPUs']
-    memory_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined Memory']
-
-    table = []
-    for region in a2_pricing['Region'].unique():
-        per_cpu_price = cpu_pricing[cpu_pricing['Region'] ==
-                                    region]['Price'].values[0]
-        per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] ==
-                                         region]['SpotPrice'].values[0]
-        per_memory_price = memory_pricing[memory_pricing['Region'] ==
-                                          region]['Price'].values[0]
-        per_memory_spot_price = memory_pricing[memory_pricing['Region'] ==
-                                               region]['SpotPrice'].values[0]
-
-        for instance_type, spec in A2_INSTANCE_TYPES.items():
-            cpu = spec['vCPU']
-            memory = spec['MemoryGiB']
-            price = per_cpu_price * cpu + per_memory_price * memory
-            spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
-            table.append([instance_type, memory, price, spot_price, region])
-    a2_df = pd.DataFrame(
-        table,
-        columns=['InstanceType', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
-
-    a2_df['AcceleratorName'] = None
-    a2_df['AcceleratorCount'] = None
-    a2_df['GpuInfo'] = None
-    a2_df['AvailabilityZone'] = None
-    return a2_df
-
-
-def get_vm_df():
-    """Generates the GCP service catalog for host VMs."""
-    vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
-    # Skip the table for "Suspended VM instances".
-    vm_price_table_urls = vm_price_table_urls[:-1]
-    vm_dfs = [get_vm_price_table(GCP_URL + url) for url in vm_price_table_urls]
-    vm_dfs = [
-        df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
-    ]
-
-    # Handle A2 instance types separately.
-    a2_df = get_a2_df()
-    vm_df = pd.concat(vm_dfs + [a2_df])
-    return vm_df
 
 
 if __name__ == '__main__':
