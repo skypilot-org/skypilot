@@ -31,7 +31,9 @@ import datetime
 import functools
 import getpass
 import os
+import pathlib
 import shlex
+import shutil
 import sys
 import tempfile
 import textwrap
@@ -2027,15 +2029,13 @@ def show_gpus(
     regions for both on-demand and spot instances.
     """
     if refresh:
-        catalog_dir = (f'{service_catalog.LOCAL_CATALOG_DIR}/'
-                       f'{service_catalog.CATALOG_SCHEMA_VERSION}/')
+        catalog_dir = pathlib.Path(f'{service_catalog.LOCAL_CATALOG_DIR}/'
+                                   f'{service_catalog.CATALOG_SCHEMA_VERSION}/')
         if cloud is None:
-            catalog_path = f'{catalog_dir}/'
+            shutil.rmtree(catalog_dir, ignore_errors=True)
         else:
-            catalog_path = f'{catalog_dir}/{cloud.lower()}.csv'
-        subprocess_utils.run(['rm', '-rf', catalog_path],
-                             check=False,
-                             shell=False)
+            catalog_path = catalog_dir / f'{cloud.lower()}.csv'
+            catalog_path.unlink()
 
     show_all = all
     if show_all and gpu_name is not None:

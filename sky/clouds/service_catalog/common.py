@@ -43,15 +43,15 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-@ux_utils.print_exception_no_traceback()
 def read_catalog(filename: str) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
     the schema version.
     """
+    assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
-    cloud = filename[:-4]
+    cloud = filename.split('.csv')[0]
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -61,18 +61,20 @@ def read_catalog(filename: str) -> pd.DataFrame:
                 r.raise_for_status()
             except requests.exceptions.RequestException as e:
                 logger.error(f'Failed to download {cloud} catalog:')
-                raise e
+                with ux_utils.print_exception_no_traceback():
+                    raise e
         # Save the catalog to a local file.
         with open(catalog_path, 'w') as f:
             f.write(r.text)
 
     try:
         df = pd.read_csv(catalog_path)
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         # As users can manually modify the catalog, read_csv can fail.
         logger.error(f'Failed to read {catalog_path}. '
                      'To fix: delete the csv file and try again.')
-        raise e
+        with ux_utils.print_exception_no_traceback():
+            raise e
     return df
 
 
