@@ -30,11 +30,26 @@ GPU_TYPES_TO_COUNTS = {
 # FIXME(woosuk): This URL can change.
 A2_PRICING_URL = '/compute/vm-instance-pricing_500ae19db0b58b862da0bc662dafc1b90ed3365a4e002c244f84fa5cae0da2fc.frame'
 A2_INSTANCE_TYPES = {
-    'a2-highgpu-1g': {'vCPU': 12, 'MemoryGiB': 85},
-    'a2-highgpu-2g': {'vCPU': 24, 'MemoryGiB': 170},
-    'a2-highgpu-4g': {'vCPU': 48, 'MemoryGiB': 340},
-    'a2-highgpu-8g': {'vCPU': 96, 'MemoryGiB': 680},
-    'a2-megagpu-16g': {'vCPU': 96, 'MemoryGiB': 1360},
+    'a2-highgpu-1g': {
+        'vCPU': 12,
+        'MemoryGiB': 85,
+    },
+    'a2-highgpu-2g': {
+        'vCPU': 24,
+        'MemoryGiB': 170,
+    },
+    'a2-highgpu-4g': {
+        'vCPU': 48,
+        'MemoryGiB': 340,
+    },
+    'a2-highgpu-8g': {
+        'vCPU': 96,
+        'MemoryGiB': 680,
+    },
+    'a2-megagpu-16g': {
+        'vCPU': 96,
+        'MemoryGiB': 1360,
+    },
 }
 
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
@@ -82,10 +97,11 @@ def get_regions(doc):
     # E.g., 'kr': 'asia-northeast3'
     regions = doc.xpath('//md-option')
     regions = {
-        region.attrib['value']: re.search(r'\((.*?)\)',region.text).group(1)
+        region.attrib['value']: re.search(r'\((.*?)\)', region.text).group(1)
         for region in regions
     }
     return regions
+
 
 # TODO(woosuk): parallelize this function using Ray.
 # Currently, 'HTML parser error : Tag md-option invalid' is raised
@@ -170,6 +186,7 @@ def get_vm_price_table(url):
             return float(memory_str)
 
     pattern = re.compile(r'\$?(.*?)\s?/')
+
     def parse_price(price_str):
         if NOT_AVAILABLE_STR in price_str:
             return None
@@ -201,7 +218,9 @@ def get_vm_price_table(url):
             return None
 
         # Price table for specific VM types.
-        df = df[['InstanceType', 'vCPU', 'MemoryGiB', 'Region', 'Price', 'SpotPrice']]
+        df = df[[
+            'InstanceType', 'vCPU', 'MemoryGiB', 'Region', 'Price', 'SpotPrice'
+        ]]
         # vCPU
         df['vCPU'] = df['vCPU'].astype(float)
         # MemoryGiB
@@ -272,12 +291,15 @@ def get_gpu_price_table(url):
 
     df = df[['AcceleratorName', 'Region', 'Price', 'SpotPrice']]
     # Fix GPU names (i.e., remove NVIDIA prefix).
-    df['AcceleratorName'] = df['AcceleratorName'].apply(lambda x: x.replace('NVIDIA ', ''))
+    df['AcceleratorName'] = df['AcceleratorName'].apply(
+        lambda x: x.replace('NVIDIA ', ''))
     # Add GPU counts.
-    df['AcceleratorCount'] = df['AcceleratorName'].apply(lambda x: GPU_TYPES_TO_COUNTS[x])
+    df['AcceleratorCount'] = df['AcceleratorName'].apply(
+        lambda x: GPU_TYPES_TO_COUNTS[x])
 
     # Parse the prices.
     pattern = re.compile(r'\$?(.*?)\s?per GPU')
+
     def parse_price(price_str):
         if NOT_AVAILABLE_STR in price_str:
             return None
@@ -315,7 +337,8 @@ def get_gpu_zones(url):
 
     # Remove "(except a2-megagpu-16g)"
     # The exceptional zones will be handled manually.
-    df['AcceleratorName'] = df['AcceleratorName'].apply(lambda x: x.replace(' (except a2-megagpu-16g)', ''))
+    df['AcceleratorName'] = df['AcceleratorName'].apply(
+        lambda x: x.replace(' (except a2-megagpu-16g)', ''))
     return df
 
 
@@ -400,10 +423,14 @@ def get_a2_df():
 
     table = []
     for region in a2_pricing['Region'].unique():
-        per_cpu_price = cpu_pricing[cpu_pricing['Region'] == region]['Price'].values[0]
-        per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] == region]['SpotPrice'].values[0]
-        per_memory_price = memory_pricing[memory_pricing['Region'] == region]['Price'].values[0]
-        per_memory_spot_price = memory_pricing[memory_pricing['Region'] == region]['SpotPrice'].values[0]
+        per_cpu_price = cpu_pricing[cpu_pricing['Region'] ==
+                                    region]['Price'].values[0]
+        per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] ==
+                                         region]['SpotPrice'].values[0]
+        per_memory_price = memory_pricing[memory_pricing['Region'] ==
+                                          region]['Price'].values[0]
+        per_memory_spot_price = memory_pricing[memory_pricing['Region'] ==
+                                               region]['SpotPrice'].values[0]
 
         for instance_type, spec in A2_INSTANCE_TYPES.items():
             cpu = spec['vCPU']
@@ -411,7 +438,9 @@ def get_a2_df():
             price = per_cpu_price * cpu + per_memory_price * memory
             spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
             table.append([instance_type, memory, price, spot_price, region])
-    a2_df = pd.DataFrame(table, columns=['InstanceType', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
+    a2_df = pd.DataFrame(
+        table,
+        columns=['InstanceType', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
 
     a2_df['AcceleratorName'] = None
     a2_df['AcceleratorCount'] = None
@@ -426,7 +455,9 @@ def get_vm_df():
     # Skip the table for "Suspended VM instances".
     vm_price_table_urls = vm_price_table_urls[:-1]
     vm_dfs = [get_vm_price_table(GCP_URL + url) for url in vm_price_table_urls]
-    vm_dfs = [df for df in vm_dfs if df is not None and 'InstanceType' in df.columns]
+    vm_dfs = [
+        df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
+    ]
 
     # Handle A2 instance types separately.
     a2_df = get_a2_df()
