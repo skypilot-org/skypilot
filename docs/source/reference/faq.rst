@@ -62,7 +62,7 @@ How to edit or update the service catalog?
 The catalog CSV files are cached in the ``~/.sky/catalogs/`` directory.
 You can customize them to your needs.
 If you want to update the service catalog, use ``sky show-gpus --refresh``.
-This will delete the cached files and automatically download the lastest catalog.
+This will delete the cached files and automatically download the latest catalog.
 
 
 How to make Sky clusters use my Weights & Biases credentials?
