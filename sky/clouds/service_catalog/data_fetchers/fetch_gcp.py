@@ -32,7 +32,7 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 # FIXME(woosuk): This URL can change.
-A2_PRICING_URL = '/compute/vm-instance-pricing_500ae19db0b58b862da0bc662dafc1b90ed3365a4e002c244f84fa5cae0da2fc.frame'
+A2_PRICING_URL = '/compute/vm-instance-pricing_500ae19db0b58b862da0bc662dafc1b90ed3365a4e002c244f84fa5cae0da2fc.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
         'vCPU': 12,
@@ -59,13 +59,8 @@ A2_INSTANCE_TYPES = {
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
 NO_A100_16G_ZONES = ['asia-northeast3-a', 'asia-northeast3-b', 'us-west4-b']
 
-# For the TPU catalog, we rely on the hard-coded CSV files.
-TPU_DATA_DIR = './tpu_data/'
-
-# Source: https://cloud.google.com/tpu/docs/regions-zones
-TPU_ZONES = TPU_DATA_DIR + 'zones.csv'
-# Source: https://cloud.google.com/tpu/pricing
-# NOTE: The CSV file does not completely align with the data in the website.
+# For the TPU catalog, we maintain our own location/pricing table.
+# NOTE: The CSV files do not completely align with the data in the websites.
 # The differences are:
 # 1. We added us-east1 for TPU Research Cloud.
 # 2. We deleted TPU v3 pods in us-central1, because we found that GCP is not
@@ -75,7 +70,10 @@ TPU_ZONES = TPU_DATA_DIR + 'zones.csv'
 # 4. For preemptible TPUs whose prices are not publicly available, we applied
 #    70% off discount on the on-demand prices because every known preemptible
 #    TPU price follows this pricing rule.
-TPU_PRICING = TPU_DATA_DIR + 'pricing.csv'
+# Source: https://cloud.google.com/tpu/docs/regions-zones
+GCP_TPU_ZONES_URL = 'https://raw.githubusercontent.com/sky-proj/skypilot-catalog/master/metadata/tpu/zones.csv'  # pylint: disable=line-too-long
+# Source: https://cloud.google.com/tpu/pricing
+GCP_TPU_PRICING_URL = 'https://raw.githubusercontent.com/sky-proj/skypilot-catalog/master/metadata/tpu/pricing.csv'  # pylint: disable=line-too-long
 
 COLUMNS = [
     'InstanceType',  # None for accelerators
@@ -473,8 +471,8 @@ def get_gpu_df():
 
 def get_tpu_df():
     """Generates the GCP service catalog for TPUs."""
-    tpu_zones = pd.read_csv(TPU_ZONES)
-    tpu_pricing = pd.read_csv(TPU_PRICING)
+    tpu_zones = pd.read_csv(GCP_TPU_ZONES_URL)
+    tpu_pricing = pd.read_csv(GCP_TPU_PRICING_URL)
 
     # Rename the columns.
     tpu_zones = tpu_zones.rename(columns={
