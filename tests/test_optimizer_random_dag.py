@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 import sky
-from sky import GCP
 
 CLOUDS = {
     'AWS': sky.AWS(),
@@ -13,7 +12,7 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_DEFAULT_INSTANCE_TYPE = GCP.get_default_instance_type()
+GCP_DEFAULT_INSTANCE_TYPE = sky.GCP.get_default_instance_type()
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
