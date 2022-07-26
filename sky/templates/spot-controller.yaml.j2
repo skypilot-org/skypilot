@@ -36,7 +36,7 @@ run: |
     --job-id $SKY_JOB_ID
 
 envs:
-  SKY_USAGE_USER_ID: {{logging_user_hash}}
+  SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
 {% if is_dev %}
   SKYPILOT_DEV: 1
 {% endif %}

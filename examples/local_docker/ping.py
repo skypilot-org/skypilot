@@ -1,9 +1,8 @@
-"""
-An example app which pings localhost.
+"""An example app which pings localhost.
 
-This script is designed to demonstrate the use of different backends with Sky.
-It is useful to support a LocalBackend that users can use to debug their
-programs even before they run them on the sky.
+This script is designed to demonstrate the use of different backends with
+SkyPilot.  It is useful to support a LocalDockerBackend that users can use to
+debug their programs even before they run them on the Sky.
 """
 
 import sky
