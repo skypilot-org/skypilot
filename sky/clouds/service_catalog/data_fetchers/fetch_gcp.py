@@ -213,7 +213,7 @@ def get_vm_price_table(url):
 
     instance_type = None
     if 'InstanceType' in df.columns:
-        # Price table for specific instance types.
+        # Price table for pre-defined instance types.
         instance_type = df['InstanceType'].iloc[0]
         if instance_type == 'a2-highgpu-1g':
             # The A2 price table includes the GPU cost.
@@ -233,7 +233,7 @@ def get_vm_price_table(url):
         df['AcceleratorCount'] = None
         df['GpuInfo'] = None
     else:
-        # Others (e.g., pricing rule table).
+        # Others (e.g., per vCPU hour or per GB hour pricing rule table).
         df = df[['Item', 'Region', 'Price', 'SpotPrice']]
     return df
 
