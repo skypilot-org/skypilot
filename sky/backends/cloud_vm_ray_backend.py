@@ -54,7 +54,6 @@ Path = str
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
 SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
-SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1819,7 +1818,7 @@ class CloudVmRayBackend(backends.Backend):
         else:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
+                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
                 f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
