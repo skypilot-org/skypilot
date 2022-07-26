@@ -22,6 +22,7 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
@@ -53,7 +54,6 @@ Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
-SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 
 logger = sky_logging.init_logger(__name__)
 
@@ -1415,7 +1415,8 @@ class CloudVmRayBackend(backends.Backend):
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
-        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, self.run_timestamp)
+        self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                    self.run_timestamp)
         # Do not make directories to avoid create folder for commands that
         # do not need it (`sky status`, `sky logs` ...)
         # os.makedirs(self.log_dir, exist_ok=True)
@@ -1818,8 +1819,9 @@ class CloudVmRayBackend(backends.Backend):
         else:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-                f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
+                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} '
+                '--no-wait -- '
+                f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,

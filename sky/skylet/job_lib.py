@@ -11,14 +11,13 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Union
 
+from sky import constants
 from sky import sky_logging
 from sky.utils import subprocess_utils
 from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
-
-SKY_LOGS_DIRECTORY = '~/sky_logs'
 
 
 class JobStatus(enum.Enum):
@@ -341,7 +340,7 @@ def _show_job_queue(jobs) -> None:
                                              absolute=True),
             job['resources'],
             job['status'].value,
-            os.path.join(SKY_LOGS_DIRECTORY, job['run_timestamp']),
+            os.path.join(constants.SKY_LOGS_DIRECTORY, job['run_timestamp']),
         ])
     print(job_table)
 
@@ -403,7 +402,7 @@ def log_dir(job_id: int) -> Optional[str]:
     if row is None:
         return None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+    return os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
 
 
 def log_dirs_with_globbing(job_id: str) -> List[str]:
@@ -419,7 +418,7 @@ def log_dirs_with_globbing(job_id: str) -> List[str]:
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-        log_path = os.path.join(SKY_LOGS_DIRECTORY, run_timestamp)
+        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
         log_paths.append((job_id, log_path))
     return log_paths
 

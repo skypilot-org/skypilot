@@ -28,7 +28,8 @@ def _to_absolute(pwd_file):
 def _run_patch(target_file, patch_file):
     """Applies a patch if it has not been applied already."""
     # .orig is the original file that is not patched.
-    orig_file = os.path.abspath(target_file + f'-{constants.SKY_REMOTE_RAY_VERSION}.orig')
+    orig_file = os.path.abspath(target_file +
+                                f'-{constants.SKY_REMOTE_RAY_VERSION}.orig')
     script = f"""\
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
