@@ -95,6 +95,8 @@ def _closest_power_of_two(x: int) -> int:
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
+    if instance_type == 'TPU-VM':
+        return True
     return common.instance_type_exists_impl(_df, instance_type)
 
 
