@@ -3,7 +3,6 @@
 Google Cloud does not have an API for querying TPU/GPU offerings, so we crawl
 the information from GCP websites.
 """
-
 import re
 
 from lxml import html
