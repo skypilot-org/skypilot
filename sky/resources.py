@@ -167,6 +167,7 @@ class Resources:
     def image_id(self) -> Optional[str]:
         return self._image_id
 
+    @property
     def use_tpu_pod(self) -> bool:
         acc, _ = list(self.accelerators.items())[0]
         return acc not in ['tpu-v2-8', 'tpu-v3-8']
