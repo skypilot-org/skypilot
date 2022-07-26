@@ -56,10 +56,11 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-How to edit or update the service catalog? (Advanced Use Case)
+How to edit or update the pricing information used by Sky? (Advanced Use Case)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The catalog CSV files are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
+Sky stores pricing information for different cloud resource types in CSV files known as service catalogs.
+These catalogs are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
 Check out your schema version by running the following command:
 
 .. code-block:: bash
@@ -69,7 +70,7 @@ Check out your schema version by running the following command:
 You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
-Then, Sky will automatically download the latest catalog in the next run.
+Sky will automatically download the latest catalog in the next run.
 
 
 How to make Sky clusters use my Weights & Biases credentials?
