@@ -56,14 +56,20 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-How to edit or update the service catalog?
+How to edit or update the service catalog? (Advanced Use Case)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The catalog CSV files are cached in the ``~/.sky/catalogs/`` directory.
-You can customize them to your needs.
-To update the entire service catalog, use ``sky show-gpus --refresh``.
-To update the catalog for a specific cloud, add ``--cloud <cloud-name>``.
-This will delete the cached files and automatically download the latest catalog.
+The catalog CSV files are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
+Check out your schema version by running the following command:
+
+.. code-block:: bash
+
+  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
+
+You can customize the catalog files to your needs.
+For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
+Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
+Then, Sky will automatically download the latest catalog in the next run.
 
 
 How to make Sky clusters use my Weights & Biases credentials?
