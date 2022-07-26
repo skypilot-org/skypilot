@@ -8,8 +8,6 @@ resources:
 
 # The setup command.  Will be run under the working directory.
 setup: |
-  pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-  pip install --upgrade clu
   git clone https://github.com/google/flax.git
 
   conda activate flax
@@ -18,12 +16,15 @@ setup: |
   else
     conda create -n flax python=3.8 -y
     conda activate flax
-    pip install --user -e flax
+    pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+    pip install --upgrade clu
+    pip install -e flax
   fi
 
 
 # The command to run.  Will be run under the working directory.
 run: |
+  conda activate flax
   cd flax/examples/mnist
   python3 main.py --workdir=/tmp/mnist \
   --config=configs/default.py \
