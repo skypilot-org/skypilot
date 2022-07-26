@@ -18,10 +18,10 @@ Options used:
 - :code:`--gpus`: specify the resource requirement for each job.
 - :code:`-d` / :code:`--detach`: detach the run and logging from the terminal, allowing multiple trials to run concurrently.
 
-If there are only 4 V100 GPUs on the cluster, Sky will queue 1 job while the
+If there are only 4 V100 GPUs on the cluster, SkyPilot will queue 1 job while the
 other 4 run in parallel. Once a job finishes, the next job will begin executing
 immediately.
-Refer to :ref:`Job Queue <job-queue>` for more details on Sky's scheduling behavior.
+Refer to :ref:`Job Queue <job-queue>` for more details on SkyPilot's scheduling behavior.
 
 
 Multiple trials per GPU

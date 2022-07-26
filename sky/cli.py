@@ -284,7 +284,7 @@ _TASK_OPTIONS = [
         1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
 
         2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
-        same value of ``$HOME`` in the local environment where the sky command
+        same value of ``$HOME`` in the local environment where the CLI command
         is run.
 
         3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
@@ -841,7 +841,7 @@ def cli():
     is_flag=True,
     required=False,
     help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if sky fails to launch the cluster on any possible region/cloud due '
+          'if we fail to launch the cluster on any possible region/cloud due '
           'to unavailability errors.'))
 @click.option('--yes',
               '-y',
@@ -1135,7 +1135,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 
 def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
                                backend: 'backend_lib.Backend', code: str):
-    click.echo(f'\nSky Job Queue of Cluster {cluster}')
+    click.echo(f'\nJob queue of cluster {cluster}')
     if handle.head_ip is None:
         click.echo(
             f'Cluster {cluster} has been stopped or not properly set up. '
@@ -1185,7 +1185,7 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
                                  ' (see `sky status`).')
     backend = backend_utils.get_backend_from_handle(handle)
     if isinstance(backend, backends.LocalDockerBackend):
-        raise click.UsageError('Sky logs is not available with '
+        raise click.UsageError('Logs are not available with '
                                'LocalDockerBackend.')
     if cluster_status != global_user_state.ClusterStatus.UP:
         click.secho(
@@ -1416,14 +1416,14 @@ def autostop(
     is_flag=True,
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
-          'if sky fails to start the cluster due to unavailability errors.'))
+          'if we fail to start the cluster due to unavailability errors.'))
 @usage_lib.entrypoint
 def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
-    provisioning/Sky runtime setup (status is INIT), this command will attempt
-    to start the cluster.  (In the second case, any failed setup steps are not
+    provisioning/runtime setup (status is INIT), this command will attempt to
+    start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
     Auto-failover provisioning is not used when restarting stopped
@@ -1630,7 +1630,7 @@ def _terminate_or_stop_clusters(
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
             if not purge:
-                msg = (f'{operation} Sky reserved cluster(s) '
+                msg = (f'{operation} reserved cluster(s) '
                        f'{reserved_clusters_str} is not supported.')
                 if terminate:
                     msg += (
@@ -1640,7 +1640,7 @@ def _terminate_or_stop_clusters(
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
-                    f'{operation} Sky reserved cluster(s) '
+                    f'{operation} reserved cluster(s) '
                     f'{reserved_clusters_str} with multiple other cluster(s) '
                     f'{names_str} is not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
@@ -1985,7 +1985,7 @@ def check():
     """Determine the set of clouds available to use.
 
     This checks access credentials for AWS, Azure and GCP; on failure, it shows
-    the reason and suggests correction steps. Sky tasks will only run on clouds
+    the reason and suggests correction steps. Tasks will only run on clouds
     that you have access to.
     """
     sky_check.check()
@@ -2408,7 +2408,7 @@ def spot_launch(
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
             # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the sky storage mount can work on the spot
+            # name field, so that the storage mount can work on the spot
             # controller.
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
@@ -2423,7 +2423,7 @@ def spot_launch(
                     raise ValueError(f'Unsupported store type: {store_type}')
             storage_obj.name = None
 
-    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(f.name, task_config)

@@ -1,4 +1,4 @@
-"""Module to enable a single Sky key for all Sky VMs in each cloud."""
+"""Module to enable a single SkyPilot key for all VMs in each cloud."""
 import copy
 import functools
 import hashlib

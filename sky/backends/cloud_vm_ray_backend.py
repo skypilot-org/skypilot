@@ -233,8 +233,8 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node' + plural + '.'
-                print('SKY INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).\\n'
-                      'SKY INFO: Waiting for task resources on ' + node_str +
+                print('INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).\\n'
+                      'INFO: Waiting for task resources on ' + node_str +
                       ' This will block if the cluster is full.',
                       file=sys.stderr,
                       flush=True)
@@ -242,7 +242,7 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
-                print('SKY INFO: All task resources reserved.',
+                print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
@@ -262,7 +262,7 @@ class RayCodeGen:
                                      placement_group_bundle_index=i).remote()
                     for i in range(pg.bundle_count)
                 ])
-                print('SKY INFO: Reserved IPs:', ip_list)
+                print('INFO: Reserved IPs:', ip_list)
                 ip_list_str = '\\n'.join(ip_list)
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
@@ -380,7 +380,7 @@ class RayCodeGen:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
-                print('SKY ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
+                print('ERROR: {colorama.Fore.RED}Job {self.job_id} failed with '
                       'return code list:{colorama.Style.RESET_ALL}',
                       returncodes,
                       file=sys.stderr,

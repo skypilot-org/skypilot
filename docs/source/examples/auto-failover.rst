@@ -3,7 +3,7 @@
 Auto-provisioning GPUs
 ==========================
 
-Sky comes with an *auto-failover provisioner*, which
+SkyPilot comes with an *auto-failover provisioner*, which
 **automatically retries provisioning a cluster in different regions (or
 clouds)** if the requested resources cannot be provisioned.
 Such provisioning failures can happen for a variety of reasons:
@@ -29,7 +29,7 @@ Cross-region failover
 The provisioner first retries across all regions within a task's chosen cloud.
 
 A common high-end GPU to use in deep learning is a NVIDIA V100 GPU.  These GPUs
-are often in high demand and hard to get.  Let's see how Sky's auto-failover
+are often in high demand and hard to get.  Let's see how SkyPilot's auto-failover
 provisioner handles such a request:
 
 .. code-block::

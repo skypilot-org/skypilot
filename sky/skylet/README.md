@@ -1,3 +1,3 @@
 # Skylet
 
-Skylet is a subpackage of Sky. It provides utilities used by a remote instance.
+Skylet is a subpackage of SkyPilot. It provides utilities to be installed and used by a remote cluster.
