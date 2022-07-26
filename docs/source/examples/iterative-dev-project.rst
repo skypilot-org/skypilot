@@ -4,7 +4,7 @@ Iteratively Developing a Project
 ====================================
 
 This page shows a typical workflow for iteratively developing and running a
-project on Sky.
+project on SkyPilot.
 
 Getting an interactive node
 ----------------------------
@@ -45,7 +45,7 @@ Alternatively, the user can directly :code:`ssh` into the cluster's nodes and ru
   $ ssh dev-worker1
   $ ssh dev-worker2
 
-Sky provides easy password-less SSH access by automatically creating entries for each cluster in :code:`~/.ssh/config`.
+SkyPilot provides easy password-less SSH access by automatically creating entries for each cluster in :code:`~/.ssh/config`.
 Referring to clusters by names also allows for seamless integration with common tools
 such as :code:`scp`, :code:`rsync`, and `Visual Studio Code Remote
 <https://code.visualstudio.com/docs/remote/remote-overview>`_.

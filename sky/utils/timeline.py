@@ -132,5 +132,5 @@ def _save_timeline(file_path: str):
         json.dump(json_output, f)
 
 
-if os.environ.get('SKY_TIMELINE_FILE_PATH'):
-    atexit.register(_save_timeline, os.environ['SKY_TIMELINE_FILE_PATH'])
+if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+    atexit.register(_save_timeline, os.environ['SKYPILOT_TIMELINE_FILE_PATH'])

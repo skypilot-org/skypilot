@@ -7,13 +7,13 @@ USAGE_MESSAGE_SCHEMA_VERSION = 1
 PRIVACY_POLICY_PATH = '~/.sky/privacy_policy'
 
 USAGE_POLICY_MESSAGE = (
-    'Sky collects usage data to improve its services. '
+    'SkyPilot collects usage data to improve its services. '
     '`setup` and `run` commands are not collected to '
     'ensure privacy.\n'
-    'Usage logging can be disabled by setting '
-    'environment variable SKY_DISABLE_USAGE_COLLECTION=1 when invoking sky.')
+    'Usage logging can be disabled by setting the '
+    'environment variable SKYPILOT_DISABLE_USAGE_COLLECTION=1.')
 
 USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
 USAGE_MESSAGE_REDACT_TYPES = {str, dict}
 
-USAGE_USER_ENV = 'SKY_USAGE_USER_ID'
+USAGE_USER_ENV = 'SKYPILOT_USAGE_USER_ID'

@@ -1,4 +1,4 @@
-"""The Sky package."""
+"""The SkyPilot package."""
 import os
 
 # Keep this order to avoid cyclic imports

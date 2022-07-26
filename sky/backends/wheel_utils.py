@@ -16,6 +16,9 @@ from sky.backends import backend_utils
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
 SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 
+# NOTE: keep the same as setup.py's setuptools.setup(name=..., ...).
+_PACKAGE_WHEEL_NAME = 'skypilot'
+
 
 def cleanup_wheels_dir(wheel_dir: pathlib.Path,
                        latest_wheel: Optional[pathlib.Path] = None) -> None:
@@ -34,7 +37,8 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 def _get_latest_built_wheel() -> pathlib.Path:
     try:
-        latest_wheel = max(WHEEL_DIR.glob('sky-*.whl'), key=os.path.getctime)
+        latest_wheel = max(WHEEL_DIR.glob(f'{_PACKAGE_WHEEL_NAME}-*.whl'),
+                           key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError('Could not find built Sky wheels.') from None
     return latest_wheel

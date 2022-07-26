@@ -1,4 +1,4 @@
-"""DAGs: user applications to be run on Sky."""
+"""DAGs: user applications to be run."""
 import pprint
 
 
