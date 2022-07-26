@@ -1,4 +1,4 @@
-"""Sky credential check: check cloud credentials and enable clouds."""
+"""Credential checks: check cloud credentials and enable clouds."""
 from typing import Dict
 
 import click
@@ -9,18 +9,20 @@ from sky import global_user_state
 
 def check(quiet: bool = False) -> None:
     echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
-    echo('Checking credentials to enable clouds for Sky.')
+    echo('Checking credentials to enable clouds for SkyPilot.')
 
     enabled_clouds = []
     for cloud in clouds.CLOUD_REGISTRY.values():
-        echo(f'  Checking {cloud}...', nl=False)
+        if not isinstance(cloud, clouds.Local):
+            echo(f'  Checking {cloud}...', nl=False)
         ok, reason = cloud.check_credentials()
         echo('\r', nl=False)
         status_msg = 'enabled' if ok else 'disabled'
         status_color = 'green' if ok else 'red'
-        echo('  ' +
-             click.style(f'{cloud}: {status_msg}', fg=status_color, bold=True) +
-             ' ' * 10)
+        if not isinstance(cloud, clouds.Local):
+            echo('  ' + click.style(
+                f'{cloud}: {status_msg}', fg=status_color, bold=True) +
+                 ' ' * 10)
         if ok:
             enabled_clouds.append(str(cloud))
             if reason is not None:
@@ -31,13 +33,13 @@ def check(quiet: bool = False) -> None:
     if len(enabled_clouds) == 0:
         click.echo(
             click.style(
-                'No cloud is enabled. Sky will not be able to run any task. '
-                'Run `sky check` for more info.',
+                'No cloud is enabled. SkyPilot will not be able to run any '
+                'task. Run `sky check` for more info.',
                 fg='red',
                 bold=True))
         raise SystemExit()
     else:
-        echo('\nSky will use only the enabled clouds to run tasks. '
+        echo('\nSkyPilot will use only the enabled clouds to run tasks. '
              'To change this, configure cloud credentials, '
              'and run ' + click.style('sky check', bold=True) + '.')
 

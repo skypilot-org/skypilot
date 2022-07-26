@@ -42,6 +42,9 @@ def patch() -> None:
     # Patch the buggy ray files. This should only be called
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
+    from ray._private import metrics_agent
+    _run_patch(metrics_agent.__file__, _to_absolute('metrics_agent.py.patch'))
+
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 

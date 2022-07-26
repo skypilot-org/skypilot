@@ -128,7 +128,8 @@ class AWS(clouds.Cloud):
                                                use_spot=use_spot,
                                                clouds='aws')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators,
+                                    use_spot: bool) -> float:
         # AWS includes accelerators as part of the instance type.  Implementing
         # this is also necessary for e.g., the instance may have 4 GPUs, while
         # the task specifies to use 1 GPU.
@@ -156,9 +157,6 @@ class AWS(clouds.Cloud):
 
         cost += 0.0
         return cost
-
-    def __repr__(self):
-        return AWS._REPR
 
     def is_same_cloud(self, other: clouds.Cloud):
         return isinstance(other, AWS)

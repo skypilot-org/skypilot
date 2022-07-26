@@ -12,22 +12,23 @@ resources:
   cloud: aws
 
 ###############################################
-#  Sky storage #
+#  SkyPilot storage #
 ###############################################
-# Storage represents an abstract data store containing large data files
-# required by the task. Compared to file_mounts, storage is faster and
-# can persist across runs, requiring fewer uploads from your local machine.
+# Storage represents an abstract data store containing large data files required
+# by the task. Compared to file_mounts, storage is faster and can persist across
+# runs, requiring fewer uploads from your local machine.
 
 
 ###############################################
-#  Using Sky Storage #
+#  Using SkyPilot Storage #
 ###############################################
 # By default, file_mounts use rsync to directly copy files from local to remote
-# VM. However, you can optionally have them backed by sky Storage, which uploads
-# the files to a cloud store (e.g. S3, GCS) and have them persist there. By
-# enabling persistence, file_mount sync can be made significantly faster.
+# VM. However, you can optionally have them backed by SkyPilot Storage, which
+# uploads the files to a cloud store (e.g. S3, GCS) and have them persist
+# there. By enabling persistence, file_mount sync can be made significantly
+# faster.
 #
-# Your usage of sky storage can fall under four use cases:
+# Your usage of SkyPilot storage can fall under four use cases:
 #
 # 1. You want to upload your local data to remote VM - specify the name and
 #    source fields. Name sets the bucket name that will be used, and source
@@ -62,7 +63,7 @@ resources:
 #     uses a close-to-open consistency model, so file writes are committed only
 #     when the file is closed.
 #
-# Here are a few examples covering the range of use cases for sky file_mounts
+# Here are a few examples covering the range of use cases for SkyPilot file_mounts
 # and storage mounting.
 
 file_mounts:
@@ -86,10 +87,10 @@ file_mounts:
 
   # *** Persistent Data Storage by copying from S3 ***
   #
-  # This uses sky Storage to first create a S3 bucket named sky-dataset,
+  # This uses SkyPilot Storage to first create a S3 bucket named sky-dataset,
   # copies the contents of ~/datasets to the remote bucket and makes the
   # bucket persistent (i.e., the bucket is not deleted after the completion of
-  # this sky task, and future invocations of this bucket will be much faster).
+  # this task, and future invocations of this bucket will be much faster).
   # When the VM is initialized, the contents of the bucket are copied to
   # /datasets-storage. If the bucket already exists, it is fetched and re-used.
   /datasets-storage:
@@ -103,11 +104,11 @@ file_mounts:
   #
   # This uses the exact same storage object defined above, but uses the MOUNT
   # mode. This means instead of copying contents of the remote bucket to the VM,
-  # sky "mounts" the bucket at /dataset-storage-mount. Files are streamed from
-  # S3 as they are read by the task. Any writes made at /dataset-storage-mount
-  # are also replicated on the remote S3 bucket and any other storage mounts
-  # using the same bucket with MOUNT mode. Note that the source is synced with
-  # the remote bucket everytime this task is run.
+  # SkyPilot "mounts" the bucket at /dataset-storage-mount. Files are streamed
+  # from S3 as they are read by the task. Any writes made at
+  # /dataset-storage-mount are also replicated on the remote S3 bucket and any
+  # other storage mounts using the same bucket with MOUNT mode. Note that the
+  # source is synced with the remote bucket everytime this task is run.
   /dataset-storage-mount:
     name: sky-dataset-romil
     source: ~/datasets

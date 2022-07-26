@@ -3,7 +3,7 @@
 Distributed Jobs on Many VMs
 ================================================
 
-Sky supports multi-node cluster
+SkyPilot supports multi-node cluster
 provisioning and distributed execution on many VMs.
 
 For example, here is a simple PyTorch Distributed training example:
@@ -37,7 +37,7 @@ For example, here is a simple PyTorch Distributed training example:
 In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
 nodes. The :code:`setup` and :code:`run` commands are executed on both nodes.
 
-Sky exposes two environment variables to distinguish per-node commands:
+SkyPilot exposes two environment variables to distinguish per-node commands:
 
 - :code:`SKY_NODE_RANK`: rank (an integer ID from 0 to :code:`num_nodes-1`) of
   the node executing the task

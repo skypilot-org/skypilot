@@ -1,6 +1,6 @@
 # Intended Behavior: 
 #  - Workdir/Standard File Mount: Only upload symlink
-#  - Sky Storage: Upload symlink folder contents
+#  - SkyPilot Storage: Upload symlink folder contents
 name: symlink-playground
 
 resources:

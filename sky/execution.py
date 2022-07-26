@@ -13,6 +13,7 @@ Current task launcher:
   - ray exec + each task's commands
 """
 import enum
+import os
 import time
 from typing import Any, List, Optional
 
@@ -23,8 +24,9 @@ from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.usage import usage_lib
+from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
-from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -88,7 +90,7 @@ def _execute(
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
-    assert len(dag) == 1, f'Sky assumes 1 task for now. {dag}'
+    assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
@@ -171,22 +173,26 @@ def _execute(
         if stages is None or Stage.TEARDOWN in stages:
             if teardown:
                 backend.teardown_ephemeral_storage(task)
-                backend.teardown(handle)
+                backend.teardown(handle, terminate=True)
     finally:
         # UX: print live clusters to make users aware (to save costs).
         # Needed because this finally doesn't always get executed on errors.
+        # Disable the usage collection for this status command.
+        env = dict(os.environ,
+                   **{env_options.Options.DISABLE_LOGGING.value: '1'})
         if cluster_name == spot.SPOT_CONTROLLER_NAME:
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
             time.sleep(0.5)
-            subprocess_utils.run('sky spot status')
+            subprocess_utils.run('sky spot status', env=env)
         else:
-            subprocess_utils.run('sky status')
+            subprocess_utils.run('sky status', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 
 
 @timeline.event
+@usage_lib.entrypoint
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -218,6 +224,7 @@ def launch(
     )
 
 
+@usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,

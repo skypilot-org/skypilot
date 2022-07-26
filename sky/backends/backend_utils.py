@@ -3,14 +3,13 @@ import contextlib
 import copy
 import datetime
 import difflib
-import hashlib
-import json
+import enum
 import getpass
+import json
 import os
 import pathlib
 import random
 import re
-import socket
 import subprocess
 import textwrap
 import threading
@@ -42,12 +41,15 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky.backends import onprem_utils
 from sky.skylet import log_lib
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils import validator
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -72,6 +74,7 @@ RESET_BOLD = '\033[0m'
 _SKY_REMOTE_FILE_MOUNTS_DIR = '~/.sky/file_mounts/'
 
 _LAUNCHED_HEAD_PATTERN = re.compile(r'(\d+) ray[._]head[._]default')
+_LAUNCHED_LOCAL_WORKER_PATTERN = re.compile(r'(\d+) node_')
 _LAUNCHED_WORKER_PATTERN = re.compile(r'(\d+) ray[._]worker[._]default')
 # Intentionally not using prefix 'rf' for the string format because yapf have a
 # bug with python=3.6.
@@ -86,10 +89,13 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 _TEST_IP = 'https://8.8.8.8'
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
-# characters. Through testing, 37 chars is the maximum length for the Sky
-# cluster name on GCP.  Ref:
+# characters. Through testing, this is the maximum length for the Sky cluster
+# name on GCP.  Ref:
 # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-_MAX_CLUSTER_NAME_LEN = 37
+# NOTE: actually 37 is maximum for a single-node cluster which gets the suffix
+# '-head', but 35 for a multinode cluster because workers get the suffix
+# '-worker'. Here we do not distinguish these cases and take the lower limit.
+_MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -562,6 +568,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          local_wheel_path: pathlib.Path,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
+                         auth_config: Optional[Dict[str, str]] = None,
                          dryrun: bool = False) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
@@ -588,7 +595,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
 
     assert cluster_name is not None
     credentials = sky_check.get_cloud_credential_file_mounts()
-    region_name = resources_vars['region']
+
+    ip_list = None
+    auth_config = None
+    if isinstance(cloud, clouds.Local):
+        ip_list = onprem_utils.get_local_ips(cluster_name)
+        auth_config = onprem_utils.get_local_auth_config(cluster_name)
+    region_name = resources_vars.get('region')
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -603,7 +616,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account cloud providers. Using uuid.getnode()
                 # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{user_and_hostname_hash()}',
+                'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
                 # Azure only.
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region_name}',
@@ -616,12 +629,21 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                # Local IP handling (optional).
+                'head_ip': None if ip_list is None else ip_list[0],
+                'worker_ips': None if ip_list is None else ip_list[1:],
+                # Authentication (optional).
+                'ssh_user':
+                    (None if auth_config is None else auth_config['ssh_user']),
+                'ssh_private_key': (None if auth_config is None else
+                                    auth_config['ssh_private_key']),
             }))
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
             resources_vars.get('tpu_vm') is None):
@@ -663,33 +685,15 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_aws_authentication(config)
     elif isinstance(cloud, clouds.GCP):
         config = auth.setup_gcp_authentication(config)
-    else:
-        assert isinstance(cloud, clouds.Azure), cloud
+    elif isinstance(cloud, clouds.Azure):
         config = auth.setup_azure_authentication(config)
-    dump_yaml(cluster_config_file, config)
-
-
-def read_yaml(path):
-    with open(path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
-
-
-def dump_yaml(path, config):
-    # https://github.com/yaml/pyyaml/issues/127
-    class LineBreakDumper(yaml.SafeDumper):
-
-        def write_line_break(self, data=None):
-            super().write_line_break(data)
-            if len(self.indents) == 1:
-                super().write_line_break()
-
-    with open(path, 'w') as f:
-        yaml.dump(config,
-                  f,
-                  Dumper=LineBreakDumper,
-                  sort_keys=False,
-                  default_flow_style=False)
+    else:
+        assert isinstance(cloud, clouds.Local), cloud
+        # Local cluster case, authentication is already filled by the user
+        # in the local cluster config (in ~/.sky/local/...). There is no need
+        # for Sky to generate authentication.
+        pass
+    common_utils.dump_yaml(cluster_config_file, config)
 
 
 def get_run_timestamp() -> str:
@@ -698,10 +702,12 @@ def get_run_timestamp() -> str:
 
 @timeline.event
 def wait_until_ray_cluster_ready(
-        cluster_config_file: str,
-        num_nodes: int,
-        log_path: str,
-        nodes_launching_progress_timeout: Optional[int] = None) -> bool:
+    cluster_config_file: str,
+    num_nodes: int,
+    log_path: str,
+    is_local_cloud: bool = False,
+    nodes_launching_progress_timeout: Optional[int] = None,
+) -> bool:
     """Returns whether the entire ray cluster is ready."""
     if num_nodes <= 1:
         return
@@ -732,11 +738,24 @@ def wait_until_ray_cluster_ready(
             logger.debug(output)
 
             # Workers that are ready
-            result = _LAUNCHED_WORKER_PATTERN.findall(output)
             ready_workers = 0
-            if result:
-                assert len(result) == 1, result
-                ready_workers = int(result[0])
+            # On-prem/local case is handled differently.
+            # `ray status` produces different output for local case, and
+            # we poll for number of nodes launched instead of counting for
+            # head and number of worker nodes separately (it is impossible
+            # to distinguish between head and worker node for local case).
+            if is_local_cloud:
+                result = _LAUNCHED_LOCAL_WORKER_PATTERN.findall(output)
+                # In the local case, ready_workers mean the total number
+                # of nodes launched, including head.
+                ready_workers = len(result)
+            else:
+                result = _LAUNCHED_WORKER_PATTERN.findall(output)
+                if len(result) == 0:
+                    ready_workers = 0
+                else:
+                    assert len(result) == 1, result
+                    ready_workers = int(result[0])
 
             result = _LAUNCHED_HEAD_PATTERN.findall(output)
             ready_head = 0
@@ -749,6 +768,8 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
+            # In the local case, ready_head=0 and ready_workers=num_nodes
+            # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
             if ready_head + ready_workers == num_nodes:
                 # All nodes are up.
                 break
@@ -778,7 +799,9 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out when waiting for workers to be provisioned.')
+                    'Timed out: waited for workers to be provisioned '
+                    f'for more than {nodes_launching_progress_timeout} seconds.'
+                )
                 return False  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
@@ -796,7 +819,7 @@ def wait_until_ray_cluster_ready(
 
 def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
-    config = read_yaml(cluster_yaml)
+    config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
@@ -894,35 +917,6 @@ def check_local_gpus() -> bool:
     return is_functional
 
 
-def user_and_hostname_hash() -> str:
-    """Returns a string containing <user>-<hostname hash last 4 chars>.
-
-    For uniquefying user clusters on shared-account cloud providers. Also used
-    for AWS security group.
-
-    Using uuid.getnode() instead of gethostname() is incorrect; observed to
-    collide on Macs.
-
-    NOTE: BACKWARD INCOMPATIBILITY NOTES
-
-    Changing this string will render AWS clusters shown in `sky status`
-    unreusable and potentially cause leakage:
-
-    - If a cluster is STOPPED, any command restarting it (`sky launch`, `sky
-      start`) will launch a NEW cluster.
-    - If a cluster is UP, a `sky launch` command reusing it will launch a NEW
-      cluster. The original cluster will be stopped and thus leaked from Sky's
-      perspective.
-    - `sky down/stop/exec` on these pre-change clusters still works, if no new
-      clusters with the same name have been launched.
-
-    The reason is AWS security group names are derived from this string, and
-    thus changing the SG name makes these clusters unrecognizable.
-    """
-    hostname_hash = hashlib.md5(socket.gethostname().encode()).hexdigest()[-4:]
-    return f'{getpass.getuser()}-{hostname_hash}'
-
-
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
@@ -931,6 +925,7 @@ def generate_cluster_name():
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
+    backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
             out = subprocess_utils.run(
@@ -946,7 +941,7 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
                 raise RuntimeError('Failed to get head ip') from e
             # Retry if the cluster is not up yet.
             logger.debug('Retrying to get head ip.')
-            time.sleep(5)
+            time.sleep(backoff.current_backoff())
     return head_ip
 
 
@@ -972,7 +967,6 @@ def get_node_ips(cluster_yaml: str,
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
-
     if expected_num_nodes > 1:
         try:
             proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
@@ -980,6 +974,19 @@ def get_node_ips(cluster_yaml: str,
                                         stderr=subprocess.PIPE)
             out = proc.stdout.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
+            # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
+            # Workaround: List of IPs are shown in Stderr
+            cluster_name = os.path.basename(cluster_yaml).split('.')[0]
+            if ((handle is not None and hasattr(handle, 'local_handle') and
+                 handle.local_handle is not None) or
+                    onprem_utils.check_if_local_cloud(cluster_name)):
+                out = proc.stderr.decode()
+                worker_ips = re.findall(IP_ADDR_REGEX, out)
+                # Remove head ip from worker ip list.
+                for i, ip in enumerate(worker_ips):
+                    if ip == head_ip[0]:
+                        del worker_ips[i]
+                        break
         except subprocess.CalledProcessError as e:
             raise exceptions.FetchIPError(
                 exceptions.FetchIPError.Reason.WORKER) from e
@@ -1257,7 +1264,7 @@ def _get_cluster_status_via_cloud_cli(
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
-    ray_config = read_yaml(handle.cluster_yaml)
+    ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
 
@@ -1355,7 +1362,7 @@ def _update_cluster_status(
 
     The function will update the cached cluster status in the global state. For the
     design of the cluster status and transition, please refer to the
-    sky/design_docs/cluster_states.md
+    sky/design_docs/cluster_status.md
 
     Returns:
       If the cluster is terminated or does not exist, return None.
@@ -1403,24 +1410,58 @@ def refresh_cluster_status_handle(
     return record['status'], record['handle']
 
 
-def get_clusters(include_reserved: bool, refresh: bool) -> List[Dict[str, Any]]:
+class CloudFilter(enum.Enum):
+    # Filter for all types of clouds.
+    ALL = 'all'
+    # Filter for Sky's main clouds (aws, gcp, azure, docker).
+    CLOUDS_AND_DOCKER = 'clouds-and-docker'
+    # Filter for only local clouds.
+    LOCAL = 'local'
+
+
+def get_clusters(
+        include_reserved: bool,
+        refresh: bool,
+        cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER
+) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
+
+    Combs through the Sky database (in ~/.sky/state.db) to get a list of records
+    corresponding to launched clusters.
 
     Args:
         include_reserved: Whether to include sky-reserved clusters, e.g. spot
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
+        cloud_filter: Sets which clouds to filer through from the global user
+            state. Supports three values, 'all' for all clouds, 'public' for public
+            clouds only, and 'local' for only local clouds.
 
     Returns:
         A list of cluster records.
     """
     records = global_user_state.get_clusters()
+
     if not include_reserved:
         records = [
             record for record in records
             if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
         ]
+
+    def _is_local_cluster(record):
+        cluster_resources = record['handle'].launched_resources
+        return isinstance(cluster_resources.cloud, clouds.Local)
+
+    if cloud_filter == CloudFilter.LOCAL:
+        records = [record for record in records if _is_local_cluster(record)]
+    elif cloud_filter == CloudFilter.CLOUDS_AND_DOCKER:
+        records = [
+            record for record in records if not _is_local_cluster(record)
+        ]
+    elif cloud_filter not in CloudFilter:
+        raise ValueError(f'{cloud_filter} is not part of CloudFilter.')
+
     if not refresh:
         return records
 
@@ -1520,7 +1561,8 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
     return resources_str
 
 
-def check_cluster_name_is_valid(cluster_name: str) -> None:
+def check_cluster_name_is_valid(cluster_name: str,
+                                cloud: Optional[clouds.Cloud] = None) -> None:
     """Errors out on invalid cluster names not supported by cloud providers.
 
     Bans (including but not limited to) names that:
@@ -1529,7 +1571,7 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
     """
     if cluster_name is None:
         return
-    # GCP errors return this exact regex.  An informal description is also at:
+    # GCP errors return this exact regex.  An informal description is at:
     # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
@@ -1537,11 +1579,15 @@ def check_cluster_name_is_valid(cluster_name: str) -> None:
             raise ValueError(
                 f'Cluster name "{cluster_name}" is invalid; '
                 f'ensure it is fully matched by regex: {valid_regex}')
-    if len(cluster_name) > _MAX_CLUSTER_NAME_LEN:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-                f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN} chars.')
+    if isinstance(cloud, clouds.GCP):
+        # GCP has too restrictive of a length limit. Don't check for other
+        # clouds.
+        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cluster name {cluster_name!r} has {len(cluster_name)}'
+                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP}'
+                    ' chars.')
 
 
 def check_cluster_name_not_reserved(

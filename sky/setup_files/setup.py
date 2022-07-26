@@ -1,13 +1,17 @@
-"""Sky is a tool to run any workload seamlessly across different
-cloud providers through a unified interface. No knowledge of cloud
-offerings is required or expected – you simply define the workload
-and its resource requirements, and Sky will automatically execute it on AWS,
-Google Cloud Platform or Microsoft Azure."""
+"""SkyPilot.
+
+SkyPilot is a tool to run any workload seamlessly across different cloud
+providers through a unified interface. No knowledge of cloud offerings is
+required or expected – you simply define the workload and its resource
+requirements, and SkyPilot will automatically execute it on AWS, Google Cloud
+Platform or Microsoft Azure.
+"""
 
 import os
 import platform
-import setuptools
 import warnings
+
+import setuptools
 
 ROOT_DIR = os.path.dirname(__file__)
 
@@ -45,7 +49,8 @@ install_requires = [
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
     'grpcio<=1.43.0',
-    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the fix.
+    # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
+    # fix.
     # https://github.com/ray-project/ray/pull/25211
     'protobuf<4.0.0',
     'psutil',
@@ -64,8 +69,11 @@ extras_require = {
 extras_require['all'] = sum(extras_require.values(), [])
 
 setuptools.setup(
-    name='sky',
-    version='0.1.dev0',
+    # NOTE: this affects the package.whl wheel name. When changing this (if
+    # ever), you must grep for '.whl' and change all corresponding wheel paths
+    # (templates/*.j2 and wheel_utils.py).
+    name='skypilot',
+    version='0.1.0',
     packages=setuptools.find_packages(),
     setup_requires=['wheel'],
     install_requires=install_requires,
@@ -80,6 +88,6 @@ setuptools.setup(
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
     ],
-    description='Sky Prototype',
+    description='SkyPilot',
     long_description=__doc__.replace('\n', ' '),
 )

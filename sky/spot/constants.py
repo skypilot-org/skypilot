@@ -1,4 +1,4 @@
-"""Constants used for sky managed spot."""
+"""Constants used for Managed Spot."""
 
 SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 30
 SPOT_CONTROLLER_NAME = 'sky-spot-controller'

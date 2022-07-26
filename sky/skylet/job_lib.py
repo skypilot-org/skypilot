@@ -86,6 +86,15 @@ db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
 _CONN.commit()
 
 
+def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
+    return f'{sky_job_id}-{job_owner}'
+
+
+def make_job_command_with_user_switching(username: str,
+                                         command: str) -> List[str]:
+    return ['sudo', '-H', 'su', '--login', username, '-c', command]
+
+
 def add_job(job_name: str, username: str, run_timestamp: str,
             resources_str: str) -> int:
     """Atomically reserve the next available job id for the user."""
@@ -214,8 +223,8 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def query_job_status(job_ids: List[int]) -> List[JobStatus]:
-    """Return the status of the jobs based on the ray job status.
+def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
+    """Return the status of the jobs based on the `ray job status` command.
 
     Though we update job status actively in ray program and job cancelling,
     we still need this to handle staleness problem, caused by instance
@@ -227,6 +236,8 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
         return []
 
     # TODO: if too slow, directly query against redis.
+    ray_job_ids = [make_ray_job_id(job_id, job_owner) for job_id in job_ids]
+
     from ray import job_submission  # pylint: disable=import-outside-toplevel
     job_client = job_submission.JobSubmissionClient(
         address='http://127.0.0.1:8265')
@@ -241,7 +252,7 @@ def query_job_status(job_ids: List[int]) -> List[JobStatus]:
             return None
 
     ray_statuses: List[Union[str, None]]
-    ray_statuses = subprocess_utils.run_in_parallel(get_job_status, job_ids)
+    ray_statuses = subprocess_utils.run_in_parallel(get_job_status, ray_job_ids)
     assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
 
     # Process the results
@@ -277,7 +288,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(submitted_gap_sec: int = 0) -> None:
+def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -290,7 +301,7 @@ def update_status(submitted_gap_sec: int = 0) -> None:
         submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
-    job_status = query_job_status(running_job_ids)
+    job_status = query_job_status(job_owner, running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
         # Do not update the status if the ray job status is RUNNING,
@@ -315,15 +326,14 @@ def is_cluster_idle() -> bool:
 
 def _show_job_queue(jobs) -> None:
     job_table = log_utils.create_table([
-        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
-        'STATUS', 'LOG'
+        'ID', 'NAME', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES', 'STATUS',
+        'LOG'
     ])
 
     for job in jobs:
         job_table.add_row([
             job['job_id'],
             job['job_name'],
-            job['username'],
             log_utils.readable_time_duration(job['submitted_at']),
             log_utils.readable_time_duration(job['start_at']),
             log_utils.readable_time_duration(job['start_at'],
@@ -351,7 +361,7 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
     _show_job_queue(jobs)
 
 
-def cancel_jobs(jobs: Optional[List[int]]) -> None:
+def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     """Cancel the jobs.
 
     Args:
@@ -363,7 +373,8 @@ def cancel_jobs(jobs: Optional[List[int]]) -> None:
         job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
-    jobs = [job['job_id'] for job in job_records]
+
+    jobs = [make_ray_job_id(job['job_id'], job_owner) for job in job_records]
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     from ray import job_submission  # pylint: disable=import-outside-toplevel
@@ -439,9 +450,9 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def update_status(cls) -> str:
+    def update_status(cls, job_owner: str) -> str:
         code = [
-            'job_lib.update_status()',
+            f'job_lib.update_status({job_owner!r})',
         ]
         return cls._build(code)
 
@@ -451,8 +462,8 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs(cls, job_ids: Optional[List[int]]) -> str:
-        code = [f'job_lib.cancel_jobs({job_ids!r})']
+    def cancel_jobs(cls, job_owner: str, job_ids: Optional[List[int]]) -> str:
+        code = [f'job_lib.cancel_jobs({job_owner!r},{job_ids!r})']
         return cls._build(code)
 
     @classmethod
@@ -462,13 +473,14 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_id: Optional[int],
+    def tail_logs(cls, job_owner: str, job_id: Optional[int],
                   spot_job_id: Optional[int]) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
             'log_dir = job_lib.log_dir(job_id)',
-            f'log_lib.tail_logs(job_id, log_dir, {spot_job_id!r})',
+            (f'log_lib.tail_logs({job_owner!r},'
+             f'job_id, log_dir, {spot_job_id!r})'),
         ]
         return cls._build(code)
 

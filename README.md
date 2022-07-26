@@ -1,26 +1,28 @@
-# Sky
+# SkyPilot
 
 ![pytest](https://github.com/sky-proj/sky/actions/workflows/pytest.yml/badge.svg)
 
-Sky is a framework to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and Sky will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+SkyPilot is a framework to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
 <!-- TODO: We need a logo here -->
 ## Getting Started
 Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/).
 - [Installation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html)
 - [Quickstart](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html)
-- [Sky CLI](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
+- [CLI](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
 
 ## Developer Guide
 ### Setup
 Use editable mode (`-e`) when installing:
 ```bash
-# Sky requires python >= 3.6 and < 3.10.
+# SkyPilot requires python >= 3.6 and < 3.10.
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
 pip install -e ".[all]"
 pip install -r requirements-dev.txt
 ```
+IMPORTANT: Please `export SKYPILOT_DEV=1` before running the CLI commands in the terminal, so that developers' usage logs do not pollute the actual user logs.
+
 
 ### Submitting pull requests
 - After you commit, format your code with [`format.sh`](./format.sh).
@@ -28,9 +30,16 @@ pip install -r requirements-dev.txt
 - For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 
+
+### Environment variables for developers
+- `export SKYPILOT_DEV=1` to send usage logs to dev space.
+- `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
+- `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
+- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize the logging for demo purpose.
+
 ### Dump timeline
 
-Timeline is useful for performance analysis and debugging in Sky.
+Timeline is useful for performance analysis and debugging in SkyPilot.
 
 Here are the APIs:
 
@@ -58,12 +67,12 @@ with timeline.FileLockEvent(lockpath):
   pass
 ```
 
-To dump the timeline, set environment variable `SKY_TIMELINE_FILE_PATH` to a file path.
+To dump the timeline, set environment variable `SKYPILOT_TIMELINE_FILE_PATH` to a file path.
 
 View the dumped timeline file using `Chrome` (chrome://tracing) or [Perfetto](https://ui.perfetto.dev/).
 
-### Updating the sky docker image
-1. Authenticate with sky ECR repository. Contact romil.bhardwaj@berkeley.edu for access:
+### Updating the SkyPilot docker image
+1. Authenticate with SkyPilot ECR repository. Contact romil.bhardwaj@berkeley.edu for access:
    ```
    aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/a9w6z7w5
    ```

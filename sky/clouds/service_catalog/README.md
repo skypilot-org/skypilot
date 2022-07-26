@@ -1,6 +1,6 @@
 # Service Catalog
 
-The Sky supports 3 major clouds: AWS, Azure and GCP.
+We support 3 major clouds: AWS, Azure and GCP.
 
 This module provides information including the instance type offerings, their pricing and data transfer costs. It also provides functions to query these information, and to select the most suitable instance types based on resource requirements. Primarily used by the Clouds module.
 

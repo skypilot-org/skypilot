@@ -20,7 +20,7 @@ For example, run the following on your laptop:
    eval $(ssh-agent -s)
    ssh-add ~/.ssh/id_rsa
 
-Then, any Sky clusters launched from this machine would be able to clone private GitHub repositories. For example:
+Then, any SkyPilot clusters launched from this machine would be able to clone private GitHub repositories. For example:
 
 .. code-block:: yaml
 
@@ -56,7 +56,7 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-How to make Sky clusters use my Weights & Biases credentials?
+How to make SkyPilot clusters use my Weights & Biases credentials?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Install the wandb library on your laptop and login to your account via ``wandb login``.
