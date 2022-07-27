@@ -70,9 +70,9 @@ NO_A100_16G_ZONES = ['asia-northeast3-a', 'asia-northeast3-b', 'us-west4-b']
 #    70% off discount on the on-demand prices because every known preemptible
 #    TPU price follows this pricing rule.
 # Source: https://cloud.google.com/tpu/docs/regions-zones
-GCP_TPU_ZONES_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilotpilot-catalog/master/metadata/tpu/zones.csv'  # pylint: disable=line-too-long
+GCP_TPU_ZONES_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/metadata/tpu/zones.csv'  # pylint: disable=line-too-long
 # Source: https://cloud.google.com/tpu/pricing
-GCP_TPU_PRICING_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilotpilot-catalog/master/metadata/tpu/pricing.csv'  # pylint: disable=line-too-long
+GCP_TPU_PRICING_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/metadata/tpu/pricing.csv'  # pylint: disable=line-too-long
 
 COLUMNS = [
     'InstanceType',  # None for accelerators
