@@ -3,12 +3,14 @@
 Thank you for your interest in contributing to SkyPilot! We welcome and value 
 all contributions to the project, including but not limited to: 
 
-* [Bug reports](https://github.com/sky-proj/sky/issues) and [discussions](https://github.com/sky-proj/sky/discussions)
-* [Pull requests](https://github.com/sky-proj/sky/pulls) for bug fixes and new features
+* [Bug reports](https://github.com/skypilot-org/skypilot/issues) and [discussions](https://github.com/skypilot-org/skypilot/discussions)
+* [Pull requests](https://github.com/skypilot-org/skypilot/pulls) for bug fixes and new features
 * Test cases to make the codebase more robust
 * Examples
 * Documentation
 * Tutorials, blog posts and talks on SkyPilot
+
+Please read through this document before contributing so that there is all the necessary information needed for us to effectively respond to your contribution.
 
 ## Contributing Code
 
