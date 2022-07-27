@@ -15,7 +15,7 @@ Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/
 ### Setup
 Use editable mode (`-e`) when installing:
 ```bash
-# SkyPilot requires python >= 3.6 and < 3.10.
+# SkyPilot requires python >= 3.6.
 # You can just install the dependencies for
 # certain clouds, e.g., ".[aws,azure,gcp]"
 pip install -e ".[all]"
