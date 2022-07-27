@@ -1887,7 +1887,7 @@ class CloudVmRayBackend(backends.Backend):
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
-            f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
+            f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
             f'-- {switch_user_cmd}')
         return job_submit_cmd
 
