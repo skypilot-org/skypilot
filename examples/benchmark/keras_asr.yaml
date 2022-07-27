@@ -13,7 +13,7 @@ setup: |
 
   # Install SkyCallback
   git clone git@github.com:skypilot-org/skypilot.git
-  pip install sky/sky/callbacks/
+  pip install skypilot/sky/callbacks/
 
   # User setup
   pip install numpy pandas tensorflow
