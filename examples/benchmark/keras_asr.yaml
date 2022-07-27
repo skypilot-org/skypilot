@@ -12,7 +12,7 @@ setup: |
   conda activate keras
 
   # Install SkyCallback
-  git clone git@github.com:sky-proj/sky.git
+  git clone git@github.com:skypilot-org/skypilot.git
   pip install sky/sky/callbacks/
 
   # User setup

@@ -6,7 +6,7 @@ Install SkyPilot using pip:
 .. code-block:: console
 
   $ # SkyPilot requires python >= 3.6 and < 3.10.
-  $ git clone ssh://git@github.com/sky-proj/sky.git
+  $ git clone ssh://git@github.com/skypilot-org/skypilot.git
   $ cd sky
 
   $ # Recommended: use a new conda env to avoid package conflicts.
