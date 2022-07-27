@@ -1,5 +1,5 @@
 
-<img src="docs/source/images/SkyPilot-logo-wide.png" style="background-color: white;">
+![logo](docs/source/images/SkyPilot-logo-wide.png)
 
 ![pytest](https://github.com/sky-proj/sky/actions/workflows/pytest.yml/badge.svg)
 
@@ -60,10 +60,7 @@ SkyPilot will perform multiple functions for you:
 4. Run the task's `setup` commands to prepare the VM for running the task 
 5. Run the task's `run` commands
 
-<p align="center">
-  <img width="600" src="https://people.eecs.berkeley.edu/~romilb/sky/sky-example.svg">
-</p>
-
+<!---- TODO(romilb): Example GIF goes here ---->
 Please refer to the [quick start](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html) and [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/) for more on how to use SkyPilot.
 
 ## Contributing
