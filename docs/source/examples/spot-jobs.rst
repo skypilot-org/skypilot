@@ -73,7 +73,7 @@ This is typically achieved by reloading the latest checkpoint at the beginning o
 An end-to-end example
 --------------------------------
 
-Below we show an `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
+Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 
 .. code-block:: yaml
 
@@ -138,7 +138,7 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
     $ python run_qa.py ... --output_dir /checkpoint/bert_qa/ --save_total_limit 10 --save_steps 1000
 
 .. note::
-  You may also refer to another example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
+  You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
 With the above changes, you are ready to launch a spot job with ``sky spot launch``!
 
