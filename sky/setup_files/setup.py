@@ -71,7 +71,8 @@ extras_require['all'] = sum(extras_require.values(), [])
 
 readme_filepath = 'README.md'
 if not os.path.exists(readme_filepath):
-    readme_filepath = os.path.join(ROOT_DIR, os.path.pardir, os.path.pardir, 'README.md')
+    readme_filepath = os.path.join(ROOT_DIR, os.path.pardir, os.path.pardir,
+                                   'README.md')
 long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
 
 setuptools.setup(
