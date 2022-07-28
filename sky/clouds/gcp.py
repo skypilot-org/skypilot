@@ -46,6 +46,7 @@ class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
+    _zones: List[clouds.Zone] = []
 
     #### Regions/Zones ####
 
@@ -320,6 +321,9 @@ class GCP(clouds.Cloud):
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'gcp')
+
+    def zone_exists(self, zone: str) -> bool:
+        return service_catalog.zone_exists(zone, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

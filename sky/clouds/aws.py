@@ -311,3 +311,6 @@ class AWS(clouds.Cloud):
 
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'aws')
+
+    def zone_exists(self, zone: str) -> bool:
+        return service_catalog.zone_exists(zone, 'aws')

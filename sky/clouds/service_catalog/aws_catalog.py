@@ -19,6 +19,10 @@ def region_exists(region: str) -> bool:
     return common.region_exists_impl(_df, region)
 
 
+def zone_exists(zone: str) -> bool:
+    return common.zone_exists_impl(_df, zone)
+
+
 def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:

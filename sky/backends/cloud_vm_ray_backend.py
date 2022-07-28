@@ -796,7 +796,15 @@ class RetryingVmProvisioner(object):
             if (to_provision.region is not None and
                     region.name != to_provision.region):
                 continue
-            yield (region, zones)
+            if to_provision.zone is not None:
+                desired_zones = None
+                for zone in zones:
+                    if zone.name == to_provision.zone:
+                        desired_zones = [zone]
+                        break
+                if desired_zones is None:
+                    continue
+            yield (region, desired_zones)
 
     def _try_provision_tpu(self, to_provision: resources_lib.Resources,
                            config_dict: Dict[str, str]) -> bool:

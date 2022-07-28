@@ -98,6 +98,10 @@ def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
     return region in df['Region'].unique()
 
 
+def zone_exists_impl(df: pd.DataFrame, zone: str) -> bool:
+    return zone in df['AvailabilityZone'].unique()
+
+
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,

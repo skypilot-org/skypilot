@@ -253,6 +253,12 @@ _TASK_OPTIONS = [
         help=('The region to use. If specified, overrides the '
               '"resources.region" config. Passing "none" resets the config.')),
     click.option(
+        '--zone',
+        required=False,
+        type=str,
+        help=('The zone to use. If specified, overrides the '
+              '"resources.zone" config. Passing "none" resets the config.')),
+    click.option(
         '--num-nodes',
         required=False,
         type=int,
@@ -320,6 +326,7 @@ def _add_click_options(options: List[click.Option]):
 
 def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
+                           zone: Optional[str] = None,
                            gpus: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
@@ -336,6 +343,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['region'] = None
         else:
             override_params['region'] = region
+    if zone is not None:
+        if zone.lower() == 'none':
+            override_params['zone'] = None
+        else:
+            override_params['zone'] = zone
     if gpus is not None:
         if gpus.lower() == 'none':
             override_params['accelerators'] = None
@@ -670,6 +682,7 @@ def _make_dag_from_entrypoint_with_overrides(
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
     region: Optional[str] = None,
+    zone: Optional[str] = None,
     gpus: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
@@ -711,6 +724,7 @@ def _make_dag_from_entrypoint_with_overrides(
 
         override_params = _parse_override_params(cloud=cloud,
                                                  region=region,
+                                                 zone=zone,
                                                  gpus=gpus,
                                                  use_spot=use_spot,
                                                  image_id=image_id,
@@ -860,6 +874,7 @@ def launch(
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -890,6 +905,7 @@ def launch(
         workdir=workdir,
         cloud=cloud,
         region=region,
+        zone=zone,
         gpus=gpus,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -937,6 +953,7 @@ def exec(
     name: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     workdir: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1018,6 +1035,7 @@ def exec(
         workdir=workdir,
         cloud=cloud,
         region=region,
+        zone=zone,
         gpus=gpus,
         use_spot=use_spot,
         image_id=image_id,
@@ -2325,6 +2343,7 @@ def spot_launch(
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -2347,6 +2366,7 @@ def spot_launch(
         workdir=workdir,
         cloud=cloud,
         region=region,
+        zone=zone,
         gpus=gpus,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -2738,6 +2758,7 @@ def benchmark_launch(
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -2784,6 +2805,9 @@ def benchmark_launch(
         if region is not None:
             if any('region' in candidate for candidate in candidates):
                 raise click.BadParameter(f'region {message}')
+        if zone is not None:
+            if any('zone' in candidate for candidate in candidates):
+                raise click.BadParameter(f'zone {message}')
         if gpus is not None:
             if any('accelerators' in candidate for candidate in candidates):
                 raise click.BadParameter(f'gpus (accelerators) {message}')
@@ -2833,6 +2857,7 @@ def benchmark_launch(
         config['num_nodes'] = num_nodes
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
+                                             zone=zone,
                                              gpus=gpus,
                                              use_spot=use_spot,
                                              image_id=image_id,
@@ -2845,6 +2870,9 @@ def benchmark_launch(
     if 'region' in resources_config:
         if resources_config['region'] is None:
             resources_config.pop('region')
+    if 'zone' in resources_config:
+        if resources_config['zone'] is None:
+            resources_config.pop('zone')
     if 'accelerators' in resources_config:
         if resources_config['accelerators'] is None:
             resources_config.pop('accelerators')

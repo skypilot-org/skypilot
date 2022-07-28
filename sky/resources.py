@@ -1,6 +1,7 @@
 """Resources: compute requirements of Tasks."""
 from typing import Dict, List, Optional, Union
 
+import sky
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
@@ -55,12 +56,15 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        zone: Optional[str] = None,
         image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
+        self._zone: Optional[str] = None
         self._set_region(region)
+        self._set_zone(zone)
 
         self._instance_type = instance_type
 
@@ -123,6 +127,10 @@ class Resources:
     @property
     def region(self):
         return self._region
+
+    @property
+    def zone(self):
+        return self._zone
 
     @property
     def instance_type(self):
@@ -267,6 +275,30 @@ class Resources:
                          f'inferred from the region {region!r}.')
             self._cloud = valid_clouds[0]
         self._region = region
+
+    def _set_zone(self, zone: Optional[str]) -> None:
+        self._zone = zone
+        if zone is None:
+            return
+
+        # Validate region.
+        if self._cloud is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cloud must be specified together with zone.'
+                )
+        elif self._cloud.is_same_cloud(sky.Azure()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Azure does not support zones.'
+                )
+        elif not self._cloud.zone_exists(zone):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid zone {zone!r} '
+                                    f'for cloud {self.cloud}.')
+
+        # TODO(weilin): validate whether zone exists in region.
+        self._zone = zone
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -537,6 +569,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
@@ -569,6 +602,8 @@ class Resources:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
+        if config.get('zone') is not None:
+            resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS/GCP.')
@@ -595,6 +630,7 @@ class Resources:
         config['spot_recovery'] = self.spot_recovery
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
+        add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         return config
 
