@@ -20,6 +20,11 @@ def region_exists(region: str) -> bool:
     return common.region_exists_impl(_df, region)
 
 
+def accelerator_in_region_or_zone(acc_name: str, region: str, zone: str) -> bool:
+    return common.accelerator_in_region_or_zone_impl(
+        _df, acc_name, region, zone)
+
+
 def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:

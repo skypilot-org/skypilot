@@ -284,6 +284,10 @@ class Azure(clouds.Cloud):
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'azure')
 
+    def accelerator_in_region_or_zone(self, accelerator: str, region: str, zone: str) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, region, zone, 'azure')
+
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:

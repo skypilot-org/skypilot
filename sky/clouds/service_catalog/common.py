@@ -102,6 +102,12 @@ def zone_exists_impl(df: pd.DataFrame, zone: str) -> bool:
     return zone in df['AvailabilityZone'].unique()
 
 
+def zone_in_region_impl(df: pd.DataFrame,
+                   region: str,
+                   zone: str) -> bool:
+    return zone in df[df['Region'] == region]['AvailabilityZone'].unique()
+
+
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
@@ -229,3 +235,32 @@ def get_region_zones(df: pd.DataFrame,
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions
+
+def accelerator_in_region(df: pd.DataFrame,
+                          acc_name: str,
+                          region: str) -> bool:
+    """Returns True if the accelerator is in the region."""
+    return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['Region'] == region)]) > 0
+
+
+def accelerator_in_zone(df: pd.DataFrame,
+                        acc_name: str,
+                        zone: str) -> bool:
+    """Returns True if the accelerator is in the zone."""
+    print(df[(df['AcceleratorName'] == acc_name)])
+    return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AvailabilityZone'] == zone)]) > 0
+
+
+def accelerator_in_region_or_zone_impl(
+    df: pd.DataFrame,
+    accelerator_name: str,
+    region: str,
+    zone: Optional[str] = None,
+) -> bool:
+    """Returns True if the accelerator is in the region or zone."""
+    if zone is None:
+        return accelerator_in_region(df, accelerator_name, region)
+    else:
+        return accelerator_in_zone(df, accelerator_name, zone)

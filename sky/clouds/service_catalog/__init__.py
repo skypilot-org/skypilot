@@ -106,6 +106,23 @@ def zone_exists(zone_name: str, clouds: CloudFilter = None) -> bool:
     """Returns the zone by name."""
     return _map_clouds_catalog(clouds, 'zone_exists', zone_name)
 
+def zone_in_region(region: str, zone: str, clouds: CloudFilter = None) -> bool:
+    """Returns True if the zone is in the region."""
+    return _map_clouds_catalog(clouds, 'zone_in_region', region, zone)
+
+def accelerator_in_region_or_zone(
+    acc_name: str,
+    region: str,
+    zone: str,
+    clouds: CloudFilter = None,
+) -> bool:
+    """Returns True if the accelerator is in the region or zone."""
+    return _map_clouds_catalog(clouds,
+                               'accelerator_in_region_or_zone',
+                               acc_name,
+                               region,
+                               zone)
+
 def get_region_zones_for_instance_type(
         instance_type: str,
         use_spot: bool,

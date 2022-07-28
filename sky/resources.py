@@ -233,6 +233,18 @@ class Resources:
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')
 
+            if self.region is not None or self.zone is not None:
+                if not self._cloud.accelerator_in_region_or_zone(
+                    acc, self.region, self.zone):
+                    error_str = (f'Accelerator "{acc}" is not available in '
+                                 '"{}" region/zone.')
+                    if self.zone:
+                        error_str = error_str.format(self.zone)
+                    else:
+                        error_str = error_str.format(self.region)
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(error_str)
+
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
 
@@ -277,11 +289,9 @@ class Resources:
         self._region = region
 
     def _set_zone(self, zone: Optional[str]) -> None:
-        self._zone = zone
         if zone is None:
             return
 
-        # Validate region.
         if self._cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -297,7 +307,11 @@ class Resources:
                 raise ValueError(f'Invalid zone {zone!r} '
                                     f'for cloud {self.cloud}.')
 
-        # TODO(weilin): validate whether zone exists in region.
+        if self._region is not None:
+            if not self._cloud.zone_in_region(self._region, zone):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Zone {zone!r} '
+                                     f'is not in region {self._region!r}.')
         self._zone = zone
 
     def _try_validate_instance_type(self):

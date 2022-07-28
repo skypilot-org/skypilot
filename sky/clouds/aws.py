@@ -314,3 +314,10 @@ class AWS(clouds.Cloud):
 
     def zone_exists(self, zone: str) -> bool:
         return service_catalog.zone_exists(zone, 'aws')
+
+    def zone_in_region(self, region: str, zone: str) -> bool:
+        return service_catalog.zone_in_region(region, zone, 'aws')
+
+    def accelerator_in_region_or_zone(self, accelerator: str, region: str, zone: str) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, region, zone, 'aws')
