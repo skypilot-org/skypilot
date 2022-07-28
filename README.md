@@ -8,10 +8,11 @@ SkyPilot is a framework to run any workload seamlessly across different cloud pr
 ### Key features
 * **Run existing projects on the cloud** with zero code changes
 * **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
+* **Minimize costs** by leveraging spot instances and automatically stopping idle clusters
 * **Automatic recovery from spot instance failures**
 * **Automatic fail-over** to find resources across regions and clouds
 * **Store datasets on the cloud** and access them like you would on a local file system 
-* **Easily manage job queues** across multiple clusters and **automatically stop idle clusters**
+* **Easily manage job queues** across multiple clusters
 
 
 ## Getting Started
