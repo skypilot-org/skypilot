@@ -1,10 +1,10 @@
-"""Sky logging utilities."""
+"""Logging utilities."""
 import logging
 import sys
 
 from sky.utils import env_options
 
-# If the SKY_MINIMIZE_LOGGING environment variable is set to True,
+# If the SKYPILOT_MINIMIZE_LOGGING environment variable is set to True,
 # remove logging prefixes and unnecessary information in optimizer
 FORMAT = (None if env_options.Options.MINIMIZE_LOGGING.get() else
           '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s')

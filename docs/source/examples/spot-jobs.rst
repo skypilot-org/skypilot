@@ -3,10 +3,10 @@
 Managed Spot Jobs
 ================================================
 
-Sky supports managed spot jobs that can **automatically recover from preemptions**.
+SkyPilot supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 
-To maximize availability, Sky automatically finds available spot resources across regions and clouds.
+To maximize availability, SkyPilot automatically finds available spot resources across regions and clouds.
 Here is an example of BERT training job failing over different regions across AWS and GCP.
 
 .. image:: ../images/spot-training.png
@@ -15,9 +15,9 @@ Here is an example of BERT training job failing over different regions across AW
 
 Below are requirements for using managed spot jobs:
 
-(1) **Mounting code and datasets**: Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`Sky Storage <sky-storage>`.
+(1) **Mounting code and datasets**: Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`SkyPilot Storage <sky-storage>`.
 
-(2) **Saving and loading checkpoints**: (For ML jobs) Application code should save checkpoints periodically to a :ref:`Sky Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
+(2) **Saving and loading checkpoints**: (For ML jobs) Application code should save checkpoints periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
 
 We explain them in detail below.
 
@@ -25,7 +25,7 @@ We explain them in detail below.
 Mounting code and datasets
 --------------------------------
 
-To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`Sky Storage <sky-storage>`.
+To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`SkyPilot Storage <sky-storage>`.
 Note that the cloud buckets can be mounted to VMs in different regions/clouds and thus enable enables transparent job relaunching without user's intervention.
 The YAML below shows an example.
 
@@ -51,7 +51,7 @@ The YAML below shows an example.
 .. note::
 
   Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
-  supported for spot jobs. You can convert them to :ref:`Sky Storage <sky-storage>`.
+  supported for spot jobs. You can convert them to :ref:`SkyPilot Storage <sky-storage>`.
 
 Saving and loading checkpoints
 --------------------------------
@@ -66,14 +66,14 @@ Below is an example of mounting a bucket to :code:`/checkpoint`.
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
 
-The :code:`MOUNT` mode in :ref:`Sky Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
+The :code:`MOUNT` mode in :ref:`SkyPilot Storage <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
 An end-to-end example
 --------------------------------
 
-Below we show an `example <https://github.com/sky-proj/sky/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
+Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 
 .. code-block:: yaml
 
@@ -138,7 +138,7 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
     $ python run_qa.py ... --output_dir /checkpoint/bert_qa/ --save_total_limit 10 --save_steps 1000
 
 .. note::
-  You may also refer to another example `here <https://github.com/sky-proj/sky/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
+  You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
 With the above changes, you are ready to launch a spot job with ``sky spot launch``!
 
@@ -146,7 +146,7 @@ With the above changes, you are ready to launch a spot job with ``sky spot launc
 
     $ sky spot launch -n bert-qa bert_qa.yaml
 
-Sky will launch and start monitoring the spot job. When a preemption happens, Sky will automatically
+SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
 search for resources across regions and clouds to re-launch the job.
 
 

@@ -34,7 +34,7 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     username = getpass.getuser()
-    path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
+    path = (f'/tmp/skypilot_ssh_{username}/{ssh_control_filename}')
     os.makedirs(path, exist_ok=True)
     return path
 

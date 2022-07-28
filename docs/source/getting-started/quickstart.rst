@@ -6,14 +6,14 @@ This guide will walk you through:
 
 - defining a task in a simple YAML format
 - provisioning a cluster and running a task
-- using the core Sky CLI commands
+- using the core SkyPilot CLI commands
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
-Hello, Sky!
------------
+Hello, SkyPilot!
+------------------
 
-Let's define our very first task, a simple Hello, Sky! program.
+Let's define our very first task, a simple Hello, SkyPilot! program.
 
 Create a directory from anywhere on your machine:
 
@@ -46,7 +46,7 @@ Copy the following YAML into a ``hello_sky.yaml`` file:
   # Typical use: make use of resources, such as running training.
   # Invoked under the workdir (i.e., can use its files).
   run: |
-    echo "Hello, Sky!"
+    echo "Hello, SkyPilot!"
     conda env list
 
 This defines a task with the following components:
@@ -81,7 +81,7 @@ The ``sky launch`` command performs much heavy-lifting:
 - executes the :code:`run` commands.
 
 In a few minutes, the cluster will finish provisioning and the task will be executed.
-The outputs will show ``Hello, Sky!`` and the list of installed Conda environments.
+The outputs will show ``Hello, SkyPilot!`` and the list of installed Conda environments.
 
 Execute a task on an existing cluster
 =====================================
@@ -128,7 +128,7 @@ This may show multiple clusters, if you have created several:
   gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp     STOPPED
   mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
-To log into the a cluster, Sky provides convenient SSH access via :code:`ssh <cluster_name>`:
+To log into the a cluster, SkyPilot provides convenient SSH access via :code:`ssh <cluster_name>`:
 
 .. code-block:: console
 
@@ -155,11 +155,11 @@ manage the lifecycle of clusters :ref:`here <interactive-nodes>`.
 Next steps
 -----------
 
-Congratulations!  In this quickstart, you have launched a cluster, run a task, and interacted with Sky's CLI.
+Congratulations!  In this quickstart, you have launched a cluster, run a task, and interacted with SkyPilot's CLI.
 
 To learn more:
 
-- Adapt :ref:`Tutorial: DNN Training` to run your own project on Sky
+- Adapt :ref:`Tutorial: DNN Training` to run your own project on SkyPilot
 - Try :ref:`Interactive Nodes` -- VMs that can be launched in one command without a YAML file
-- See a fully complete :ref:`YAML example <yaml-spec>` and more examples in the `repository <https://github.com/sky-proj/sky/tree/master/examples>`_
+- See a fully complete :ref:`YAML example <yaml-spec>` and more examples in the `repository <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
 - Explore the rest of the documentation

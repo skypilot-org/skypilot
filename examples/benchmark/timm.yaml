@@ -12,8 +12,8 @@ setup: |
   conda activate timm
 
   # Install SkyCallback
-  git clone git@github.com:sky-proj/sky.git
-  pip install sky/sky/callbacks/
+  git clone git@github.com:skypilot-org/skypilot.git
+  pip install skypilot/sky/callbacks/
 
   # User setup
   git clone https://github.com/rwightman/pytorch-image-models.git timm

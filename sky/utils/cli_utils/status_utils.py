@@ -1,4 +1,4 @@
-"""Utilities for sky status."""
+"""Utilities for `sky status`."""
 from typing import Callable, List
 
 import click

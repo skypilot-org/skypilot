@@ -4,6 +4,12 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+from sky.clouds.service_catalog.constants import (
+    HOSTED_CATALOG_DIR_URL,
+    CATALOG_SCHEMA_VERSION,
+    LOCAL_CATALOG_DIR,
+)
+
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
     from sky.clouds.service_catalog import common
@@ -182,4 +188,8 @@ __all__ = [
     'get_region_zones_for_accelerators',
     'get_common_gpus',
     'get_tpus',
+    # Constants
+    'HOSTED_CATALOG_DIR_URL',
+    'CATALOG_SCHEMA_VERSION',
+    'LOCAL_CATALOG_DIR',
 ]
