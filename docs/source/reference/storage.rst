@@ -193,7 +193,7 @@ and use mount mode when attaching it to your tasks like so:
         mode: MOUNT
 
 
-Here is a `simple example <https://github.com/sky-proj/sky/blob/master/examples/storage/pingpong.yaml>`_
+Here is a `simple example <https://github.com/skypilot-org/skypilot/blob/master/examples/storage/pingpong.yaml>`_
 using SkyPilot Storage to perform communication between processes using files.
 
 

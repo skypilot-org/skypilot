@@ -91,7 +91,7 @@ Example file mounts:
     /s3-data-test: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0
 
 
-For more details, see `this example <https://github.com/sky-proj/sky/blob/master/examples/using_file_mounts.yaml>`_ and :ref:`YAML Configuration <yaml-spec>`.
+For more details, see `this example <https://github.com/skypilot-org/skypilot/blob/master/examples/using_file_mounts.yaml>`_ and :ref:`YAML Configuration <yaml-spec>`.
 
 .. note::
 

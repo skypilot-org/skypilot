@@ -1,6 +1,6 @@
 0a1,4
 > # Adapted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/_private/metrics_agent.py
-> # Fixed the problem in https://github.com/sky-proj/sky/issues/990, by adding exception catch for creating the metrics agent.
+> # Fixed the problem in https://github.com/skypilot-org/skypilot/issues/990, by adding exception catch for creating the metrics agent.
 > # The change is adapted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/_private/metrics_agent.py#L77-L95
 > 
 74,79c78,87

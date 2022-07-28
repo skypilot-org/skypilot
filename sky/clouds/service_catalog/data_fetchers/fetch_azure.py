@@ -187,5 +187,5 @@ def get_all_regions_instance_types_df():
 if __name__ == '__main__':
     ray.init()
     df = get_all_regions_instance_types_df()
-    df.to_csv('../data/azure.csv', index=False)
+    df.to_csv('azure.csv', index=False)
     print('Azure Service Catalog saved to azure.csv')
