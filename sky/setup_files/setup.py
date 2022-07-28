@@ -7,6 +7,7 @@ requirements, and SkyPilot will automatically execute it on AWS, Google Cloud
 Platform or Microsoft Azure.
 """
 
+import io
 import os
 import platform
 import warnings
@@ -23,8 +24,8 @@ if system == 'Darwin':
     mac_minor = int(mac_minor)
     if mac_major < 10 or (mac_major == 10 and mac_minor >= 15):
         warnings.warn(
-            f"\'Detected MacOS version {mac_version}. MacOS version >=10.15 "
-            "is required to install ray>=1.9\'")
+            f'\'Detected MacOS version {mac_version}. MacOS version >=10.15 '
+            'is required to install ray>=1.9\'')
 
 install_requires = [
     'wheel',
@@ -75,7 +76,13 @@ setuptools.setup(
     name='skypilot',
     version='0.1.0',
     packages=setuptools.find_packages(),
+    author='SkyPilot Team',
+    license="Apache 2.0",
+    readme = 'README.md',
+    long_description=io.open('README.md', 'r', encoding='utf-8').read(),
+    long_description_content_type='text/markdown',
     setup_requires=['wheel'],
+    requires_python = '>=3.6',
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
@@ -87,7 +94,15 @@ setuptools.setup(
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'License :: OSI Approved :: Apache Software License',
+        'Operating System :: OS Independent',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+        'Topic :: System :: Distributed Computing',
     ],
-    description='SkyPilot',
-    long_description=__doc__.replace('\n', ' '),
+    description='SkyPilot: An intercloud broker above the clouds',
+    project_urls={
+        'Homepage': 'https://github.com/skypilot-org/skypilot',
+        'Issues': 'https://github.com/skypilot-org/skypilot/issues',
+        'Documentation': 'https://skypilot.readthedocs.io/en/latest/',
+    },
 )

@@ -2,25 +2,6 @@
 requires = ["setuptools>=58.0"]
 build-backend = "setuptools.build_meta"
 
-[project]
-name = "skypilot"
-version = "0.1.0"
-authors = []
-description = "An intercloud broker above the clouds"
-readme = "README.md"
-license = { file="LICENSE" }
-requires-python = ">=3.6"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache Software License",
-    "Operating System :: OS Independent",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: System :: Distributed Computing",
-]
-
-[project.urls]
-"Homepage" = "https://skypilot.readthedocs.io/en/latest/"
-"Bug Tracker" = "https://github.com/skypilot-org/skypilot/issues"
 
 [tool.yapf]
 based_on_style = "google"
