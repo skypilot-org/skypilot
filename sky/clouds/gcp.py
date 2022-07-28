@@ -299,7 +299,7 @@ class GCP(clouds.Cloud):
                 # ~/.config/gcloud/application_default_credentials.json.
                 '  $ gcloud auth application-default login\n    '
                 'For more info: '
-                'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
         return True, None
 

@@ -16,10 +16,10 @@ SkyPilot is a framework to run any workload seamlessly across different cloud pr
 
 
 ## Getting Started
-You can find our documentation [here](https://sky-proj-sky.readthedocs-hosted.com/en/latest/).
-- [Installation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html)
-- [Quickstart](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html)
-- [CLI reference](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
+You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
+- [Installation](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)
+- [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html)
+- [CLI reference](https://skypilot.readthedocs.io/en/latest/reference/cli.html)
 
 ## Example SkyPilot Task
 
@@ -62,7 +62,7 @@ SkyPilot will perform multiple functions for you:
 5. Run the task's `run` commands
 
 <!---- TODO(romilb): Example GIF goes here ---->
-Please refer to the [quick start](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html) and [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/) for more on how to use SkyPilot.
+Please refer to the [quick start](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) and [documentation](https://skypilot.readthedocs.io/en/latest/) for more on how to use SkyPilot.
 
 ## Contributing
 Please refer to the [contribution guide](CONTRIBUTING.md).
