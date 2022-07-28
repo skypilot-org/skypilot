@@ -78,11 +78,11 @@ setuptools.setup(
     packages=setuptools.find_packages(),
     author='SkyPilot Team',
     license="Apache 2.0",
-    readme = 'README.md',
+    readme='README.md',
     long_description=io.open('README.md', 'r', encoding='utf-8').read(),
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
-    requires_python = '>=3.6',
+    requires_python='>=3.6',
     install_requires=install_requires,
     extras_require=extras_require,
     entry_points={
