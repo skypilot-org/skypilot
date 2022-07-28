@@ -161,5 +161,5 @@ To learn more:
 
 - Adapt :ref:`Tutorial: DNN Training` to run your own project on SkyPilot
 - Try :ref:`Interactive Nodes` -- VMs that can be launched in one command without a YAML file
-- See a fully complete :ref:`YAML example <yaml-spec>` and more examples in the `repository <https://github.com/sky-proj/sky/tree/master/examples>`_
+- See a fully complete :ref:`YAML example <yaml-spec>` and more examples in the `repository <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
 - Explore the rest of the documentation
