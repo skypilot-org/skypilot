@@ -248,7 +248,6 @@ def accelerator_in_zone(df: pd.DataFrame,
                         acc_name: str,
                         zone: str) -> bool:
     """Returns True if the accelerator is in the zone."""
-    print(df[(df['AcceleratorName'] == acc_name)])
     return len(df[(df['AcceleratorName'] == acc_name) &
                   (df['AvailabilityZone'] == zone)]) > 0
 
