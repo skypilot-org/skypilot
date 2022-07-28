@@ -2,6 +2,7 @@
 ![logo](docs/source/images/SkyPilot-logo-wide.png)
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
+[![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
 
 SkyPilot is a framework to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
