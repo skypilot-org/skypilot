@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "skypilot"
 version = "0.1.0"
-authors = ["SkyPilot Team"]
+authors = []
 description = "An intercloud broker above the clouds"
 readme = "README.md"
 license = { file="LICENSE" }
