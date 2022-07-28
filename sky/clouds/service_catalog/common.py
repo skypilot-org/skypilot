@@ -102,9 +102,7 @@ def zone_exists_impl(df: pd.DataFrame, zone: str) -> bool:
     return zone in df['AvailabilityZone'].unique()
 
 
-def zone_in_region_impl(df: pd.DataFrame,
-                   region: str,
-                   zone: str) -> bool:
+def zone_in_region_impl(df: pd.DataFrame, region: str, zone: str) -> bool:
     return zone in df[df['Region'] == region]['AvailabilityZone'].unique()
 
 
@@ -236,17 +234,14 @@ def get_region_zones(df: pd.DataFrame,
             region.set_zones(zones_in_region[region.name])
     return regions
 
-def accelerator_in_region(df: pd.DataFrame,
-                          acc_name: str,
-                          region: str) -> bool:
+
+def accelerator_in_region(df: pd.DataFrame, acc_name: str, region: str) -> bool:
     """Returns True if the accelerator is in the region."""
     return len(df[(df['AcceleratorName'] == acc_name) &
                   (df['Region'] == region)]) > 0
 
 
-def accelerator_in_zone(df: pd.DataFrame,
-                        acc_name: str,
-                        zone: str) -> bool:
+def accelerator_in_zone(df: pd.DataFrame, acc_name: str, zone: str) -> bool:
     """Returns True if the accelerator is in the zone."""
     return len(df[(df['AcceleratorName'] == acc_name) &
                   (df['AvailabilityZone'] == zone)]) > 0

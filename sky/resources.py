@@ -235,7 +235,7 @@ class Resources:
 
             if self.region is not None or self.zone is not None:
                 if not self._cloud.accelerator_in_region_or_zone(
-                    acc, self.region, self.zone):
+                        acc, self.region, self.zone):
                     error_str = (f'Accelerator "{acc}" is not available in '
                                  '"{}" region/zone.')
                     if self.zone:
@@ -294,18 +294,14 @@ class Resources:
 
         if self._cloud is None:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cloud must be specified together with zone.'
-                )
+                raise ValueError('Cloud must be specified together with zone.')
         elif self._cloud.is_same_cloud(sky.Azure()):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Azure does not support zones.'
-                )
+                raise ValueError('Azure does not support zones.')
         elif not self._cloud.zone_exists(zone):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid zone {zone!r} '
-                                    f'for cloud {self.cloud}.')
+                                 f'for cloud {self.cloud}.')
 
         if self._region is not None:
             if not self._cloud.zone_in_region(self._region, zone):
