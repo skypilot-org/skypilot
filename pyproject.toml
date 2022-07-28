@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skypilot"
-version = "0.0.0"
-authors = []
+version = "0.1.0"
+authors = ["SkyPilot Team"]
 description = "An intercloud broker above the clouds"
 readme = "README.md"
 license = { file="LICENSE" }
@@ -19,8 +19,8 @@ classifiers = [
 ]
 
 [project.urls]
-"Homepage" = "https://sky-proj-sky.readthedocs-hosted.com/en/latest/"
-"Bug Tracker" = "https://github.com/sky-proj/sky/issues"
+"Homepage" = "https://skypilot.readthedocs.io/en/latest/"
+"Bug Tracker" = "https://github.com/skypilot-org/skypilot/issues"
 
 [tool.yapf]
 based_on_style = "google"
