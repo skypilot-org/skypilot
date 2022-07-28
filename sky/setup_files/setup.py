@@ -69,6 +69,11 @@ extras_require = {
 
 extras_require['all'] = sum(extras_require.values(), [])
 
+readme_filepath = 'README.md'
+if not os.path.exists(readme_filepath):
+    readme_filepath = os.path.join(ROOT_DIR, os.path.pardir, os.path.pardir, 'README.md')
+long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
+
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if
     # ever), you must grep for '.whl' and change all corresponding wheel paths
@@ -79,7 +84,7 @@ setuptools.setup(
     author='SkyPilot Team',
     license="Apache 2.0",
     readme='README.md',
-    long_description=io.open('README.md', 'r', encoding='utf-8').read(),
+    long_description=long_description,
     long_description_content_type='text/markdown',
     setup_requires=['wheel'],
     requires_python='>=3.6',
