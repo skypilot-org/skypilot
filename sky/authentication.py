@@ -1,4 +1,5 @@
 """Module to enable a single SkyPilot key for all VMs in each cloud."""
+from asyncio import subprocess
 import copy
 import functools
 import hashlib
@@ -12,7 +13,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 from Crypto.PublicKey import RSA
 
+from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
@@ -21,6 +26,8 @@ from sky.adaptors import aws, gcp
 
 MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
+
+GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
 
 
 def generate_rsa_key_pair():
@@ -158,6 +165,53 @@ def setup_gcp_authentication(config):
                         cache_discovery=False)
     user = config['auth']['ssh_user']
     project = compute.projects().get(project=project_id).execute()
+
+    project_oslogin = next(
+        (item for item in project['commonInstanceMetadata'].get('items', [])
+         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
+    if project_oslogin == 'True':
+        # project.
+        logger.info(
+            f'OS Login is enabled for GCP project {project_id}. Running '
+            'additional authentication steps.')
+        config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
+        if not os.path.exists(config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'GCP authentication failed, as the oslogin is enabled but '
+                    f'the file {config_path} is not found.')
+        with open(config_path, 'r') as infile:
+            for line in infile:
+                if line.startswith('account'):
+                    account = line.split('=')[1].strip()
+                    break
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'GCP authentication failed, as the oslogin is enabled '
+                        f'but the file {config_path} does not contain the '
+                        'account information.')
+        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+        # Add ssh key to GCP with oslogin
+        subprocess.run(
+            'gcloud compute os-login ssh-keys add '
+            f'--key-file={public_key_path}',
+            shell=True,
+            check=True)
+        # Enable ssh port for all the instances
+        subprocess.run(
+            'gcloud compute firewall-rules create '
+            'allow-ssh-ingress-from-iap '
+            '--direction=INGRESS '
+            '--action=allow '
+            '--rules=tcp:22 '
+            '--source-ranges=0.0.0.0/0',
+            shell=True,
+            check=True)
+        return config
+
+    # OS Login is not enabled for the project. Add the ssh key directly to the
+    # metadata.
     project_keys = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')
