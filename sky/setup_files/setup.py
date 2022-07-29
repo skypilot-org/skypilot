@@ -114,7 +114,7 @@ setuptools.setup(
     project_urls={
         'Homepage': 'https://github.com/skypilot-org/skypilot',
         'Issues': 'https://github.com/skypilot-org/skypilot/issues',
-        'Discussion': 'https://github.com/skypilot-org/skypilot/discussions'
+        'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
         'Documentation': 'https://skypilot.readthedocs.io/en/latest/',
     },
 )
