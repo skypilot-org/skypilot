@@ -169,7 +169,7 @@ def setup_gcp_authentication(config):
     project_oslogin = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
-    if project_oslogin == 'True':
+    if project_oslogin.lower() == 'true':
         # project.
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
