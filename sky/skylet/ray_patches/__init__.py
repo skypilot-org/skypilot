@@ -28,6 +28,7 @@ def _run_patch(target_file, patch_file):
     # .orig is the original file that is not patched.
     orig_file = os.path.abspath(target_file + '.orig')
     script = f"""\
+    which patch >/dev/null 2>&1 || sudo yum install -y patch
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
         cp {target_file} {orig_file}
