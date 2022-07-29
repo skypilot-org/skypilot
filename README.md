@@ -1,117 +1,77 @@
-# SkyPilot
+<p align="center">
+  <img src="docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=55%/>
+</p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
+[![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
 
-SkyPilot is a framework to run any workload seamlessly across different cloud providers through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+SkyPilot is a framework for easily running machine learning[^1] workloads on any cloud through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
-<!-- TODO: We need a logo here -->
+[^1]: SkyPilot is primarily targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
+
+### Key features
+* **Run existing projects on the cloud** with zero code changes
+* **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
+* **Minimize costs** by leveraging spot instances and automatically stopping idle clusters
+* **Automatic recovery from spot instance failures**
+* **Automatic fail-over** to find resources across regions and clouds
+* **Store datasets on the cloud** and access them like you would on a local file system 
+* **Easily manage job queues** across multiple clusters
+
+
 ## Getting Started
-Please refer to our [documentation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/).
-- [Installation](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html)
-- [Quickstart](https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/quickstart.html)
-- [CLI](https://sky-proj-sky.readthedocs-hosted.com/en/latest/reference/cli.html)
+You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
+- [Installation](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)
+- [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html)
+- [CLI reference](https://skypilot.readthedocs.io/en/latest/reference/cli.html)
 
-## Developer Guide
-### Setup
-Use editable mode (`-e`) when installing:
+## Example SkyPilot Task
+
+Tasks in SkyPilot are specified as a YAML file containing the resource requirements, data to be synced, setup commands and the task commands. Here is an example.
+
+```yaml
+# my-task.yaml
+resources:
+  # 1x NVIDIA V100 GPU
+  accelerators: V100:1
+
+# Number of VMs to launch in the cluster
+num_nodes: 1
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+workdir: .
+
+# Commands to be run before executing the job
+# Typical use: pip install -r requirements.txt, git clone, etc.
+setup: |
+  echo "Running setup."
+
+# Commands to run as a job
+# Typical use: make use of resources, such as running training.
+run: |
+  echo "Hello, SkyPilot!"
+  conda env list
+```
+
+This task can be launched on the cloud with the `sky launch` command.
 ```bash
-# SkyPilot requires python >= 3.6 and < 3.10.
-# You can just install the dependencies for
-# certain clouds, e.g., ".[aws,azure,gcp]"
-pip install -e ".[all]"
-pip install -r requirements-dev.txt
+$ sky launch my-task.yaml
 ```
-IMPORTANT: Please `export SKYPILOT_DEV=1` before running the CLI commands in the terminal, so that developers' usage logs do not pollute the actual user logs.
+SkyPilot will perform multiple functions for you:
+1. Find the lowest priced VM instance type across different clouds
+2. Provision the VM
+3. Copy the local contents of `workdir` to the VM
+4. Run the task's `setup` commands to prepare the VM for running the task 
+5. Run the task's `run` commands
 
+<!---- TODO(romilb): Example GIF goes here ---->
+Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to use SkyPilot.
 
-### Submitting pull requests
-- After you commit, format your code with [`format.sh`](./format.sh).
-- In the PR description, write a `Tested:` section to describe relevant tests performed.
-- For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
-- Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
+## Issues, feature requests and questions
+We are excited to hear your feedback! SkyPilot has two channels for engaging with the community - [GitHub Issues](https://github.com/skypilot-org/skypilot/issues) and [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
+* For bug reports and issues, please [open an issue](https://github.com/skypilot-org/skypilot/issues/new).
+* For feature requests or general questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
-
-### Environment variables for developers
-- `export SKYPILOT_DEV=1` to send usage logs to dev space.
-- `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
-- `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
-- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize the logging for demo purpose.
-
-### Dump timeline
-
-Timeline is useful for performance analysis and debugging in SkyPilot.
-
-Here are the APIs:
-
-```python
-
-from utils import timeline
-
-
-# record a function in the timeline with the function path name
-@timeline.event
-def f(): ...
-
-
-# record a function in the timeline using name='my_name'
-@timeline.event(name='event_name')
-def f(): ...
-
-
-# record an event over a code block in the timeline:
-with timeline.Event(name='event_name'):
-  ...
-
-# use a file lock with event:
-with timeline.FileLockEvent(lockpath):
-  pass
-```
-
-To dump the timeline, set environment variable `SKYPILOT_TIMELINE_FILE_PATH` to a file path.
-
-View the dumped timeline file using `Chrome` (chrome://tracing) or [Perfetto](https://ui.perfetto.dev/).
-
-### Updating the SkyPilot docker image
-1. Authenticate with SkyPilot ECR repository. Contact romil.bhardwaj@berkeley.edu for access:
-   ```
-   aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws/a9w6z7w5
-   ```
-
-2. Build and tag the docker image:
-   ```
-   docker build -t public.ecr.aws/a9w6z7w5/sky:latest .
-   ```
-
-3. Push the image to ECR:
-   ```
-   docker push public.ecr.aws/a9w6z7w5/sky:latest
-   ```
-
-### Some general engineering practice suggestions
-
-These are suggestions, not strict rules to follow. When in doubt, follow the [style guide](https://google.github.io/styleguide/pyguide.html).
-
-* Use `TODO(author_name)`/`FIXME(author_name)` instead of blank `TODO/FIXME`. This is critical for tracking down issues. You can write TODOs with your name and assign it to others (on github) if it is someone else's issue.
-* Delete your branch after merging it. This keeps the repo clean and faster to sync.
-* Use an exception if this is an error. Only use `assert` for debugging or proof-checking purpose. This is because exception messages usually contain more information.
-* Use modern python features and styles that increases code quality.
-  * Use f-string instead of `.format()` for short expressions to increase readability.
-  * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
-  * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
-  * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
-
-### Testing
-To run smoke tests:
-```
-bash tests/run_smoke_tests.sh
-
-# Run one of the smoke tests
-bash tests/run_smoke_tests.sh test_minimal
-```
-
-For profiling code, use:
-```
-pip install tuna # Tuna for viz
-python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
-tuna sky.prof
-```
+## Contributing
+We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
