@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=80%/>
+  <img src="docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=60%/>
 </p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
