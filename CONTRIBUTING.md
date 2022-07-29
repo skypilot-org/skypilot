@@ -10,11 +10,9 @@ all contributions to the project, including but not limited to:
 * Documentation
 * Tutorials, blog posts and talks on SkyPilot
 
-Please read through this document before contributing so that there is all the necessary information needed for us to effectively respond to your contribution.
-
 ## Contributing Code
 
-We use Github to track issues and features. For new contributors, we recommend looking at issues labeled ["good first issue"](https://github.com/sky-proj/sky/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22+).
+We use GitHub to track issues and features. For new contributors, we recommend looking at issues labeled ["good first issue"](https://github.com/sky-proj/sky/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22+).
 
 ### Installing SkyPilot for development
 ```bash
@@ -24,13 +22,6 @@ We use Github to track issues and features. For new contributors, we recommend l
 pip install -e ".[all]"
 pip install -r requirements-dev.txt
 ```
-IMPORTANT: Please `export SKYPILOT_DEV=1` before running the CLI commands in the terminal, so that developers' usage logs do not pollute the actual user logs.
-
-### Environment variables for developers
-- `export SKYPILOT_DEV=1` to send usage logs to dev space.
-- `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
-- `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
-- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
 
 ### Testing
 To run smoke tests:
@@ -68,3 +59,8 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use `class MyClass:` instead of `class MyClass(object):`. The later one was a workaround for python2.x.
   * Use `abc` module for abstract classes to ensure all abstract methods are implemented.
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
+
+### Environment variables for developers
+- `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
+- `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
+- `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.

@@ -1,5 +1,6 @@
-
-![logo](docs/source/images/SkyPilot-logo-wide.png)
+<p align="center">
+  <img src="docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=80%/>
+</p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
 [![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
@@ -65,7 +66,12 @@ SkyPilot will perform multiple functions for you:
 5. Run the task's `run` commands
 
 <!---- TODO(romilb): Example GIF goes here ---->
-Please refer to the [quick start](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) and [documentation](https://skypilot.readthedocs.io/en/latest/) for more on how to use SkyPilot.
+Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) and [documentation](https://skypilot.readthedocs.io/en/latest/) for more on how to use SkyPilot.
+
+## Issues, feature requests and questions
+We are excited to hear your feedback! SkyPilot has two channels for engaging with the community - [GitHub Issues](https://github.com/skypilot-org/skypilot/issues) and [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
+* For bug reports and issues, please [open an issue](https://github.com/skypilot-org/skypilot/issues/new).
+* For feature requests or general questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
 ## Contributing
-Please refer to the [contribution guide](CONTRIBUTING.md).
+We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
