@@ -1510,8 +1510,7 @@ class CloudVmRayBackend(backends.Backend):
                         cluster_name, acquire_per_cluster_status_lock=False))
             assert to_provision_config.resources is not None, (
                 'to_provision should not be None', to_provision_config)
-            backend_utils.check_cluster_name_is_valid(
-                cluster_name, to_provision_config.resources.cloud)
+            
 
             usage_lib.messages.usage.update_cluster_resources(
                 to_provision_config.num_nodes, to_provision_config.resources)
@@ -2424,6 +2423,14 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_name, handle.launched_resources, handle.launched_nodes,
                 True)
         usage_lib.messages.usage.set_new_cluster()
+        assert len(task.resources) == 1, task.resources
+        resources = list(task.resources)[0]
+        task_cloud = resources.cloud
+        # Use the task_cloud, because the cloud in `to_provision` can be changed
+        # later during the retry.
+        backend_utils.check_cluster_name_is_valid(cluster_name, task_cloud)
+        
+
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):
             # The field ssh_user is specified in the cluster config file.
