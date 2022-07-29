@@ -1715,7 +1715,10 @@ def validate_schema(obj, schema, err_msg_prefix=''):
                     most_similar_field = difflib.get_close_matches(
                         field, known_fields, 1)
                     if most_similar_field:
-                        err_msg += f'\nInstead of \'{field}\', did you mean \'{most_similar_field[0]}\'?'
+                        err_msg += (f'\nInstead of {field!r}, did you mean '
+                                    f'{most_similar_field[0]!r}?')
+                    else:
+                        err_msg += f'\nFound unsupported field {field!r}.'
         else:
             err_msg = err_msg_prefix + e.message
 
