@@ -15,6 +15,7 @@ from Crypto.PublicKey import RSA
 
 from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -193,21 +194,24 @@ def setup_gcp_authentication(config):
                         'account information.')
         config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
         # Add ssh key to GCP with oslogin
-        subprocess.run(
+        subprocess_utils.run(
             'gcloud compute os-login ssh-keys add '
             f'--key-file={public_key_path}',
-            shell=True,
-            check=True)
+            stdout=subprocess.DEVNULL)
         # Enable ssh port for all the instances
-        subprocess.run(
-            'gcloud compute firewall-rules create '
-            'allow-ssh-ingress-from-iap '
-            '--direction=INGRESS '
-            '--action=allow '
-            '--rules=tcp:22 '
-            '--source-ranges=0.0.0.0/0',
-            shell=True,
-            check=True)
+        enable_ssh_cmd = ('gcloud compute firewall-rules create '
+                          'allow-ssh-ingress-from-iap '
+                          '--direction=INGRESS '
+                          '--action=allow '
+                          '--rules=tcp:22 '
+                          '--source-ranges=0.0.0.0/0')
+        proc = subprocess_utils.run(enable_ssh_cmd,
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE)
+        if proc.returncode != 0 and 'already exists' not in proc.stderr:
+            subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
+                                               'Failed to enable ssh port.',
+                                               proc.stderr)
         return config
 
     # OS Login is not enabled for the project. Add the ssh key directly to the
