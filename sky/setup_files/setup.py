@@ -88,7 +88,7 @@ setuptools.setup(
     version='0.1.0',
     packages=setuptools.find_packages(),
     author='SkyPilot Team',
-    license="Apache 2.0",
+    license='Apache 2.0',
     readme='README.md',
     description='SkyPilot: An intercloud broker for the clouds',
     long_description=long_description,
