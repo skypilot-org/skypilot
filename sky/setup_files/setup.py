@@ -69,11 +69,10 @@ extras_require = {
 
 extras_require['all'] = sum(extras_require.values(), [])
 
+long_description = ''
 readme_filepath = 'README.md'
-if not os.path.exists(readme_filepath):
-    readme_filepath = os.path.join(ROOT_DIR, os.path.pardir, os.path.pardir,
-                                   'README.md')
-long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
+if os.path.exists(readme_filepath):
+    long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
 
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if
