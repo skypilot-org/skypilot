@@ -116,22 +116,3 @@ python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
 tuna sky.prof
 ```
 
-### Publish Release
-The package can be published to PyPi with the following steps ([official document](https://packaging.python.org/en/latest/tutorials/packaging-projects/)):
-1. Install prerequisites:
-```
-pip install --upgrade build
-pip install --upgrade twine
-```
-2. Increment the version number in [pyproject.toml](pyproject.toml)
-3. Build the package and upload it to PyPi test repository and check the installation:
-```
-cd $(git rev-parse --show-toplevel)
-python -m build
-twine upload --repository testpypi --skip-existing dist/*
-pip install --index-url https://test.pypi.org/simple/ --no-deps skypilot
-```
-4. If everything works well, upload the package to the main repository:
-```
-twine upload --skip-existing dist/*
-```

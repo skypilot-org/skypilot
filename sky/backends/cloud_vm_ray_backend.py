@@ -1517,11 +1517,11 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config.num_nodes, to_provision_config.resources)
             usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
 
-            # TODO(suquark): once we have sky on PYPI, we should directly
-            # install sky from PYPI.
+            # TODO(suquark): once we have sky on PyPI, we should directly
+            # install sky from PyPI.
             with timeline.Event('backend.provision.wheel_build'):
-                # TODO(suquark): once we have sky on PYPI, we should directly
-                # install sky from PYPI.
+                # TODO(suquark): once we have sky on PyPI, we should directly
+                # install sky from PyPI.
                 local_wheel_path = wheel_utils.build_sky_wheel()
             backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1

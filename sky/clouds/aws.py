@@ -273,7 +273,7 @@ class AWS(clouds.Cloud):
             return False, (
                 'AWS CLI is not installed properly.'
                 ' Run the following commands under sky folder:'
-                # TODO(zhwu): after we publish sky to pypi,
+                # TODO(zhwu): after we publish sky to PyPI,
                 # change this to `pip install sky[aws]`
                 '\n     $ pip install .[aws]'
                 '\n   Credentials may also need to be set.' + help_str)
