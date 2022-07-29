@@ -197,6 +197,7 @@ def setup_gcp_authentication(config):
         subprocess.run(
             'gcloud compute os-login ssh-keys add '
             f'--key-file={public_key_path}',
+            check=True,
             shell=True,
             stdout=subprocess.DEVNULL)
         # Enable ssh port for all the instances
@@ -207,10 +208,12 @@ def setup_gcp_authentication(config):
                           '--rules=tcp:22 '
                           '--source-ranges=0.0.0.0/0')
         proc = subprocess.run(enable_ssh_cmd,
+                              check=False,
                               shell=True,
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.PIPE)
-        if proc.returncode != 0 and 'already exists' not in proc.stderr.decode('utf-8'):
+        if proc.returncode != 0 and 'already exists' not in proc.stderr.decode(
+                'utf-8'):
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr)
