@@ -210,7 +210,7 @@ def setup_gcp_authentication(config):
                               shell=True,
                               stdout=subprocess.DEVNULL,
                               stderr=subprocess.PIPE)
-        if proc.returncode != 0 and 'already exists' not in proc.stderr:
+        if proc.returncode != 0 and 'already exists' not in proc.stderr.decode('utf-8'):
             subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
                                                'Failed to enable ssh port.',
                                                proc.stderr)
