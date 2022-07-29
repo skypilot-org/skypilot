@@ -611,7 +611,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
                 # Temporary measure, as deleting per-cluster SGs is too slow.
-                # See https://github.com/sky-proj/sky/pull/742.
+                # See https://github.com/skypilot-org/skypilot/pull/742.
                 # Generate the name of the security group we're looking for.
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account cloud providers. Using uuid.getnode()

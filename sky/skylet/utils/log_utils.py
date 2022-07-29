@@ -46,7 +46,7 @@ class RayUpLineProcessor(LineProcessor):
                         f'{colorama.Style.RESET_ALL}')
             self.status_display.start()
             self.status_display.update(
-                '[bold cyan]Launching - Preparing Sky runtime')
+                '[bold cyan]Launching - Preparing SkyPilot runtime')
             self.state = self.ProvisionStatus.RUNTIME_SETUP
 
     def __exit__(self, except_type, except_value, traceback):
