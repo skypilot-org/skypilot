@@ -1230,7 +1230,7 @@ class RetryingVmProvisioner(object):
                 except ValueError as value_error:
                     # Let failover below handle this (i.e., block this cloud).
                     raise exceptions.ResourcesUnavailableError(
-                    ) from value_error
+                        str(value_error)) from value_error
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
