@@ -66,7 +66,7 @@ SkyPilot will perform multiple functions for you:
 5. Run the task's `run` commands
 
 <!---- TODO(romilb): Example GIF goes here ---->
-Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) and [documentation](https://skypilot.readthedocs.io/en/latest/) for more on how to use SkyPilot.
+Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to use SkyPilot.
 
 ## Issues, feature requests and questions
 We are excited to hear your feedback! SkyPilot has two channels for engaging with the community - [GitHub Issues](https://github.com/skypilot-org/skypilot/issues) and [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
