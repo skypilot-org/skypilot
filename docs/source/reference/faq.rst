@@ -20,7 +20,7 @@ For example, run the following on your laptop:
    eval $(ssh-agent -s)
    ssh-add ~/.ssh/id_rsa
 
-Then, any Sky clusters launched from this machine would be able to clone private GitHub repositories. For example:
+Then, any SkyPilot clusters launched from this machine would be able to clone private GitHub repositories. For example:
 
 .. code-block:: yaml
 
@@ -56,7 +56,24 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-How to make Sky clusters use my Weights & Biases credentials?
+How to edit or update the pricing information used by SkyPilot? (Advanced Use Case)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot stores pricing information for different cloud resource types in CSV files known as service catalogs.
+These catalogs are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
+Check out your schema version by running the following command:
+
+.. code-block:: bash
+
+  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
+
+You can customize the catalog files to your needs.
+For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
+Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
+SkyPilot will automatically download the latest catalog in the next run.
+
+
+How to make SkyPilot clusters use my Weights & Biases credentials?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Install the wandb library on your laptop and login to your account via ``wandb login``.

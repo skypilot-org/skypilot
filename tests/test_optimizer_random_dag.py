@@ -3,6 +3,7 @@ import random
 
 import numpy as np
 import pandas as pd
+
 import sky
 
 CLOUDS = {
@@ -11,6 +12,7 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
+GCP_DEFAULT_INSTANCE_TYPE = sky.GCP.get_default_instance_type()
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -65,7 +67,7 @@ def generate_random_dag(
                     cloud=CLOUDS[candidate.cloud],
                     instance_type=candidate.instance_type \
                         if not pd.isna(candidate.instance_type) \
-                        else CLOUDS['GCP'].get_default_instance_type(),
+                        else GCP_DEFAULT_INSTANCE_TYPE,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count},
                 )

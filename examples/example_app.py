@@ -67,7 +67,7 @@ def make_application():
         infer_op.set_time_estimator(
             time_estimators.resnet50_infer_estimate_runtime)
 
-        # Chain the sky.tasks (Airflow syntax).
+        # Chain the tasks (Airflow syntax).
         # The dependency represents data flow.
         train_op >> infer_op
 

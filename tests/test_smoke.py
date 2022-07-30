@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import pathlib
 import subprocess
@@ -12,13 +13,20 @@ import pytest
 
 import sky
 from sky import global_user_state
-from sky.backends import backend_utils
 from sky.data import storage as storage_lib
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
-# (username, last 4 chars of hash of hostname): for uniquefying users on
-# shared-account cloud providers.
-_smoke_test_hash = backend_utils.user_and_hostname_hash()
+# For uniquefying users on shared-account cloud providers. Used as part of the
+# cluster names.
+_smoke_test_hash = hashlib.md5(
+    common_utils.user_and_hostname_hash().encode()).hexdigest()[:8]
+
+# To avoid the second smoke test reusing the cluster launched in the first
+# smoke test. Also required for test_spot_recovery to make sure the manual
+# termination with aws ec2 does not accidentally terminate other spot clusters
+# from the different spot launch with the same cluster name but a different job
+# id.
 test_id = str(uuid.uuid4())[-2:]
 
 
@@ -40,19 +48,19 @@ class Test(NamedTuple):
         print(message, file=sys.stderr, flush=True)
 
 
-def _get_cluster_name(with_test_id: bool = True) -> str:
+def _get_cluster_name() -> str:
     """Returns a user-unique cluster name for each test_<name>().
 
     Must be called from each test_<name>().
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-')
-    if with_test_id:
-        return f'{test_name}-{_smoke_test_hash}-{test_id}'
-    return f'{test_name}-{_smoke_test_hash}'
+    return f'{test_name}-{_smoke_test_hash}-{test_id}'
 
 
 def run_one_test(test: Test) -> Tuple[int, str, str]:
+    # Fail fast if `sky` CLI somehow errors out.
+    subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
     log_file = tempfile.NamedTemporaryFile('a',
                                            prefix=f'{test.name}-',
                                            suffix='.log',
@@ -213,13 +221,12 @@ def test_n_node_job_queue():
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
-    name = _get_cluster_name(
-        with_test_id=False)  # Keep consistent with the py script.
+    name = _get_cluster_name()
     test = Test(
         'multi_echo',
         [
-            'python examples/multi_echo.py',
-            'sleep 20',
+            f'python examples/multi_echo.py {name}',
+            'sleep 70',
         ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
@@ -275,7 +282,9 @@ def test_tpu_vm():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
-            f'sky start -y {name}',
+            # Use retry: guard against transient errors observed for
+            # just-stopped TPU VMs (#962).
+            f'sky start --retry-until-up -y {name}',
             f'sky exec {name} examples/tpu/tpuvm_mnist.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
@@ -304,13 +313,12 @@ def test_multi_hostname():
 
 # ---------- Task: n=2 nodes with setups. ----------
 def test_distributed_tf():
-    name = _get_cluster_name(
-        with_test_id=False)  # Keep consistent with the py script.
+    name = _get_cluster_name()
     test = Test(
         'resnet_distributed_tf_app',
         [
             # NOTE: running it twice will hang (sometimes?) - an app-level bug.
-            'python examples/resnet_distributed_tf_app.py',
+            f'python examples/resnet_distributed_tf_app.py {name}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -453,7 +461,7 @@ def test_use_spot():
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} examples/minimal.yaml --use-spot -y -d',
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
@@ -522,7 +530,7 @@ def test_spot_recovery():
             f'--filters Name=tag:ray-cluster-name,Values={name}* '
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
-            'sleep 40',
+            'sleep 50',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -837,7 +845,7 @@ class TestYamlSpecs:
 
     def _check_equivalent(self, yaml_path):
         """Check if the yaml is equivalent after load and dump again."""
-        origin_task_config = backend_utils.read_yaml(yaml_path)
+        origin_task_config = common_utils.read_yaml(yaml_path)
 
         task = sky.Task.from_yaml(yaml_path)
         new_task_config = task.to_yaml_config()

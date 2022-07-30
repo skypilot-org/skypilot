@@ -1,0 +1,20 @@
+diff --git a/examples/pytorch/question-answering/run_qa.py b/examples/pytorch/question-answering/run_qa.py
+index f8f2ad7db..82fd64221 100755
+--- a/examples/pytorch/question-answering/run_qa.py
++++ b/examples/pytorch/question-answering/run_qa.py
+@@ -26,6 +26,7 @@ from typing import Optional
+ 
+ import datasets
+ from datasets import load_dataset, load_metric
++from sky_callback import SkyTransformersCallback
+ 
+ import transformers
+ from trainer_qa import QuestionAnsweringTrainer
+@@ -609,6 +610,7 @@ def main():
+         data_collator=data_collator,
+         post_process_function=post_processing_function,
+         compute_metrics=compute_metrics,
++        callbacks=[SkyTransformersCallback()],
+     )
+ 
+     # Training

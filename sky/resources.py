@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -30,8 +30,8 @@ class Resources:
         sky.Resources(clouds.GCP(), 'n1-standard-16')
         sky.Resources(clouds.GCP(), 'n1-standard-8', 'V100')
 
-        # Specifying required resources; Sky decides the cloud/instance type.
-        # The below are equivalent:
+        # Specifying required resources; the system decides the cloud/instance
+        # type. The below are equivalent:
         sky.Resources(accelerators='V100')
         sky.Resources(accelerators='V100:1')
         sky.Resources(accelerators={'V100': 1})
@@ -59,7 +59,6 @@ class Resources:
     ):
         self._version = self._VERSION
         self._cloud = cloud
-
         self._region: Optional[str] = None
         self._set_region(region)
 
@@ -89,6 +88,7 @@ class Resources:
 
         self._set_accelerators(accelerators, accelerator_args)
 
+        self._try_validate_local()
         self._try_validate_instance_type()
         self._try_validate_accelerators()
         self._try_validate_spot()
@@ -101,6 +101,10 @@ class Resources:
             accelerators = f', {self.accelerators}'
             if self.accelerator_args is not None:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
+
+        if isinstance(self.cloud, clouds.Local):
+            return f'{self.cloud}({self.accelerators})'
+
         use_spot = ''
         if self.use_spot:
             use_spot = '[Spot]'
@@ -348,6 +352,25 @@ class Resources:
                     'is not supported. The strategy should be among '
                     f'{list(spot.SPOT_STRATEGIES.keys())}')
 
+    def _try_validate_local(self) -> None:
+        if isinstance(self._cloud, clouds.Local):
+            if self._use_spot:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Local/On-prem mode does not support spot '
+                                     'instances.')
+            local_instance = clouds.Local.get_default_instance_type()
+            if (self._instance_type is not None and
+                    self._instance_type != local_instance):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Local/On-prem mode does not support instance type:'
+                        f' {self._instance_type}.')
+            if self._image_id is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Local/On-prem mode does not support custom '
+                        'images.')
+
     def _try_validate_image_id(self) -> None:
         if self._image_id is None:
             return
@@ -365,7 +388,7 @@ class Resources:
             raise ValueError('image_id is only supported for AWS in a specific '
                              'region, please explicitly specify the region.')
 
-    def get_cost(self, seconds: float):
+    def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600
         # Instance.
@@ -426,8 +449,20 @@ class Resources:
         # self == other
         return True
 
-    def less_demanding_than(self, other: 'Resources') -> bool:
-        """Returns whether this resources is less demanding than the other."""
+    def less_demanding_than(self,
+                            other: Union[List['Resources'], 'Resources'],
+                            requested_num_nodes: int = 1) -> bool:
+        """Returns whether this resources is less demanding than the other.
+
+        Args:
+            other: Resources of the launched cluster. If the cluster is
+              heterogeneous, it is represented as a list of Resource objects.
+            requested_num_nodes: Number of nodes that the current task
+              requests from the cluster.
+        """
+        if isinstance(other, list):
+            resources_list = [self.less_demanding_than(o) for o in other]
+            return requested_num_nodes <= sum(resources_list)
         if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
             return False
         # self.cloud <= other.cloud
@@ -482,8 +517,6 @@ class Resources:
             return False
         if self._instance_type is not None or other.instance_type is not None:
             return self._instance_type == other.instance_type
-        # For GCP, when a accelerator type fails to launch, it should be blocked
-        # regardless of the count, since the larger number will fail either.
         return self.accelerators.keys() == other.accelerators.keys()
 
     def is_empty(self) -> bool:

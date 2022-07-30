@@ -1,16 +1,19 @@
 """skylet events"""
+import getpass
 import math
 import os
-import psutil
 import re
 import subprocess
 import time
 import traceback
+
+import psutil
 import yaml
 
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
+from sky.utils import common_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -59,7 +62,9 @@ class JobUpdateEvent(SkyletEvent):
     _SUBMITTED_GAP_SECONDS = 60
 
     def _run(self):
-        job_lib.update_status(submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
+        job_owner = getpass.getuser()
+        job_lib.update_status(job_owner,
+                              submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
 
 
 class AutostopEvent(SkyletEvent):
@@ -133,5 +138,5 @@ class AutostopEvent(SkyletEvent):
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # Empty the file_mounts.
         config['file_mounts'] = dict()
-        backend_utils.dump_yaml(yaml_path, config)
+        common_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced worker num and upscaling speed to 0.')

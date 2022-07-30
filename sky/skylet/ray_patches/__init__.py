@@ -28,6 +28,8 @@ def _run_patch(target_file, patch_file):
     # .orig is the original file that is not patched.
     orig_file = os.path.abspath(target_file + '.orig')
     script = f"""\
+    which patch >/dev/null 2>&1 || sudo yum install -y patch || true
+    which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
         cp {target_file} {orig_file}
@@ -42,6 +44,9 @@ def patch() -> None:
     # Patch the buggy ray files. This should only be called
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
+    from ray._private import metrics_agent
+    _run_patch(metrics_agent.__file__, _to_absolute('metrics_agent.py.patch'))
+
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 

@@ -98,10 +98,13 @@ class GCP(clouds.Cloud):
         use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
-        del instance_type  # unused
         if accelerators is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
+            if instance_type is None:
+                # fallback to manually specified region/zones
+                regions = cls.regions()
+            else:
+                regions = service_catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
@@ -139,9 +142,6 @@ class GCP(clouds.Cloud):
             return 0.11 * num_gigabytes
         else:
             return 0.08 * num_gigabytes
-
-    def __repr__(self):
-        return GCP._REPR
 
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
@@ -302,7 +302,7 @@ class GCP(clouds.Cloud):
                 # ~/.config/gcloud/application_default_credentials.json.
                 '  $ gcloud auth application-default login\n    '
                 'For more info: '
-                'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
         return True, None
 

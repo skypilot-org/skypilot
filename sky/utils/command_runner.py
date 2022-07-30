@@ -34,15 +34,15 @@ def _ssh_control_path(ssh_control_filename: Optional[str]) -> Optional[str]:
     if ssh_control_filename is None:
         return None
     username = getpass.getuser()
-    path = (f'/tmp/sky_ssh_{username}/{ssh_control_filename}')
+    path = (f'/tmp/skypilot_ssh_{username}/{ssh_control_filename}')
     os.makedirs(path, exist_ok=True)
     return path
 
 
-def _ssh_options_list(ssh_private_key: Optional[str],
-                      ssh_control_name: Optional[str],
-                      *,
-                      timeout=30) -> List[str]:
+def ssh_options_list(ssh_private_key: Optional[str],
+                     ssh_control_name: Optional[str],
+                     *,
+                     timeout=30) -> List[str]:
     """Returns a list of sane options for 'ssh'."""
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
@@ -159,7 +159,7 @@ class SSHCommandRunner:
                 logger.info(
                     f'Forwarding port {local} to port {remote} on localhost.')
                 ssh += ['-L', f'{remote}:localhost:{local}']
-        return ssh + _ssh_options_list(
+        return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name) + [f'{self.ssh_user}@{self.ip}']
 
@@ -289,7 +289,7 @@ class SSHCommandRunner:
                 RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
-            _ssh_options_list(self.ssh_private_key, self.ssh_control_name))
+            ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         rsync_command.extend([
             source,

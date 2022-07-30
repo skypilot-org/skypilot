@@ -4,6 +4,7 @@ import os
 import re
 import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+
 import yaml
 
 import sky
@@ -139,7 +140,6 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-
         # Check if the task is legal.
         self._validate()
 
@@ -281,6 +281,7 @@ class Task:
 
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
+
         task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
@@ -445,8 +446,8 @@ class Task:
         """Sets the storage mounts for this Task
 
         Advanced method for users. Storage mounts map a mount path on the Cloud
-        VM to a Storage object (see sky/data/storage.py). The storage object
-        can be from a local folder or from an existing cloud bucket.
+        VM to a Storage object (see data/storage.py). The storage object can be
+        from a local folder or from an existing cloud bucket.
 
         Example:
             task.set_storage_mounts({
@@ -483,7 +484,7 @@ class Task:
                 self.storage_plans[storage] = storage_lib.StoreType.S3
                 storage.add_store(storage_lib.StoreType.S3)
             else:
-                # Sky will download the first store that is added to remote
+                # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
         storage_mounts = self.storage_mounts

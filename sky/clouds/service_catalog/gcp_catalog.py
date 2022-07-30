@@ -36,152 +36,6 @@ _A100_INSTANCE_TYPES = {
     8: 'a2-highgpu-8g',
     16: 'a2-megagpu-16g',
 }
-# count -> host memory
-_A100_HOST_MEMORY = {
-    1: 85,
-    2: 170,
-    4: 340,
-    8: 680,
-    16: 1360,
-}
-
-# Pricing.  All info assumes us-central1.
-# In general, query pricing from the cloud.
-_ON_DEMAND_PRICES = {
-    # VMs: https://cloud.google.com/compute/all-pricing.
-    # N1 standard
-    'n1-standard-1': 0.04749975,
-    'n1-standard-2': 0.0949995,
-    'n1-standard-4': 0.189999,
-    'n1-standard-8': 0.379998,
-    'n1-standard-16': 0.759996,
-    'n1-standard-32': 1.519992,
-    'n1-standard-64': 3.039984,
-    'n1-standard-96': 4.559976,
-    # N1 highmem
-    'n1-highmem-2': 0.118303,
-    'n1-highmem-4': 0.236606,
-    'n1-highmem-8': 0.473212,
-    'n1-highmem-16': 0.946424,
-    'n1-highmem-32': 1.892848,
-    'n1-highmem-64': 3.785696,
-    'n1-highmem-96': 5.678544,
-    # N1 highcpu
-    'n1-highcpu-2': 0.0708486,
-    'n1-highcpu-4': 0.1416972,
-    'n1-highcpu-8': 0.2833944,
-    'n1-highcpu-16': 0.5667888,
-    'n1-highcpu-32': 1.1335776,
-    'n1-highcpu-64': 2.2671552,
-    'n1-highcpu-96': 3.4007328,
-    # n2 standard
-    'n2-standard-2': 0.097118,
-    'n2-standard-4': 0.194236,
-    'n2-standard-8': 0.388472,
-    'n2-standard-16': 0.776944,
-    'n2-standard-32': 1.553888,
-    'n2-standard-48': 2.330832,
-    'n2-standard-64': 3.107776,
-    'n2-standard-80': 3.88472,
-    'n2-standard-96': 4.661664,
-    'n2-standard-128': 6.215552,
-    # n2 highmem
-    'n2-highmem-2': 0.147546,
-    'n2-highmem-4': 0.295092,
-    'n2-highmem-8': 0.590184,
-    'n2-highmem-16': 1.180368,
-    'n2-highmem-32': 2.360736,
-    'n2-highmem-48': 3.541104,
-    'n2-highmem-64': 4.721472,
-    'n2-highmem-80': 5.90184,
-    # n2 highcpu
-    'n2-highcpu-2': 0.071696,
-    'n2-highcpu-4': 0.143392,
-    'n2-highcpu-8': 0.286784,
-    'n2-highcpu-16': 0.573568,
-    'n2-highcpu-32': 1.147136,
-    'n2-highcpu-48': 1.720704,
-    'n2-highcpu-64': 2.294272,
-    'n2-highcpu-80': 2.86784,
-    'n2-highcpu-96': 3.441408,
-    # A2 highgpu for A100
-    'a2-highgpu-1g': 0.749750,
-    'a2-highgpu-2g': 1.499500,
-    'a2-highgpu-4g': 2.998986,
-    'a2-highgpu-8g': 5.997986,
-    'a2-megagpu-16g': 8.919152,
-
-    # Currently the host VM of TPU does not cost extra.
-    'TPU-VM': 0.,
-}
-
-_SPOT_PRICES = {
-    # VMs: https://cloud.google.com/compute/all-pricing.
-    # N1 standard
-    'n1-standard-1': 0.01,
-    'n1-standard-2': 0.02,
-    'n1-standard-4': 0.04,
-    'n1-standard-8': 0.08,
-    'n1-standard-16': 0.16,
-    'n1-standard-32': 0.32,
-    'n1-standard-64': 0.64,
-    'n1-standard-96': 0.96,
-    # N1 highmem
-    'n1-highmem-2': 0.024906,
-    'n1-highmem-4': 0.049812,
-    'n1-highmem-8': 0.099624,
-    'n1-highmem-16': 0.199248,
-    'n1-highmem-32': 0.398496,
-    'n1-highmem-64': 0.796992,
-    'n1-highmem-96': 1.195488,
-    # N1 highcpu
-    'n1-highcpu-2': 0.0149156,
-    'n1-highcpu-4': 0.0298312,
-    'n1-highcpu-8': 0.0596624,
-    'n1-highcpu-16': 0.1193248,
-    'n1-highcpu-32': 0.2386496,
-    'n1-highcpu-64': 0.4772992,
-    'n1-highcpu-96': 0.7159488,
-    # n2 standard
-    'n2-standard-2': 0.02354,
-    'n2-standard-4': 0.04708,
-    'n2-standard-8': 0.09416,
-    'n2-standard-16': 0.18832,
-    'n2-standard-32': 0.37664,
-    'n2-standard-48': 0.56496,
-    'n2-standard-64': 0.75328,
-    'n2-standard-80': 0.9416,
-    'n2-standard-96': 1.12992,
-    'n2-standard-128': 1.50656,
-    # n2 highmem
-    'n2-highmem-2': 0.03392,
-    'n2-highmem-4': 0.06784,
-    'n2-highmem-8': 0.13568,
-    'n2-highmem-16': 0.27136,
-    'n2-highmem-32': 0.54272,
-    'n2-highmem-48': 0.81408,
-    'n2-highmem-64': 1.08544,
-    'n2-highmem-80': 1.3568,
-    # n2 highcpu
-    'n2-highcpu-2': 0.01736,
-    'n2-highcpu-4': 0.03472,
-    'n2-highcpu-8': 0.06944,
-    'n2-highcpu-16': 0.13888,
-    'n2-highcpu-32': 0.27776,
-    'n2-highcpu-48': 0.41664,
-    'n2-highcpu-64': 0.55552,
-    'n2-highcpu-80': 0.6944,
-    'n2-highcpu-96': 0.83328,
-    # A2 highgpu for A100
-    'a2-highgpu-1g': 0.224930,
-    'a2-highgpu-2g': 0.449847,
-    'a2-highgpu-4g': 0.899694,
-    'a2-highgpu-8g': 1.799388,
-    'a2-megagpu-16g': 2.675750,
-
-    # Currently the host VM of TPU does not cost extra.
-    'TPU-VM': 0.,
-}
 
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
@@ -274,19 +128,21 @@ def _closest_power_of_two(x: int) -> int:
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
-    return instance_type in _ON_DEMAND_PRICES
+    if instance_type == 'TPU-VM':
+        return True
+    return common.instance_type_exists_impl(_df, instance_type)
 
 
 def get_hourly_cost(
     instance_type: str,
-    region: str,
+    region: Optional[str] = None,
     use_spot: bool = False,
 ) -> float:
     """Returns the hourly price for a given instance type and region."""
-    del region  # unused
-    if use_spot:
-        return _SPOT_PRICES[instance_type]
-    return _ON_DEMAND_PRICES[instance_type]
+    if instance_type == 'TPU-VM':
+        # Currently the host VM of TPU does not cost extra.
+        return 0
+    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
 def get_instance_type_for_accelerator(
@@ -330,6 +186,12 @@ def get_instance_type_for_accelerator(
 
 def region_exists(region: str) -> bool:
     return common.region_exists_impl(_df, region)
+
+
+def get_region_zones_for_instance_type(instance_type: str,
+                                       use_spot: bool) -> List['cloud.Region']:
+    df = _df[_df['InstanceType'] == instance_type]
+    return common.get_region_zones(df, use_spot)
 
 
 def _get_accelerator(
@@ -378,23 +240,36 @@ def list_accelerators(
     """Returns all instance types in GCP offering GPUs."""
     results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
 
-    # TODO(zongheng): fix A100 info directly in catalog.
     a100_infos = results.get('A100', None)
-    if a100_infos is not None:
-        new_infos = []
-        for info in a100_infos:
-            assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
-            a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
-            new_infos.append(
-                info._replace(
-                    instance_type=a100_host_vm_type,
-                    memory=_A100_HOST_MEMORY[info.accelerator_count],
-                    # total cost = VM instance + GPU.
-                    price=info.price + _ON_DEMAND_PRICES[a100_host_vm_type],
-                    spot_price=info.spot_price +
-                    _SPOT_PRICES[a100_host_vm_type],
-                ))
-        results['A100'] = new_infos
+    if a100_infos is None:
+        return results
+
+    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
+    # A100 GPUs can only be attached to fixed-size A2 VMs.
+    # Thus, we can show their exact cost including the host VM prices.
+    new_infos = []
+    for info in a100_infos:
+        assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
+        a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
+        df = _df[_df['InstanceType'] == a100_host_vm_type]
+        memory = df['MemoryGiB'].iloc[0]
+        vm_price = common.get_hourly_cost_impl(_df,
+                                               a100_host_vm_type,
+                                               None,
+                                               use_spot=False)
+        vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                    a100_host_vm_type,
+                                                    None,
+                                                    use_spot=True)
+        new_infos.append(
+            info._replace(
+                instance_type=a100_host_vm_type,
+                memory=memory,
+                # total cost = VM instance + GPU.
+                price=info.price + vm_price,
+                spot_price=info.spot_price + vm_spot_price,
+            ))
+    results['A100'] = new_infos
     return results
 
 
