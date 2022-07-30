@@ -348,6 +348,7 @@ def check_host_accelerator_compatibility(instance_type: str,
             max_memory = 208
 
     # vCPU counts and memory sizes of N1 machines.
+    # TODO(woosuk): Query vCPU counts from the GCP catalog.
     num_cpus = int(instance_type.split('-')[2])
     df = _df[_df['InstanceType'] == instance_type]
     memory = df['MemoryGiB'].iloc[0]
