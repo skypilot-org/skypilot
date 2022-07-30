@@ -169,7 +169,7 @@ def check_host_accelerator_compatibility(instance_type: str,
                                          accelerators: Optional[Dict[str, int]],
                                          zone: Optional[str] = None,
                                          clouds: CloudFilter = None) -> None:
-    """Check if GCP host VM type is compatible with the accelerators."""
+    """GCP only: Check if host VM type is compatible with the accelerators."""
     _map_clouds_catalog(clouds, 'check_host_accelerator_compatibility',
                         instance_type, accelerators, zone)
 
