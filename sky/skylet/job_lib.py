@@ -9,7 +9,7 @@ import re
 import shlex
 import sqlite3
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from sky import constants
 from sky import sky_logging
@@ -18,6 +18,22 @@ from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+def _import_ray_job_submission_client():
+    """Import the ray job submission client."""
+    try:
+        import ray  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        logger.error('Failed to import ray')
+        raise
+    try:
+        from ray import job_submission  # pylint: disable=import-outside-toplevel
+        return job_submission
+    except ImportError:
+        logger.error(
+            f'Failed to import job_submission with ray=={ray.__version__}')
+        raise
 
 
 class JobStatus(enum.Enum):
@@ -237,20 +253,23 @@ def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
     # TODO: if too slow, directly query against redis.
     ray_job_ids = [make_ray_job_id(job_id, job_owner) for job_id in job_ids]
 
-    from ray import job_submission  # pylint: disable=import-outside-toplevel
+    job_submission = _import_ray_job_submission_client()
     job_client = job_submission.JobSubmissionClient(
         address='http://127.0.0.1:8265')
 
-    def get_job_status(job_id) -> str:
+    def get_job_status(job_id) -> Optional[str]:
         try:
             # The return value is a string, e.g. 'RUNNING', which conflicts
             # with the return type in ray code.
             return job_client.get_job_status(job_id)
-        except RuntimeError:
-            # Job not found.
-            return None
+        except RuntimeError as e:
+            # If the job does not exist or if the request to the
+            # job server fails.
+            if 'does not exist' in str(e):
+                return None
+            raise
 
-    ray_statuses: List[Union[str, None]]
+    ray_statuses: List[Optional[str]]
     ray_statuses = subprocess_utils.run_in_parallel(get_job_status, ray_job_ids)
     assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
 
@@ -376,15 +395,17 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     jobs = [make_ray_job_id(job['job_id'], job_owner) for job in job_records]
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
-    from ray import job_submission  # pylint: disable=import-outside-toplevel
+    job_submission = _import_ray_job_submission_client()
     job_client = job_submission.JobSubmissionClient(
         address='http://127.0.0.1:8265')
 
     def stop_job(job: str):
         try:
             job_client.stop_job(job)
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            # If the job does not exist or if the request to the
+            # job server fails.
+            logger.warning(str(e))
 
     subprocess_utils.run_in_parallel(stop_job, jobs)
     for job in job_records:
