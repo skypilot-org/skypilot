@@ -1,7 +1,6 @@
 """Resources: compute requirements of Tasks."""
 from typing import Dict, List, Optional, Union
 
-import sky
 from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
@@ -233,17 +232,6 @@ class Resources:
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')
 
-            if self.region is not None or self.zone is not None:
-                if not self._cloud.accelerator_in_region_or_zone(
-                        acc, self.region, self.zone):
-                    error_str = (f'Accelerator "{acc}" is not available in '
-                                 '"{}" region/zone.')
-                    if self.zone:
-                        error_str = error_str.format(self.zone)
-                    else:
-                        error_str = error_str.format(self.region)
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(error_str)
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
@@ -295,7 +283,7 @@ class Resources:
         if self._cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cloud must be specified together with zone.')
-        elif self._cloud.is_same_cloud(sky.Azure()):
+        elif self._cloud.is_same_cloud(clouds.Azure()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Azure does not support zones.')
         elif not self._cloud.zone_exists(zone):
@@ -350,7 +338,9 @@ class Resources:
             self._cloud = valid_clouds[0]
 
     def _try_validate_accelerators(self) -> None:
-        """Try-validates accelerators against the instance type."""
+        """Try-validates accelerators against the instance type and
+        availability within region/zone.
+        """
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
             acc_requested = self.accelerators
@@ -373,6 +363,21 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
+
+        # Validate whether accelerator is available in specified region/zone.
+        if self.accelerators is not None:
+            acc, _ = list(self.accelerators.items())[0]
+            if self.region is not None or self.zone is not None:
+                if not self._cloud.accelerator_in_region_or_zone(
+                        acc, self.region, self.zone):
+                    error_str = (f'Accelerator "{acc}" is not available in '
+                                    '"{}" region/zone.')
+                    if self.zone:
+                        error_str = error_str.format(self.zone)
+                    else:
+                        error_str = error_str.format(self.region)
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(error_str)
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
@@ -458,6 +463,13 @@ class Resources:
             return False
         # self.region <= other.region
 
+        if (self.zone is None) != (other.zone is None):
+            # self and other's zone should be both None or both not None
+            return False
+
+        if self.zone is not None and self.zone != other.zone:
+            return False
+
         if (self.image_id is None) != (other.image_id is None):
             # self and other's image id should be both None or both not None
             return False
@@ -507,6 +519,10 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if self.zone is not None and self.zone != other.zone:
+            return False
+        # self.zone <= other.zone
 
         if (self.image_id is not None and self.image_id != other.image_id):
             return False
@@ -678,4 +694,7 @@ class Resources:
 
         if version < 4:
             self._image_id = None
+
+        if version < 5:
+            self._zone = None
         self.__dict__.update(state)

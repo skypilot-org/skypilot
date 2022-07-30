@@ -114,8 +114,8 @@ def zone_in_region(region: str, zone: str, clouds: CloudFilter = None) -> bool:
 
 def accelerator_in_region_or_zone(
     acc_name: str,
-    region: str,
-    zone: str,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> bool:
     """Returns True if the accelerator is in the region or zone."""

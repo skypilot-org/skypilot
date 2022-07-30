@@ -699,6 +699,12 @@ class RetryingVmProvisioner(object):
                             f'{handle.cluster_yaml} '
                             'has been changed from '
                             f'{prev_resources.region} to {region}.')
+                    if zones != prev_resources.zones:
+                        raise ValueError(
+                            f'Zones mismatch. The zones in '
+                            f'{handle.cluster_yaml} '
+                            'have been changed from '
+                            f'{prev_resources.zones} to {zones}.')
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -792,19 +798,16 @@ class RetryingVmProvisioner(object):
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
         ):
-            # Do not retry on region if it's not in the requested region.
+            # Only retry requested region/zones or all if not specified.
             if (to_provision.region is not None and
                     region.name != to_provision.region):
                 continue
-            filtered_zones = zones
             if to_provision.zone is not None:
-                for zone in zones:
-                    if zone.name == to_provision.zone:
-                        filtered_zones = [zone]
-                        break
-                if filtered_zones is None:
+                zones_name = [zone.name for zone in zones]
+                if to_provision.zone not in zones_name:
                     continue
-            yield (region, filtered_zones)
+                zones = [clouds.Zone(name=to_provision.zone)]
+            yield (region, zones)
 
     def _try_provision_tpu(self, to_provision: resources_lib.Resources,
                            config_dict: Dict[str, str]) -> bool:
@@ -1485,6 +1488,13 @@ class CloudVmRayBackend(backends.Backend):
                         'Task requested resources in region '
                         f'{task_resources.region!r}, but the existing cluster '
                         f'is in region {launched_resources.region!r}.')
+            if (task_resources.zone is not None and
+                    task_resources.zone != launched_resources.zone):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        'Task requested resources in zone '
+                        f'{task_resources.zone!r}, but the existing cluster '
+                        f'is in zone {launched_resources.zone!r}.')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     'Requested resources do not match the existing cluster.\n'

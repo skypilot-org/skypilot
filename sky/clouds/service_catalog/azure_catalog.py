@@ -20,8 +20,8 @@ def region_exists(region: str) -> bool:
     return common.region_exists_impl(_df, region)
 
 
-def accelerator_in_region_or_zone(acc_name: str, region: str,
-                                  zone: str) -> bool:
+def accelerator_in_region_or_zone(acc_name: str, region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> bool:
     return common.accelerator_in_region_or_zone_impl(_df, acc_name, region,
                                                      zone)
 
