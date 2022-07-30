@@ -87,7 +87,7 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
         1: (8, 52),
         2: (16, 104),
         4: (32, 208),
-        8: (64, 416),  # except for asia-east1-a, us-east1-d
+        8: (64, 208),  # except for asia-east1-a, us-east1-d
     },
     'V100': {
         1: (12, 78),
@@ -288,7 +288,7 @@ def check_host_accelerator_compatibility(instance_type: str,
                                          zone: Optional[str] = None) -> None:
     """Check if the instance type is compatible with the accelerators."""
     if accelerators is None:
-        if instance_type.startswith('a2-highgpu-'):
+        if instance_type.startswith('a2-'):
             # NOTE: While it is allowed to use A2 machines as CPU-only nodes,
             # we exclude this case as it is uncommon and undesirable.
             with ux_utils.print_exception_no_traceback():
@@ -310,17 +310,19 @@ def check_host_accelerator_compatibility(instance_type: str,
     # Treat A100 as a special case.
     if acc_name == 'A100':
         # A100 must be attached to A2 instance type.
-        if not instance_type.startswith('a2-highgpu-'):
+        a100_instance_type = _A100_INSTANCE_TYPES[acc_count]
+        if not instance_type.startswith('a2-'):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'A100 GPUs cannot be attached to {instance_type}. '
-                    'Use A2 instance type instead.')
-        a100_instance_type = _A100_INSTANCE_TYPES[acc_count]
+                    f'Use {a100_instance_type} instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
         if instance_type != a100_instance_type:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'A100:{acc_count} cannot be attached to {instance_type}. '
-                    f'Use {a100_instance_type} instead.')
+                    f'Use {a100_instance_type} instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
         return
 
     # Other GPUs must be attached to N1 machines.
@@ -329,7 +331,8 @@ def check_host_accelerator_compatibility(instance_type: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'{acc_name} GPUs cannot be attached to {instance_type}. '
-                f'Use N1 instance types instead.')
+                'Use N1 instance types instead. Please refer to: '
+                'https://cloud.google.com/compute/docs/machine-types#gpus')
 
     # Memory/CPU ratios of N1 machines.
     num_cpus = int(instance_type.split('-')[2])
@@ -340,6 +343,8 @@ def check_host_accelerator_compatibility(instance_type: str,
         memory = 6.5 * num_cpus
     elif machine_type == 'highcpu':
         memory = 0.9 * num_cpus
+    else:
+        raise ValueError(f'Unknown machine type: {machine_type}')
 
     if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
         with ux_utils.print_exception_no_traceback():
@@ -359,9 +364,11 @@ def check_host_accelerator_compatibility(instance_type: str,
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'{acc_name}:{acc_count} cannot be attached to '
-                f'{instance_type}. The maximum number of vCPUs is {max_cpus}.')
+                f'{instance_type}. The maximum number of vCPUs is {max_cpus}. '
+                'Please refer to: https://cloud.google.com/compute/docs/gpus')
     if memory > max_memory:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'{acc_name}:{acc_count} cannot be attached to '
-                f'{instance_type}. The maximum CPU memory is {max_memory} GB.')
+                f'{instance_type}. The maximum CPU memory is {max_memory} GB. '
+                'Please refer to: https://cloud.google.com/compute/docs/gpus')
