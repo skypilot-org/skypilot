@@ -226,7 +226,7 @@ def test_multi_echo():
         'multi_echo',
         [
             f'python examples/multi_echo.py {name}',
-            'sleep 20',
+            'sleep 70',
         ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
