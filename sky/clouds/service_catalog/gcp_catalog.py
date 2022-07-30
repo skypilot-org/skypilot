@@ -334,23 +334,10 @@ def check_host_accelerator_compatibility(instance_type: str,
                 'Use N1 instance types instead. Please refer to: '
                 'https://cloud.google.com/compute/docs/machine-types#gpus')
 
-    # Memory/CPU ratios of N1 machines.
-    num_cpus = int(instance_type.split('-')[2])
-    machine_type = instance_type.split('-')[1]
-    if machine_type == 'standard':
-        memory = 3.75 * num_cpus
-    elif machine_type == 'highmem':
-        memory = 6.5 * num_cpus
-    elif machine_type == 'highcpu':
-        memory = 0.9 * num_cpus
-    else:
-        raise ValueError(f'Unknown machine type: {machine_type}')
-
+    # Check maximum vCPUs and memory.
     if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'{acc_name} is not supported by GCP.')
-
-    # Check available vCPUs and memory.
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
     if acc_name == 'K80' and acc_count == 8:
         if zone in ['asia-east1-a', 'us-east1-d']:
@@ -359,6 +346,11 @@ def check_host_accelerator_compatibility(instance_type: str,
         if zone in ['us-east1-c', 'europe-west1-d', 'europe-west1-b']:
             max_cpus = 64
             max_memory = 208
+
+    # vCPU counts and memory sizes of N1 machines.
+    num_cpus = int(instance_type.split('-')[2])
+    df = _df[_df['InstanceType'] == instance_type]
+    memory = df['MemoryGiB'].iloc[0]
 
     if num_cpus > max_cpus:
         with ux_utils.print_exception_no_traceback():
