@@ -786,8 +786,8 @@ class _DocumentedCodeCommand(click.Command):
         ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
         return super().get_help(ctx)
 
-
 @click.group(cls=_NaturalOrderGroup)
+@click.version_option(package_name='skypilot')
 def cli():
     pass
 

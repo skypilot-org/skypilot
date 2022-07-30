@@ -14,6 +14,7 @@ in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
 import io
 import os
 import platform
+import re
 import warnings
 
 import setuptools
@@ -30,6 +31,18 @@ if system == 'Darwin':
         warnings.warn(
             f'\'Detected MacOS version {mac_version}. MacOS version >=10.15 '
             'is required to install ray>=1.9\'')
+
+
+def find_version(*filepath):
+    # Extract version information from filepath
+    # Adapted from: https://github.com/ray-project/ray/blob/master/python/setup.py
+    with open(os.path.join(ROOT_DIR, *filepath)) as fp:
+        version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
+                                  fp.read(), re.M)
+        if version_match:
+            return version_match.group(1)
+        raise RuntimeError('Unable to find version string.')
+
 
 install_requires = [
     'wheel',
@@ -85,7 +98,7 @@ setuptools.setup(
     # ever), you must grep for '.whl' and change all corresponding wheel paths
     # (templates/*.j2 and wheel_utils.py).
     name='skypilot',
-    version='0.1.0',
+    version=find_version('sky', '__init__.py'),
     packages=setuptools.find_packages(),
     author='SkyPilot Team',
     license='Apache 2.0',
