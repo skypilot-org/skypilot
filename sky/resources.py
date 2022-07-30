@@ -232,7 +232,6 @@ class Resources:
                         'Missing runtime_version in accelerator_args, using'
                         f' default ({accelerator_args["runtime_version"]})')
 
-
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
 
@@ -371,7 +370,7 @@ class Resources:
                 if not self._cloud.accelerator_in_region_or_zone(
                         acc, self.region, self.zone):
                     error_str = (f'Accelerator "{acc}" is not available in '
-                                    '"{}" region/zone.')
+                                 '"{}" region/zone.')
                     if self.zone:
                         error_str = error_str.format(self.zone)
                     else:

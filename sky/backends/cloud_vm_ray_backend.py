@@ -700,11 +700,10 @@ class RetryingVmProvisioner(object):
                             'has been changed from '
                             f'{prev_resources.region} to {region}.')
                     if zones != prev_resources.zones:
-                        raise ValueError(
-                            f'Zones mismatch. The zones in '
-                            f'{handle.cluster_yaml} '
-                            'have been changed from '
-                            f'{prev_resources.zones} to {zones}.')
+                        raise ValueError(f'Zones mismatch. The zones in '
+                                         f'{handle.cluster_yaml} '
+                                         'have been changed from '
+                                         f'{prev_resources.zones} to {zones}.')
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass

@@ -284,7 +284,9 @@ class Azure(clouds.Cloud):
     def region_exists(self, region: str) -> bool:
         return service_catalog.region_exists(region, 'azure')
 
-    def accelerator_in_region_or_zone(self, accelerator: str, region: Optional[str] = None,
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, region, zone, 'azure')

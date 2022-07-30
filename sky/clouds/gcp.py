@@ -328,7 +328,9 @@ class GCP(clouds.Cloud):
     def zone_in_region(self, region: str, zone: str) -> bool:
         return service_catalog.zone_in_region(region, zone, 'gcp')
 
-    def accelerator_in_region_or_zone(self, accelerator: str, region: Optional[str] = None,
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, region, zone, 'gcp')

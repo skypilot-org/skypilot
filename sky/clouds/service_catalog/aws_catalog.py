@@ -27,7 +27,8 @@ def zone_in_region(region: str, zone: str) -> bool:
     return common.zone_in_region_impl(_df, region, zone)
 
 
-def accelerator_in_region_or_zone(acc_name: str, region: Optional[str] = None,
+def accelerator_in_region_or_zone(acc_name: str,
+                                  region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
     return common.accelerator_in_region_or_zone_impl(_df, acc_name, region,
                                                      zone)
