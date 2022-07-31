@@ -1104,7 +1104,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         return set(ray_launch_hashes)
     with subpress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    # Adopted from https://github.com/ray-project/ray/blob/e4ce38d001dbbe09cd21c497fedd03d692b2be3e/python/ray/autoscaler/_private/node_launcher.py#L56-L64
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']
