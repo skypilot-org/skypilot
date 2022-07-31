@@ -46,6 +46,9 @@ def patch() -> None:
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
 
+    from ray._private import log_monitor
+    _run_patch(log_monitor.__file__, _to_absolute('log_monitor.py.patch'))
+
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
