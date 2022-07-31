@@ -31,6 +31,8 @@ def _run_patch(target_file, patch_file):
     orig_file = os.path.abspath(
         f'{target_file}-v{constants.SKY_REMOTE_RAY_VERSION}.orig')
     script = f"""\
+    which patch >/dev/null 2>&1 || sudo yum install -y patch || true
+    which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
     if [ ! -f {orig_file} ]; then
         echo Create backup file {orig_file}
         cp {target_file} {orig_file}
