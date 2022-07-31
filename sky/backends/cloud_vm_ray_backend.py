@@ -1628,13 +1628,12 @@ class CloudVmRayBackend(backends.Backend):
                 # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
                 # 2. On next `sky start`, it gets reset to FAILED.
                 cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-                returncode, stdout, stderr = self.run_on_head(handle,
-                                                         cmd,
-                                                         require_outputs=True)
+                returncode, stdout, stderr = self.run_on_head(
+                    handle, cmd, require_outputs=True)
                 subprocess_utils.handle_returncode(
                     returncode, cmd,
                     'Failed to set previously in-progress jobs to FAILED',
-                    stdout+stderr)
+                    stdout + stderr)
 
             with timeline.Event('backend.provision.post_process'):
                 global_user_state.add_or_update_cluster(cluster_name,
