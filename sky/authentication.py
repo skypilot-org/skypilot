@@ -167,8 +167,8 @@ def _wait_for_compute_global_operation(project_name, operation_name, compute):
 # Snippets of code inspired from
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
-# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to avoid
-# duplicated codes.
+# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
+# avoid duplicated codes.
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
