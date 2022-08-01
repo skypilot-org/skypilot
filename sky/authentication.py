@@ -20,6 +20,8 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
+logger = sky_logging.init_logger(__name__)
+
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
 # using Cloud Client Libraries for Python, where possible, for new code
@@ -145,9 +147,35 @@ def setup_aws_authentication(config):
     return config
 
 
+# Reference:
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
+def _wait_for_compute_global_operation(project_name, operation_name, compute):
+    """Poll for global compute operation until finished."""
+    logger.debug('wait_for_compute_global_operation: '
+                 'Waiting for operation {} to finish...'.format(operation_name))
+    max_polls = 10
+    poll_interval = 5
+    for _ in range(max_polls):
+        result = compute.globalOperations().get(
+            project=project_name,
+            operation=operation_name,
+        ).execute()
+        if 'error' in result:
+            raise Exception(result['error'])
+
+        if result['status'] == 'DONE':
+            logger.debug('wait_for_compute_global_operation: '
+                         'Operation done.')
+            break
+        time.sleep(poll_interval)
+    return result
+
+
 # Snippets of code inspired from
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
+# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
+# avoid duplicated codes.
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
@@ -255,12 +283,15 @@ def setup_gcp_authentication(config):
             metadata.append({'key': 'ssh-keys', 'value': new_ssh_key})
         else:
             ssh_key_index = ssh_key_index[0]
-            ssh_dict = metadata[ssh_key_index]
-            ssh_dict['value'] += '\n' + new_ssh_key
-            compute.projects().setCommonInstanceMetadata(
-                project=project['name'],
-                body=project['commonInstanceMetadata']).execute()
-            time.sleep(5)
+            metadata[ssh_key_index]['value'] += '\n' + new_ssh_key
+
+        project['commonInstanceMetadata']['items'] = metadata
+
+        operation = compute.projects().setCommonInstanceMetadata(
+            project=project['name'],
+            body=project['commonInstanceMetadata']).execute()
+        _wait_for_compute_global_operation(project['name'], operation['name'],
+                                           compute)
     return config
 
 

@@ -469,7 +469,11 @@ class RetryingVmProvisioner(object):
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
-            exception_dict = ast.literal_eval(exception_str)
+            try:
+                exception_dict = ast.literal_eval(exception_str)
+            except Exception as e:
+                raise RuntimeError(
+                    f'Failed to parse exception: {exception_str}') from e
             # TPU VM returns a different structured response.
             if 'errors' not in exception_dict:
                 exception_dict = {'errors': [exception_dict]}
