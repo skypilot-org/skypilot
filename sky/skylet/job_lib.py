@@ -20,7 +20,7 @@ from sky.skylet.utils import log_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _import_ray_job_submission_client():
+def _create_ray_job_submission_client():
     """Import the ray job submission client."""
     try:
         import ray  # pylint: disable=import-outside-toplevel
@@ -29,11 +29,11 @@ def _import_ray_job_submission_client():
         raise
     try:
         from ray import job_submission  # pylint: disable=import-outside-toplevel
-        return job_submission
     except ImportError:
         logger.error(
             f'Failed to import job_submission with ray=={ray.__version__}')
         raise
+    return job_submission.JobSubmissionClient(address='http://127.0.0.1:8265')
 
 
 class JobStatus(enum.Enum):
@@ -253,9 +253,7 @@ def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
     # TODO: if too slow, directly query against redis.
     ray_job_ids = [make_ray_job_id(job_id, job_owner) for job_id in job_ids]
 
-    job_submission = _import_ray_job_submission_client()
-    job_client = job_submission.JobSubmissionClient(
-        address='http://127.0.0.1:8265')
+    job_client = _create_ray_job_submission_client()
 
     def get_job_status(job_id) -> Optional[str]:
         try:
@@ -395,9 +393,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     jobs = [make_ray_job_id(job['job_id'], job_owner) for job in job_records]
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
-    job_submission = _import_ray_job_submission_client()
-    job_client = job_submission.JobSubmissionClient(
-        address='http://127.0.0.1:8265')
+    job_client = _create_ray_job_submission_client()
 
     def stop_job(job: str):
         try:

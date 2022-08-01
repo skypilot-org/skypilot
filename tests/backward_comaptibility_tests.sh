@@ -4,7 +4,7 @@ set -ex
 CLUSTER_NAME="test-back-compat"
 . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
 
-git clone git@github.com:sky-proj/sky.git sky-master || true
+git clone https://github.com/skypilot-org/skypilot.git sky-master || true
 
 
 # Create environment for compatibility tests
