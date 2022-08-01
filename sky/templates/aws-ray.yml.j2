@@ -92,7 +92,7 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
-    sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf;
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
