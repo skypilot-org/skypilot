@@ -321,7 +321,9 @@ def _follow_job_logs(file,
 
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
-    status = job_lib.get_status(job_id)
+    # No need to lock the status here, as the while loop can handle
+    # the older status.
+    status = job_lib.get_status_no_lock(job_id)
     start_streaming = False
     wait_last_logs = True
     while True:
@@ -355,7 +357,7 @@ def _follow_job_logs(file,
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
-            status = job_lib.get_status(job_id)
+            status = job_lib.get_status_no_lock(job_id)
 
 
 def tail_logs(job_owner: str,
@@ -378,7 +380,9 @@ def tail_logs(job_owner: str,
     log_path = os.path.expanduser(log_path)
 
     job_lib.update_job_status(job_owner, [job_id], need_output=False)
-    status = job_lib.get_status(job_id)
+    # No need to lock the status here, as the while loop can handle the
+    # older status.
+    status = job_lib.get_status_no_lock(job_id)
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -401,7 +405,7 @@ def tail_logs(job_owner: str,
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         job_lib.update_job_status(job_owner, [job_id], need_output=False)
-        status = job_lib.get_status(job_id)
+        status = job_lib.get_status_no_lock(job_id)
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         # Not using `ray job logs` because it will put progress bar in
