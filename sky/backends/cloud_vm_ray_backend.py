@@ -1096,10 +1096,10 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
                 return True
-            
-            if ('ConnectionResetError: [Errno 54] Connection reset by peer' in stderr):
-                logger.info(
-                    'Retrying due to Connection reset by peer.')
+
+            if ('ConnectionResetError: [Errno 54] Connection reset by peer'
+                    in stderr):
+                logger.info('Retrying due to Connection reset by peer.')
                 return True
             return False
 
