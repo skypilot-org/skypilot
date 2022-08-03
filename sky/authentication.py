@@ -221,10 +221,10 @@ def setup_gcp_authentication(config):
                         f'but the file {config_path} does not contain the '
                         'account information.')
         config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
-        
+
         # Generating ssh key if it does not exist
         get_or_generate_keys(private_key_path, public_key_path)
-        
+
         # Add ssh key to GCP with oslogin
         subprocess.run(
             'gcloud compute os-login ssh-keys add '
