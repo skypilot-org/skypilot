@@ -24,12 +24,21 @@ SKY_LOGS_DIRECTORY = '~/sky_logs'
 class JobStatus(enum.Enum):
     """Job status"""
     # 3 in-flux states: each can transition to any state below it.
+    # The `job_id` is fetched, but the generated ray program is not
+    # started yet.
     INIT = 'INIT'
+    # The job is waiting for the required resources. (`ray job status`
+    # shows RUNNING as the generated ray program is started, but blocked
+    # by the placement constraints.)
     PENDING = 'PENDING'
+    # The job is running.
     RUNNING = 'RUNNING'
     # 3 terminal states below: once reached, they do not transition.
+    # The job finished successfully.
     SUCCEEDED = 'SUCCEEDED'
+    # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
+    # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
 
     def is_terminal(self):
@@ -231,7 +240,10 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 
 def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
-    """Return the status of the jobs based on the `ray job status` command.
+    """Return the statuses of the jobs.
+
+    This function returns the job status that matches the meaning of each
+    status in the comment of `class JobStatus`.
 
     Though we update job status actively in ray program and job cancelling,
     we still need this to handle staleness problem, caused by instance
@@ -280,8 +292,12 @@ def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
-            # To avoid race condition, where the original status has already
+            # Taking max of the status is necessary because:
+            # 1. It avoids race condition, where the original status has already
             # been set to later state by the job. We skip the update.
+            # 2. We map the `ray job status` from RUNNING to PENDING, as the
+            # actual status should be decided by the job status in the database
+            # (set by the generated ray program actively).
             status = max(status, original_status)
         job_status_list.append(status)
     return job_status_list
@@ -312,9 +328,9 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
         submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
-    job_status = query_job_status(job_owner, running_job_ids)
+    job_statuses = query_job_status(job_owner, running_job_ids)
     # Process the results
-    for job, status in zip(running_jobs, job_status):
+    for job, status in zip(running_jobs, job_statuses):
         logger.info(f'Updating job {job["job_id"]} status to {status}')
         set_status(job['job_id'], status)
 
