@@ -41,8 +41,15 @@ class JobStatus(enum.Enum):
 
 
 _RAY_TO_JOB_STATUS_MAP = {
-    'PENDING': JobStatus.PENDING,
-    'RUNNING': JobStatus.RUNNING,
+    # These are intentionally set to one status before, because:
+    # 1. when the ray status indicates the job is PENDING the generated
+    # python program should be not started yet, i.e. the job should be INIT.
+    # 2. when the ray status indicates the job is RUNNING the resources
+    # may not be allocated yet, i.e. the job should be PENDING. 
+    # Note: We need to compare the status with the sky cached job status
+    # to determine if the job is actually running.
+    'PENDING': JobStatus.INIT,
+    'RUNNING': JobStatus.PENDING,
     'succeeded': JobStatus.SUCCEEDED,
     'failed': JobStatus.FAILED,
     'stopped': JobStatus.CANCELLED,
