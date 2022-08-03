@@ -137,8 +137,6 @@ def add_job(job_name: str, username: str, run_timestamp: str,
 
 
 def set_status(job_id: int, status: JobStatus) -> None:
-    assert status != JobStatus.RUNNING, (
-        'Please use set_job_started() to set job status to RUNNING')
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
