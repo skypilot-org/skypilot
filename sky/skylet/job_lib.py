@@ -22,7 +22,13 @@ logger = sky_logging.init_logger(__name__)
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
-_JOB_STATUS_LOCK = os.path.expanduser('~/.sky/.sky_job_lock_for_{}.lock')
+_JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
+
+
+def _get_lock_path(job_id: int) -> str:
+    lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
+    os.path.mkdir(os.path.dirname(lock_path), exist_ok=True)
+    return lock_path
 
 
 class JobStatus(enum.Enum):
@@ -140,9 +146,9 @@ def add_job(job_name: str, username: str, run_timestamp: str,
 
 def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
     """Setting the status of the job in the database.
-    
+
     Call the `set_job_stated` at the first time setting the job status
-    to RUNNING so as to update the start_at field. 
+    to RUNNING so as to update the start_at field.
     """
     if status.is_terminal():
         end_at = time.time()
@@ -162,14 +168,14 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
 def set_status(job_id: int, status: JobStatus) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+    with filelock.FileLock(_get_lock_path(job_id)):
         _set_status_no_lock(job_id, status)
 
 
 def set_job_started(job_id: int) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+    with filelock.FileLock(_get_lock_path(job_id)):
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
             'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
@@ -195,7 +201,7 @@ def get_status_no_lock(job_id: int) -> JobStatus:
 def get_status(job_id: int) -> Optional[JobStatus]:
     # TODO(mraheja): remove pylint disabling when filelock version updated.
     # pylint: disable=abstract-class-instantiated
-    with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+    with filelock.FileLock(_get_lock_path(job_id)):
         return get_status_no_lock(job_id)
 
 
