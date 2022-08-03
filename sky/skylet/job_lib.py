@@ -47,7 +47,7 @@ class JobStatus(enum.Enum):
 
     @classmethod
     def nonterminal_statuses(cls) -> List['JobStatus']:
-        return (cls.INIT, cls.PENDING, cls.RUNNING)
+        return [cls.INIT, cls.PENDING, cls.RUNNING]
 
     def is_terminal(self):
         return self not in self.nonterminal_statuses()
@@ -62,9 +62,11 @@ _RAY_TO_JOB_STATUS_MAP = {
     # python program should not be started yet, i.e. the job should be INIT.
     # 2. when the ray status indicates the job is RUNNING the resources
     # may not be allocated yet, i.e. the job should be PENDING.
-    # Note: We need to check the job status in our database for job, which
-    # will be only set to RUNNING by the generated ray program, to
-    # determine if the job is actually running.
+    # For case 2, update_job_status() would compare this mapped PENDING to
+    # the status in our jobs DB and take the max. This is because the job's
+    # generated ray program is the only place that can determine a job has
+    # reserved resources and actually started running: it will set the
+    # status in the DB to RUNNING.
     'PENDING': JobStatus.INIT,
     'RUNNING': JobStatus.PENDING,
     'succeeded': JobStatus.SUCCEEDED,
@@ -137,6 +139,11 @@ def add_job(job_name: str, username: str, run_timestamp: str,
 
 
 def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
+    """Setting the status of the job in the database.
+    
+    Call the `set_job_stated` at the first time setting the job status
+    to RUNNING so as to update the start_at field. 
+    """
     if status.is_terminal():
         end_at = time.time()
         # status does not need to be set if the end_at is not null, since
@@ -170,6 +177,13 @@ def set_job_started(job_id: int) -> None:
 
 
 def get_status_no_lock(job_id: int) -> JobStatus:
+    """Get the status of the job with the given id.
+
+    This function can return a stale status if there is a concurrent update.
+    Make sure the caller will not be affected by the stale status, e.g. getting
+    the status in a while loop as in `log_lib._follow_job_logs`. Otherwise, use
+    `get_status`.
+    """
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (status,) in rows:
@@ -263,9 +277,12 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 def update_job_status(job_owner: str,
                       job_ids: List[int],
-                      need_output: bool = True) -> List[JobStatus]:
-    """Updates the "true" job statuses from our perspective in the database,
-    i.e., with the semantics documented in the comments of `class JobStatus`.
+                      silent: bool = False) -> List[JobStatus]:
+    """Updates and returns the true job statuses that match our semantics
+    of `JobStatus`.
+
+    "True" statuses: this function queries `ray job status` and processes
+    those results to match our semantics.
 
     This function queries `ray job status` and processes those results to
     match our semantics.
@@ -302,6 +319,7 @@ def update_job_status(job_owner: str,
     assert len(results) == len(job_ids), (results, job_ids)
 
     # Process the results
+    statuses = []
     for job_id, res in zip(job_ids, results):
         # Replace the color codes in the output
         res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
@@ -311,6 +329,7 @@ def update_job_status(job_owner: str,
             # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
                 original_status = get_status_no_lock(job_id)
+                status = original_status
                 if not original_status.is_terminal():
                     # The job may be stale, when the instance is restarted (the
                     # ray redis is volatile). We need to reset the status of the
@@ -318,8 +337,6 @@ def update_job_status(job_owner: str,
                     # PENDING.
                     status = JobStatus.FAILED
                     _set_status_no_lock(job_id, status)
-                    if need_output:
-                        logger.info(f'Updated job {job_id} status to {status}')
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
@@ -342,8 +359,10 @@ def update_job_status(job_owner: str,
                 # that value. So we take the max here to keep it at RUNNING.
                 status = max(status, original_status)
                 _set_status_no_lock(job_id, status)
-            if need_output:
-                logger.info(f'Updated job {job_id} status to {status}')
+        if not silent:
+            logger.info(f'Updated job {job_id} status to {status}')
+        statuses.append(status)
+    return statuses
 
 
 def fail_all_jobs_in_progress() -> None:

@@ -379,10 +379,7 @@ def tail_logs(job_owner: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    job_lib.update_job_status(job_owner, [job_id], need_output=False)
-    # No need to lock the status here, as the while loop can handle the
-    # older status.
-    status = job_lib.get_status_no_lock(job_id)
+    status = job_lib.update_job_status(job_owner, [job_id], silent=True)
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -404,8 +401,7 @@ def tail_logs(job_owner: str,
         print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        job_lib.update_job_status(job_owner, [job_id], need_output=False)
-        status = job_lib.get_status_no_lock(job_id)
+        status = job_lib.update_job_status(job_owner, [job_id], silent=True)
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         # Not using `ray job logs` because it will put progress bar in

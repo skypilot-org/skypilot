@@ -67,7 +67,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
-# The maximum retry count for fetching head IP address.
+# The maximum retry count for fetching IP address.
 _HEAD_IP_MAX_ATTEMPTS = 5
 _WORKER_IP_MAX_ATTEMPTS = 5
 
