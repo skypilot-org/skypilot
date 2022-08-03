@@ -315,12 +315,8 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     job_status = query_job_status(job_owner, running_job_ids)
     # Process the results
     for job, status in zip(running_jobs, job_status):
-        # Do not update the status if the ray job status is RUNNING,
-        # because it could be pending for resources instead. The
-        # RUNNING status will be set by our generated ray program.
-        if status != JobStatus.RUNNING:
-            logger.info(f'Updating job {job["job_id"]} status to {status}')
-            set_status(job['job_id'], status)
+        logger.info(f'Updating job {job["job_id"]} status to {status}')
+        set_status(job['job_id'], status)
 
 
 def is_cluster_idle() -> bool:
