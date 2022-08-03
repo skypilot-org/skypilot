@@ -333,7 +333,7 @@ def update_job_status(job_owner: str,
             # TODO(mraheja): remove pylint disabling when filelock version
             # updated
             # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+            with filelock.FileLock(_get_lock_path(job_id)):
                 original_status = get_status_no_lock(job_id)
                 status = original_status
                 if not original_status.is_terminal():
@@ -352,7 +352,7 @@ def update_job_status(job_owner: str,
             # TODO(mraheja): remove pylint disabling when filelock version
             # updated
             # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+            with filelock.FileLock(_get_lock_path(job_id)):
                 original_status = get_status_no_lock(job_id)
                 # Taking max of the status is necessary because:
                 # 1. It avoids race condition, where the original status has
