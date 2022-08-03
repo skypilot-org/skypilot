@@ -149,6 +149,7 @@ def test_region():
     )
     run_one_test(test)
 
+
 def test_stale_job():
     name = _get_cluster_name()
     test = Test(
@@ -165,6 +166,7 @@ def test_stale_job():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 # ---------- Check Sky's environment variables; workdir. ----------
 def test_env_check():
@@ -354,6 +356,7 @@ def test_gcp_start_stop():
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
+            f'sleep 20',
             f'sky start -y {name}',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.

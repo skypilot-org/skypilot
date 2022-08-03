@@ -973,9 +973,10 @@ def get_node_ips(cluster_yaml: str,
         while retry_cnt < worker_ip_max_attempts:
             retry_cnt += 1
             try:
-                proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
-                                            stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE)
+                proc = subprocess_utils.run(
+                    f'ray get-worker-ips {cluster_yaml}',
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE)
                 out = proc.stdout.decode()
             except subprocess.CalledProcessError as e:
                 raise exceptions.FetchIPError(
@@ -985,7 +986,7 @@ def get_node_ips(cluster_yaml: str,
         # Workaround: List of IPs are shown in Stderr
         cluster_name = os.path.basename(cluster_yaml).split('.')[0]
         if ((handle is not None and hasattr(handle, 'local_handle') and
-                handle.local_handle is not None) or
+             handle.local_handle is not None) or
                 onprem_utils.check_if_local_cloud(cluster_name)):
             out = proc.stderr.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)

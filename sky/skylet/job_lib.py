@@ -168,6 +168,7 @@ def set_job_started(job_id: int) -> None:
             'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
         _CONN.commit()
 
+
 def get_status_no_lock(job_id: int) -> JobStatus:
     rows = _CURSOR.execute('SELECT status FROM jobs WHERE job_id=(?)',
                            (job_id,))
@@ -178,9 +179,11 @@ def get_status_no_lock(job_id: int) -> JobStatus:
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
+    # TODO(mraheja): remove pylint disabling when filelock version updated.
+    # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
         return get_status_no_lock(job_id)
-    
+
 
 def get_latest_job_id() -> Optional[int]:
     rows = _CURSOR.execute(
@@ -303,12 +306,16 @@ def update_job_status(job_owner: str,
         # Replace the color codes in the output
         res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
         if res == 'not found':
+            # TODO(mraheja): remove pylint disabling when filelock version
+            # updated
+            # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
                 original_status = get_status_no_lock(job_id)
                 if not original_status.is_terminal():
-                    # The job may be stale, when the instance is restarted (the ray
-                    # redis is volatile). We need to reset the status of the task to
-                    # FAILED if its original status is RUNNING or PENDING.
+                    # The job may be stale, when the instance is restarted (the
+                    # ray redis is volatile). We need to reset the status of the
+                    # task to FAILED if its original status is RUNNING or
+                    # PENDING.
                     status = JobStatus.FAILED
                     _set_status_no_lock(job_id, status)
                     if need_output:
