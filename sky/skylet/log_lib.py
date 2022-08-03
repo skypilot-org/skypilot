@@ -344,8 +344,7 @@ def _follow_job_logs(file,
             # Auto-exit the log tailing, if the job has finished. Check
             # the job status before query again to avoid unfinished logs.
             if status not in [
-                    job_lib.JobStatus.INIT, job_lib.JobStatus.RUNNING,
-                    job_lib.JobStatus.PENDING
+                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
             ]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
@@ -378,7 +377,7 @@ def tail_logs(job_owner: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    status = job_lib.query_job_status(job_owner, [job_id])[0]
+    status = job_lib.get_status(job_id)
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -400,7 +399,7 @@ def tail_logs(job_owner: str,
         print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        status = job_lib.query_job_status(job_owner, [job_id])[0]
+        status = job_lib.get_status(job_id)
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         # Not using `ray job logs` because it will put progress bar in
