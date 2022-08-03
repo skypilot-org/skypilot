@@ -136,23 +136,27 @@ def add_job(job_name: str, username: str, run_timestamp: str,
     return job_id
 
 
+def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
+    if status.is_terminal():
+        end_at = time.time()
+        # status does not need to be set if the end_at is not null, since
+        # the job must be in a terminal state already.
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?), end_at=(?) '
+            'WHERE job_id=(?) AND end_at IS NULL',
+            (status.value, end_at, job_id))
+    else:
+        _CURSOR.execute(
+            'UPDATE jobs SET status=(?), end_at=NULL '
+            'WHERE job_id=(?)', (status.value, job_id))
+    _CONN.commit()
+
+
 def set_status(job_id: int, status: JobStatus) -> None:
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
-        if status.is_terminal():
-            end_at = time.time()
-            # status does not need to be set if the end_at is not null, since
-            # the job must be in a terminal state already.
-            _CURSOR.execute(
-                'UPDATE jobs SET status=(?), end_at=(?) '
-                'WHERE job_id=(?) AND end_at IS NULL',
-                (status.value, end_at, job_id))
-        else:
-            _CURSOR.execute(
-                'UPDATE jobs SET status=(?), end_at=NULL '
-                'WHERE job_id=(?)', (status.value, job_id))
-        _CONN.commit()
+        _set_status_no_lock(job_id, status)
 
 
 def set_job_started(job_id: int) -> None:
@@ -250,7 +254,9 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def update_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
+def update_job_status(job_owner: str,
+                      job_ids: List[int],
+                      need_output: bool = True) -> List[JobStatus]:
     """Updates the "true" job statuses from our perspective in the database,
     i.e., with the semantics documented in the comments of `class JobStatus`.
 
@@ -300,7 +306,8 @@ def update_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
                 # FAILED if its original status is RUNNING or PENDING.
                 status = JobStatus.FAILED
                 set_status(job_id, status)
-                logger.info(f'Updated job {job_id} status to {status}')
+                if need_output:
+                    logger.info(f'Updated job {job_id} status to {status}')
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
@@ -322,8 +329,9 @@ def update_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
                 # `original_status` (job status from our DB) would already have
                 # that value. So we take the max here to keep it at RUNNING.
                 status = max(status, original_status)
-                set_status(job_id, status)
-            logger.info(f'Updated job {job_id} status to {status}')
+                _set_status_no_lock(job_id, status)
+            if need_output:
+                logger.info(f'Updated job {job_id} status to {status}')
 
 
 def fail_all_jobs_in_progress() -> None:
