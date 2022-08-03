@@ -91,7 +91,7 @@ setup_commands:
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
     sudo dpkg --configure -a;
-    sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `goofys`;
   - pip3 uninstall skypilot -y &> /dev/null;
     pip3 install "$(echo {{sky_remote_path}}/skypilot-*.whl)[aws]";
     python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray files
