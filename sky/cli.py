@@ -1120,7 +1120,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         _show_job_queue_on_cluster(cluster, handle, backend, code)
 
     for local_cluster in local_clusters:
-        if local_cluster not in clusters:
+        if local_cluster not in clusters and len(clusters) > 1:
             click.secho(
                 f'Local cluster {local_cluster} is uninitialized;'
                 ' skipped.',
