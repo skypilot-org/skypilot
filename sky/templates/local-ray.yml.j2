@@ -26,8 +26,8 @@ file_mounts: {
 # List of shell commands to run to set up nodes.
 # (Ray Autoscaler Bug) `setup_commands` only runs on head, not on worker nodes.
 setup_commands:
-  # Ensures that regular user's python binary is the same as the admin's python binary by removing base env (or other `conda init` artifacts)
-  - (! conda >/dev/null 2>&1) || grep -qxF 'conda deactivate' ~/.bashrc || echo 'conda deactivate' >> ~/.bashrc
+  # Ensures that regular user's python binary is the same as the admin's python binary by deactivating base or other default envs.
+  - (! conda >/dev/null 2>&1) || grep -qxF 'conda deactivate' ~/.bashrc || (conda init && echo 'conda deactivate' >> ~/.bashrc && conda config --set auto_activate_base false)
   - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
   - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
