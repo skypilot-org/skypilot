@@ -27,7 +27,7 @@ _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 
 def _get_lock_path(job_id: int) -> str:
     lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
-    os.path.mkdir(os.path.dirname(lock_path), exist_ok=True)
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     return lock_path
 
 
