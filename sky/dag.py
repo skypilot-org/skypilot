@@ -1,33 +1,40 @@
 """DAGs: user applications to be run."""
 import pprint
+import threading
 
 
 class DagContext:
-    """A global stack of Dags.
+    """A process-global stack of Dags.
 
-    Currently, we only use one sky.Dag.
+    This class is thread-safe.
     """
+    # Protects all internal attributes and methods.
+    _lock = threading.Lock()
+
     _current_dag = None
     _previous_dags = []
 
     @classmethod
     def push_dag(cls, dag):
-        if cls._current_dag:
-            cls._previous_dags.append(cls._current_dag)
-        cls._current_dag = dag
+        with cls._lock:
+            if cls._current_dag is not None:
+                cls._previous_dags.append(cls._current_dag)
+            cls._current_dag = dag
 
     @classmethod
     def pop_dag(cls):
-        old_dag = cls._current_dag
-        if cls._previous_dags:
-            cls._current_dag = cls._previous_dags.pop()
-        else:
-            cls._current_dag = None
-        return old_dag
+        with cls._lock:
+            old_dag = cls._current_dag
+            if cls._previous_dags:
+                cls._current_dag = cls._previous_dags.pop()
+            else:
+                cls._current_dag = None
+            return old_dag
 
     @classmethod
     def get_current_dag(cls):
-        return cls._current_dag
+        with cls._lock:
+            return cls._current_dag
 
 
 class Dag:
