@@ -75,9 +75,11 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Make sure python3 & pip3 are available on this image.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
-  - pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
   # We set auto_activate_base to be false for pre-installed conda.
   # Refer to the issue link here: https://github.com/skypilot-org/skypilot/pull/1007
