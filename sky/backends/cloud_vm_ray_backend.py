@@ -69,6 +69,7 @@ _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching head IP address.
 _HEAD_IP_MAX_ATTEMPTS = 5
+_WORKER_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -1592,7 +1593,8 @@ class CloudVmRayBackend(backends.Backend):
                 ip_list = backend_utils.get_node_ips(
                     cluster_config_file,
                     config_dict['launched_nodes'],
-                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
