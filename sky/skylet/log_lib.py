@@ -377,6 +377,7 @@ def tail_logs(job_owner: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
+    job_lib.update_job_status(job_owner, [job_id])
     status = job_lib.get_status(job_id)
 
     # Wait for the log to be written. This is needed due to the `ray submit`
