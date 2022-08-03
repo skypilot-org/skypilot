@@ -223,7 +223,7 @@ def setup_gcp_authentication(config):
         config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
         
         # Generating ssh key if it does not exist
-        _, public_key = get_or_generate_keys(private_key_path, public_key_path)
+        get_or_generate_keys(private_key_path, public_key_path)
         
         # Add ssh key to GCP with oslogin
         subprocess.run(
