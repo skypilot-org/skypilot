@@ -344,7 +344,8 @@ def _follow_job_logs(file,
             # Auto-exit the log tailing, if the job has finished. Check
             # the job status before query again to avoid unfinished logs.
             if status not in [
-                    job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+                    job_lib.JobStatus.INIT, job_lib.JobStatus.RUNNING,
+                    job_lib.JobStatus.PENDING
             ]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
