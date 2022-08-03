@@ -388,7 +388,7 @@ def tail_logs(job_owner: str,
             job_lib.JobStatus.RUNNING,
     ]:
         retry_cnt += 1
-        if os.path.exists(log_path):
+        if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
             print(
@@ -399,6 +399,7 @@ def tail_logs(job_owner: str,
         print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
+        job_lib.update_job_status(job_owner, [job_id])
         status = job_lib.get_status(job_id)
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:

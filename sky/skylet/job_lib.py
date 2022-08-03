@@ -12,6 +12,8 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional
 
+import filelock
+
 from sky import sky_logging
 from sky.skylet.utils import db_utils
 from sky.skylet.utils import log_utils
@@ -20,15 +22,17 @@ logger = sky_logging.init_logger(__name__)
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
 
+_JOB_STATUS_LOCK = os.path.expanduser('~/.sky/.sky_job_lock_for_{}.lock')
+
 
 class JobStatus(enum.Enum):
     """Job status"""
     # 3 in-flux states: each can transition to any state below it.
-    # The `job_id` is fetched, but the generated ray program is not
-    # started yet.
+    # The `job_id` has been generated, but the generated ray program has
+    # not started yet.
     INIT = 'INIT'
     # The job is waiting for the required resources. (`ray job status`
-    # shows RUNNING as the generated ray program is started, but blocked
+    # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
     PENDING = 'PENDING'
     # The job is running.
@@ -41,9 +45,12 @@ class JobStatus(enum.Enum):
     # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
 
+    @classmethod
+    def nonterminal_statuses(cls) -> List['JobStatus']:
+        return (cls.INIT, cls.PENDING, cls.RUNNING)
+
     def is_terminal(self):
-        return self in (JobStatus.SUCCEEDED, JobStatus.FAILED,
-                        JobStatus.CANCELLED)
+        return self not in self.nonterminal_statuses()
 
     def __lt__(self, other):
         return list(JobStatus).index(self) < list(JobStatus).index(other)
@@ -55,8 +62,9 @@ _RAY_TO_JOB_STATUS_MAP = {
     # python program should not be started yet, i.e. the job should be INIT.
     # 2. when the ray status indicates the job is RUNNING the resources
     # may not be allocated yet, i.e. the job should be PENDING.
-    # Note: We need to compare the status with the job status in our
-    # database for job, to determine if the job is actually running.
+    # Note: We need to check the job status in our database for job, which
+    # will be only set to RUNNING by the generated ray program, to
+    # determine if the job is actually running.
     'PENDING': JobStatus.INIT,
     'RUNNING': JobStatus.PENDING,
     'succeeded': JobStatus.SUCCEEDED,
@@ -131,20 +139,32 @@ def add_job(job_name: str, username: str, run_timestamp: str,
 def set_status(job_id: int, status: JobStatus) -> None:
     assert status != JobStatus.RUNNING, (
         'Please use set_job_started() to set job status to RUNNING')
+    # TODO(mraheja): remove pylint disabling when filelock version updated
+    # pylint: disable=abstract-class-instantiated
+    with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+        if status.is_terminal():
+            end_at = time.time()
+            # status does not need to be set if the end_at is not null, since
+            # the job must be in a terminal state already.
+            _CURSOR.execute(
+                'UPDATE jobs SET status=(?), end_at=(?) '
+                'WHERE job_id=(?) AND end_at IS NULL',
+                (status.value, end_at, job_id))
+        else:
+            _CURSOR.execute(
+                'UPDATE jobs SET status=(?), end_at=NULL '
+                'WHERE job_id=(?)', (status.value, job_id))
+        _CONN.commit()
 
-    if status.is_terminal():
-        end_at = time.time()
-        # status does not need to be set if the end_at is not null, since the
-        # job must be in a terminal state already.
+
+def set_job_started(job_id: int) -> None:
+    # TODO(mraheja): remove pylint disabling when filelock version updated.
+    # pylint: disable=abstract-class-instantiated
+    with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
         _CURSOR.execute(
-            'UPDATE jobs SET status=(?), end_at=(?) '
-            'WHERE job_id=(?) AND end_at IS NULL',
-            (status.value, end_at, job_id))
-    else:
-        _CURSOR.execute(
-            'UPDATE jobs SET status=(?), end_at=NULL '
-            'WHERE job_id=(?)', (status.value, job_id))
-    _CONN.commit()
+            'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
+            'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
+        _CONN.commit()
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
@@ -169,13 +189,6 @@ def get_job_time(job_id: int, is_end: bool) -> Optional[int]:
                            (job_id,))
     for (timestamp,) in rows:
         return timestamp
-
-
-def set_job_started(job_id: int) -> None:
-    _CURSOR.execute(
-        'UPDATE jobs SET status=(?), start_at=(?), end_at=NULL '
-        'WHERE job_id=(?)', (JobStatus.RUNNING.value, time.time(), job_id))
-    _CONN.commit()
 
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
@@ -239,11 +252,12 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     return records
 
 
-def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
-    """Return the statuses of the jobs.
+def update_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
+    """Updates the "true" job statuses from our perspective in the database,
+    i.e., with the semantics documented in the comments of `class JobStatus`.
 
-    This function returns the job status that matches the meaning of each
-    status in the comment of `class JobStatus`.
+    This function queries `ray job status` and processes those results to
+    match our semantics.
 
     Though we update job status actively in ray program and job cancelling,
     we still need this to handle staleness problem, caused by instance
@@ -277,35 +291,46 @@ def query_job_status(job_owner: str, job_ids: List[int]) -> List[JobStatus]:
     assert len(results) == len(job_ids), (results, job_ids)
 
     # Process the results
-    job_status_list = []
     for job_id, res in zip(job_ids, results):
         # Replace the color codes in the output
         res = ANSI_ESCAPE.sub('', res.strip().rstrip('.'))
-        original_status = get_status(job_id)
         if res == 'not found':
-            # The job may be stale, when the instance is restarted (the ray
-            # redis is volatile). We need to reset the status of the task to
-            # FAILED if its original status is RUNNING or PENDING.
-            status = original_status
+            original_status = get_status(job_id)
             if not original_status.is_terminal():
+                # The job may be stale, when the instance is restarted (the ray
+                # redis is volatile). We need to reset the status of the task to
+                # FAILED if its original status is RUNNING or PENDING.
                 status = JobStatus.FAILED
+                set_status(job_id, status)
+                logger.info(f'Updated job {job_id} status to {status}')
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
-            # Taking max of the status is necessary because:
-            # 1. It avoids race condition, where the original status has already
-            # been set to later state by the job. We skip the update.
-            # 2. We map the `ray job status` from RUNNING to PENDING, as the
-            # actual status should be decided by the job status in the database
-            # (set by the generated ray program actively).
-            status = max(status, original_status)
-        job_status_list.append(status)
-    return job_status_list
+            # Per-job status lock is required because between the job status
+            # query and the job status update, the job status in the databse
+            # can be modified by the generated ray program.
+            # TODO(mraheja): remove pylint disabling when filelock version
+            # updated
+            # pylint: disable=abstract-class-instantiated
+            with filelock.FileLock(_JOB_STATUS_LOCK.format(job_id)):
+                original_status = get_status(job_id)
+                # Taking max of the status is necessary because:
+                # 1. It avoids race condition, where the original status has
+                # already been set to later state by the job. We skip the
+                # update.
+                # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
+                # `RUNNING` to our JobStatus.PENDING; if a job has already been
+                # set to JobStatus.RUNNING by the generated ray program,
+                # `original_status` (job status from our DB) would already have
+                # that value. So we take the max here to keep it at RUNNING.
+                status = max(status, original_status)
+                set_status(job_id, status)
+            logger.info(f'Updated job {job_id} status to {status}')
 
 
 def fail_all_jobs_in_progress() -> None:
     in_progress_status = [
-        JobStatus.INIT.value, JobStatus.PENDING.value, JobStatus.RUNNING.value
+        status.value for status in JobStatus.nonterminal_statuses()
     ]
     _CURSOR.execute(
         f"""\
@@ -322,17 +347,12 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # function, as the `ray job status job_id` does not exist due to the app
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
-    running_jobs = _get_jobs(
-        username=None,
-        status_list=[JobStatus.INIT, JobStatus.PENDING, JobStatus.RUNNING],
-        submitted_gap_sec=submitted_gap_sec)
+    running_jobs = _get_jobs(username=None,
+                             status_list=JobStatus.nonterminal_statuses(),
+                             submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in running_jobs]
 
-    job_statuses = query_job_status(job_owner, running_job_ids)
-    # Process the results
-    for job, status in zip(running_jobs, job_statuses):
-        logger.info(f'Updating job {job["job_id"]} status to {status}')
-        set_status(job['job_id'], status)
+    update_job_status(job_owner, running_job_ids)
 
 
 def is_cluster_idle() -> bool:
@@ -341,8 +361,7 @@ def is_cluster_idle() -> bool:
         """\
         SELECT COUNT(*) FROM jobs
         WHERE status IN (?, ?, ?)
-        """, (JobStatus.INIT.value, JobStatus.PENDING.value,
-              JobStatus.RUNNING.value))
+        """, [status.value for status in JobStatus.nonterminal_statuses()])
     for (count,) in rows:
         return count == 0
 
