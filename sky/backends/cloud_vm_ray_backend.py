@@ -699,11 +699,11 @@ class RetryingVmProvisioner(object):
                             f'{handle.cluster_yaml} '
                             'has been changed from '
                             f'{prev_resources.region} to {region}.')
-                    if zones != prev_resources.zones:
-                        raise ValueError(f'Zones mismatch. The zones in '
-                                         f'{handle.cluster_yaml} '
-                                         'have been changed from '
-                                         f'{prev_resources.zones} to {zones}.')
+                    if zones is not None and prev_resources.zone is not None:
+                        if prev_resources.zone not in zones:
+                            raise ValueError(f'Requested zones mismatch.')
+                        # Overwrite with the actual zone in the handle.
+                        zones = prev_resources.zone
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -1624,6 +1624,12 @@ class CloudVmRayBackend(backends.Backend):
                 handle.launched_nodes, handle.launched_resources)
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
+
+            # Add zone info into handle's launched_resources
+            get_zone_cmd = handle.launched_resources.cloud.get_zone_shell_cmd()
+            if get_zone_cmd is not None:
+                returncode, stdout, _ = self.run_on_head(handle, get_zone_cmd, require_outputs=True)
+                handle.launched_resources = handle.launched_resources.copy(zone=stdout.strip())
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.

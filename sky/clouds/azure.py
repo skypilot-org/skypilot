@@ -159,6 +159,10 @@ class Azure(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
 
+    @classmethod
+    def get_zone_shell_cmd(self) -> Optional[str]:
+        return None
+
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],

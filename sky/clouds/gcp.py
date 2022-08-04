@@ -117,6 +117,10 @@ class GCP(clouds.Cloud):
             for zone in region.zones:
                 yield (region, [zone])
 
+    @classmethod
+    def get_zone_shell_cmd(self) -> Optional[str]:
+        return 'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\''
+
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):

@@ -45,7 +45,7 @@ def show_status_table(show_all: bool = False, refresh: bool = False):
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
-        StatusColumn('REQUESTED_ZONE', _get_zone, show_by_default=False),
+        StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('DURATION', _get_duration, show_by_default=False),
         StatusColumn('AUTOSTOP', _get_autostop),

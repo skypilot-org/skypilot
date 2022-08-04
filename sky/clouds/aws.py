@@ -120,6 +120,10 @@ class AWS(clouds.Cloud):
         assert region_name in amis, region_name
         return amis[region_name]
 
+    @classmethod
+    def get_zone_shell_cmd(self) -> Optional[str]:
+        return 'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | python3 -c "import sys, json; print(json.load(sys.stdin)[\'availabilityZone\'])"'
+
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):

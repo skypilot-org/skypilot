@@ -95,6 +95,11 @@ class Cloud:
         """
         raise NotImplementedError
 
+    @classmethod
+    def get_zone_shell_cmd(self) -> Optional[str]:
+        """Returns the shell command to obtain the zone of instance."""
+        raise NotImplementedError
+
     #### Normal methods ####
 
     # TODO: incorporate region/zone into the API.
@@ -185,6 +190,14 @@ class Cloud:
 
     def region_exists(self, region: str) -> bool:
         """Returns whether the region is valid for this cloud."""
+        raise NotImplementedError
+
+    def zone_exists(self, zone: str) -> bool:
+        """Returns whether the zone is valid for this cloud."""
+        raise NotImplementedError
+
+    def zone_in_region(self, region: str, zone: str) -> bool:
+        """Returns whether the zone is valid in the region for this cloud."""
         raise NotImplementedError
 
     def __repr__(self):
