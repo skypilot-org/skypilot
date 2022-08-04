@@ -1627,14 +1627,20 @@ class CloudVmRayBackend(backends.Backend):
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.UP)
 
-            # Add zone info into handle's launched_resources
+            # Get actual zone info and save it into handle
             get_zone_cmd = handle.launched_resources.cloud.get_zone_shell_cmd()
             if get_zone_cmd is not None:
-                returncode, stdout, _ = self.run_on_head(handle,
-                                                         get_zone_cmd,
-                                                         require_outputs=True)
-                handle.launched_resources = handle.launched_resources.copy(
-                    zone=stdout.strip())
+                # Leave the zone field to None for multi-node cases
+                # if zone is not specified because head and worker nodes
+                # can be launched in different zones.
+                if (task.num_nodes > 1 and
+                        handle.launched_resources.zone is None):
+                    pass
+                else:
+                    returncode, stdout, _ = self.run_on_head(
+                        handle, get_zone_cmd, require_outputs=True)
+                    handle.launched_resources = handle.launched_resources.copy(
+                        zone=stdout.strip())
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.
