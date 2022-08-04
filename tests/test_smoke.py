@@ -79,6 +79,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
+            test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(e)
             # Kill the current process.
             proc.terminate()
@@ -254,6 +255,7 @@ def test_multi_echo():
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
