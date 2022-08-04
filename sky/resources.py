@@ -243,36 +243,15 @@ class Resources:
         if region is None:
             return
 
-        # Validate region.
-        if self._cloud is not None:
-            if not self._cloud.region_exists(region):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid region {region!r} '
-                                     f'for cloud {self.cloud}.')
-        else:
-            # If cloud not specified
-            valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
-            for cloud in enabled_clouds:
-                if cloud.region_exists(region):
-                    valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
-                if len(enabled_clouds) == 1:
-                    cloud_str = f'for cloud {enabled_clouds[0]}'
-                else:
-                    cloud_str = f'for any cloud among {enabled_clouds}'
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid region {region!r} '
-                                     f'{cloud_str}.')
-            if len(valid_clouds) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Ambiguous region {region!r}. '
-                        f'Please specify cloud explicitly among {valid_clouds}.'
-                    )
-            logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
-                         f'inferred from the region {region!r}.')
-            self._cloud = valid_clouds[0]
+        if self._cloud is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified together with region.')
+
+        if not self._cloud.region_exists(region):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid region {region!r} '
+                                 f'for cloud {self.cloud}.')
         self._region = region
 
     def _set_zone(self, zone: Optional[str]) -> None:

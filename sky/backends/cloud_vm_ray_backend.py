@@ -680,14 +680,14 @@ class RetryingVmProvisioner(object):
                 prev_resources = handle.launched_resources
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
-                    if cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
-                            sky.AWS()):
+                    if cloud.is_same_cloud(cloud.GCP()) or cloud.is_same_cloud(
+                            cloud.AWS()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
-                    elif cloud.is_same_cloud(sky.Azure()):
+                    elif cloud.is_same_cloud(cloud.Azure()):
                         region = config['provider']['location']
                         zones = None
-                    elif cloud.is_same_cloud(sky.Local()):
+                    elif cloud.is_same_cloud(cloud.Local()):
                         local_regions = clouds.Local.regions()
                         region = local_regions[0].name
                         zones = None
@@ -1405,12 +1405,12 @@ class CloudVmRayBackend(backends.Backend):
             config = common_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
-            if cloud.is_same_cloud(sky.Azure()):
+            if cloud.is_same_cloud(cloud.Azure()):
                 region = provider['location']
-            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
-                    sky.AWS()):
+            elif cloud.is_same_cloud(cloud.GCP()) or cloud.is_same_cloud(
+                    cloud.AWS()):
                 region = provider['region']
-            elif cloud.is_same_cloud(sky.Local()):
+            elif cloud.is_same_cloud(cloud.Local()):
                 # There is only 1 region for Local cluster, 'Local'.
                 local_regions = clouds.Local.regions()
                 region = local_regions[0].name
