@@ -5,11 +5,12 @@ import numpy as np
 import pandas as pd
 
 import sky
+from sky import clouds
 
 CLOUDS = {
-    'AWS': sky.AWS(),
-    'GCP': sky.GCP(),
-    'Azure': sky.Azure(),
+    'AWS': clouds.AWS(),
+    'GCP': clouds.GCP(),
+    'Azure': clouds.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
 GCP_DEFAULT_INSTANCE_TYPE = sky.GCP.get_default_instance_type()

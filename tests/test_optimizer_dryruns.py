@@ -106,18 +106,18 @@ def test_partial_tpu(monkeypatch):
 
 
 def test_partial_v100(monkeypatch):
-    _test_resources_launch(monkeypatch, sky.AWS(), accelerators='V100')
+    _test_resources_launch(monkeypatch, clouds.AWS(), accelerators='V100')
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           clouds.AWS(),
                            accelerators='V100',
                            use_spot=True)
-    _test_resources_launch(monkeypatch, sky.AWS(), accelerators={'V100': 8})
+    _test_resources_launch(monkeypatch, clouds.AWS(), accelerators={'V100': 8})
 
 
 def test_invalid_cloud_tpu(monkeypatch):
     with pytest.raises(AssertionError) as e:
         _test_resources_launch(monkeypatch,
-                               cloud=sky.AWS(),
+                               cloud=clouds.AWS(),
                                accelerators='tpu-v3-8')
     assert 'Cloud must be GCP' in str(e.value)
 
@@ -152,7 +152,7 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
     for instance, acc in bad_instance_and_accs:
         with pytest.raises(ValueError) as e:
             _test_resources_launch(monkeypatch,
-                                   sky.AWS(),
+                                   clouds.AWS(),
                                    instance_type=instance,
                                    accelerators=acc)
         assert 'Infeasible resource demands found' in str(e.value)
@@ -160,22 +160,22 @@ def test_instance_type_mistmatches_accelerators(monkeypatch):
 
 def test_instance_type_matches_accelerators(monkeypatch):
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           clouds.AWS(),
                            instance_type='p3.2xlarge',
                            accelerators='V100')
     _test_resources_launch(monkeypatch,
-                           sky.GCP(),
+                           clouds.GCP(),
                            instance_type='n1-standard-2',
                            accelerators='V100')
     # Partial use: Instance has 8 V100s, while the task needs 1 of them.
     _test_resources_launch(monkeypatch,
-                           sky.AWS(),
+                           clouds.AWS(),
                            instance_type='p3.16xlarge',
                            accelerators={'V100': 1})
 
 
 def test_invalid_instance_type(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+    for cloud in [clouds.AWS(), clouds.Azure(), clouds.GCP(), None]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, instance_type='invalid')
         assert 'Invalid instance type' in str(e.value)
@@ -184,27 +184,27 @@ def test_invalid_instance_type(monkeypatch):
 def test_infer_cloud_from_instance_type(monkeypatch):
     # AWS instances
     _test_resources(monkeypatch,
-                    cloud=sky.AWS(),
+                    cloud=clouds.AWS(),
                     instance_type='m5.12xlarge',
-                    expected_cloud=sky.AWS())
+                    expected_cloud=clouds.AWS())
     _test_resources(monkeypatch,
                     instance_type='p3.8xlarge',
-                    expected_cloud=sky.AWS())
+                    expected_cloud=clouds.AWS())
     _test_resources(monkeypatch,
                     instance_type='g4dn.2xlarge',
-                    expected_cloud=sky.AWS())
+                    expected_cloud=clouds.AWS())
     # GCP instances
     _test_resources(monkeypatch,
                     instance_type='n1-standard-96',
-                    expected_cloud=sky.GCP())
+                    expected_cloud=clouds.GCP())
     #Azure instances
     _test_resources(monkeypatch,
                     instance_type='Standard_NC12s_v3',
-                    expected_cloud=sky.Azure())
+                    expected_cloud=clouds.Azure())
 
 
 def test_invalid_region(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
+    for cloud in [clouds.AWS(), clouds.Azure(), clouds.GCP()]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
@@ -213,7 +213,7 @@ def test_invalid_region(monkeypatch):
 def test_invalid_image(monkeypatch):
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch,
-                        cloud=sky.AWS(),
+                        cloud=clouds.AWS(),
                         image_id='ami-0868a20f5a3bf9702')
     assert 'in a specific region' in str(e.value)
 
@@ -222,25 +222,27 @@ def test_invalid_image(monkeypatch):
     assert 'Cloud must be specified' in str(e.value)
 
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
+        _test_resources(monkeypatch,
+                        cloud=clouds.Azure(),
+                        image_id='some-image')
     assert 'only supported for AWS and GCP' in str(e.value)
 
 
 def test_valid_image(monkeypatch):
     _test_resources(monkeypatch,
-                    cloud=sky.AWS(),
+                    cloud=clouds.AWS(),
                     region='us-east-1',
                     image_id='ami-0868a20f5a3bf9702')
     _test_resources(
         monkeypatch,
-        cloud=sky.GCP(),
+        cloud=clouds.GCP(),
         region='us-central1',
         image_id=
         'projects/deeplearning-platform-release/global/images/family/common-cpu'
     )
     _test_resources(
         monkeypatch,
-        cloud=sky.GCP(),
+        cloud=clouds.GCP(),
         image_id=
         'projects/deeplearning-platform-release/global/images/family/common-cpu'
     )

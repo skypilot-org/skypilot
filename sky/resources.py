@@ -272,7 +272,7 @@ class Resources:
         if self._region is not None:
             if not self._cloud.zone_in_region(self._region, zone):
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Zone {zone!r} '
+                    raise ValueError(f'Invalid zone: {zone!r} '
                                      f'is not in region {self._region!r}.')
         self._zone = zone
 

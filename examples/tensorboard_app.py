@@ -1,6 +1,7 @@
 import subprocess
 
 import sky
+from sky import clouds
 
 # Start the instance.
 with sky.Dag() as dag:
@@ -19,7 +20,7 @@ with sky.Dag() as dag:
            cd models && pip install -e .)'
 
     task = sky.Task('setup', workdir=workdir, setup=setup)
-    task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
+    task.set_resources(sky.Resources(clouds.AWS(), accelerators={'V100': 1}))
 # `detach_run` will only detach the `run` command. The provision and `setup` are
 # still blocking.
 sky.launch(dag, cluster_name='tb', detach_run=True)

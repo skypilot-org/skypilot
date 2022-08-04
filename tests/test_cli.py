@@ -11,10 +11,10 @@ import sky.cli as cli
 
 def test_infer_gpunode_type():
     resources = [
-        sky.Resources(cloud=sky.AWS(), instance_type='p3.2xlarge'),
-        sky.Resources(cloud=sky.GCP(), accelerators='K80'),
+        sky.Resources(cloud=clouds.AWS(), instance_type='p3.2xlarge'),
+        sky.Resources(cloud=clouds.GCP(), accelerators='K80'),
         sky.Resources(accelerators={'V100': 8}),
-        sky.Resources(cloud=sky.Azure(), accelerators='A100'),
+        sky.Resources(cloud=clouds.Azure(), accelerators='A100'),
     ]
     for spec in resources:
         assert cli._infer_interactive_node_type(spec) == 'gpunode', spec
@@ -22,8 +22,8 @@ def test_infer_gpunode_type():
 
 def test_infer_cpunode_type():
     resources = [
-        sky.Resources(cloud=sky.AWS(), instance_type='m5.2xlarge'),
-        sky.Resources(cloud=sky.GCP()),
+        sky.Resources(cloud=clouds.AWS(), instance_type='m5.2xlarge'),
+        sky.Resources(cloud=clouds.GCP()),
         sky.Resources(),
     ]
     for spec in resources:
@@ -32,9 +32,9 @@ def test_infer_cpunode_type():
 
 def test_infer_tpunode_type():
     resources = [
-        sky.Resources(cloud=sky.GCP(), accelerators='tpu-v3-8'),
-        sky.Resources(cloud=sky.GCP(), accelerators='tpu-v2-32'),
-        sky.Resources(cloud=sky.GCP(),
+        sky.Resources(cloud=clouds.GCP(), accelerators='tpu-v3-8'),
+        sky.Resources(cloud=clouds.GCP(), accelerators='tpu-v2-32'),
+        sky.Resources(cloud=clouds.GCP(),
                       accelerators={'tpu-v2-128': 1},
                       accelerator_args={'tpu_name': 'tpu'}),
     ]
