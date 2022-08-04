@@ -145,11 +145,9 @@ def add_job(job_name: str, username: str, run_timestamp: str,
 
 
 def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
-    """Setting the status of the job in the database.
-
-    Call the `set_job_stated` at the first time setting the job status
-    to RUNNING so as to update the start_at field.
-    """
+    """Setting the status of the job in the database."""
+    assert status != JobStatus.RUNNING, (
+        'Please use set_job_started() to set job status to RUNNING')
     if status.is_terminal():
         end_at = time.time()
         # status does not need to be set if the end_at is not null, since
@@ -284,8 +282,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 def update_job_status(job_owner: str,
                       job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
-    """Updates and returns the true job statuses that match our semantics
-    of `JobStatus`.
+    """Updates and returns the job statuses matching our `JobStatus` semantics
 
     "True" statuses: this function queries `ray job status` and processes
     those results to match our semantics.
@@ -343,6 +340,8 @@ def update_job_status(job_owner: str,
                     # PENDING.
                     status = JobStatus.FAILED
                     _set_status_no_lock(job_id, status)
+                    if not silent:
+                        logger.info(f'Updated job {job_id} status to {status}')
         else:
             ray_status = res.rpartition(' ')[-1]
             status = _RAY_TO_JOB_STATUS_MAP[ray_status]
@@ -364,9 +363,10 @@ def update_job_status(job_owner: str,
                 # `original_status` (job status from our DB) would already have
                 # that value. So we take the max here to keep it at RUNNING.
                 status = max(status, original_status)
-                _set_status_no_lock(job_id, status)
-        if not silent:
-            logger.info(f'Updated job {job_id} status to {status}')
+                if status != original_status:  # Prevents redundant update.
+                    _set_status_no_lock(job_id, status)
+                    if not silent:
+                        logger.info(f'Updated job {job_id} status to {status}')
         statuses.append(status)
     return statuses
 
