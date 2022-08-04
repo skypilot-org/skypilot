@@ -1088,15 +1088,16 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     all_jobs = not skip_finished
-
     username = getpass.getuser()
     if all_users:
         username = None
     code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
 
+    show_local_clusters = False
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
+        show_local_clusters = True
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
@@ -1120,7 +1121,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         _show_job_queue_on_cluster(cluster, handle, backend, code)
 
     for local_cluster in local_clusters:
-        if local_cluster not in clusters:
+        if local_cluster not in clusters and show_local_clusters:
             click.secho(
                 f'Local cluster {local_cluster} is uninitialized;'
                 ' skipped.',
