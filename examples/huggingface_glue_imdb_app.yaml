@@ -9,6 +9,7 @@ resources:
 setup: |
   git clone https://github.com/huggingface/transformers/
   cd transformers
+  git checkout v4.20.1
   pip3 install .
   cd examples/pytorch/text-classification
   pip3 install -r requirements.txt
