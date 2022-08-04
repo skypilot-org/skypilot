@@ -2450,13 +2450,16 @@ def spot_launch(
             f'Launching managed spot job {name} from spot controller...',
             fg='yellow')
         click.echo('Launching spot controller...')
-        sky.launch(dag,
-                   stream_logs=True,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=spot_lib.
-                   SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   is_spot_controller_task=True)
+        sky.launch(
+            dag,
+            stream_logs=True,
+            cluster_name=controller_name,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=spot_lib.
+            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            is_spot_controller_task=True,
+            retry_until_up=True,
+        )
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)

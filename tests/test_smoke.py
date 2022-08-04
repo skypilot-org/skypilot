@@ -79,7 +79,10 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
+            test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(e)
+            # Kill the current process.
+            proc.terminate()
             proc.returncode = 1  # None if we don't set it.
             break
 
@@ -252,6 +255,7 @@ def test_multi_echo():
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -541,7 +545,7 @@ def test_spot_recovery():
         'managed-spot-recovery',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
-            'sleep 200',
+            'sleep 300',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -627,6 +631,7 @@ def test_custom_image():
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     run_one_test(test)
 

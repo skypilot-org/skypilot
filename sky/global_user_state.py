@@ -11,8 +11,6 @@ import json
 import os
 import pathlib
 import pickle
-import sqlite3
-import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional
@@ -31,52 +29,42 @@ _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
-class _SQLiteConn(threading.local):
-    """Thread-local connection to the sqlite3 database."""
+def create_table(cursor, conn):
+    # Table for Clusters
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS clusters (
+        name TEXT PRIMARY KEY,
+        launched_at INTEGER,
+        handle BLOB,
+        last_use TEXT,
+        status TEXT,
+        autostop INTEGER DEFAULT -1)""")
+    # Table for configs (e.g. enabled clouds)
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY, value TEXT)""")
+    # Table for Storage
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS storage (
+        name TEXT PRIMARY KEY,
+        launched_at INTEGER,
+        handle BLOB,
+        last_use TEXT,
+        status TEXT)""")
+    # For backward compatibility.
+    # TODO(zhwu): Remove this function after all users have migrated to
+    # the latest version of SkyPilot.
+    # Add autostop column to clusters table
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'autostop',
+                                 'INTEGER DEFAULT -1')
 
-    def __init__(self, db_path: str):
-        super().__init__()
-        self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
-        self.cursor = self.conn.cursor()
-        self._create_tables()
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
+                                 'TEXT DEFAULT "{}"')
 
-    def _create_tables(self):
-        # Table for Clusters
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS clusters (
-            name TEXT PRIMARY KEY,
-            launched_at INTEGER,
-            handle BLOB,
-            last_use TEXT,
-            status TEXT,
-            autostop INTEGER DEFAULT -1)""")
-        # Table for configs (e.g. enabled clouds)
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS config (
-            key TEXT PRIMARY KEY, value TEXT)""")
-        # Table for Storage
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS storage (
-            name TEXT PRIMARY KEY,
-            launched_at INTEGER,
-            handle BLOB,
-            last_use TEXT,
-            status TEXT)""")
-        # For backward compatibility.
-        # TODO(zhwu): Remove this function after all users have migrated to
-        # the latest version of SkyPilot.
-        # Add autostop column to clusters table
-        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
-                                     'autostop', 'INTEGER DEFAULT -1')
-
-        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
-                                     'metadata', 'TEXT DEFAULT "{}"')
-
-        self.conn.commit()
+    conn.commit()
 
 
-_DB = _SQLiteConn(_DB_PATH)
+_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 
 class ClusterStatus(enum.Enum):

@@ -1,7 +1,7 @@
 """Utils for sky databases."""
-import typing
-if typing.TYPE_CHECKING:
-    import sqlite3
+import threading
+import sqlite3
+from typing import Callable
 
 
 def add_column_to_table(
@@ -37,3 +37,14 @@ def rename_column(
                            f'RENAME COLUMN {old_name} to {new_name}')
             break
     conn.commit()
+
+
+class SQLiteConn(threading.local):
+    """Thread-local connection to the sqlite3 database."""
+
+    def __init__(self, db_path: str, create_table: Callable):
+        super().__init__()
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
+        self.cursor = self.conn.cursor()
+        create_table(self.cursor, self.conn)

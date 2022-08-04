@@ -37,6 +37,7 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -63,7 +64,6 @@ SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
@@ -623,7 +623,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # GCP only.
                 'gcp_project_id': gcp_project_id,
                 # Ray version.
-                'ray_version': SKY_REMOTE_RAY_VERSION,
+                'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
@@ -1113,7 +1113,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         return set(ray_launch_hashes)
     with subpress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']

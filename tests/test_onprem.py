@@ -277,7 +277,7 @@ class TestOnprem:
                 f'sky exec {name} -d -- "echo hi"',
                 f'sky cancel {name} 5',
                 f'sky logs {name} 1',
-                f'sky queue {name} | grep "^5\\b" | grep CANCELLED',
+                f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep "^5\\b" | grep CANCELLED',
             ],
             # Cleaning up artifacts created from the test.
             f'sky down -y {name}; rm -f ~/.sky/local/{name}.yml',
@@ -303,12 +303,12 @@ class TestOnprem:
                 f'sky exec {second_cluster_name} -d -- "sleep 300"',
                 f'sky cancel {first_cluster_name} 2',
                 'sleep 5',
-                f'sky queue {first_cluster_name} | grep "^2\\b" | grep CANCELLED',
+                f's=$(sky queue {first_cluster_name}); printf "$s"; echo; echo; printf "$s" | grep "^2\\b" | grep CANCELLED',
                 # User 1 should not cancel user 2's jobs.
-                f'sky queue {second_cluster_name} | grep "^2\\b" | grep -v CANCELLED',
+                f's=$(sky queue {second_cluster_name}); printf "$s"; echo; echo; printf "$s" | grep "^2\\b" | grep -v CANCELLED',
                 f'sky cancel {second_cluster_name} 2',
                 f'sleep 5',
-                f'sky queue {second_cluster_name} | grep "^2\\b" | grep CANCELLED',
+                f's=$(sky queue {second_cluster_name}); printf "$s"; echo; echo; printf "$s" | grep "^2\\b" | grep CANCELLED',
                 f'sky logs {first_cluster_name} 1',
                 f'sky logs {second_cluster_name} 1'
             ],
