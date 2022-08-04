@@ -66,8 +66,9 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
-# The maximum retry count for fetching head IP address.
+# The maximum retry count for fetching IP address.
 _HEAD_IP_MAX_ATTEMPTS = 5
+_WORKER_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -468,7 +469,11 @@ class RetryingVmProvisioner(object):
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
-            exception_dict = ast.literal_eval(exception_str)
+            try:
+                exception_dict = ast.literal_eval(exception_str)
+            except Exception as e:
+                raise RuntimeError(
+                    f'Failed to parse exception: {exception_str}') from e
             # TPU VM returns a different structured response.
             if 'errors' not in exception_dict:
                 exception_dict = {'errors': [exception_dict]}
@@ -1090,6 +1095,11 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
                 return True
+
+            if ('ConnectionResetError: [Errno 54] Connection reset by peer'
+                    in stderr):
+                logger.info('Retrying due to Connection reset by peer.')
+                return True
             return False
 
         retry_cnt = 0
@@ -1588,7 +1598,8 @@ class CloudVmRayBackend(backends.Backend):
                 ip_list = backend_utils.get_node_ips(
                     cluster_config_file,
                     config_dict['launched_nodes'],
-                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
