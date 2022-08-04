@@ -210,22 +210,6 @@ def test_invalid_region(monkeypatch):
         assert 'Invalid region' in str(e.value)
 
 
-def test_infer_cloud_from_region(monkeypatch):
-    # AWS regions
-    _test_resources(monkeypatch, region='us-east-1', expected_cloud=sky.AWS())
-    _test_resources(monkeypatch, region='us-west-2', expected_cloud=sky.AWS())
-    _test_resources(monkeypatch, region='us-west-1', expected_cloud=sky.AWS())
-    # GCP regions
-    _test_resources(monkeypatch, region='us-east1', expected_cloud=sky.GCP())
-    _test_resources(monkeypatch, region='us-west1', expected_cloud=sky.GCP())
-    #Azure regions
-    _test_resources(monkeypatch, region='westus', expected_cloud=sky.Azure())
-    _test_resources(monkeypatch,
-                    cloud=sky.Azure(),
-                    region='northcentralus',
-                    expected_cloud=sky.Azure())
-
-
 def test_invalid_image(monkeypatch):
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch,
