@@ -160,7 +160,7 @@ class Azure(clouds.Cloud):
             instance_type, clouds='azure')
 
     @classmethod
-    def get_zone_shell_cmd(self) -> Optional[str]:
+    def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
     def make_deploy_resources_variables(

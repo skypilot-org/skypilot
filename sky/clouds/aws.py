@@ -121,8 +121,12 @@ class AWS(clouds.Cloud):
         return amis[region_name]
 
     @classmethod
-    def get_zone_shell_cmd(self) -> Optional[str]:
-        return 'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | python3 -c "import sys, json; print(json.load(sys.stdin)[\'availabilityZone\'])"'
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        command_str = (
+            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            ' | python3 -c "import sys, json; '
+            'print(json.load(sys.stdin)[\'availabilityZone\'])"')
+        return command_str
 
     #### Normal methods ####
 

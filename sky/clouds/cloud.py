@@ -96,7 +96,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_zone_shell_cmd(self) -> Optional[str]:
+    def get_zone_shell_cmd(cls) -> Optional[str]:
         """Returns the shell command to obtain the zone of instance."""
         raise NotImplementedError
 

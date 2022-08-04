@@ -118,8 +118,11 @@ class GCP(clouds.Cloud):
                 yield (region, [zone])
 
     @classmethod
-    def get_zone_shell_cmd(self) -> Optional[str]:
-        return 'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\''
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        command_str = (
+            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # pylint: disable=line-too-long
+            ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')
+        return command_str
 
     #### Normal methods ####
 
