@@ -536,7 +536,7 @@ class JobLibCodeGen:
             f'{username!r}, '
             f'{run_timestamp!r}, '
             f'{resources_str!r})',
-            'print(job_id, flush=True)',
+            'print("Job ID: " + str(job_id), flush=True)',
         ]
         return cls._build(code)
 

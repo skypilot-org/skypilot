@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import tempfile
@@ -90,6 +91,8 @@ _TEARDOWN_PURGE_WARNING = (
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
 _MAX_RAY_UP_RETRY = 5
+
+_JOB_ID_REGEX = re.compile(r'^Job ID: ([0-9]+)$')
 
 
 def _get_cluster_config_template(cloud):
@@ -1914,7 +1917,7 @@ class CloudVmRayBackend(backends.Backend):
                                            'Failed to fetch job id.',
                                            job_id_str + stderr)
         try:
-            job_id = int(job_id_str)
+            job_id = _JOB_ID_REGEX.match(job_id_str).group(1)
         except ValueError as e:
             logger.error(stderr)
             raise ValueError(f'Failed to parse job id: {job_id_str}; '
