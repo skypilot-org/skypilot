@@ -3,45 +3,33 @@ import pprint
 import threading
 
 
-class DagContext:
-    """A process-global stack of Dags.
-
-    This class is thread-safe.
-    """
-    # Protects all internal attributes and methods.
-    _lock = threading.Lock()
-
+class DagContext(threading.local):
+    """A thread-local stack of Dags."""
     _current_dag = None
     _previous_dags = []
 
     @classmethod
     def push_dag(cls, dag):
-        with cls._lock:
-            if cls._current_dag is not None:
-                cls._previous_dags.append(cls._current_dag)
-            cls._current_dag = dag
+        if cls._current_dag is not None:
+            cls._previous_dags.append(cls._current_dag)
+        cls._current_dag = dag
 
     @classmethod
     def pop_dag(cls):
-        with cls._lock:
-            old_dag = cls._current_dag
-            if cls._previous_dags:
-                cls._current_dag = cls._previous_dags.pop()
-            else:
-                cls._current_dag = None
-            return old_dag
+        old_dag = cls._current_dag
+        if cls._previous_dags:
+            cls._current_dag = cls._previous_dags.pop()
+        else:
+            cls._current_dag = None
+        return old_dag
 
     @classmethod
     def get_current_dag(cls):
-        with cls._lock:
-            return cls._current_dag
+        return cls._current_dag
 
 
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks."""
-
-    _PREVIOUS_DAGS = []
-    _CURRENT_DAG = None
 
     def __init__(self):
         self.tasks = []
