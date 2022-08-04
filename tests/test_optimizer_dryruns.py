@@ -204,7 +204,7 @@ def test_infer_cloud_from_instance_type(monkeypatch):
 
 
 def test_invalid_region(monkeypatch):
-    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+    for cloud in [sky.AWS(), sky.Azure(), sky.GCP()]:
         with pytest.raises(ValueError) as e:
             _test_resources(monkeypatch, cloud, region='invalid')
         assert 'Invalid region' in str(e.value)
