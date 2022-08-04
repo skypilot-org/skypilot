@@ -5,9 +5,7 @@ This is a remote utility module that provides job queue functionality.
 import enum
 import os
 import pathlib
-import re
 import shlex
-import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
@@ -23,26 +21,50 @@ logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 
+
 def _get_lock_path(job_id: int) -> str:
     lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     return lock_path
 
-def _create_ray_job_submission_client():
-    """Import the ray job submission client."""
-    try:
-        import ray  # pylint: disable=import-outside-toplevel
-    except ImportError:
-        logger.error('Failed to import ray')
-        raise
-    try:
-        from ray import job_submission  # pylint: disable=import-outside-toplevel
-    except ImportError:
-        logger.error(
-            f'Failed to import job_submission with ray=={ray.__version__}')
-        raise
-    return job_submission.JobSubmissionClient(address='http://127.0.0.1:8265')
 
+class JobInfoLoc(enum.IntEnum):
+    """Job Info's Location in the DB record"""
+    JOB_ID = 0
+    JOB_NAME = 1
+    USERNAME = 2
+    SUBMITTED_AT = 3
+    STATUS = 4
+    RUN_TIMESTAMP = 5
+    START_AT = 6
+    END_AT = 7
+    RESOURCES = 8
+
+
+_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
+os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
+
+
+def create_table(cursor, conn):
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS jobs (
+        job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_name TEXT,
+        username TEXT,
+        submitted_at FLOAT,
+        status TEXT,
+        run_timestamp TEXT CANDIDATE KEY,
+        start_at FLOAT)""")
+
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
+    db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
+
+    conn.commit()
+
+
+_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
+_CURSOR = _DB.cursor
+_CONN = _DB.conn
 
 
 class JobStatus(enum.Enum):
@@ -94,42 +116,21 @@ _RAY_TO_JOB_STATUS_MAP = {
     'STOPPED': JobStatus.CANCELLED,
 }
 
-ANSI_ESCAPE = re.compile(r'(?:\x1B[@-_]|[\x80-\x9F])[0-?]*[ -/]*[@-~]')
 
-
-class JobInfoLoc(enum.IntEnum):
-    """Job Info's Location in the DB record"""
-    JOB_ID = 0
-    JOB_NAME = 1
-    USERNAME = 2
-    SUBMITTED_AT = 3
-    STATUS = 4
-    RUN_TIMESTAMP = 5
-    START_AT = 6
-    END_AT = 7
-    RESOURCES = 8
-
-
-_DB_PATH = os.path.expanduser('~/.sky/jobs.db')
-os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
-
-_CONN = sqlite3.connect(_DB_PATH)
-_CURSOR = _CONN.cursor()
-
-_CURSOR.execute("""\
-    CREATE TABLE IF NOT EXISTS jobs (
-    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_name TEXT,
-    username TEXT,
-    submitted_at FLOAT,
-    status TEXT,
-    run_timestamp TEXT CANDIDATE KEY,
-    start_at FLOAT)""")
-
-db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'end_at', 'FLOAT')
-db_utils.add_column_to_table(_CURSOR, _CONN, 'jobs', 'resources', 'TEXT')
-
-_CONN.commit()
+def _create_ray_job_submission_client():
+    """Import the ray job submission client."""
+    try:
+        import ray  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        logger.error('Failed to import ray')
+        raise
+    try:
+        from ray import job_submission  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        logger.error(
+            f'Failed to import job_submission with ray=={ray.__version__}')
+        raise
+    return job_submission.JobSubmissionClient(address='http://127.0.0.1:8265')
 
 
 def make_ray_job_id(sky_job_id: int, job_owner: str) -> str:
@@ -318,33 +319,25 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    def get_job_status(job_id) -> Optional[str]:
+    def get_job_status(job_id) -> Optional[JobStatus]:
         try:
             # The return value is a string, e.g. 'RUNNING', which conflicts
             # with the return type in ray code.
             ray_status = job_client.get_job_status(job_id)
+            return _RAY_TO_JOB_STATUS_MAP[ray_status]
         except RuntimeError as e:
             # If the job does not exist or if the request to the
             # job server fails.
             if 'does not exist' in str(e):
-                # TODO(mraheja): remove pylint disabling when filelock version
-                # updated
-                # pylint: disable=abstract-class-instantiated
-                with filelock.FileLock(_get_lock_path(job_id)):
-                    original_status = get_status_no_lock(job_id)
-                    status = original_status
-                    if not original_status.is_terminal():
-                        # The job may be stale, when the instance is restarted (the
-                        # ray redis is volatile). We need to reset the status of the
-                        # task to FAILED if its original status is RUNNING or
-                        # PENDING.
-                        status = JobStatus.FAILED
-                        _set_status_no_lock(job_id, status)
-                        if not silent:
-                            logger.info(f'Updated job {job_id} status to {status}')
-                return status
+                return None
             raise
-        status = _RAY_TO_JOB_STATUS_MAP[ray_status]
+
+    ray_statuses: List[JobStatus] = subprocess_utils.run_in_parallel(
+        get_job_status, ray_job_ids)
+    assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
+
+    statuses = []
+    for job_id, status in zip(job_ids, ray_statuses):
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
@@ -352,27 +345,36 @@ def update_job_status(job_owner: str,
         # updated
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job_id)):
-            original_status = get_status_no_lock(job_id)
-            # Taking max of the status is necessary because:
-            # 1. It avoids race condition, where the original status has
-            # already been set to later state by the job. We skip the
-            # update.
-            # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
-            # `RUNNING` to our JobStatus.PENDING; if a job has already been
-            # set to JobStatus.RUNNING by the generated ray program,
-            # `original_status` (job status from our DB) would already have
-            # that value. So we take the max here to keep it at RUNNING.
-            status = max(status, original_status)
-            if status != original_status:  # Prevents redundant update.
-                _set_status_no_lock(job_id, status)
-                if not silent:
-                    logger.info(f'Updated job {job_id} status to {status}')
-        return status
-
-    statuses: List[JobStatus] = subprocess_utils.run_in_parallel(get_job_status, ray_job_ids)
-    assert len(statuses) == len(job_ids), (statuses, job_ids)
+            if status is None:
+                original_status = get_status_no_lock(job_id)
+                status = original_status
+                if not original_status.is_terminal():
+                    # The job may be stale, when the instance is restarted
+                    # (the ray redis is volatile). We need to reset the
+                    # status of the task to FAILED if its original status
+                    # is RUNNING or PENDING.
+                    status = JobStatus.FAILED
+                    _set_status_no_lock(job_id, status)
+                    if not silent:
+                        logger.info(f'Updated job {job_id} status to {status}')
+            else:
+                original_status = get_status_no_lock(job_id)
+                # Taking max of the status is necessary because:
+                # 1. It avoids race condition, where the original status has
+                # already been set to later state by the job. We skip the
+                # update.
+                # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
+                # `RUNNING` to our JobStatus.PENDING; if a job has already been
+                # set to JobStatus.RUNNING by the generated ray program,
+                # `original_status` (job status from our DB) would already have
+                # that value. So we take the max here to keep it at RUNNING.
+                status = max(status, original_status)
+                if status != original_status:  # Prevents redundant update.
+                    _set_status_no_lock(job_id, status)
+                    if not silent:
+                        logger.info(f'Updated job {job_id} status to {status}')
+        statuses.append(status)
     return statuses
-    
 
 
 def fail_all_jobs_in_progress() -> None:
