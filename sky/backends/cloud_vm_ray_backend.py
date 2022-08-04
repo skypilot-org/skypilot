@@ -702,8 +702,10 @@ class RetryingVmProvisioner(object):
                             prev_resources.zone
                             in zones), (f'{prev_resources.zone} not found in '
                                         f'zones of {handle.cluster_yaml}.')
-                    # Overwrite with the actual zone in the handle.
-                    zones = prev_resources.zone
+                    # Overwrite with the zone in the handle because
+                    # the one in Ray YAML can be a list of requested zones.
+                    if prev_resources.zone is not None:
+                        zones = prev_resources.zone
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
