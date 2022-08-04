@@ -210,6 +210,31 @@ def test_invalid_region(monkeypatch):
         assert 'Invalid region' in str(e.value)
 
 
+def test_invalid_zone(monkeypatch):
+    for cloud in [clouds.AWS(), clouds.GCP()]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(monkeypatch, cloud, zone='invalid')
+        assert 'Invalid zone' in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch, clouds.Azure(), zone='invalid')
+    assert 'Azure does not support zones.' in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch,
+                        clouds.AWS(),
+                        region='us-east-1',
+                        zone='us-east-2a')
+    assert 'Invalid zone' in str(e.value)
+
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch,
+                        clouds.GCP(),
+                        region='us-west2',
+                        zone='us-west1-a')
+    assert 'Invalid zone' in str(e.value)
+
+
 def test_invalid_image(monkeypatch):
     with pytest.raises(ValueError) as e:
         _test_resources(monkeypatch,
