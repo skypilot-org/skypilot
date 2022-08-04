@@ -162,7 +162,7 @@ def test_zone():
             f'sky launch -y -c {name} examples/zone_test.yaml',
             f'sky exec {name} examples/zone_test.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1-c', # Ensure the zone is correct.
+            f'sky status --all | grep {name} | grep us-central1-c',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )
