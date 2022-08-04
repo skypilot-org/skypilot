@@ -969,9 +969,9 @@ def get_node_ips(cluster_yaml: str,
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
     if expected_num_nodes > 1:
-        retry_cnt = 0
-        while retry_cnt < worker_ip_max_attempts:
-            retry_cnt += 1
+        backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
+
+        for retry_cnt in range(worker_ip_max_attempts):
             try:
                 proc = subprocess_utils.run(
                     f'ray get-worker-ips {cluster_yaml}',
@@ -979,8 +979,12 @@ def get_node_ips(cluster_yaml: str,
                     stderr=subprocess.PIPE)
                 out = proc.stdout.decode()
             except subprocess.CalledProcessError as e:
-                raise exceptions.FetchIPError(
-                    exceptions.FetchIPError.Reason.WORKER) from e
+                if retry_cnt == worker_ip_max_attempts - 1:
+                    raise exceptions.FetchIPError(
+                        exceptions.FetchIPError.Reason.WORKER) from e
+                # Retry if the ssh is not ready for the workers yet.
+                logger.debug('Retrying to get worker ip.')
+                time.sleep(backoff.current_backoff())
         worker_ips = re.findall(IP_ADDR_REGEX, out)
         # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
         # Workaround: List of IPs are shown in Stderr
