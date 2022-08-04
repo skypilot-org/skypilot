@@ -97,6 +97,7 @@ def get_gpu_name(family: str) -> str:
         'standardNCPromoFamily': 'K80',
         'StandardNCASv3_T4Family': 'T4',
         'standardNDSv2Family': 'V100-32GB',
+        'StandardNCADSA100v4Family': 'A100-80GB',
         'standardNDAMSv4_A100Family': 'A100-80GB',
         'StandardNDASv4_A100Family': 'A100',
         'standardNVFamily': 'M60',
@@ -104,6 +105,8 @@ def get_gpu_name(family: str) -> str:
         'standardNVSv3Family': 'M60',
         'standardNVPromoFamily': 'M60',
         'standardNVSv4Family': 'Radeon MI25',
+        'standardNDSFamily': 'P40',
+        'StandardNVADSA10v5Family': 'A10',
     }
     # NP-series offer Xilinx U250 FPGAs which are not GPUs,
     # so we do not include them here.

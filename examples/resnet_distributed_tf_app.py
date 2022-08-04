@@ -78,7 +78,7 @@ def run(cluster: Optional[str] = None):
         train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
         train.set_resources(sky.Resources(clouds.AWS(), accelerators='V100'))
 
-    sky.launch(dag, cluster_name=cluster)
+    sky.launch(dag, cluster_name=cluster, retry_until_up=True)
 
 
 if __name__ == '__main__':

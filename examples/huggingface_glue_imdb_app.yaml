@@ -8,8 +8,9 @@ resources:
 # The setup command.  Will be run under the working directory.
 setup: |
   git clone https://github.com/huggingface/transformers/
+  # checkout to the correct version
   cd transformers
-  git checkout v4.20.1
+  git checkout v4.21.0
   pip3 install .
   cd examples/pytorch/text-classification
   pip3 install -r requirements.txt

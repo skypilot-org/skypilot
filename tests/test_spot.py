@@ -11,6 +11,7 @@ from sky import cli
 from sky import clouds
 from sky import global_user_state
 from sky import spot
+from sky.skylet.utils import db_utils
 
 
 def test_spot_nonexist_strategy():
@@ -36,8 +37,9 @@ class TestReservedClustersOperations:
     def _mock_db_conn(self, monkeypatch, tmp_path):
         tmp_path.mkdir(parents=True, exist_ok=True)
         db_path = tmp_path / 'state_testing.db'
-        monkeypatch.setattr(global_user_state, '_DB',
-                            global_user_state._SQLiteConn(str(db_path)))
+        monkeypatch.setattr(
+            global_user_state, '_DB',
+            db_utils.SQLiteConn(str(db_path), global_user_state.create_table))
 
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn):

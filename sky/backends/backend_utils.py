@@ -37,6 +37,7 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -63,7 +64,6 @@ SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
@@ -623,7 +623,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # GCP only.
                 'gcp_project_id': gcp_project_id,
                 # Ray version.
-                'ray_version': SKY_REMOTE_RAY_VERSION,
+                'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
@@ -949,7 +949,8 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
                  handle: Optional[backends.Backend.ResourceHandle] = None,
-                 head_ip_max_attempts: int = 1) -> List[str]:
+                 head_ip_max_attempts: int = 1,
+                 worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
@@ -968,28 +969,36 @@ def get_node_ips(cluster_yaml: str,
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
     if expected_num_nodes > 1:
-        try:
-            proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE)
-            out = proc.stdout.decode()
+        backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
+
+        for retry_cnt in range(worker_ip_max_attempts):
+            try:
+                proc = subprocess_utils.run(
+                    f'ray get-worker-ips {cluster_yaml}',
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE)
+                out = proc.stdout.decode()
+            except subprocess.CalledProcessError as e:
+                if retry_cnt == worker_ip_max_attempts - 1:
+                    raise exceptions.FetchIPError(
+                        exceptions.FetchIPError.Reason.WORKER) from e
+                # Retry if the ssh is not ready for the workers yet.
+                logger.debug('Retrying to get worker ip.')
+                time.sleep(backoff.current_backoff())
+        worker_ips = re.findall(IP_ADDR_REGEX, out)
+        # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
+        # Workaround: List of IPs are shown in Stderr
+        cluster_name = os.path.basename(cluster_yaml).split('.')[0]
+        if ((handle is not None and hasattr(handle, 'local_handle') and
+             handle.local_handle is not None) or
+                onprem_utils.check_if_local_cloud(cluster_name)):
+            out = proc.stderr.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
-            # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
-            # Workaround: List of IPs are shown in Stderr
-            cluster_name = os.path.basename(cluster_yaml).split('.')[0]
-            if ((handle is not None and hasattr(handle, 'local_handle') and
-                 handle.local_handle is not None) or
-                    onprem_utils.check_if_local_cloud(cluster_name)):
-                out = proc.stderr.decode()
-                worker_ips = re.findall(IP_ADDR_REGEX, out)
-                # Remove head ip from worker ip list.
-                for i, ip in enumerate(worker_ips):
-                    if ip == head_ip[0]:
-                        del worker_ips[i]
-                        break
-        except subprocess.CalledProcessError as e:
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.WORKER) from e
+            # Remove head ip from worker ip list.
+            for i, ip in enumerate(worker_ips):
+                if ip == head_ip[0]:
+                    del worker_ips[i]
+                    break
         if len(worker_ips) != expected_num_nodes - 1:
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
@@ -1104,7 +1113,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         return set(ray_launch_hashes)
     with subpress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']
@@ -1715,7 +1724,10 @@ def validate_schema(obj, schema, err_msg_prefix=''):
                     most_similar_field = difflib.get_close_matches(
                         field, known_fields, 1)
                     if most_similar_field:
-                        err_msg += f'\nInstead of \'{field}\', did you mean \'{most_similar_field[0]}\'?'
+                        err_msg += (f'\nInstead of {field!r}, did you mean '
+                                    f'{most_similar_field[0]!r}?')
+                    else:
+                        err_msg += f'\nFound unsupported field {field!r}.'
         else:
             err_msg = err_msg_prefix + e.message
 

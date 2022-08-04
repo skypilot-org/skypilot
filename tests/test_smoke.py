@@ -79,7 +79,10 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
+            test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(e)
+            # Kill the current process.
+            proc.terminate()
             proc.returncode = 1  # None if we don't set it.
             break
 
@@ -166,6 +169,24 @@ def test_zone():
     run_one_test(test)
 
 
+def test_stale_job():
+    name = _get_cluster_name()
+    test = Test(
+        'stale-job',
+        [
+            f'sky launch -y -c {name} --cloud gcp "echo hi"',
+            f'sky exec {name} --cloud gcp -d "echo start; sleep 10000"',
+            f'sky stop {name} -y',
+            'sleep 40',
+            f'sky start {name} -y',
+            f'sky logs {name} 1 --status',
+            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Check Sky's environment variables; workdir. ----------
 def test_env_check():
     name = _get_cluster_name()
@@ -242,7 +263,7 @@ def test_multi_echo():
         'multi_echo',
         [
             f'python examples/multi_echo.py {name}',
-            'sleep 20',
+            'sleep 70',
         ] +
         # Ensure jobs succeeded.
         [f'sky logs {name} {i + 1} --status' for i in range(32)] +
@@ -250,6 +271,7 @@ def test_multi_echo():
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -354,6 +376,7 @@ def test_gcp_start_stop():
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
+            f'sleep 20',
             f'sky start -y {name}',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
@@ -538,7 +561,7 @@ def test_spot_recovery():
         'managed-spot-recovery',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
-            'sleep 200',
+            'sleep 300',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -624,6 +647,7 @@ def test_custom_image():
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     run_one_test(test)
 

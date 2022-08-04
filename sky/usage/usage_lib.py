@@ -28,16 +28,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# An indicator for PRIVACY_POLICY has already been shown.
-privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
-if not env_options.Options.DISABLE_LOGGING.get():
-    os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
-    try:
-        with open(privacy_policy_indicator, 'x'):
-            click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
-    except FileExistsError:
-        pass
-
 _run_id = None
 
 
@@ -408,6 +398,17 @@ def entrypoint_context(name: str, fallback: bool = False):
     additional entrypoint_context with fallback=True can be used to wrap
     the global entrypoint to catch any exceptions that are not caught.
     """
+    # Show the policy message only when the entrypoint is used.
+    # An indicator for PRIVACY_POLICY has already been shown.
+    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
+    if not env_options.Options.DISABLE_LOGGING.get():
+        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
+        try:
+            with open(privacy_policy_indicator, 'x'):
+                click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
+        except FileExistsError:
+            pass
+
     is_entry = messages.usage.entrypoint is None
     if is_entry and not fallback:
         for message in messages.values():
