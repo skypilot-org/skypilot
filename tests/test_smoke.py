@@ -150,6 +150,24 @@ def test_region():
     run_one_test(test)
 
 
+def test_stale_job():
+    name = _get_cluster_name()
+    test = Test(
+        'stale-job',
+        [
+            f'sky launch -y -c {name} --cloud gcp "echo hi"',
+            f'sky exec {name} --cloud gcp -d "echo start; sleep 10000"',
+            f'sky stop {name} -y',
+            'sleep 40',
+            f'sky start {name} -y',
+            f'sky logs {name} 1 --status',
+            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Check Sky's environment variables; workdir. ----------
 def test_env_check():
     name = _get_cluster_name()
@@ -338,6 +356,7 @@ def test_gcp_start_stop():
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
+            f'sleep 20',
             f'sky start -y {name}',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.

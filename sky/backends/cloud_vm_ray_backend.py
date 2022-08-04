@@ -67,8 +67,9 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
-# The maximum retry count for fetching head IP address.
+# The maximum retry count for fetching IP address.
 _HEAD_IP_MAX_ATTEMPTS = 5
+_WORKER_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -1095,6 +1096,11 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
                 return True
+
+            if ('ConnectionResetError: [Errno 54] Connection reset by peer'
+                    in stderr):
+                logger.info('Retrying due to Connection reset by peer.')
+                return True
             return False
 
         retry_cnt = 0
@@ -1592,7 +1598,8 @@ class CloudVmRayBackend(backends.Backend):
                 ip_list = backend_utils.get_node_ips(
                     cluster_config_file,
                     config_dict['launched_nodes'],
-                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(

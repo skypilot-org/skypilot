@@ -321,7 +321,9 @@ def _follow_job_logs(file,
 
     `sleep_sec` is the time to sleep after empty reads. """
     line = ''
-    status = job_lib.get_status(job_id)
+    # No need to lock the status here, as the while loop can handle
+    # the older status.
+    status = job_lib.get_status_no_lock(job_id)
     start_streaming = False
     wait_last_logs = True
     while True:
@@ -355,7 +357,7 @@ def _follow_job_logs(file,
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
-            status = job_lib.get_status(job_id)
+            status = job_lib.get_status_no_lock(job_id)
 
 
 def tail_logs(job_owner: str,
@@ -377,7 +379,7 @@ def tail_logs(job_owner: str,
     log_path = os.path.join(log_dir, 'run.log')
     log_path = os.path.expanduser(log_path)
 
-    status = job_lib.query_job_status(job_owner, [job_id])[0]
+    status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
 
     # Wait for the log to be written. This is needed due to the `ray submit`
     # will take some time to start the job and write the log.
@@ -388,7 +390,7 @@ def tail_logs(job_owner: str,
             job_lib.JobStatus.RUNNING,
     ]:
         retry_cnt += 1
-        if os.path.exists(log_path):
+        if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
             print(
@@ -399,7 +401,7 @@ def tail_logs(job_owner: str,
         print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
-        status = job_lib.query_job_status(job_owner, [job_id])[0]
+        status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
 
     if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
         # Not using `ray job logs` because it will put progress bar in
