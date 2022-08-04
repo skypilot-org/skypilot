@@ -684,10 +684,10 @@ class RetryingVmProvisioner(object):
                             clouds.AWS()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
-                    elif cloud.is_same_cloud(cloud.Azure()):
+                    elif cloud.is_same_cloud(clouds.Azure()):
                         region = config['provider']['location']
                         zones = None
-                    elif cloud.is_same_cloud(cloud.Local()):
+                    elif cloud.is_same_cloud(clouds.Local()):
                         local_regions = clouds.Local.regions()
                         region = local_regions[0].name
                         zones = None
@@ -1405,12 +1405,12 @@ class CloudVmRayBackend(backends.Backend):
             config = common_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
-            if cloud.is_same_cloud(cloud.Azure()):
+            if cloud.is_same_cloud(clouds.Azure()):
                 region = provider['location']
             elif cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
                     clouds.AWS()):
                 region = provider['region']
-            elif cloud.is_same_cloud(cloud.Local()):
+            elif cloud.is_same_cloud(clouds.Local()):
                 # There is only 1 region for Local cluster, 'Local'.
                 local_regions = clouds.Local.regions()
                 region = local_regions[0].name
