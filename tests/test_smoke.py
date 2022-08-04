@@ -150,6 +150,22 @@ def test_region():
     run_one_test(test)
 
 
+# ---------- Test zone ----------
+def test_zone():
+    name = _get_cluster_name()
+    test = Test(
+        'zone',
+        [
+            f'sky launch -y -c {name} examples/zone_test.yaml',
+            f'sky exec {name} examples/zone_test.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep us-central1-c', # Ensure the zone is correct.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Check Sky's environment variables; workdir. ----------
 def test_env_check():
     name = _get_cluster_name()
