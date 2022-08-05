@@ -189,11 +189,11 @@ class Cloud:
         raise NotImplementedError
 
     def region_exists(self, region: str) -> Tuple[bool, List[str]]:
-        """Returns whether the region is valid for this cloud."""
+        """Returns whether the region exists and a list of candidates."""
         raise NotImplementedError
 
     def zone_exists(self, zone: str) -> Tuple[bool, List[str]]:
-        """Returns whether the zone is valid for this cloud."""
+        """Returns whether the zone exists and a list of candidates."""
         raise NotImplementedError
 
     def zone_in_region(self, region: str, zone: str) -> bool:

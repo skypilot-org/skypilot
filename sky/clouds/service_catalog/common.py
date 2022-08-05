@@ -96,6 +96,7 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 
 def region_exists_impl(df: pd.DataFrame, region: str) -> Tuple[bool, List[str]]:
+    """Returns True if the region is valid or False with a candidate list."""
     all_regions = df['Region'].unique()
     if region in all_regions:
         return True, None
@@ -108,6 +109,7 @@ def region_exists_impl(df: pd.DataFrame, region: str) -> Tuple[bool, List[str]]:
 
 
 def zone_exists_impl(df: pd.DataFrame, zone: str) -> Tuple[bool, List[str]]:
+    """Returns True if the zone is valid or False with a candidate list."""
     all_zones = df['AvailabilityZone'].unique()
     if zone in all_zones:
         return True, None
