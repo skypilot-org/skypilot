@@ -49,7 +49,7 @@ class TestReservedClustersOperations:
             cluster_yaml='/tmp/cluster1.yaml',
             head_ip='1.1.1.1',
             launched_nodes=2,
-            launched_resources=sky.Resources(clouds.AWS(),
+            launched_resources=sky.Resources(sky.AWS(),
                                              instance_type='p3.2xlarge',
                                              region='us-east-1'),
         )
@@ -61,7 +61,7 @@ class TestReservedClustersOperations:
             cluster_yaml='/tmp/cluster2.yaml',
             head_ip='1.1.1.2',
             launched_nodes=1,
-            launched_resources=sky.Resources(clouds.GCP(),
+            launched_resources=sky.Resources(sky.GCP(),
                                              instance_type='n1-highmem-8',
                                              accelerators={'A100': 4},
                                              region='us-west1'),
@@ -74,7 +74,7 @@ class TestReservedClustersOperations:
             cluster_yaml='/tmp/cluster3.yaml',
             head_ip='1.1.1.3',
             launched_nodes=4,
-            launched_resources=sky.Resources(clouds.Azure(),
+            launched_resources=sky.Resources(sky.Azure(),
                                              instance_type='Standard_D4s_v3',
                                              region='eastus'),
         )
@@ -86,7 +86,7 @@ class TestReservedClustersOperations:
             cluster_yaml='/tmp/spot_controller.yaml',
             head_ip='1.1.1.4',
             launched_nodes=1,
-            launched_resources=sky.Resources(clouds.AWS(),
+            launched_resources=sky.Resources(sky.AWS(),
                                              instance_type='m4.2xlarge',
                                              region='us-west-1'),
         )

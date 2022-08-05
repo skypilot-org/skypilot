@@ -7,7 +7,6 @@ illustrating how volume mounts can be used to share data with containers.
 """
 
 import sky
-from sky import clouds
 
 # Though the mnist dataset is not used, we show download and mounting
 # it to the docker container as an example here. If you are running this on
@@ -23,6 +22,6 @@ run_command = 'docker run -v ~/mnist/:/mnist/ --runtime=nvidia --rm cemizm/tf-be
 
 with sky.Dag() as dag:
     t = sky.Task(run=run_command, setup=setup_cmd)
-    t.set_resources(sky.Resources(clouds.AWS(), accelerators='V100'))
+    t.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
 
 sky.launch(dag)

@@ -16,7 +16,6 @@ Incorporate the notion of region/zone (affects pricing).
 Incorporate the notion of per-account egress quota (affects pricing).
 """
 import sky
-from sky import clouds
 
 import time_estimators
 
@@ -41,8 +40,8 @@ def make_application():
         train_op.set_outputs('CLOUD://my-model', estimated_size_gigabytes=0.1)
 
         train_op.set_resources({
-            sky.Resources(clouds.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            sky.Resources(clouds.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
+            sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
             sky.Resources(clouds.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         })
@@ -59,8 +58,8 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
-            sky.Resources(clouds.AWS(), 'inf1.2xlarge'),
-            sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+            sky.Resources(sky.AWS(), 'inf1.2xlarge'),
+            sky.Resources(sky.AWS(), 'p3.2xlarge'),
             sky.Resources(clouds.GCP(), 'n1-standard-4', 'T4'),
             sky.Resources(clouds.GCP(), 'n1-standard-8', 'T4'),
         })
