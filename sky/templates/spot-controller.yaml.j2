@@ -4,7 +4,7 @@ name: {{cluster_name}}
 
 resources:
   disk_size: 50
-# It is now using default CPU instance type hard-coded in sky code for spot controller,
+# It is now using default CPU instance type hard-coded in code for spot controller,
 # i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
 # This allows users without the credits for some of the clouds available to use managed spot instances.
 # TODO(zhwu): Fix this to be able to failvoer across clouds with cheaper instance.
@@ -17,11 +17,11 @@ setup: |
   # Install cli dependencies
   (pip list | grep boto3 2>&1 > /dev/null && \
    pip list | grep google-api-python-client 2>&1 > /dev/null) || \
-   pip3 install "$(echo {{sky_remote_path}}/*.whl)[aws,gcp]" 2>&1 > /dev/null
+   pip3 install "$(echo {{sky_remote_path}}/skypilot-*.whl)[aws,gcp]" 2>&1 > /dev/null
 
   # We do not install azure dependencies for now since our subscription does not support spot instances.
   # pip list | grep azure-cli 2>&1 > /dev/null || \
-  #  pip3 install "$(echo {{sky_remote_path}}/*.whl)[azure]" 2>&1 > /dev/null 
+  #  pip3 install "$(echo {{sky_remote_path}}/skypilot-*.whl)[azure]" 2>&1 > /dev/null
 
   gcloud --version 2>&1 > /dev/null || \
   (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \
@@ -34,3 +34,12 @@ run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
     --job-id $SKY_JOB_ID
+
+envs:
+  SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
+{% if is_dev %}
+  SKYPILOT_DEV: 1
+{% endif %}
+{% if disable_logging %}
+  SKYPILOT_DISABLE_USAGE_COLLECTION: 1
+{% endif %}

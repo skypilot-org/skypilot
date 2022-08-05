@@ -9,9 +9,9 @@ sys.path.insert(0, os.path.abspath('../../'))
 
 # -- Project information
 
-project = 'Sky'
-copyright = '2022, Sky Team'
-author = 'the Sky authors'
+project = 'SkyPilot'
+copyright = '2022, SkyPilot Team'
+author = 'the SkyPilot authors'
 
 release = '0.1'
 version = '0.1.0'

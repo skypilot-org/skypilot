@@ -211,7 +211,7 @@ def stream_logs_by_id(job_id: int) -> str:
     spot_status = spot_state.get_status(job_id)
     while not spot_status.is_terminal():
         if spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'SKY INFO: The log is not ready yet, as the spot job '
+            logger.info(f'INFO: The log is not ready yet, as the spot job '
                         f'is {spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
@@ -231,7 +231,7 @@ def stream_logs_by_id(job_id: int) -> str:
                         f'(status: {job_status.value}).')
             break
         logger.info(
-            f'SKY INFO: The return code is {returncode}. '
+            f'INFO: The return code is {returncode}. '
             f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and

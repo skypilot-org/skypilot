@@ -1,0 +1,64 @@
+# SkyPilot Storage benchmarks using fio.
+#
+# Uses FIO to run benchmarks on SkyPilot Storage. We use Azure's recommended
+# parameters for fio to measure storage performance.
+# See https://docs.microsoft.com/en-us/azure/virtual-machines/disks-benchmarks
+#
+# Also measures S3->EBS bandwidth using aws s3 cp, which is used in COPY mode.
+#
+# Note that random writes are not supported by SkyPilot Storage, and thus
+# not benchmarked.
+#
+# Usage:
+#   sky launch -y -c bench storage_rawperf.yaml
+#   sky down bench
+#   SkyPilot Storage delete <storage_name>
+
+name: storage-demo
+
+resources:
+  cloud: aws
+  instance_type: m5.8xlarge
+
+file_mounts:
+  /skystorage-mount:
+    name: sky-romil-benchmark # Make sure this name is unique.
+    mode: MOUNT
+
+setup: |
+  sudo apt update
+  sudo apt install -y fio
+
+run: |
+  purge_io () { echo "Purging I/O caches..."; sync && echo 3 > sudo tee /proc/sys/vm/drop_caches; }
+  purge_io
+  echo "Running EBS read benchmark..."
+  fio --name=64kseqreads --rw=read --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/tmp/ --output-format=json > /skystorage-mount/perf_read_ebs.json
+  purge_io
+  echo "Running S3 read benchmark..."
+  fio --name=64kseqreads --rw=read --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_read_s3.json
+  purge_io
+  echo "Running EBS write benchmark..."
+  fio --name=64kseqwrites --rw=write --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/tmp/ --output-format=json > /skystorage-mount/perf_write_ebs.json
+  purge_io
+  echo "Running S3 write benchmark..."
+  fio --name=64kseqwrites --rw=write --direct=1 --ioengine=libaio --bs=64k --numjobs=4 --iodepth=128 --size=1G --group_reporting --directory=/skystorage-mount/ --output-format=json > /skystorage-mount/perf_write_s3.json
+  
+  # Change the s3 path here to the storage bucket name used above
+  echo "Running S3 read benchmark with aws s3 cp (COPY mode setup bandwidth)..."
+  purge_io
+  /usr/bin/time -o /skystorage-mount/perf_copymode_time.txt -f "%e" /bin/bash -c "aws s3 cp s3://sky-romil-benchmark/64kseqreads.0.0 ~/ > /tmp/perf_copymode_log.txt; sync && echo 3 > sudo tee /proc/sys/vm/drop_caches; "
+  sed -i -e 's/\r/\n/g' /tmp/perf_copymode_log.txt
+  cp /tmp/perf_copymode_log.txt /skystorage-mount/perf_copymode_log.txt && rm /tmp/perf_copymode_log.txt 
+  
+  echo -e '\n===== Benchmark Results ====='
+  echo 'All results are reported as (bandwidth, IOPS)'
+  echo -e '\n##### Sequential Read Results #####'
+  cat /skystorage-mount/perf_read_ebs.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('EBS:\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['read']['bw_bytes']/(1000*1000), data['read']['iops']))"
+  cat /skystorage-mount/perf_read_s3.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('S3:\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['read']['bw_bytes']/(1000*1000), data['read']['iops']))"
+  echo -e '\n##### Sequential Write Results #####'
+  cat /skystorage-mount/perf_write_ebs.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('EBS:\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['write']['bw_bytes']/(1000*1000), data['write']['iops']))"
+  cat /skystorage-mount/perf_write_s3.json | python3 -c "import sys, json; data = json.load(sys.stdin)['jobs'][0]; print('S3:\t{:.2f} MB/s\t{:.2f} IOPS'.format(data['write']['bw_bytes']/(1000*1000), data['write']['iops']))"
+  echo -e '\n##### SkyPilot Storage COPY mode setup bandwidth #####'
+  echo -n 'aws s3 cp reported bandwidth: ' && ( tail -2 /skystorage-mount/perf_copymode_log.txt | head -1 | grep -o '([^)]* MiB/s)' )
+  echo -n 'Actual aws s3 cp -> EBS bandwidth (MB/s): ' && ( bc <<< $(stat -c %s ~/64kseqreads.0.0)/$(cat /skystorage-mount/perf_copymode_time.txt)/1000000)

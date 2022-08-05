@@ -1,0 +1,40 @@
+cluster_name: {{cluster_name}}
+
+provider:
+  type: local
+  head_ip: {{head_ip}}
+  worker_ips: [
+    {%- for ip in worker_ips %}
+      "{{ip}}",
+    {%- endfor %}
+  ]
+
+auth:
+  ssh_user: {{ssh_user}}
+  ssh_private_key: {{ssh_private_key}}
+
+# Format: `REMOTE_PATH : LOCAL_PATH`
+# (Ray Autoscaler Bug) `file_mounts` only mounts on head, not worker nodes.
+file_mounts: {
+  "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
+  "{{sky_remote_path}}": "{{sky_local_path}}",
+{%- for remote_path, local_path in credentials.items() %}
+  "{{remote_path}}": "{{local_path}}",
+{%- endfor %}
+}
+
+# List of shell commands to run to set up nodes.
+# (Ray Autoscaler Bug) `setup_commands` only runs on head, not on worker nodes.
+setup_commands:
+  - (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
+    (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
+  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+  - pip3 uninstall skypilot -y &> /dev/null; pip3 install {{sky_remote_path}}/skypilot-*.whl;
+
+head_setup_commands: []
+
+
+head_start_ray_commands:
+  - (ps ux | grep -v 'bash\|grep' | grep -q sky.skylet.skylet) || (nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &) # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
+
+worker_start_ray_commands: []

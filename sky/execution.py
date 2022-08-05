@@ -14,6 +14,7 @@ Current task launcher:
 """
 import enum
 import tempfile
+import os
 import time
 from typing import Any, List, Optional
 
@@ -29,8 +30,10 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage
+from sky.usage import usage_lib
+from sky.utils import common_utils
+from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
-from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -95,7 +98,7 @@ def _execute(
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
-    assert len(dag) == 1, f'Sky assumes 1 task for now. {dag}'
+    assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
     if task.need_spot_recovery:
@@ -182,6 +185,9 @@ def _execute(
     finally:
         # UX: print live clusters to make users aware (to save costs).
         # Needed because this finally doesn't always get executed on errors.
+        # Disable the usage collection for this status command.
+        env = dict(os.environ,
+                   **{env_options.Options.DISABLE_LOGGING.value: '1'})
         if cluster_name == spot.SPOT_CONTROLLER_NAME:
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
@@ -189,12 +195,13 @@ def _execute(
             subprocess_utils.run(
                 f'sky spot status | head -n {_MAX_SPOT_JOB_LENGTH}')
         else:
-            subprocess_utils.run('sky status')
+            subprocess_utils.run('sky status', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
 
 
 @timeline.event
+@usage_lib.entrypoint
 def launch(
     dag: sky.Dag,
     dryrun: bool = False,
@@ -224,6 +231,7 @@ def launch(
     )
 
 
+@usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
@@ -332,7 +340,7 @@ def spot_launch(
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
             # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the sky storage mount can work on the spot
+            # name field, so that the storage mount can work on the spot
             # controller.
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
@@ -348,10 +356,10 @@ def spot_launch(
                         f'Unsupported store type: {store_type}')
             storage_obj.name = None
 
-    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
+    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
-        backend_utils.dump_yaml(f.name, task_config)
+        common_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
         yaml_path = backend_utils.fill_template(
@@ -361,6 +369,9 @@ def spot_launch(
                 'spot_controller': controller_name,
                 'cluster_name': name,
                 'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
+                'is_dev': env_options.Options.IS_DEVELOPER.get(),
+                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+                'logging_user_hash': usage_lib.get_logging_user_hash()
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as spot_dag:
@@ -378,4 +389,5 @@ def spot_launch(
             detach_run=detach_run,
             idle_minutes_to_autostop=spot.
             SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            retry_until_up=True,
         )

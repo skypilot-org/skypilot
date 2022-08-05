@@ -1,13 +1,13 @@
 Installation
 ============
 
-Install Sky using pip:
+Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # Sky requires python >= 3.6 and < 3.10.
-  $ git clone ssh://git@github.com/sky-proj/sky.git
-  $ cd sky
+  $ # SkyPilot requires python >= 3.6.
+  $ git clone ssh://git@github.com/skypilot-org/skypilot.git
+  $ cd skypilot
 
   $ # Recommended: use a new conda env to avoid package conflicts.
   $ conda create -n sky python=3.7
@@ -17,18 +17,18 @@ Install Sky using pip:
   $ # To install AWS dependencies only:
   $ # pip install ".[aws]"
 
-Sky currently supports three major cloud providers: AWS, GCP, and Azure.  If you
+SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
 only have access to certain clouds, use any combination of
 :code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
 dependencies installed.
 
 .. note::
 
-    For Macs, macOS >= 10.15 is required to install Sky. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing Sky.
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing SkyPilot.
 
 .. note::
 
-    As an alternative to installing Sky on your laptop, we also provide a Docker image as a quick way to try out Sky. See instructions below on running Sky :ref:`in a container <docker-image>`.
+    As an alternative to installing SkyPilot on your laptop, we also provide a Docker image as a quick way to try out SkyPilot. See instructions below on running SkyPilot :ref:`in a container <docker-image>`.
 
 .. _cloud-account-setup:
 
@@ -89,12 +89,12 @@ This will produce a summary like:
 
 .. code-block:: text
 
-  Checking credentials to enable clouds for Sky.
+  Checking credentials to enable clouds for SkyPilot.
     AWS: enabled
     GCP: enabled
     Azure: enabled
 
-  Sky will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
+  SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
 Requesting quotas for first time users
 --------------------------------------
@@ -111,8 +111,8 @@ increases before proceeding.
 Quick alternative: trying in Docker
 ------------------------------------------------------
 
-As a **quick alternative to installing Sky on your laptop**, we also provide a Docker image with Sky and
-its dependencies installed for users to quickly try out Sky. You can simply run:
+As a **quick alternative to installing SkyPilot on your laptop**, we also provide a Docker image with SkyPilot and
+its dependencies installed for users to quickly try out SkyPilot. You can simply run:
 
 .. code-block:: console
 

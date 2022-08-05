@@ -1,5 +1,4 @@
-"""The controller module handles the life cycle of a sky spot cluster (job)."""
-
+"""Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import pathlib
 import time
