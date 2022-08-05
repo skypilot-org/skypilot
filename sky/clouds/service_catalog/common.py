@@ -2,6 +2,7 @@
 import os
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+import difflib
 import requests
 import pandas as pd
 
@@ -94,12 +95,28 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
-def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
-    return region in df['Region'].unique()
+def region_exists_impl(df: pd.DataFrame, region: str) -> Tuple[bool, List[str]]:
+    all_regions = df['Region'].unique()
+    if region in all_regions:
+        return True, None
+    candidate_regions = difflib.get_close_matches(region,
+                                                  all_regions,
+                                                  n=5,
+                                                  cutoff=0.9)
+    candidate_regions = sorted(candidate_regions)
+    return False, candidate_regions
 
 
-def zone_exists_impl(df: pd.DataFrame, zone: str) -> bool:
-    return zone in df['AvailabilityZone'].unique()
+def zone_exists_impl(df: pd.DataFrame, zone: str) -> Tuple[bool, List[str]]:
+    all_zones = df['AvailabilityZone'].unique()
+    if zone in all_zones:
+        return True, None
+    candidate_zones = difflib.get_close_matches(zone,
+                                                all_zones,
+                                                n=5,
+                                                cutoff=0.9)
+    candidate_zones = sorted(candidate_zones)
+    return False, candidate_zones
 
 
 def zone_in_region_impl(df: pd.DataFrame, region: str, zone: str) -> bool:

@@ -248,10 +248,16 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified together with region.')
 
-        if not self._cloud.region_exists(region):
+        exist, candidate_list = self._cloud.region_exists(region)
+        if not exist:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid region {region!r} '
-                                 f'for cloud {self.cloud}.')
+                error_msg = (f'Invalid region {region!r} '
+                             f'for cloud {self.cloud}.')
+                if len(candidate_list) > 0:
+                    candidate_strs = ', '.join(candidate_list)
+                    error_msg += ('\nDid you mean one of these: '
+                                  f'{candidate_strs}?')
+                raise ValueError(error_msg)
         self._region = region
 
     def _set_zone(self, zone: Optional[str]) -> None:
@@ -264,11 +270,17 @@ class Resources:
         elif self._cloud.is_same_cloud(clouds.Azure()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Azure does not support zones.')
-        elif not self._cloud.zone_exists(zone):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid zone {zone!r} '
+        else:
+            exist, candidate_list = self._cloud.zone_exists(zone)
+            if not exist:
+                with ux_utils.print_exception_no_traceback():
+                    error_msg = (f'Invalid zone {zone!r} '
                                  f'for cloud {self.cloud}.')
-
+                    if len(candidate_list) > 0:
+                        candidate_strs = ', '.join(candidate_list)
+                        error_msg += ('\nDid you mean one of these: '
+                                      f'{candidate_strs}?')
+                    raise ValueError(error_msg)
         if self._region is not None:
             if not self._cloud.zone_in_region(self._region, zone):
                 with ux_utils.print_exception_no_traceback():

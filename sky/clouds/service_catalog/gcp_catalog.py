@@ -151,11 +151,11 @@ def get_instance_type_for_accelerator(
     return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
-def region_exists(region: str) -> bool:
+def region_exists(region: str) -> Tuple[bool, List[str]]:
     return common.region_exists_impl(_df, region)
 
 
-def zone_exists(zone: str) -> bool:
+def zone_exists(zone: str) -> Tuple[bool, List[str]]:
     return common.zone_exists_impl(_df, zone)
 
 

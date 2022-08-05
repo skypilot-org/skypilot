@@ -234,6 +234,16 @@ def test_invalid_zone(monkeypatch):
                         zone='us-west1-a')
     assert 'Invalid zone' in str(e.value)
 
+    input_zone = 'us-central1'
+    expected_candidates = [
+        'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f'
+    ]
+    with pytest.raises(ValueError) as e:
+        _test_resources(monkeypatch, clouds.GCP(), zone=input_zone)
+    assert 'Invalid zone' in str(e.value)
+    for cand in expected_candidates:
+        assert cand in str(e.value)
+
 
 def test_invalid_image(monkeypatch):
     with pytest.raises(ValueError) as e:

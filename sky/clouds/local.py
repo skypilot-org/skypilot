@@ -130,7 +130,7 @@ class Local(clouds.Cloud):
         # local cloud.
         return instance_type == self.get_default_instance_type()
 
-    def region_exists(self, region: str) -> bool:
+    def region_exists(self, region: str) -> Tuple[bool, List[str]]:
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
-        return region == Local.LOCAL_REGION.name
+        return region == Local.LOCAL_REGION.name, []

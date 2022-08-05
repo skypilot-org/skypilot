@@ -317,10 +317,10 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def region_exists(self, region: str) -> bool:
+    def region_exists(self, region: str) -> Tuple[bool, List[str]]:
         return service_catalog.region_exists(region, 'aws')
 
-    def zone_exists(self, zone: str) -> bool:
+    def zone_exists(self, zone: str) -> Tuple[bool, List[str]]:
         return service_catalog.zone_exists(zone, 'aws')
 
     def zone_in_region(self, region: str, zone: str) -> bool:
