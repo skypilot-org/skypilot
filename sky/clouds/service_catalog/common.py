@@ -97,9 +97,7 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
                               zone: Optional[str]):
-    all_regions = df['Region'].unique()
-    all_zones = df['AvailabilityZone'].unique()
-
+    """Validates whether region and zone exist in the catalog."""
     def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
@@ -109,17 +107,21 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
 
-    if region is not None and region not in all_regions:
-        with ux_utils.print_exception_no_traceback():
-            error_msg = (f'Invalid region {region!r}')
-            error_msg += _get_candidate_str(region, all_regions)
-            raise ValueError(error_msg)
+    if region is not None:
+        all_regions = df['Region'].unique()
+        if region not in all_regions:
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid region {region!r}')
+                error_msg += _get_candidate_str(region, all_regions)
+                raise ValueError(error_msg)
 
-    if zone is not None and zone not in all_zones:
-        with ux_utils.print_exception_no_traceback():
-            error_msg = (f'Invalid zone {zone!r}')
-            error_msg += _get_candidate_str(zone, all_zones)
-            raise ValueError(error_msg)
+    if zone is not None:
+        all_zones = df['AvailabilityZone'].unique()
+        if zone not in all_zones:
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid zone {zone!r}')
+                error_msg += _get_candidate_str(zone, all_zones)
+                raise ValueError(error_msg)
 
     if region is not None and zone is not None:
         if zone not in df[df['Region'] == region]['AvailabilityZone'].unique():
