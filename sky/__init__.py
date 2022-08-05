@@ -1,8 +1,9 @@
-"""The Sky package."""
+"""The SkyPilot package."""
 import os
 
 # Keep this order to avoid cyclic imports
 from sky import backends
+from sky import benchmark
 from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
 from sky.dag import Dag, DagContext
@@ -33,6 +34,7 @@ __all__ = [
     'Resources',
     'Task',
     'backends',
+    'benchmark',
     'launch',
     'exec',
     'list_accelerators',

@@ -203,16 +203,16 @@
 --------------------------------------------------------------------------------
 
 Code in providers/azure from
-https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/_azure
-Git Revision: 7f1bacc7dc9caf6d0ec042e39499bbf1d9a7d065
+https://github.com/ray-project/ray/tree/ray-1.13.0/python/ray/autoscaler/_private/_azure
+Git commit of the release 1.13.0: 4ce38d001dbbe09cd21c497fedd03d692b2be3e
 
 Code in providers/gcp from
-https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/gcp
-Git Revision: ef9d9df4e7454d428a958281e9de333795dccb44
+https://github.com/ray-project/ray/tree/ray-1.13.0/python/ray/autoscaler/_private/gcp
+Git commit of the release 1.13.0: 4ce38d001dbbe09cd21c497fedd03d692b2be3e
 
 Code in providers/aws from
-https://github.com/ray-project/ray/tree/master/python/ray/autoscaler/_private/aws
-Git Revision: f737731a5e53ab3a2c5192d3d9efd4bb4bbbbf48
+https://github.com/ray-project/ray/tree/ray-1.13.0/python/ray/autoscaler/_private/aws
+Git commit of the release 1.13.0: 4ce38d001dbbe09cd21c497fedd03d692b2be3e
 
 
 Copyright 2016-2022 Ray developers

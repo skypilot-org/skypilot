@@ -1,4 +1,4 @@
-# Example Sky apps
+# Example SkyPilot applications
 
 To launch an example:
 ```python

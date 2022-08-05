@@ -73,9 +73,6 @@ class Azure(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def __repr__(self):
-        return Azure._REPR
-
     def is_same_cloud(self, other):
         return isinstance(other, Azure)
 

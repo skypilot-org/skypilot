@@ -1,1 +1,1 @@
-"""Utility functions for sky."""
+"""Utility functions."""
