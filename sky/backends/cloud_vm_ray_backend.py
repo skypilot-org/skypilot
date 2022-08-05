@@ -6,6 +6,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import signal
 import subprocess
 import tempfile
@@ -22,6 +23,7 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
+from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
@@ -53,22 +55,21 @@ Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
 SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
-SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
-SKY_REMOTE_RAY_VERSION = backend_utils.SKY_REMOTE_RAY_VERSION
 
 logger = sky_logging.init_logger(__name__)
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout for provision a cluster and wait for it to be ready in seconds.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 30
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
-# The maximum retry count for fetching head IP address.
+# The maximum retry count for fetching IP address.
 _HEAD_IP_MAX_ATTEMPTS = 5
+_WORKER_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'{colorama.Fore.RED}Failed to terminate '
@@ -90,6 +91,8 @@ _TEARDOWN_PURGE_WARNING = (
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
 
 _MAX_RAY_UP_RETRY = 5
+
+_JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 
 
 def _get_cluster_config_template(cloud):
@@ -469,7 +472,11 @@ class RetryingVmProvisioner(object):
         if len(exception_str) == 1:
             # Parse structured response {'errors': [...]}.
             exception_str = exception_str[0][len('Exception: '):]
-            exception_dict = ast.literal_eval(exception_str)
+            try:
+                exception_dict = ast.literal_eval(exception_str)
+            except Exception as e:
+                raise RuntimeError(
+                    f'Failed to parse exception: {exception_str}') from e
             # TPU VM returns a different structured response.
             if 'errors' not in exception_dict:
                 exception_dict = {'errors': [exception_dict]}
@@ -1091,6 +1098,11 @@ class RetryingVmProvisioner(object):
                 logger.info(
                     'Retrying sky runtime setup due to ssh connection issue.')
                 return True
+
+            if ('ConnectionResetError: [Errno 54] Connection reset by peer'
+                    in stderr):
+                logger.info('Retrying due to Connection reset by peer.')
+                return True
             return False
 
         retry_cnt = 0
@@ -1188,7 +1200,7 @@ class RetryingVmProvisioner(object):
         if isinstance(launched_resources.cloud, clouds.Local):
             raise RuntimeError(
                 'The command `ray status` errored out on the head node '
-                'of the local cluster. Check if ray[default]==1.10.0 '
+                'of the local cluster. Check if ray[default]==1.13.0 '
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
         log_lib.run_with_log(
@@ -1416,7 +1428,8 @@ class CloudVmRayBackend(backends.Backend):
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
-        self.log_dir = os.path.join(SKY_LOGS_DIRECTORY, self.run_timestamp)
+        self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                    self.run_timestamp)
         # Do not make directories to avoid create folder for commands that
         # do not need it (`sky status`, `sky logs` ...)
         # os.makedirs(self.log_dir, exist_ok=True)
@@ -1588,7 +1601,8 @@ class CloudVmRayBackend(backends.Backend):
                 ip_list = backend_utils.get_node_ips(
                     cluster_config_file,
                     config_dict['launched_nodes'],
-                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS)
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
                 head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
@@ -1628,13 +1642,12 @@ class CloudVmRayBackend(backends.Backend):
                 # to SUCCEEDED, the cluster is STOPPED by `sky stop`.
                 # 2. On next `sky start`, it gets reset to FAILED.
                 cmd = job_lib.JobLibCodeGen.fail_all_jobs_in_progress()
-                returncode, _, stderr = self.run_on_head(handle,
-                                                         cmd,
-                                                         require_outputs=True)
+                returncode, stdout, stderr = self.run_on_head(
+                    handle, cmd, require_outputs=True)
                 subprocess_utils.handle_returncode(
                     returncode, cmd,
                     'Failed to set previously in-progress jobs to FAILED',
-                    stderr)
+                    stdout + stderr)
 
             with timeline.Event('backend.provision.post_process'):
                 global_user_state.add_or_update_cluster(cluster_name,
@@ -1817,8 +1830,9 @@ class CloudVmRayBackend(backends.Backend):
         else:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-                f'-- "{executable} -u {script_path} > {remote_log_path} 2>&1"')
+                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} '
+                '--no-wait -- '
+                f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -1884,7 +1898,7 @@ class CloudVmRayBackend(backends.Backend):
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
-            f'--address=127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
+            f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
             f'-- {switch_user_cmd}')
         return job_submit_cmd
 
@@ -1903,7 +1917,12 @@ class CloudVmRayBackend(backends.Backend):
                                            'Failed to fetch job id.',
                                            job_id_str + stderr)
         try:
-            job_id = int(job_id_str)
+            job_id_match = _JOB_ID_PATTERN.search(job_id_str)
+            if job_id_match is not None:
+                job_id = int(job_id_match.group(1))
+            else:
+                # For backward compatibility.
+                job_id = int(job_id_str)
         except ValueError as e:
             logger.error(stderr)
             raise ValueError(f'Failed to parse job id: {job_id_str}; '
