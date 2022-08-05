@@ -709,6 +709,10 @@ class RetryingVmProvisioner(object):
                             prev_resources.zone
                             in zones), (f'{prev_resources.zone} not found in '
                                         f'zones of {handle.cluster_yaml}.')
+                    # Note that we don't overwrite the zone field in Ray YAML
+                    # even if prev_resources.zone != zones.
+                    # This is because Ray will consider the YAML hash changed
+                    # and not reuse the existing cluster.
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
