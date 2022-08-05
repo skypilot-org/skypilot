@@ -10,7 +10,7 @@ from sky import backends
 from sky import cli
 from sky import global_user_state
 from sky import spot
-from sky.skylet.utils import db_utils
+from sky.utils import db_utils
 
 
 def test_spot_nonexist_strategy():
