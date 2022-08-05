@@ -952,6 +952,27 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
+
+    ray_config = common_utils.read_yaml(cluster_yaml)
+    if ray_config['provider']['_has_tpus']:
+        cluster_name = ray_config['cluster_name']
+        zone = ray_config['provider']['availability_zone']
+        query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
+                    f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                    f'--zone={zone} --format=value\\(name\\)')
+        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
+                    f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                    '(networkEndpoints.accessConfig.externalIp)"')
+
+        returncode, stdout, stderr = log_lib.run_with_log(
+                        tpuvm_cmd,
+                        '/dev/null',
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+        all_ips = re.findall(IP_ADDR_REGEX, stdout)
+        return all_ips
+
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
             handle.head_ip is not None):

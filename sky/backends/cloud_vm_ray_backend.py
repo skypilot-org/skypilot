@@ -1002,6 +1002,63 @@ class RetryingVmProvisioner(object):
                    'Try changing resource requirements or use another cloud.')
         raise exceptions.ResourcesUnavailableError(message)
 
+    def do_filemounts_and_setup_on_local_workers(self, cluster_yaml: str):
+        """Completes filemounting and setup on worker nodes.
+
+        Syncs filemounts and runs setup on worker nodes for a local cluster. This
+        is a workaround for a Ray Autoscaler bug where `ray up` does not perform
+        filemounting or setup for local cluster worker nodes.
+        """
+        config = common_utils.read_yaml(cluster_yaml)
+
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            cluster_yaml)
+        # FIXME: correct num_node
+        all_ips = backend_utils.get_node_ips(cluster_yaml, 1)
+        file_mounts = config['file_mounts']
+
+        setup_cmds = config['setup_commands']
+        setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
+
+        worker_runners = command_runner.SSHCommandRunner.make_runner_list(
+            all_ips[1:], *ssh_credentials)
+
+        # Uploads setup script to the worker node
+        with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+            f.write(setup_script)
+            f.flush()
+            setup_sh_path = f.name
+            setup_file = os.path.basename(setup_sh_path)
+            file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
+
+            # Ray Autoscaler Bug: Filemounting + Ray Setup
+            # does not happen on workers.
+            def _setup_local_worker(runner: command_runner.SSHCommandRunner):
+                for dst, src in file_mounts.items():
+                    mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
+                    # run_command_and_handle_ssh_failure(
+                    #     runner,
+                    #     mkdir_dst,
+                    #     failure_message=f'Failed to run {mkdir_dst} on remote.')
+                    runner.run(mkdir_dst,
+                                require_outputs=True,
+                                stream_logs=False)
+                    if os.path.isdir(src):
+                        src = os.path.join(src, '')
+                    runner.rsync_up(source=src, target=dst, stream_logs=False)
+
+                setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+                rc, stdout, _ = runner.run(setup_cmd,
+                                        stream_logs=False,
+                                        require_outputs=True)
+                subprocess_utils.handle_returncode(
+                    rc,
+                    setup_cmd,
+                    'Failed to setup Ray autoscaler commands on remote.',
+                    stderr=stdout)
+
+            subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
+
     @timeline.event
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, num_nodes: int,
@@ -1118,6 +1175,10 @@ class RetryingVmProvisioner(object):
         logger.debug(f'Ray up takes {time.time() - start} seconds with '
                      f'{retry_cnt} retries.')
 
+        config = common_utils.read_yaml(cluster_config_file)
+        if config['provider']['_has_tpus']:
+            logger.info('Setting up all TPU workers!')
+            self.do_filemounts_and_setup_on_local_workers(cluster_config_file)
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
             return self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr
