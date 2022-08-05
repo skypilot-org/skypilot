@@ -43,6 +43,7 @@ def find_version(*filepath):
             return version_match.group(1)
         raise RuntimeError('Unable to find version string.')
 
+
 def parse_footnote(readme: str) -> str:
     """Parse the footnote from the README.md file."""
     readme = readme.replace('<!-- Footnote -->', '#')
@@ -99,7 +100,6 @@ readme_filepath = 'README.md'
 if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
     long_description = parse_footnote(long_description)
-
 
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if
