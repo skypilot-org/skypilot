@@ -1634,10 +1634,6 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
-            usage_lib.messages.usage.update_cluster_resources(
-                handle.launched_nodes, handle.launched_resources)
-            usage_lib.messages.usage.update_final_cluster_status(
-                global_user_state.ClusterStatus.UP)
 
             # Get actual zone info and save it into handle
             get_zone_cmd = handle.launched_resources.cloud.get_zone_shell_cmd()
@@ -1653,6 +1649,11 @@ class CloudVmRayBackend(backends.Backend):
                         handle, get_zone_cmd, require_outputs=True)
                     handle.launched_resources = handle.launched_resources.copy(
                         zone=stdout.strip())
+
+            usage_lib.messages.usage.update_cluster_resources(
+                handle.launched_nodes, handle.launched_resources)
+            usage_lib.messages.usage.update_final_cluster_status(
+                global_user_state.ClusterStatus.UP)
 
             # Update job queue to avoid stale jobs (when restarted), before
             # setting the cluster to be ready.

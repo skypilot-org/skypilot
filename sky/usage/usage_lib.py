@@ -106,6 +106,8 @@ class UsageMessageToReport(MessageToReport):
         self.cloud: Optional[str] = None  # update_cluster_resources
         #: The final region of the cluster.
         self.region: Optional[str] = None  # update_cluster_resources
+        #: The final zone of the cluster.
+        self.zone: Optional[str] = None  # update_cluster_resources
         #: The final instance_type of the cluster.
         self.instance_type: Optional[str] = None  # update_cluster_resources
         #: The final accelerators the cluster.
@@ -138,6 +140,8 @@ class UsageMessageToReport(MessageToReport):
         self.task_cloud: Optional[str] = None  # update_actual_task
         #: Requested region
         self.task_region: Optional[str] = None  # update_actual_task
+        #: Requested zone
+        self.task_zone: Optional[str] = None  # update_actual_task
         #: Requested instance_type
         self.task_instance_type: Optional[str] = None  # update_actual_task
         #: Requested accelerators
@@ -187,6 +191,7 @@ class UsageMessageToReport(MessageToReport):
 
             self.task_cloud = str(resources.cloud)
             self.task_region = resources.region
+            self.task_zone = resources.zone
             self.task_instance_type = resources.instance_type
             self.task_use_spot = resources.use_spot
             # Update accelerators.
@@ -217,6 +222,7 @@ class UsageMessageToReport(MessageToReport):
                                  resources: 'resources_lib.Resources'):
         self.cloud = str(resources.cloud)
         self.region = resources.region
+        self.zone = resources.zone
         self.instance_type = resources.instance_type
         self.use_spot = resources.use_spot
 
