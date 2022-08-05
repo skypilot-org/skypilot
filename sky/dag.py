@@ -3,31 +3,6 @@ import pprint
 import threading
 
 
-class DagContext(threading.local):
-    """A thread-local stack of Dags."""
-    _current_dag = None
-    _previous_dags = []
-
-    @classmethod
-    def push_dag(cls, dag):
-        if cls._current_dag is not None:
-            cls._previous_dags.append(cls._current_dag)
-        cls._current_dag = dag
-
-    @classmethod
-    def pop_dag(cls):
-        old_dag = cls._current_dag
-        if cls._previous_dags:
-            cls._current_dag = cls._previous_dags.pop()
-        else:
-            cls._current_dag = None
-        return old_dag
-
-    @classmethod
-    def get_current_dag(cls):
-        return cls._current_dag
-
-
 class Dag:
     """Dag: a user application, represented as a DAG of Tasks."""
 
@@ -54,11 +29,11 @@ class Dag:
         return len(self.tasks)
 
     def __enter__(self):
-        DagContext.push_dag(self)
+        push_dag(self)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        DagContext.pop_dag()
+        pop_dag()
 
     def __repr__(self):
         pformat = pprint.pformat(self.tasks)
@@ -83,3 +58,32 @@ class Dag:
                 else:
                     visited_zero_out_degree = True
         return is_chain
+
+
+class _DagContext(threading.local):
+    """A thread-local stack of Dags."""
+    _current_dag = None
+    _previous_dags = []
+
+    def push_dag(self, dag):
+        if self._current_dag is not None:
+            self._previous_dags.append(self._current_dag)
+        self._current_dag = dag
+
+    def pop_dag(self):
+        old_dag = self._current_dag
+        if self._previous_dags:
+            self._current_dag = self._previous_dags.pop()
+        else:
+            self._current_dag = None
+        return old_dag
+
+    def get_current_dag(self):
+        return self._current_dag
+
+
+_dag_context = _DagContext()
+# Exposed via `sky.dag.*`.
+push_dag = _dag_context.push_dag
+pop_dag = _dag_context.pop_dag
+get_current_dag = _dag_context.get_current_dag
