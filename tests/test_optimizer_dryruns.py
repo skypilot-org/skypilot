@@ -257,9 +257,7 @@ def test_invalid_image(monkeypatch):
     assert 'Cloud must be specified' in str(e.value)
 
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch,
-                        cloud=sky.Azure(),
-                        image_id='some-image')
+        _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
     assert 'only supported for AWS and GCP' in str(e.value)
 
 

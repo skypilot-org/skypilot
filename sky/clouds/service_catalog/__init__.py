@@ -97,16 +97,12 @@ def instance_type_exists(instance_type: str,
     return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
 
-def region_exists(region_name: str,
-                  clouds: CloudFilter = None) -> Tuple[bool, List[str]]:
-    """Returns the region by name."""
-    return _map_clouds_catalog(clouds, 'region_exists', region_name)
-
-
-def zone_exists(zone_name: str,
-                clouds: CloudFilter = None) -> Tuple[bool, List[str]]:
+def validate_region_zone(region_name: Optional[str],
+                         zone_name: Optional[str],
+                         clouds: CloudFilter = None) -> bool:
     """Returns the zone by name."""
-    return _map_clouds_catalog(clouds, 'zone_exists', zone_name)
+    return _map_clouds_catalog(clouds, 'validate_region_zone', region_name,
+                               zone_name)
 
 
 def zone_in_region(region: str, zone: str, clouds: CloudFilter = None) -> bool:

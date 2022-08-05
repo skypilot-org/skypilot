@@ -188,12 +188,8 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def region_exists(self, region: str) -> Tuple[bool, List[str]]:
-        """Returns whether the region exists and a list of candidates."""
-        raise NotImplementedError
-
-    def zone_exists(self, zone: str) -> Tuple[bool, List[str]]:
-        """Returns whether the zone exists and a list of candidates."""
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        """Validates the region and zone."""
         raise NotImplementedError
 
     def zone_in_region(self, region: str, zone: str) -> bool:

@@ -680,7 +680,6 @@ def _make_dag_from_entrypoint_with_overrides(
     spot_recovery: Optional[str] = None,
 ) -> sky.Dag:
     entrypoint = ' '.join(entrypoint)
-
     with sky.Dag() as dag:
         is_yaml, yaml_config = _check_yaml(entrypoint)
         if is_yaml:

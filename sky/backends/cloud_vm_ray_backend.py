@@ -1504,11 +1504,14 @@ class CloudVmRayBackend(backends.Backend):
                         f'is in region {launched_resources.region!r}.')
             if (task_resources.zone is not None and
                     task_resources.zone != launched_resources.zone):
+                zone_str = (f'is in zone {launched_resources.zone!r}.'
+                            if launched_resources.zone is not None else
+                            'does not have zone specified.')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
                         'Task requested resources in zone '
                         f'{task_resources.zone!r}, but the existing cluster '
-                        f'is in zone {launched_resources.zone!r}.')
+                        f'{zone_str}')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     'Requested resources do not match the existing cluster.\n'
@@ -1638,15 +1641,14 @@ class CloudVmRayBackend(backends.Backend):
             # Get actual zone info and save it into handle
             get_zone_cmd = handle.launched_resources.cloud.get_zone_shell_cmd()
             if get_zone_cmd is not None:
-                # Leave the zone field to None for multi-node cases
+                # We leave the zone field to None for multi-node cases
                 # if zone is not specified because head and worker nodes
                 # can be launched in different zones.
-                if (task.num_nodes > 1 and
-                        handle.launched_resources.zone is None):
-                    pass
-                else:
+                if (task.num_nodes == 1 or
+                        handle.launched_nodes.zone is not None):
                     returncode, stdout, _ = self.run_on_head(
                         handle, get_zone_cmd, require_outputs=True)
+                    # zone will be checked during Resources cls initialization.
                     handle.launched_resources = handle.launched_resources.copy(
                         zone=stdout.strip())
 

@@ -326,11 +326,8 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def region_exists(self, region: str) -> Tuple[bool, List[str]]:
-        return service_catalog.region_exists(region, 'gcp')
-
-    def zone_exists(self, zone: str) -> Tuple[bool, List[str]]:
-        return service_catalog.zone_exists(zone, 'gcp')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region, zone, clouds='gcp')
 
     def zone_in_region(self, region: str, zone: str) -> bool:
         return service_catalog.zone_in_region(region, zone, 'gcp')

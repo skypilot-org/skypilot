@@ -15,12 +15,8 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def region_exists(region: str) -> Tuple[bool, List[str]]:
-    return common.region_exists_impl(_df, region)
-
-
-def zone_exists(zone: str) -> Tuple[bool, List[str]]:
-    return common.zone_exists_impl(_df, zone)
+def validate_region_zone(region: Optional[str], zone: Optional[str]):
+    return common.validate_region_zone_impl(_df, region, zone)
 
 
 def zone_in_region(region: str, zone: str) -> bool:

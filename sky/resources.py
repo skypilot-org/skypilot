@@ -62,8 +62,7 @@ class Resources:
         self._cloud = cloud
         self._region: Optional[str] = None
         self._zone: Optional[str] = None
-        self._set_region(region)
-        self._set_zone(zone)
+        self._set_region_zone(region, zone)
 
         self._instance_type = instance_type
 
@@ -238,54 +237,20 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
-    def _set_region(self, region: Optional[str]) -> None:
-        self._region = region
-        if region is None:
+    def _set_region_zone(self, region: Optional[str],
+                         zone: Optional[str]) -> None:
+        if region is None and zone is None:
             return
 
         if self._cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cloud must be specified together with region.')
+                    'Cloud must be specified together with region/zone.')
 
-        exist, candidate_list = self._cloud.region_exists(region)
-        if not exist:
-            with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid region {region!r} '
-                             f'for cloud {self.cloud}.')
-                if len(candidate_list) > 0:
-                    candidate_strs = ', '.join(candidate_list)
-                    error_msg += ('\nDid you mean one of these: '
-                                  f'{candidate_strs!r}?')
-                raise ValueError(error_msg)
+        # Validate whether region and zone exist in the catalog.
+        self._cloud.validate_region_zone(region, zone)
+
         self._region = region
-
-    def _set_zone(self, zone: Optional[str]) -> None:
-        if zone is None:
-            return
-
-        if self._cloud is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Cloud must be specified together with zone.')
-        elif self._cloud.is_same_cloud(clouds.Azure()):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Azure does not support zones.')
-        else:
-            exist, candidate_list = self._cloud.zone_exists(zone)
-            if not exist:
-                with ux_utils.print_exception_no_traceback():
-                    error_msg = (f'Invalid zone {zone!r} '
-                                 f'for cloud {self.cloud}.')
-                    if len(candidate_list) > 0:
-                        candidate_strs = ', '.join(candidate_list)
-                        error_msg += ('\nDid you mean one of these: '
-                                      f'{candidate_strs!r}?')
-                    raise ValueError(error_msg)
-        if self._region is not None:
-            if not self._cloud.zone_in_region(self._region, zone):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid zone: {zone!r} '
-                                     f'is not in region {self._region!r}.')
         self._zone = zone
 
     def _try_validate_instance_type(self):

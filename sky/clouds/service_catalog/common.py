@@ -95,30 +95,40 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
-def region_exists_impl(df: pd.DataFrame, region: str) -> Tuple[bool, List[str]]:
-    """Returns True if the region is valid or False with a candidate list."""
+def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
+                              zone: Optional[str]):
     all_regions = df['Region'].unique()
-    if region in all_regions:
-        return True, None
-    candidate_regions = difflib.get_close_matches(region,
-                                                  all_regions,
-                                                  n=5,
-                                                  cutoff=0.9)
-    candidate_regions = sorted(candidate_regions)
-    return False, candidate_regions
-
-
-def zone_exists_impl(df: pd.DataFrame, zone: str) -> Tuple[bool, List[str]]:
-    """Returns True if the zone is valid or False with a candidate list."""
     all_zones = df['AvailabilityZone'].unique()
-    if zone in all_zones:
-        return True, None
-    candidate_zones = difflib.get_close_matches(zone,
-                                                all_zones,
-                                                n=5,
-                                                cutoff=0.9)
-    candidate_zones = sorted(candidate_zones)
-    return False, candidate_zones
+
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
+        candidate_loc = sorted(candidate_loc)
+        candidate_strs = ''
+        if len(candidate_loc) > 0:
+            candidate_strs = ', '.join(candidate_loc)
+            candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
+        return candidate_strs
+
+    if region is not None and region not in all_regions:
+        with ux_utils.print_exception_no_traceback():
+            error_msg = (f'Invalid region {region!r}')
+            error_msg += _get_candidate_str(region, all_regions)
+            raise ValueError(error_msg)
+
+    if zone is not None and zone not in all_zones:
+        with ux_utils.print_exception_no_traceback():
+            error_msg = (f'Invalid zone {zone!r}')
+            error_msg += _get_candidate_str(zone, all_zones)
+            raise ValueError(error_msg)
+
+    if region is not None and zone is not None:
+        if zone not in df[df['Region'] == region]['AvailabilityZone'].unique():
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid zone {zone!r} for region {region!r}')
+                error_msg += _get_candidate_str(
+                    zone,
+                    df[df['Region'] == region]['AvailabilityZone'].unique())
+                raise ValueError(error_msg)
 
 
 def zone_in_region_impl(df: pd.DataFrame, region: str, zone: str) -> bool:
