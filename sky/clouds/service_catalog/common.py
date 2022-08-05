@@ -98,6 +98,7 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
                               zone: Optional[str]):
     """Validates whether region and zone exist in the catalog."""
+
     def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
