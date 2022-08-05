@@ -256,7 +256,7 @@ class Resources:
                 if len(candidate_list) > 0:
                     candidate_strs = ', '.join(candidate_list)
                     error_msg += ('\nDid you mean one of these: '
-                                  f'{candidate_strs}?')
+                                  f'{candidate_strs!r}?')
                 raise ValueError(error_msg)
         self._region = region
 
@@ -279,7 +279,7 @@ class Resources:
                     if len(candidate_list) > 0:
                         candidate_strs = ', '.join(candidate_list)
                         error_msg += ('\nDid you mean one of these: '
-                                      f'{candidate_strs}?')
+                                      f'{candidate_strs!r}?')
                     raise ValueError(error_msg)
         if self._region is not None:
             if not self._cloud.zone_in_region(self._region, zone):
