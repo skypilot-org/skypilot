@@ -5,7 +5,7 @@ through a unified interface. No knowledge of cloud offerings is required or expe
 you simply define the workload and its resource requirements, and SkyPilot will
 automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
-*: [^1]: SkyPilot is primarily targeted at machine learning workloads, but it can also
+*: SkyPilot is primarily targeted at machine learning workloads, but it can also
 support many general workloads. We're excited to hear about your use case and would
 love to hear more about how we can better support your requirements - please join us
 in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
@@ -42,6 +42,12 @@ def find_version(*filepath):
         if version_match:
             return version_match.group(1)
         raise RuntimeError('Unable to find version string.')
+
+def parse_footnote(readme: str) -> str:
+    """Parse the footnote from the README.md file."""
+    readme = readme.replace('<!-- Footnote -->', '#')
+    footnote_re = re.compile(r'\[\^([0-9]+)\]')
+    return footnote_re.sub(r'<sup>[\1]</sup>', readme)
 
 
 install_requires = [
@@ -92,6 +98,8 @@ readme_filepath = 'README.md'
 # Skip the description for that case.
 if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
+    long_description = parse_footnote(long_description)
+
 
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if
