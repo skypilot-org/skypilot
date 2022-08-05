@@ -6,12 +6,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import dag
 from sky import task
 from sky import backends
+from sky import constants
 from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.backends import onprem_utils
 from sky.skylet import job_lib
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
@@ -205,6 +207,10 @@ def _check_cluster_available(cluster_name: str,
             f'Cluster {cluster_name} with LocalDockerBackend does '
             f'not support {operation}.')
     if cluster_status != global_user_state.ClusterStatus.UP:
+        if onprem_utils.check_if_local_cloud(cluster_name):
+            raise exceptions.ClusterNotUpError(
+                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
+                    cluster_name))
         raise exceptions.ClusterNotUpError(
             f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} is not up '
             f'(status: {cluster_status.value}); skipped.'

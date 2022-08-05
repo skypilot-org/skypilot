@@ -33,11 +33,9 @@ import getpass
 import os
 import shlex
 import sys
-import tempfile
 import textwrap
 import typing
-from typing import Dict, List, Optional, Tuple
-import yaml
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 import colorama
@@ -64,7 +62,6 @@ from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
-from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -106,7 +103,8 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
         if len(glob_cluster) == 0:
             if onprem_utils.check_if_local_cloud(cluster):
                 click.echo(
-                    constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(cluster=cluster))
+                    constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
+                        cluster=cluster))
             else:
                 click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
@@ -1037,7 +1035,7 @@ def exec(
     if handle is None:
         if onprem_utils.check_if_local_cloud(cluster):
             raise click.BadParameter(
-                _UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
+                constants.UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -1128,7 +1126,6 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
-
     unsupported_clusters = []
     for cluster in clusters:
         try:
@@ -1142,7 +1139,6 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             continue
         job_table = job_lib.format_job_queue(job_table)
         click.echo(f'{job_table}')
-
 
     local_clusters = onprem_utils.check_and_get_local_clusters()
     for local_cluster in local_clusters:
@@ -1207,8 +1203,10 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
                                    'Job ID must be integers.')
     if status:
         job_statuses = core.job_status(cluster, job_ids)
+        job_id = list(job_statuses.keys())[0]
         job_status = list(job_statuses.values())[0]
-        click.echo(job_status)
+        job_status_str = job_status.value if job_status is not None else 'None'
+        click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
@@ -2106,17 +2104,6 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         names = [s['name'] for s in storages]
     for name in names:
         sky.storage_delete(name)
-
-    # Launching Ray Autoscaler service
-    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
-    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
-    steps += 1
-
-# Onprem CLIs
-@cli.group(cls=_NaturalOrderGroup)
-def admin():
-    """Sky administrator commands for local clusters."""
-    pass
 
 
 @cli.group(cls=_NaturalOrderGroup)
