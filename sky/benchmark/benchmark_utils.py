@@ -21,6 +21,7 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import constants
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
@@ -39,7 +40,6 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
-_SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 # NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR
@@ -489,7 +489,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 
     # Save stdout/stderr from cluster launches.
     run_timestamp = backend_utils.get_run_timestamp()
-    log_dir = os.path.join(_SKY_LOGS_DIRECTORY, run_timestamp)
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
     log_dir = os.path.expanduser(log_dir)
     logger.info(
         f'{colorama.Fore.YELLOW}To view stdout/stderr from individual '
