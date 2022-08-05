@@ -530,8 +530,8 @@ def test_spot():
             f'sky spot status | grep {name}-2 | head -n1 | grep STARTING',
             f'sky spot cancel -y -n {name}-1',
             'sleep 200',
-            f'sky spot status | grep {name}-1 | head -n1 | grep CANCELLED',
-            f'sky spot status | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
     )
