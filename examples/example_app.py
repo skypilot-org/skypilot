@@ -43,7 +43,7 @@ def make_application():
             sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
             sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(clouds.GCP(), 'n1-standard-8', 'tpu-v3-8'),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         })
 
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
@@ -60,8 +60,8 @@ def make_application():
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge'),
             sky.Resources(sky.AWS(), 'p3.2xlarge'),
-            sky.Resources(clouds.GCP(), 'n1-standard-4', 'T4'),
-            sky.Resources(clouds.GCP(), 'n1-standard-8', 'T4'),
+            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4'),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4'),
         })
 
         infer_op.set_time_estimator(
