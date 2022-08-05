@@ -879,6 +879,7 @@ def parallel_data_transfer_with_nodes(
             runner.rsync(
                 source=source,
                 target=target,
+                up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
             )

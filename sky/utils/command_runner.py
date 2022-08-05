@@ -114,7 +114,7 @@ class SSHCommandRunner:
         Example Usage:
             runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
-            runner.rsync_up(source, target)
+            runner.rsync(source, target, up=True)
 
         Args:
             ip: The IP address of the remote machine.
@@ -266,7 +266,7 @@ class SSHCommandRunner:
         source: str,
         target: str,
         *,
-        up: bool = True,
+        up: bool,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,

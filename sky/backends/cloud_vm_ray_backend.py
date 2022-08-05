@@ -1707,6 +1707,7 @@ class CloudVmRayBackend(backends.Backend):
             runner.rsync(
                 source=workdir,
                 target=SKY_REMOTE_WORKDIR,
+                up=True,
                 log_path=log_path,
                 stream_logs=False,
             )
@@ -1761,6 +1762,7 @@ class CloudVmRayBackend(backends.Backend):
             def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
                 runner.rsync(source=setup_sh_path,
                              target=f'/tmp/{setup_file}',
+                             up=True,
                              stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -1806,7 +1808,10 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            runner.rsync(source=fp.name, target=script_path, stream_logs=False)
+            runner.rsync(source=fp.name,
+                         target=script_path,
+                         up=True,
+                         stream_logs=False)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
@@ -1885,9 +1890,10 @@ class CloudVmRayBackend(backends.Backend):
             remote_run_file = f'/tmp/{run_file}'
             # We choose to sync code + exec, so that Ray job submission API will
             # work for the multitenant case.
-            runner.rsync_up(source=fp.name,
-                            target=remote_run_file,
-                            stream_logs=False)
+            runner.rsync(source=fp.name,
+                         target=remote_run_file,
+                         up=True,
+                         stream_logs=False)
         runner.run(f'mkdir -p {remote_log_dir}; chmod a+rwx {remote_run_file}',
                    stream_logs=False)
         switch_user_cmd = job_lib.make_job_command_with_user_switching(
