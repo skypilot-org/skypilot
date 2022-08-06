@@ -57,7 +57,7 @@ To get around this, mount the files to a different path, then symlink to them.  
 
 
 How to edit or update the pricing information used by SkyPilot? (Advanced Use Case)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 SkyPilot stores pricing information for different cloud resource types in CSV files known as service catalogs.
 These catalogs are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
@@ -74,7 +74,7 @@ SkyPilot will automatically download the latest catalog in the next run.
 
 
 How to make SkyPilot clusters use my Weights & Biases credentials?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Install the wandb library on your laptop and login to your account via ``wandb login``.
 Then, add the following lines in your task yaml file:

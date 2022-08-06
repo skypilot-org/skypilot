@@ -56,10 +56,10 @@ Key features:
 
 .. toctree::
    :maxdepth: 1
-   :caption: SkyPilot CLI
+   :caption: SkyPilot Interface
 
    reference/cli
-
+   reference/api
 
 .. .. toctree::
 ..   :maxdepth: 1
