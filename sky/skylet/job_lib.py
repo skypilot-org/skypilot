@@ -527,7 +527,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 
-def log_dir(job_id: Optional[int]) -> Optional[str]:
+def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     """Returns the relative path to the log file for a job."""
     _CURSOR.execute(
         """\
@@ -537,10 +537,11 @@ def log_dir(job_id: Optional[int]) -> Optional[str]:
     if row is None:
         return None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+    return run_timestamp
 
 
-def log_dirs_with_globbing_json(job_ids: List[Optional[str]]) -> Dict[str, str]:
+def run_timestamp_with_globbing_json(
+        job_ids: List[Optional[str]]) -> Dict[str, str]:
     """Returns the relative paths to the log files for job with globbing."""
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
     _CURSOR.execute(
@@ -548,13 +549,12 @@ def log_dirs_with_globbing_json(job_ids: List[Optional[str]]) -> Dict[str, str]:
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _CURSOR.fetchall()
-    log_paths = dict()
+    run_timestamps = dict()
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-        log_paths[str(job_id)] = log_path
-    return json.dumps(log_paths)
+        run_timestamps[str(job_id)] = run_timestamp
+    return json.dumps(run_timestamps)
 
 
 class JobLibCodeGen:
@@ -565,7 +565,7 @@ class JobLibCodeGen:
       >> codegen = JobLibCodeGen.add_job(...)
     """
 
-    _PREFIX = ['from sky.skylet import job_lib, log_lib']
+    _PREFIX = ['import os', 'from sky.skylet import job_lib, log_lib']
 
     @classmethod
     def add_job(cls, job_name: str, username: str, run_timestamp: str,
@@ -614,7 +614,9 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            'log_dir = job_lib.log_dir(job_id)',
+            'run_timestamp = job_lib.get_run_timestamp(job_id)',
+            (f'log_dir = os.path.join({constants.SKY_LOGS_DIRECTORY!r}, '
+             'run_timestamp)'),
             (f'log_lib.tail_logs({job_owner!r},'
              f'job_id, log_dir, {spot_job_id!r})'),
         ]
@@ -644,19 +646,12 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_log_path(cls, job_id: int) -> str:
-        code = [
-            f'log_dir = job_lib.log_dir({job_id})',
-            'print(log_dir, flush=True)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_log_path_with_globbing(cls, job_ids: Optional[List[str]]) -> str:
+    def get_run_timestamp_with_globbing(cls,
+                                        job_ids: Optional[List[str]]) -> str:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.log_dirs_with_globbing_json(job_ids)',
+            'log_dirs = job_lib.run_timestamp_with_globbing_json(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

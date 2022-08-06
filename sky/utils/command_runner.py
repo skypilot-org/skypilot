@@ -270,8 +270,20 @@ class SSHCommandRunner:
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
-    ) -> Union[int, Tuple[int, str, str]]:
-        """TODO(zhwu)"""
+    ) -> None:
+        """Uses 'rsync' to sync 'source' to 'target'.
+
+        Args:
+            source: The source path.
+            target: The target path.
+            up: The direction of the sync, True for local to cluster, False
+              for cluster to local.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+
+        Raises:
+            exceptions.CommandError: rsync command failed.
+        """
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used

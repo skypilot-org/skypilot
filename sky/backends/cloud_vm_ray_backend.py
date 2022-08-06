@@ -2046,31 +2046,37 @@ class CloudVmRayBackend(backends.Backend):
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
-    def sync_down_logs(self, handle: ResourceHandle,
-                       job_ids: Optional[str]) -> Dict[str, str]:
+    def sync_down_logs(
+            self,
+            handle: ResourceHandle,
+            job_ids: Optional[str],
+            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
 
         Returns:
             A dictionary mapping job_id to log path.
         """
-        code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
-        returncode, log_dirs, stderr = self.run_on_head(handle,
-                                                        code,
-                                                        stream_logs=False,
-                                                        require_outputs=True)
+        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
+        returncode, run_timestamps, stderr = self.run_on_head(
+            handle, code, stream_logs=False, require_outputs=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        log_dirs = json.loads(log_dirs)
-        if not log_dirs:
+        run_timestamps = json.loads(run_timestamps)
+        if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
             return
 
-        job_ids = list(log_dirs.keys())
-        remote_log_dirs = list(log_dirs.values())
+        job_ids = list(run_timestamps.keys())
+        run_timestamps = list(run_timestamps.values())
+        remote_log_dirs = [
+            os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+            for run_timestamp in run_timestamps
+        ]
         local_log_dirs = [
-            os.path.expanduser(log_dir) for log_dir in remote_log_dirs
+            os.path.expanduser(os.path.join(local_dir, run_timestamp))
+            for run_timestamp in run_timestamps
         ]
 
         style = colorama.Style
@@ -2114,7 +2120,7 @@ class CloudVmRayBackend(backends.Backend):
                          for item in zip(local_log_dirs, remote_log_dirs)
                          for runner in runners]
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
-        return log_dirs
+        return run_timestamps
 
     def tail_logs(self,
                   handle: ResourceHandle,
@@ -2568,7 +2574,7 @@ class CloudVmRayBackend(backends.Backend):
                     mkdir_for_wrapped_dst = f'mkdir -p {wrapped_dst}'
 
                 # TODO(mluo): Fix method so that mkdir and rsync run together
-                backend_utils.parallel_data_transfer_with_nodes(
+                backend_utils.parallel_data_transfer_to_nodes(
                     runners,
                     source=src,
                     target=wrapped_dst,
@@ -2601,7 +2607,7 @@ class CloudVmRayBackend(backends.Backend):
             ]
             command = ' && '.join(download_target_commands)
             # dst is only used for message printing.
-            backend_utils.parallel_data_transfer_with_nodes(
+            backend_utils.parallel_data_transfer_to_nodes(
                 runners,
                 source=src,
                 target=dst,
@@ -2673,7 +2679,7 @@ class CloudVmRayBackend(backends.Backend):
             mount_cmd = store.mount_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
-            backend_utils.parallel_data_transfer_with_nodes(
+            backend_utils.parallel_data_transfer_to_nodes(
                 runners,
                 source=src_print,
                 target=dst,

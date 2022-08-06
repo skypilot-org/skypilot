@@ -248,29 +248,6 @@ _TASK_OPTIONS = [
         help=('The region to use. If specified, overrides the '
               '"resources.region" config. Passing "none" resets the config.')),
     click.option(
-        '--gpus',
-        required=False,
-        type=str,
-        help=
-        ('Type and number of GPUs to use. Example values: '
-         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-         '(fractional counts are supported by the scheduling framework). '
-         'If a new cluster is being launched by this command, this is the '
-         'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
-         'resources and is used for scheduling the task. '
-         'Overrides the "accelerators" '
-         'config in the YAML if both are supplied. '
-         'Passing "none" resets the config.')),
-    click.option(
-        '--instance-type',
-        required=False,
-        type=str,
-        help=('The instance type to use. If specified, overrides the '
-              '"resources.instance_type" config. Passing "none" resets the '
-              'config.'),
-    ),
-    click.option(
         '--num-nodes',
         required=False,
         type=int,
@@ -293,7 +270,7 @@ _TASK_OPTIONS = [
         required=False,
         type=_parse_env_var,
         multiple=True,
-        help="""
+        help="""\
         Environment variable to set on the remote node.
         It can be specified multiple times.
         Examples:
@@ -309,20 +286,31 @@ _TASK_OPTIONS = [
         same value of ``$MY_ENV3`` in the local environment.""",
     )
 ]
-_GPUS_OPTION = click.option(
-    '--gpus',
-    required=False,
-    type=str,
-    help=('Type and number of GPUs to use. Example values: '
-          '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-          '(fractional counts are supported by the scheduling framework). '
-          'If a new cluster is being launched by this command, this is the '
-          'resources to provision. If an existing cluster is being reused, this'
-          ' is seen as the task demand, which must fit the cluster\'s total '
-          'resources and is used for scheduling the task. '
-          'Overrides the "accelerators" '
-          'config in the YAML if both are supplied. '
-          'Passing "none" resets the config.'))
+_EXTRA_RESOURCES_OPTIONS = [
+    click.option(
+        '--gpus',
+        required=False,
+        type=str,
+        help=
+        ('Type and number of GPUs to use. Example values: '
+         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+         '(fractional counts are supported by the scheduling framework). '
+         'If a new cluster is being launched by this command, this is the '
+         'resources to provision. If an existing cluster is being reused, this'
+         ' is seen as the task demand, which must fit the cluster\'s total '
+         'resources and is used for scheduling the task. '
+         'Overrides the "accelerators" '
+         'config in the YAML if both are supplied. '
+         'Passing "none" resets the config.')),
+    click.option(
+        '--instance-type',
+        required=False,
+        type=str,
+        help=('The instance type to use. If specified, overrides the '
+              '"resources.instance_type" config. Passing "none" resets the '
+              'config.'),
+    ),
+]
 
 
 def _add_click_options(options: List[click.Option]):
@@ -840,7 +828,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS + [_GPUS_OPTION])
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -955,7 +943,7 @@ def launch(
               is_flag=True,
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
-@_add_click_options(_TASK_OPTIONS + [_GPUS_OPTION])
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
@@ -1176,17 +1164,26 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
 
-    If JOB_ID is not provided, tails the logs of the last job on the cluster.
+    If JOB_ID is not provided, the latest job on the cluster will be used.
+
+    1. If no flags are provided, tail the logs of the job_id specified. At most
+    one job_id can be provided.
+    2. If --status is specified, print the status of the job and exit with
+    returncode 0 if the job is succeeded, or 1 otherwise. At most one job_id can
+    be specified.
+    3. If --sync-down is specified, the logs of the job will be downloaded from
+    the cluster and saved to the local machine under `~/sky_logs`. Mulitple
+    job_ids can be specified.
     """
     if sync_down and status:
         raise click.UsageError(
-            'Both sync_down and status are specified '
+            'Both --sync_down and --status are specified '
             '(ambiguous). To fix: specify at most one of them.')
 
     if len(job_ids) > 1 and not sync_down:
         raise click.UsageError(
             f'Cannot stream logs of multiple jobs {job_ids}. '
-            'Set --sync_down to download them.')
+            'Set --sync-down to download them.')
 
     job_ids = None if not job_ids else job_ids
 
@@ -2209,7 +2206,7 @@ def spot():
 @spot.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS + [_GPUS_OPTION])
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
               type=str,

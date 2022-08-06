@@ -225,7 +225,7 @@ def _check_cluster_available(cluster_name: str,
 
 def queue(cluster_name: str,
           skip_finished: bool = False,
-          all_users: bool = False):
+          all_users: bool = False) -> List[dict]:
     """Get the job queue in List[dict].
 
     Please refer to the sky.cli.queue for the document.
@@ -336,8 +336,10 @@ def tail_logs(cluster_name: str, job_id: Optional[str]):
     backend.tail_logs(handle, job_id)
 
 
-def download_logs(cluster_name: str,
-                  job_ids: Optional[List[str]]) -> Dict[str, str]:
+def download_logs(
+        cluster_name: str,
+        job_ids: Optional[List[str]],
+        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     """Download the logs of jobs.
 
     Args:
@@ -356,7 +358,7 @@ def download_logs(cluster_name: str,
     logger.info(f'{colorama.Fore.YELLOW}'
                 'Syncing down logs to local...'
                 f'{colorama.Style.RESET_ALL}')
-    local_log_dirs = backend.sync_down_logs(handle, job_ids)
+    local_log_dirs = backend.sync_down_logs(handle, job_ids, local_dir)
     return local_log_dirs
 
 

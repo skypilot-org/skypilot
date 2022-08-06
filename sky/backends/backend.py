@@ -94,7 +94,7 @@ class Backend:
     def teardown(self,
                  handle: ResourceHandle,
                  terminate: bool,
-                 purge: bool = False):
+                 purge: bool = False) -> None:
         self._teardown(handle, terminate, purge)
 
     def register_info(self, **kwargs) -> None:
