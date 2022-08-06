@@ -92,7 +92,10 @@ class StrategyExecutor:
                 # Wait the job to be started
                 status = spot_utils.get_job_status(self.backend,
                                                    self.cluster_name)
-                while (status is None or status in [job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING]):
+                while (status is None or status in [
+                        job_lib.JobStatus.INIT,
+                        job_lib.JobStatus.PENDING,
+                ]):
                     time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
                     status = spot_utils.get_job_status(self.backend,
                                                        self.cluster_name)
