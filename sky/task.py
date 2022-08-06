@@ -143,7 +143,7 @@ class Task:
         # Check if the task is legal.
         self._validate()
 
-        dag = sky.DagContext.get_current_dag()
+        dag = sky.dag.get_current_dag()
         if dag is not None:
             dag.add(self)
 
@@ -628,7 +628,7 @@ class Task:
         return d
 
     def __rshift__(self, b):
-        sky.DagContext.get_current_dag().add_edge(self, b)
+        sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
         if self.name:
