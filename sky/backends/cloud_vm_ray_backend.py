@@ -1753,7 +1753,9 @@ class CloudVmRayBackend(backends.Backend):
             # Sync the setup script up and run it.
             ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
                                                  handle.launched_nodes,
-                                                 handle=handle)
+                                                 handle=handle,
+                                                 head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                                                 worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             runners = command_runner.SSHCommandRunner.make_runner_list(
