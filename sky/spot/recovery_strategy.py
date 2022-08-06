@@ -11,6 +11,7 @@ from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -70,7 +71,7 @@ class StrategyExecutor:
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
-        backoff = backend_utils.Backoff(retry_init_gap_seconds)
+        backoff = common_utils.Backoff(retry_init_gap_seconds)
         while True:
             retry_cnt += 1
             try:
