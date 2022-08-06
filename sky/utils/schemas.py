@@ -155,3 +155,43 @@ def get_task_schema():
             },
         }
     }
+
+
+def get_cluster_schema():
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'cluster': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'ips': {
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        }
+                    },
+                    'name': {
+                        'type': 'string',
+                    },
+                }
+            },
+            'auth': {
+                'type': 'object',
+                'required': [],
+                'additionalProperties': False,
+                'properties': {
+                    'ssh_user': {
+                        'type': 'string',
+                    },
+                    'ssh_private_key': {
+                        'type': 'string',
+                    },
+                }
+            },
+        }
+    }
