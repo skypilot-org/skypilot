@@ -32,7 +32,8 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
     Please refer to the sky.cli.status for the document.
 
     Returns:
-        List[dict]:
+        A list of dicts, each dict contains the information of a cluster.
+
         [
             {
                 'name': (str) cluster name,
@@ -43,6 +44,7 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
                 'metadata': (dict) metadata of the cluster,
             }
         ]
+
     """
     cluster_records = backend_utils.get_clusters(all, refresh)
     return cluster_records

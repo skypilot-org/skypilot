@@ -204,16 +204,40 @@ def _execute(
 @usage_lib.entrypoint
 def launch(
     dag: sky.Dag,
+    cluster_name: Optional[str] = None,
+    retry_until_up: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     teardown: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    retry_until_up: bool = False,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
-    cluster_name: Optional[str] = None,
     detach_run: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-) -> None:
+):
+    """Launch a sky.DAG (rerun setup if cluster exists).
+
+    Args:
+        dag: sky.DAG to launch.
+        cluster_name: name of the cluster to create/reuse.  If None,
+            auto-generate a name.
+        retry_until_up: whether to retry launching the cluster until it is
+            up.
+        idle_minutes_to_autostop: if provided, the cluster will be auto-stop
+            after this many minutes of idleness.
+
+    Examples:
+        >>> import sky
+        >>> with sky.Dag() as dag:
+        >>>     task = sky.Task(run='echo hello SkyPilot')
+        >>>     task.set_resources(
+        ...             sky.Resources(
+        ...                 cloud=sky.AWS(),
+        ...                 accelerators='V100:4'
+        ...             )
+        ...     )
+        >>> sky.launch(dag, cluster_name='my-cluster')
+
+    """
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
     _execute(
@@ -241,7 +265,7 @@ def exec(  # pylint: disable=redefined-builtin
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
-) -> None:
+):
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
@@ -273,7 +297,7 @@ def spot_launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
-) -> None:
+):
     """Launch a managed spot job.
 
     Please refer to the sky.cli.spot_launch for the document.
