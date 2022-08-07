@@ -1786,8 +1786,9 @@ class CloudVmRayBackend(backends.Backend):
                     except subprocess.CalledProcessError:
                         last_10_lines = None
 
-                    err_msg = (f'Failed to setup with return code {returncode}.'
-                               f'Check the details in log: {setup_log_path}.')
+                    err_msg = (
+                        f'Failed to setup with return code {returncode}. '
+                        f'Check the details in log: {setup_log_path}.')
                     if last_10_lines:
                         err_msg += (
                             f'\n\n{colorama.Fore.RED}'
