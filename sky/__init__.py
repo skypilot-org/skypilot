@@ -6,7 +6,7 @@ from sky import backends
 from sky import benchmark
 from sky import clouds
 from sky.clouds.service_catalog import list_accelerators
-from sky.dag import Dag, DagContext
+from sky.dag import Dag
 from sky.execution import launch, exec  # pylint: disable=redefined-builtin
 from sky.resources import Resources
 from sky.task import Task
@@ -27,7 +27,6 @@ __all__ = [
     'Azure',
     'GCP',
     'Dag',
-    'DagContext',
     'Local',
     'Optimizer',
     'OptimizeTarget',
