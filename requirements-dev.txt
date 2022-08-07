@@ -8,3 +8,4 @@ toml==0.10.2
 # testing
 pytest
 pytest-xdist
+pytest-env>=0.6
