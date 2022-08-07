@@ -2123,7 +2123,7 @@ class CloudVmRayBackend(backends.Backend):
                          for item in zip(local_log_dirs, remote_log_dirs)
                          for runner in runners]
         subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
-        return run_timestamps
+        return dict(zip(job_ids, local_log_dirs))
 
     def tail_logs(self,
                   handle: ResourceHandle,
