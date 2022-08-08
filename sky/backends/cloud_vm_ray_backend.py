@@ -1788,14 +1788,14 @@ class CloudVmRayBackend(backends.Backend):
 
                     err_msg = (
                         f'Failed to setup with return code {returncode}. '
-                        f'Check the details in log: {setup_log_path}.')
+                        f'Check the details in log: {setup_log_path}')
                     if last_10_lines:
                         err_msg += (
                             f'\n\n{colorama.Fore.RED}'
                             '****** START Last lines of setup output ******'
                             f'{colorama.Style.RESET_ALL}\n'
                             f'{last_10_lines}'
-                            f'\n{colorama.Fore.RED}'
+                            f'{colorama.Fore.RED}'
                             '******* END Last lines of setup output *******'
                             f'{colorama.Style.RESET_ALL}')
                     return err_msg
