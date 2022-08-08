@@ -984,8 +984,11 @@ def get_node_ips(cluster_yaml: str,
                     raise exceptions.FetchIPError(
                         exceptions.FetchIPError.Reason.WORKER) from e
                 # Retry if the ssh is not ready for the workers yet.
-                logger.debug('Retrying to get worker ip.')
-                time.sleep(backoff.current_backoff())
+                backoff_time = backoff.current_backoff()
+                logger.debug('Retrying to get worker ip '
+                             f'[{retry_cnt}/{worker_ip_max_attempts}] in '
+                             f'{backoff_time} seconds.')
+                time.sleep(backoff_time)
         worker_ips = re.findall(IP_ADDR_REGEX, out)
         # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
         # Workaround: List of IPs are shown in Stderr
