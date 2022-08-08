@@ -258,7 +258,7 @@ class Azure(clouds.Cloud):
             return False, (
                 'Azure CLI returned error. Run the following commands '
                 'under sky folder:'
-                # TODO(zhwu): after we publish sky to pypi, change this to
+                # TODO(zhwu): after we publish sky to PyPI, change this to
                 # `pip install sky[azure]`
                 '\n      $ pip install .[azure]'
                 '\n    Credentials may also need to be set.' + help_str)

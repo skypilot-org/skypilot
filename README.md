@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=55%/>
+  <img src="https://github.com/skypilot-org/skypilot/raw/master/docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=55%/>
 </p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
@@ -7,7 +7,6 @@
 
 SkyPilot is a framework for easily running machine learning[^1] workloads on any cloud through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
-[^1]: SkyPilot is primarily targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
 
 ### Key features
 * **Run existing projects on the cloud** with zero code changes
@@ -75,3 +74,6 @@ We are excited to hear your feedback! SkyPilot has two channels for engaging wit
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
+
+<!-- Footnote -->
+[^1]: SkyPilot is primarily targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!

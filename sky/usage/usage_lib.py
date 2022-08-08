@@ -16,6 +16,7 @@ import uuid
 
 import requests
 
+import sky
 from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
@@ -90,6 +91,7 @@ class UsageMessageToReport(MessageToReport):
         # Message identifier.
         self.user: str = get_logging_user_hash()
         self.run_id: str = _get_logging_run_id()
+        self.sky_version: str = sky.__version__
 
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()

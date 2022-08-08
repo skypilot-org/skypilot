@@ -11,6 +11,7 @@ import filelock
 
 import sky
 from sky.backends import backend_utils
+from sky.utils import common_utils
 
 # Local wheel path is same as the remote path.
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
@@ -37,7 +38,9 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 def _get_latest_built_wheel() -> pathlib.Path:
     try:
-        latest_wheel = max(WHEEL_DIR.glob(f'{_PACKAGE_WHEEL_NAME}-*.whl'),
+        latest_wheel = max(WHEEL_DIR.glob(
+            f'{_PACKAGE_WHEEL_NAME}-'
+            f'{common_utils.normalize_version(sky.__version__)}-*.whl'),
                            key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError('Could not find built Sky wheels.') from None

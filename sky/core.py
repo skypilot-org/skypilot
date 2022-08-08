@@ -472,7 +472,7 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
             returncode, code, 'Failed to fetch managed job statuses',
             job_table_json + stderr)
     except exceptions.CommandError as e:
-        raise RuntimeError(e.message) from e
+        raise RuntimeError(e.error_msg) from e
 
     jobs = spot.load_spot_job_queue(job_table_json)
     return jobs
@@ -522,7 +522,7 @@ def spot_cancel(name: Optional[str] = None,
                                            'Failed to cancel managed spot job',
                                            stdout)
     except exceptions.CommandError as e:
-        raise RuntimeError(e.message) from e
+        raise RuntimeError(e.error_msg) from e
 
     logger.info(stdout)
     if 'Multiple jobs found with name' in stdout:

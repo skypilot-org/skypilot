@@ -1085,12 +1085,18 @@ class RetryingVmProvisioner(object):
             if returncode == 0:
                 return False
 
-            if ('Head node fetch timed out. Failed to create head node.'
-                    in stderr and isinstance(to_provision_cloud, clouds.Azure)):
-                logger.info(
-                    'Retrying head node provisioning due to head fetching '
-                    'timeout.')
-                return True
+            if isinstance(to_provision_cloud, clouds.Azure):
+                if 'Failed to invoke the Azure CLI' in stderr:
+                    logger.info(
+                        'Retrying head node provisioning due to Azure CLI '
+                        'issues.')
+                    return True
+                if ('Head node fetch timed out. Failed to create head node.'
+                        in stderr):
+                    logger.info(
+                        'Retrying head node provisioning due to head fetching '
+                        'timeout.')
+                    return True
             if ('Processing file mounts' in stdout and
                     'Running setup commands' not in stdout and
                     'Failed to setup head node.' in stderr):
@@ -1527,11 +1533,11 @@ class CloudVmRayBackend(backends.Backend):
                 to_provision_config.num_nodes, to_provision_config.resources)
             usage_lib.messages.usage.update_cluster_status(prev_cluster_status)
 
-            # TODO(suquark): once we have sky on PYPI, we should directly
-            # install sky from PYPI.
+            # TODO(suquark): once we have sky on PyPI, we should directly
+            # install sky from PyPI.
             with timeline.Event('backend.provision.wheel_build'):
-                # TODO(suquark): once we have sky on PYPI, we should directly
-                # install sky from PYPI.
+                # TODO(suquark): once we have sky on PyPI, we should directly
+                # install sky from PyPI.
                 local_wheel_path = wheel_utils.build_sky_wheel()
             backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
