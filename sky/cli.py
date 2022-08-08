@@ -73,6 +73,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+_CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
 provision a new cluster with that name. Otherwise provision a new cluster with
@@ -801,8 +803,8 @@ class _DocumentedCodeCommand(click.Command):
         return super().get_help(ctx)
 
 
-@click.group(cls=_NaturalOrderGroup)
-@click.version_option(package_name='skypilot')
+@click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
+@click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
 def cli():
     pass
 

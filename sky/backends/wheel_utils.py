@@ -20,6 +20,11 @@ SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 _PACKAGE_WHEEL_NAME = 'skypilot'
 
 
+def normalize_version(version: str) -> str:
+    """Normalize a version string."""
+    return version.replace('-dev', '.dev')
+
+
 def cleanup_wheels_dir(wheel_dir: pathlib.Path,
                        latest_wheel: Optional[pathlib.Path] = None) -> None:
     if latest_wheel is None:
@@ -37,9 +42,10 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 def _get_latest_built_wheel() -> pathlib.Path:
     try:
-        latest_wheel = max(
-            WHEEL_DIR.glob(f'{_PACKAGE_WHEEL_NAME}-{sky.__version__}-*.whl'),
-            key=os.path.getctime)
+        latest_wheel = max(WHEEL_DIR.glob(
+            f'{_PACKAGE_WHEEL_NAME}-'
+            f'{normalize_version(sky.__version__)}-*.whl'),
+                           key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError('Could not find built Sky wheels.') from None
     return latest_wheel

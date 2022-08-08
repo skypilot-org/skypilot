@@ -1,6 +1,11 @@
 """The SkyPilot package."""
 import os
 
+# Replaced with the current commit when building the wheels.
+__commit__ = '{{SKYPILOT_COMMIT_SHA}}'
+__version__ = '1.0.0-dev0'
+__root_dir__ = os.path.dirname(os.path.abspath(__file__))
+
 # Keep this order to avoid cyclic imports
 from sky import backends
 from sky import benchmark
@@ -18,10 +23,6 @@ from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       tail_logs, download_logs, job_status, spot_status,
                       spot_cancel, storage_ls, storage_delete)
 
-__version__ = '0.0.6rc4'
-
-__root_dir__ = os.path.dirname(os.path.abspath(__file__))
-
 # Aliases.
 AWS = clouds.AWS
 Azure = clouds.Azure
@@ -30,6 +31,7 @@ Local = clouds.Local
 optimize = Optimizer.optimize
 
 __all__ = [
+    '__version__',
     'AWS',
     'Azure',
     'GCP',
