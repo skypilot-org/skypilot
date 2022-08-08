@@ -8,6 +8,7 @@ import tempfile
 from typing import Optional
 
 import filelock
+from packaging import version
 
 import sky
 from sky.backends import backend_utils
@@ -40,7 +41,7 @@ def _get_latest_built_wheel() -> pathlib.Path:
     try:
         latest_wheel = max(WHEEL_DIR.glob(
             f'{_PACKAGE_WHEEL_NAME}-'
-            f'{common_utils.normalize_version(sky.__version__)}-*.whl'),
+            f'{version.parse(sky.__version__)}-*.whl'),
                            key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError('Could not find built Sky wheels.') from None

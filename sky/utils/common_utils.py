@@ -183,8 +183,3 @@ def retry(method, max_retries=3, initial_backoff=1):
                     raise
 
     return method_with_retries
-
-
-def normalize_version(version: str) -> str:
-    """Normalize a version string."""
-    return version.replace('-dev', '.dev')

@@ -21,6 +21,7 @@ import colorama
 import filelock
 import jinja2
 import jsonschema
+from packaging import version
 import psutil
 import requests
 from requests import adapters
@@ -628,7 +629,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
-                'sky_version': common_utils.normalize_version(sky.__version__),
+                'sky_version': str(version.parse(sky.__version__)),
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
