@@ -1644,7 +1644,7 @@ class CloudVmRayBackend(backends.Backend):
                 # if zone is not specified because head and worker nodes
                 # can be launched in different zones.
                 if (task.num_nodes == 1 or
-                        handle.launched_nodes.zone is not None):
+                        handle.launched_resources.zone is not None):
                     returncode, stdout, _ = self.run_on_head(
                         handle, get_zone_cmd, require_outputs=True)
                     # zone will be checked during Resources cls initialization.
