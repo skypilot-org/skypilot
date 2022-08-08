@@ -134,10 +134,6 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
                 raise ValueError(error_msg)
 
 
-def zone_in_region_impl(df: pd.DataFrame, region: str, zone: str) -> bool:
-    return zone in df[df['Region'] == region]['AvailabilityZone'].unique()
-
-
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,

@@ -320,9 +320,6 @@ class AWS(clouds.Cloud):
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         return service_catalog.validate_region_zone(region, zone, clouds='aws')
 
-    def zone_in_region(self, region: str, zone: str) -> bool:
-        return service_catalog.zone_in_region(region, zone, 'aws')
-
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,

@@ -155,10 +155,6 @@ def validate_region_zone(region: Optional[str], zone: Optional[str]):
     return common.validate_region_zone_impl(_df, region, zone)
 
 
-def zone_in_region(region: str, zone: str) -> bool:
-    return common.zone_in_region_impl(_df, region, zone)
-
-
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,

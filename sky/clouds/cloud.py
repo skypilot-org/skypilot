@@ -192,9 +192,6 @@ class Cloud:
         """Validates the region and zone."""
         raise NotImplementedError
 
-    def zone_in_region(self, region: str, zone: str) -> bool:
-        """Returns whether the zone is valid in the region for this cloud."""
-        raise NotImplementedError
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,

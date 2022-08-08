@@ -105,11 +105,6 @@ def validate_region_zone(region_name: Optional[str],
                                zone_name)
 
 
-def zone_in_region(region: str, zone: str, clouds: CloudFilter = None) -> bool:
-    """Returns True if the zone is in the region."""
-    return _map_clouds_catalog(clouds, 'zone_in_region', region, zone)
-
-
 def accelerator_in_region_or_zone(
     acc_name: str,
     acc_count: int,
