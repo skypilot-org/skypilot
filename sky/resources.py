@@ -321,10 +321,10 @@ class Resources:
 
         # Validate whether accelerator is available in specified region/zone.
         if self.accelerators is not None:
-            acc, _ = list(self.accelerators.items())[0]
+            acc, acc_count = list(self.accelerators.items())[0]
             if self.region is not None or self.zone is not None:
                 if not self._cloud.accelerator_in_region_or_zone(
-                        acc, self.region, self.zone):
+                        acc, acc_count, self.region, self.zone):
                     error_str = (f'Accelerator "{acc}" is not available in '
                                  '"{}" region/zone.')
                     if self.zone:

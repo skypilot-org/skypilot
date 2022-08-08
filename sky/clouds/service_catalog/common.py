@@ -267,22 +267,25 @@ def get_region_zones(df: pd.DataFrame,
     return regions
 
 
-def _accelerator_in_region(df: pd.DataFrame, acc_name: str,
+def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
                            region: str) -> bool:
     """Returns True if the accelerator is in the region."""
     return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AcceleratorCount'] == acc_count) &
                   (df['Region'] == region)]) > 0
 
 
-def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, zone: str) -> bool:
+def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int, zone: str) -> bool:
     """Returns True if the accelerator is in the zone."""
     return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AcceleratorCount'] == acc_count) &
                   (df['AvailabilityZone'] == zone)]) > 0
 
 
 def accelerator_in_region_or_zone_impl(
     df: pd.DataFrame,
     accelerator_name: str,
+    acc_count: int,
     region: Optional[str] = None,
     zone: Optional[str] = None,
 ) -> bool:
@@ -290,6 +293,6 @@ def accelerator_in_region_or_zone_impl(
     assert region is not None or zone is not None, (
         'Both region and zone are None.')
     if zone is None:
-        return _accelerator_in_region(df, accelerator_name, region)
+        return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
-        return _accelerator_in_zone(df, accelerator_name, zone)
+        return _accelerator_in_zone(df, accelerator_name, acc_count, zone)

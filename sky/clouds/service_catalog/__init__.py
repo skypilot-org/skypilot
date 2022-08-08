@@ -112,13 +112,14 @@ def zone_in_region(region: str, zone: str, clouds: CloudFilter = None) -> bool:
 
 def accelerator_in_region_or_zone(
     acc_name: str,
+    acc_count: int,
     region: Optional[str] = None,
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> bool:
     """Returns True if the accelerator is in the region or zone."""
     return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
-                               acc_name, region, zone)
+                               acc_name, acc_count, region, zone)
 
 
 def get_region_zones_for_instance_type(

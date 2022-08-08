@@ -196,5 +196,13 @@ class Cloud:
         """Returns whether the zone is valid in the region for this cloud."""
         raise NotImplementedError
 
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        """Returns whether the accelerator is valid in the region or zone."""
+        raise NotImplementedError
+
     def __repr__(self):
         return self._REPR

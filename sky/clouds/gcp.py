@@ -334,10 +334,11 @@ class GCP(clouds.Cloud):
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
+                                      acc_count: int,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
-            accelerator, region, zone, 'gcp')
+            accelerator, acc_count, region, zone, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
