@@ -1769,15 +1769,44 @@ class CloudVmRayBackend(backends.Backend):
                              stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+                setup_log_path = os.path.join(self.log_dir,
+                                              f'setup-{runner.ip}.log')
                 returncode = runner.run(
                     cmd,
-                    log_path=os.path.join(self.log_dir, 'setup.log'),
+                    log_path=setup_log_path,
                     process_stream=False,
                 )
-                subprocess_utils.handle_returncode(
-                    returncode=returncode,
-                    command=cmd,
-                    error_msg=f'Failed to setup with return code {returncode}')
+
+                def error_message() -> str:
+                    # Use the function to avoid tailing the file in success case
+                    try:
+                        last_10_lines = subprocess.run(
+                            [
+                                'tail', '-n10',
+                                os.path.expanduser(setup_log_path)
+                            ],
+                            stdout=subprocess.PIPE,
+                            check=True).stdout.decode('utf-8')
+                    except subprocess.CalledProcessError:
+                        last_10_lines = None
+
+                    err_msg = (
+                        f'Failed to setup with return code {returncode}. '
+                        f'Check the details in log: {setup_log_path}')
+                    if last_10_lines:
+                        err_msg += (
+                            f'\n\n{colorama.Fore.RED}'
+                            '****** START Last lines of setup output ******'
+                            f'{colorama.Style.RESET_ALL}\n'
+                            f'{last_10_lines}'
+                            f'{colorama.Fore.RED}'
+                            '******* END Last lines of setup output *******'
+                            f'{colorama.Style.RESET_ALL}')
+                    return err_msg
+
+                subprocess_utils.handle_returncode(returncode=returncode,
+                                                   command=cmd,
+                                                   error_msg=error_message)
 
             num_nodes = handle.launched_nodes
             plural = 's' if num_nodes > 1 else ''
