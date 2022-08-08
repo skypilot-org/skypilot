@@ -8,7 +8,6 @@ import getpass
 import json
 import os
 import pathlib
-import random
 import re
 import subprocess
 import textwrap
@@ -876,9 +875,10 @@ def parallel_data_transfer_to_nodes(
         if run_rsync:
             # TODO(zhwu): Optimize for large amount of files.
             # zip / transfer/ unzip
-            runner.rsync_up(
+            runner.rsync(
                 source=source,
                 target=target,
+                up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
             )
@@ -925,7 +925,7 @@ def generate_cluster_name():
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
-    backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
+    backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
             out = subprocess_utils.run(
@@ -969,7 +969,7 @@ def get_node_ips(cluster_yaml: str,
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
     if expected_num_nodes > 1:
-        backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
 
         for retry_cnt in range(worker_ip_max_attempts):
             try:
@@ -1682,33 +1682,6 @@ def stop_handler(signum, frame):
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-class Backoff:
-    """Exponential backoff with jittering."""
-    MULTIPLIER = 1.6
-    JITTER = 0.4
-
-    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
-        self._initial = True
-        self._backoff = None
-        self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff_factor * self._inital_backoff
-
-    # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
-    # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
-
-    def current_backoff(self) -> float:
-        """Backs off once and returns the current backoff in seconds."""
-        if self._initial:
-            self._initial = False
-            self._backoff = min(self._inital_backoff, self._max_backoff)
-        else:
-            self._backoff = min(self._backoff * self.MULTIPLIER,
-                                self._max_backoff)
-        self._backoff += random.uniform(-self.JITTER * self._backoff,
-                                        self.JITTER * self._backoff)
-        return self._backoff
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):
