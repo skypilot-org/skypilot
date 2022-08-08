@@ -18,6 +18,9 @@ from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       tail_logs, download_logs, job_status, spot_status,
                       spot_cancel, storage_ls, storage_delete)
 
+
+__version__ = '0.1.1'
+
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
 # Aliases.
@@ -70,4 +73,3 @@ __all__ = [
     'storage_delete',
 ]
 
-__version__ = '0.0.6'
