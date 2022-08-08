@@ -12,7 +12,6 @@ from packaging import version
 
 import sky
 from sky.backends import backend_utils
-from sky.utils import common_utils
 
 # Local wheel path is same as the remote path.
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
