@@ -628,6 +628,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                'sky_version': sky.__version__,
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
