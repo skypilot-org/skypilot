@@ -1086,9 +1086,10 @@ class RetryingVmProvisioner(object):
                 return False
 
             if isinstance(to_provision_cloud, clouds.Azure):
-                if ('Failed to invoke the Azure CLI' in stderr):
+                if 'Failed to invoke the Azure CLI' in stderr:
                     logger.info(
-                        'Retrying head node provisioning due to Azure CLI issue.'
+                        'Retrying head node provisioning due to Azure CLI '
+                        'issues.'
                     )
                     return True
                 if ('Head node fetch timed out. Failed to create head node.'
