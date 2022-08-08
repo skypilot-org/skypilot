@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 import sky
-from sky import clouds
 
 CLOUDS = {
     'AWS': sky.AWS(),

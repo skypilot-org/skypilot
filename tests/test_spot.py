@@ -8,7 +8,6 @@ import pytest
 import sky
 from sky import backends
 from sky import cli
-from sky import clouds
 from sky import global_user_state
 from sky import spot
 from sky.utils import db_utils
