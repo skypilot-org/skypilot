@@ -43,7 +43,8 @@ def _get_latest_built_wheel() -> pathlib.Path:
         latest_wheel = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError(
-            f'Could not find built SkyPilot wheels: {wheel_name}') from None
+            f'Could not find built SkyPilot wheels {wheel_name!r} '
+            f'under {WHEEL_DIR!r}') from None
     return latest_wheel
 
 
