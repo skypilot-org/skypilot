@@ -37,7 +37,7 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 def _get_latest_built_wheel() -> pathlib.Path:
     try:
-        latest_wheel = max(WHEEL_DIR.glob(f'{_PACKAGE_WHEEL_NAME}-*.whl'),
+        latest_wheel = max(WHEEL_DIR.glob(f'{_PACKAGE_WHEEL_NAME}-{sky.__version__}-*.whl'),
                            key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError('Could not find built Sky wheels.') from None

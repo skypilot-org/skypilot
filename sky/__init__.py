@@ -19,7 +19,7 @@ from sky.core import (status, start, stop, down, autostop, queue, cancel,
                       spot_cancel, storage_ls, storage_delete)
 
 
-__version__ = '0.1.1rc1'
+__version__ = '0.0.6rc3'
 
 __root_dir__ = os.path.dirname(os.path.abspath(__file__))
 
