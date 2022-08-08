@@ -3,6 +3,7 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
+import json
 import os
 import pathlib
 import shlex
@@ -14,8 +15,8 @@ import filelock
 from sky import constants
 from sky import sky_logging
 from sky.utils import subprocess_utils
-from sky.skylet.utils import db_utils
-from sky.skylet.utils import log_utils
+from sky.utils import db_utils
+from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -218,6 +219,27 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return get_status_no_lock(job_id)
 
 
+def get_statuses_json(job_ids: List[Optional[int]]) -> str:
+    # Per-job lock is not required here, since the staled job status will not
+    # affect the caller.
+    query_str = ','.join(['?'] * len(job_ids))
+    rows = _CURSOR.execute(
+        f'SELECT job_id, status FROM jobs WHERE job_id IN ({query_str})',
+        job_ids)
+    statuses = {job_id: None for job_id in job_ids}
+    for (job_id, status) in rows:
+        statuses[job_id] = status
+    return json.dumps(statuses)
+
+
+def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
+    statuses = json.loads(statuses_json)
+    for job_id, status in statuses.items():
+        if status is not None:
+            statuses[job_id] = JobStatus[status]
+    return statuses
+
+
 def get_latest_job_id() -> Optional[int]:
     rows = _CURSOR.execute(
         'SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
@@ -415,12 +437,17 @@ def is_cluster_idle() -> bool:
         return count == 0
 
 
-def _show_job_queue(jobs) -> None:
+def format_job_queue(jobs: List[Dict[str, Any]]):
+    """Format the job queue for display.
+
+    Usage:
+        jobs = get_job_queue()
+        print(format_job_queue(jobs))
+    """
     job_table = log_utils.create_table([
         'ID', 'NAME', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES', 'STATUS',
         'LOG'
     ])
-
     for job in jobs:
         job_table.add_row([
             job['job_id'],
@@ -432,13 +459,13 @@ def _show_job_queue(jobs) -> None:
                                              absolute=True),
             job['resources'],
             job['status'].value,
-            os.path.join(constants.SKY_LOGS_DIRECTORY, job['run_timestamp']),
+            job['log_path'],
         ])
-    print(job_table)
+    return job_table
 
 
-def show_jobs(username: Optional[str], all_jobs: bool) -> None:
-    """Show the job queue.
+def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
+    """Get the job queue in json format.
 
     Args:
         username: The username to show jobs for. Show all the users if None.
@@ -449,7 +476,23 @@ def show_jobs(username: Optional[str], all_jobs: bool) -> None:
         status_list = None
 
     jobs = _get_jobs(username, status_list=status_list)
-    _show_job_queue(jobs)
+    for job in jobs:
+        job['status'] = job['status'].value
+        job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                       job.pop('run_timestamp'))
+    return json.dumps(jobs, indent=2)
+
+
+def load_job_queue(json_str: str) -> List[Dict[str, Any]]:
+    """Load the job queue from json format.
+
+    Args:
+        json_str: The json string to load.
+    """
+    jobs = json.loads(json_str)
+    for job in jobs:
+        job['status'] = JobStatus(job['status'])
+    return jobs
 
 
 def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
@@ -484,7 +527,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 
-def log_dir(job_id: int) -> Optional[str]:
+def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     """Returns the relative path to the log file for a job."""
     _CURSOR.execute(
         """\
@@ -494,25 +537,24 @@ def log_dir(job_id: int) -> Optional[str]:
     if row is None:
         return None
     run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-    return os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+    return run_timestamp
 
 
-def log_dirs_with_globbing(job_id: str) -> List[str]:
+def run_timestamp_with_globbing_json(
+        job_ids: List[Optional[str]]) -> Dict[str, str]:
     """Returns the relative paths to the log files for job with globbing."""
+    query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
     _CURSOR.execute(
-        """\
+        f"""\
             SELECT * FROM jobs
-            WHERE job_id GLOB (?)""", (job_id,))
+            WHERE {query_str}""", job_ids)
     rows = _CURSOR.fetchall()
-    if len(rows) == 0:
-        return None
-    log_paths = []
+    run_timestamps = dict()
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
-        log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-        log_paths.append((job_id, log_path))
-    return log_paths
+        run_timestamps[str(job_id)] = run_timestamp
+    return json.dumps(run_timestamps)
 
 
 class JobLibCodeGen:
@@ -523,7 +565,7 @@ class JobLibCodeGen:
       >> codegen = JobLibCodeGen.add_job(...)
     """
 
-    _PREFIX = ['from sky.skylet import job_lib, log_lib']
+    _PREFIX = ['import os', 'from sky.skylet import job_lib, log_lib']
 
     @classmethod
     def add_job(cls, job_name: str, username: str, run_timestamp: str,
@@ -548,8 +590,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def show_jobs(cls, username: Optional[str], all_jobs: bool) -> str:
-        code = [f'job_lib.show_jobs({username!r}, {all_jobs})']
+    def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
+        code = [
+            'job_queue = job_lib.dump_job_queue('
+            f'{username!r}, {all_jobs})', 'print(job_queue, flush=True)'
+        ]
         return cls._build(code)
 
     @classmethod
@@ -569,21 +614,22 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            'log_dir = job_lib.log_dir(job_id)',
+            'run_timestamp = job_lib.get_run_timestamp(job_id)',
+            (f'log_dir = os.path.join({constants.SKY_LOGS_DIRECTORY!r}, '
+             'run_timestamp)'),
             (f'log_lib.tail_logs({job_owner!r},'
              f'job_id, log_dir, {spot_job_id!r})'),
         ]
         return cls._build(code)
 
     @classmethod
-    def get_job_status(cls, job_id: Optional[int] = None) -> str:
+    def get_job_status(cls, job_ids: Optional[List[int]] = None) -> str:
         # Prints "Job <id> <status>" for UX; caller should parse the last token.
         code = [
-            f'job_id = {job_id} if {job_id} is not None '
-            'else job_lib.get_latest_job_id()',
-            'job_status = job_lib.get_status(job_id)',
-            'status_str = None if job_status is None else job_status.value',
-            'print("Job", job_id, status_str, flush=True)',
+            f'job_ids = {job_ids} if {job_ids} is not None '
+            'else [job_lib.get_latest_job_id()]',
+            'job_statuses = job_lib.get_statuses_json(job_ids)',
+            'print(job_statuses, flush=True)',
         ]
         return cls._build(code)
 
@@ -600,19 +646,12 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_log_path(cls, job_id: int) -> str:
+    def get_run_timestamp_with_globbing(cls,
+                                        job_ids: Optional[List[str]]) -> str:
         code = [
-            f'log_dir = job_lib.log_dir({job_id})',
-            'print(log_dir, flush=True)',
-        ]
-        return cls._build(code)
-
-    @classmethod
-    def get_log_path_with_globbing(cls, job_id: Optional[str]) -> str:
-        code = [
-            f'job_id = {job_id!r} if {job_id!r} is not None '
-            'else job_lib.get_latest_job_id()',
-            'log_dirs = job_lib.log_dirs_with_globbing(str(job_id))',
+            f'job_ids = {job_ids} if {job_ids} is not None '
+            'else [job_lib.get_latest_job_id()]',
+            'log_dirs = job_lib.run_timestamp_with_globbing_json(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

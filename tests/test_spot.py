@@ -10,7 +10,7 @@ from sky import backends
 from sky import cli
 from sky import global_user_state
 from sky import spot
-from sky.skylet.utils import db_utils
+from sky.utils import db_utils
 
 
 def test_spot_nonexist_strategy():
@@ -153,5 +153,5 @@ class TestReservedClustersOperations:
     def test_cancel_on_spot_controller(self, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, ['sky-spot-controller', '-a'])
-        assert isinstance(result.exception, ValueError)
-        assert 'Cancelling jobs is not allowed' in str(result.exception)
+        assert result.exit_code == click.UsageError.exit_code
+        assert 'Cancelling jobs is not allowed' in str(result.output)

@@ -15,7 +15,6 @@ import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
-import click
 import colorama
 import filelock
 
@@ -39,10 +38,10 @@ from sky.backends import wheel_utils
 from sky.skylet import autostop_lib
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.utils import log_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -168,7 +167,7 @@ class RayCodeGen:
             import ray.util as ray_util
 
             from sky.skylet import job_lib
-            from sky.skylet.utils import log_utils
+            from sky.utils import log_utils
 
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
@@ -1534,7 +1533,7 @@ class CloudVmRayBackend(backends.Backend):
                 # TODO(suquark): once we have sky on PYPI, we should directly
                 # install sky from PYPI.
                 local_wheel_path = wheel_utils.build_sky_wheel()
-            backoff = backend_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
+            backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
                 # RetryingVmProvisioner will retry within a cloud's regions
@@ -1705,9 +1704,10 @@ class CloudVmRayBackend(backends.Backend):
             ip_list, *ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
-            runner.rsync_up(
+            runner.rsync(
                 source=workdir,
                 target=SKY_REMOTE_WORKDIR,
+                up=True,
                 log_path=log_path,
                 stream_logs=False,
             )
@@ -1751,18 +1751,22 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                 handle.launched_nodes,
-                                                 handle=handle)
+            ip_list = backend_utils.get_node_ips(
+                handle.cluster_yaml,
+                handle.launched_nodes,
+                handle=handle,
+                head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             runners = command_runner.SSHCommandRunner.make_runner_list(
                 ip_list, *ssh_credentials)
 
             def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
-                runner.rsync_up(source=setup_sh_path,
-                                target=f'/tmp/{setup_file}',
-                                stream_logs=False)
+                runner.rsync(source=setup_sh_path,
+                             target=f'/tmp/{setup_file}',
+                             up=True,
+                             stream_logs=False)
                 # Need this `-i` option to make sure `source ~/.bashrc` work
                 cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
                 returncode = runner.run(
@@ -1807,9 +1811,10 @@ class CloudVmRayBackend(backends.Backend):
             # We choose to sync code + exec, because the alternative of 'ray
             # submit' may not work as it may use system python (python2) to
             # execute the script.  Happens for AWS.
-            runner.rsync_up(source=fp.name,
-                            target=script_path,
-                            stream_logs=False)
+            runner.rsync(source=fp.name,
+                         target=script_path,
+                         up=True,
+                         stream_logs=False)
         remote_log_dir = self.log_dir
         remote_log_path = os.path.join(remote_log_dir, 'run.log')
 
@@ -1888,9 +1893,10 @@ class CloudVmRayBackend(backends.Backend):
             remote_run_file = f'/tmp/{run_file}'
             # We choose to sync code + exec, so that Ray job submission API will
             # work for the multitenant case.
-            runner.rsync_up(source=fp.name,
-                            target=remote_run_file,
-                            stream_logs=False)
+            runner.rsync(source=fp.name,
+                         target=remote_run_file,
+                         up=True,
+                         stream_logs=False)
         runner.run(f'mkdir -p {remote_log_dir}; chmod a+rwx {remote_run_file}',
                    stream_logs=False)
         switch_user_cmd = job_lib.make_job_command_with_user_switching(
@@ -1991,7 +1997,7 @@ class CloudVmRayBackend(backends.Backend):
     def _teardown(self,
                   handle: ResourceHandle,
                   terminate: bool,
-                  purge: bool = False) -> bool:
+                  purge: bool = False):
         cluster_name = handle.cluster_name
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
@@ -2006,19 +2012,20 @@ class CloudVmRayBackend(backends.Backend):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
                 os.remove(lock_path)
-            return success
-        except filelock.Timeout:
-            logger.error(f'Cluster {cluster_name} is locked by {lock_path}. '
-                         'Check to see if it is still being launched.')
-        return False
+        except filelock.Timeout as e:
+            raise RuntimeError(
+                f'Cluster {cluster_name!r} is locked by {lock_path}. '
+                'Check to see if it is still being launched.') from e
 
     # --- CloudVMRayBackend Specific APIs ---
 
-    def get_job_status(self,
-                       handle: ResourceHandle,
-                       job_id: Optional[int] = None,
-                       stream_logs: bool = True) -> Optional[job_lib.JobStatus]:
-        code = job_lib.JobLibCodeGen.get_job_status(job_id)
+    def get_job_status(
+        self,
+        handle: ResourceHandle,
+        job_ids: Optional[List[str]] = None,
+        stream_logs: bool = True
+    ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
+        code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
@@ -2026,11 +2033,8 @@ class CloudVmRayBackend(backends.Backend):
                                                  require_outputs=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stdout)
-        result = stdout.strip()
-        if result.endswith(' None'):
-            # "Job 9876 None"
-            return None
-        return job_lib.JobStatus(result.split(' ')[-1])
+        statuses = job_lib.load_statuses_json(stdout)
+        return statuses
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
@@ -2045,27 +2049,38 @@ class CloudVmRayBackend(backends.Backend):
             returncode, code,
             f'Failed to cancel jobs on cluster {handle.cluster_name}.', stdout)
 
-    def sync_down_logs(self, handle: ResourceHandle,
-                       job_ids: Optional[str]) -> None:
-        code = job_lib.JobLibCodeGen.get_log_path_with_globbing(job_ids)
-        returncode, log_dirs, stderr = self.run_on_head(handle,
-                                                        code,
-                                                        stream_logs=False,
-                                                        require_outputs=True)
+    def sync_down_logs(
+            self,
+            handle: ResourceHandle,
+            job_ids: Optional[str],
+            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+        """Sync down logs for the given job_ids.
+
+        Returns:
+            A dictionary mapping job_id to log path.
+        """
+        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
+        returncode, run_timestamps, stderr = self.run_on_head(
+            handle, code, stream_logs=False, require_outputs=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        log_dirs = ast.literal_eval(log_dirs)
-        if not log_dirs or len(log_dirs) == 0:
+        run_timestamps = json.loads(run_timestamps)
+        if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
             return
 
-        job_ids = [log_dir[0] for log_dir in log_dirs]
-        local_log_dirs = [
-            os.path.expanduser(log_dir[1]) for log_dir in log_dirs
+        job_ids = list(run_timestamps.keys())
+        run_timestamps = list(run_timestamps.values())
+        remote_log_dirs = [
+            os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+            for run_timestamp in run_timestamps
         ]
-        remote_log_dirs = [log_dir[1] for log_dir in log_dirs]
+        local_log_dirs = [
+            os.path.expanduser(os.path.join(local_dir, run_timestamp))
+            for run_timestamp in run_timestamps
+        ]
 
         style = colorama.Style
         fore = colorama.Fore
@@ -2073,42 +2088,42 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
                         f'{style.RESET_ALL}')
 
-        ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                         handle.launched_nodes,
-                                         handle=handle)
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes,
+                                             handle=handle)
+        ssh_credentials = backend_utils.ssh_credential_from_yaml(
+            handle.cluster_yaml)
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            ip_list, *ssh_credentials)
 
-        def rsync_down(ip: str, local_log_dir: str,
-                       remote_log_dir: str) -> None:
-            from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
-            sdk.rsync(
-                handle.cluster_yaml,
-                source=f'{remote_log_dir}/*',
-                target=f'{local_log_dir}',
-                down=True,
-                ip_address=ip,
-                use_internal_ip=False,
-                should_bootstrap=False,
-            )
+        def _rsync_down(args) -> None:
+            """Rsync down logs from remote nodes.
 
-        # Call the ray sdk to rsync the logs back to local.
-        for job_id, local_log_dir, remote_log_dir in zip(
-                job_ids, local_log_dirs, remote_log_dirs):
-            for i, ip in enumerate(ips):
-                try:
-                    # Disable the output of rsync.
-                    with backend_utils.subpress_output():
-                        rsync_down(ip, local_log_dir, remote_log_dir)
-                    logger.info(
-                        f'{fore.CYAN}Job {job_id} logs: downloaded from '
-                        f'node-{i} ({ip}){style.RESET_ALL}')
-                except click.exceptions.ClickException as e:
+            Args:
+                args: A tuple of (runner, local_log_dir, remote_log_dir)
+            """
+            (runner, local_log_dir, remote_log_dir) = args
+            try:
+                os.makedirs(local_log_dir, exist_ok=True)
+                runner.rsync(
+                    source=f'{remote_log_dir}/*',
+                    target=local_log_dir,
+                    up=False,
+                    stream_logs=False,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
                     # Raised by rsync_down. Remote log dir may not exist, since
                     # the job can be run on some part of the nodes.
-                    if 'SSH command failed' in str(e):
-                        logger.debug(
-                            f'node-{i} ({ip}) does not have the tasks/*.')
-                    else:
-                        raise e
+                    logger.debug(f'{runner.ip} does not have the tasks/*.')
+                else:
+                    raise
+
+        parallel_args = [[runner, *item]
+                         for item in zip(local_log_dirs, remote_log_dirs)
+                         for runner in runners]
+        subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
+        return dict(zip(job_ids, local_log_dirs))
 
     def tail_logs(self,
                   handle: ResourceHandle,

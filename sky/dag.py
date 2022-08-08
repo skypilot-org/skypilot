@@ -4,7 +4,13 @@ import threading
 
 
 class Dag:
-    """Dag: a user application, represented as a DAG of Tasks."""
+    """Dag: a user application, represented as a DAG of Tasks.
+
+    Examples:
+        >>> import sky
+        >>> with sky.Dag() as dag:
+        >>>     task = sky.Task(...)
+    """
 
     def __init__(self):
         self.tasks = []
