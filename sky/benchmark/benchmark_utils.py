@@ -29,7 +29,7 @@ from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -297,8 +297,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
             # NOTE: The id of the benchmarking job must be 1.
             # TODO(woosuk): Handle exceptions.
             job_status = backend.get_job_status(handle,
-                                                job_id=1,
-                                                stream_logs=False)
+                                                job_ids=['1'],
+                                                stream_logs=False)['1']
 
     # Update the benchmark status.
     if (cluster_status == global_user_state.ClusterStatus.INIT or

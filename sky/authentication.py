@@ -15,6 +15,7 @@ from Crypto.PublicKey import RSA
 
 from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -176,6 +177,8 @@ def _wait_for_compute_global_operation(project_name, operation_name, compute):
 # Takes in config, a yaml dict and outputs a postprocessed dict
 # TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
 # avoid duplicated codes.
+# Retry for the GCP as sometimes there will be connection reset by peer error.
+@common_utils.retry
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)

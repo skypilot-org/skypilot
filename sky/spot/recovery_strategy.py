@@ -11,6 +11,7 @@ from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -70,7 +71,7 @@ class StrategyExecutor:
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
-        backoff = backend_utils.Backoff(retry_init_gap_seconds)
+        backoff = common_utils.Backoff(retry_init_gap_seconds)
         while True:
             retry_cnt += 1
             try:
@@ -91,7 +92,10 @@ class StrategyExecutor:
                 # Wait the job to be started
                 status = spot_utils.get_job_status(self.backend,
                                                    self.cluster_name)
-                while status is None or status == job_lib.JobStatus.INIT:
+                while (status is None or status in [
+                        job_lib.JobStatus.INIT,
+                        job_lib.JobStatus.PENDING,
+                ]):
                     time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
                     status = spot_utils.get_job_status(self.backend,
                                                        self.cluster_name)
@@ -130,7 +134,12 @@ class StrategyExecutor:
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
         if handle is not None:
-            self.backend.teardown(handle, terminate=True)
+            try:
+                self.backend.teardown(handle, terminate=True)
+            except RuntimeError:
+                logger.error(
+                    f'Failed to terminate the spot cluster {self.cluster_name}.'
+                )
 
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
