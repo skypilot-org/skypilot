@@ -28,8 +28,8 @@ def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count, region,
-                                                     zone)
+    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+                                                     region, zone)
 
 
 def get_hourly_cost(instance_type: str,

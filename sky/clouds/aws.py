@@ -122,6 +122,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
             'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
             ' | python3 -u -c "import sys, json; '

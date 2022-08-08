@@ -159,8 +159,8 @@ def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count, region,
-                                                     zone)
+    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+                                                     region, zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

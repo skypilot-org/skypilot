@@ -119,6 +119,8 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://cloud.google.com/compute/docs/metadata/querying-metadata
         command_str = (
             'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # pylint: disable=line-too-long
             ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')

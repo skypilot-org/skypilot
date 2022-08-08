@@ -192,7 +192,6 @@ class Cloud:
         """Validates the region and zone."""
         raise NotImplementedError
 
-
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
