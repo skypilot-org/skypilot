@@ -6,9 +6,11 @@ on:
   push:
     branches:
       - master
+      - 'releases/**'
   pull_request:
     branches:
       - master
+      - 'releases/**'
 
 jobs:
   pylint:

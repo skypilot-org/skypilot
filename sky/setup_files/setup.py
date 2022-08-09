@@ -94,6 +94,10 @@ extras_require = {
 
 extras_require['all'] = sum(extras_require.values(), [])
 
+# Install aws requirements by default, as it is the most common cloud provider,
+# and the installation is quick.
+install_requires += extras_require['aws']
+
 long_description = ''
 readme_filepath = 'README.md'
 # When sky/backends/wheel_utils.py builds wheels, it will not contain the README.
