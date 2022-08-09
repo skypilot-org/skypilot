@@ -686,25 +686,32 @@ class RetryingVmProvisioner(object):
                 prev_resources = handle.launched_resources
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
-                    if cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
-                            sky.AWS()):
+                    if cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
+                            clouds.AWS()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
-                    elif cloud.is_same_cloud(sky.Azure()):
+                    elif cloud.is_same_cloud(clouds.Azure()):
                         region = config['provider']['location']
                         zones = None
-                    elif cloud.is_same_cloud(sky.Local()):
+                    elif cloud.is_same_cloud(clouds.Local()):
                         local_regions = clouds.Local.regions()
                         region = local_regions[0].name
                         zones = None
                     else:
                         assert False, cloud
-                    if region != prev_resources.region:
-                        raise ValueError(
-                            f'Region mismatch. The region in '
-                            f'{handle.cluster_yaml} '
-                            'has been changed from '
-                            f'{prev_resources.region} to {region}.')
+                    assert region == prev_resources.region, (
+                        f'Region mismatch. The region in '
+                        f'{handle.cluster_yaml} '
+                        'has been changed from '
+                        f'{prev_resources.region} to {region}.')
+                    assert (zones is None or prev_resources.zone is None or
+                            prev_resources.zone
+                            in zones), (f'{prev_resources.zone} not found in '
+                                        f'zones of {handle.cluster_yaml}.')
+                    # Note that we don't overwrite the zone field in Ray YAML
+                    # even if prev_resources.zone != zones.
+                    # This is because Ray will consider the YAML hash changed
+                    # and not reuse the existing cluster.
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -798,10 +805,15 @@ class RetryingVmProvisioner(object):
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
         ):
-            # Do not retry on region if it's not in the requested region.
+            # Only retry requested region/zones or all if not specified.
             if (to_provision.region is not None and
                     region.name != to_provision.region):
                 continue
+            if to_provision.zone is not None:
+                zones_name = [zone.name for zone in zones]
+                if to_provision.zone not in zones_name:
+                    continue
+                zones = [clouds.Zone(name=to_provision.zone)]
             yield (region, zones)
 
     def _try_provision_tpu(self, to_provision: resources_lib.Resources,
@@ -1410,12 +1422,12 @@ class CloudVmRayBackend(backends.Backend):
             config = common_utils.read_yaml(self.cluster_yaml)
             provider = config['provider']
             cloud = self.launched_resources.cloud
-            if cloud.is_same_cloud(sky.Azure()):
+            if cloud.is_same_cloud(clouds.Azure()):
                 region = provider['location']
-            elif cloud.is_same_cloud(sky.GCP()) or cloud.is_same_cloud(
-                    sky.AWS()):
+            elif cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
+                    clouds.AWS()):
                 region = provider['region']
-            elif cloud.is_same_cloud(sky.Local()):
+            elif cloud.is_same_cloud(clouds.Local()):
                 # There is only 1 region for Local cluster, 'Local'.
                 local_regions = clouds.Local.regions()
                 region = local_regions[0].name
@@ -1495,6 +1507,16 @@ class CloudVmRayBackend(backends.Backend):
                         'Task requested resources in region '
                         f'{task_resources.region!r}, but the existing cluster '
                         f'is in region {launched_resources.region!r}.')
+            if (task_resources.zone is not None and
+                    task_resources.zone != launched_resources.zone):
+                zone_str = (f'is in zone {launched_resources.zone!r}.'
+                            if launched_resources.zone is not None else
+                            'does not have zone specified.')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ResourcesMismatchError(
+                        'Task requested resources in zone '
+                        f'{task_resources.zone!r}, but the existing cluster '
+                        f'{zone_str}')
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     'Requested resources do not match the existing cluster.\n'
@@ -1620,6 +1642,21 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+            # Get actual zone info and save it into handle
+            get_zone_cmd = handle.launched_resources.cloud.get_zone_shell_cmd()
+            if get_zone_cmd is not None:
+                # We leave the zone field to None for multi-node cases
+                # if zone is not specified because head and worker nodes
+                # can be launched in different zones.
+                if (task.num_nodes == 1 or
+                        handle.launched_resources.zone is not None):
+                    returncode, stdout, _ = self.run_on_head(
+                        handle, get_zone_cmd, require_outputs=True)
+                    # zone will be checked during Resources cls initialization.
+                    handle.launched_resources = handle.launched_resources.copy(
+                        zone=stdout.strip())
+
             usage_lib.messages.usage.update_cluster_resources(
                 handle.launched_nodes, handle.launched_resources)
             usage_lib.messages.usage.update_final_cluster_status(

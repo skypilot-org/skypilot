@@ -34,6 +34,9 @@ describe all fields available.
       # if this is specified.
       region: us-east-1
 
+      # The zone to use (optional).
+      region: us-east-1a
+
       # Accelerator name and count per node (optional).
       #
       # Use `sky show-gpus` to view available accelerator configurations.

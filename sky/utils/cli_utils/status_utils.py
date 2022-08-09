@@ -43,6 +43,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
+        StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('DURATION', _get_duration, show_by_default=False),
         StatusColumn('AUTOSTOP', _get_autostop),
@@ -180,6 +181,8 @@ _get_launched = (lambda cluster_status: log_utils.readable_time_duration(
     cluster_status['launched_at']))
 _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
+_get_zone = (
+    lambda clusters_status: clusters_status['handle'].launched_resources.zone)
 _get_status = (lambda cluster_status: cluster_status['status'].value)
 _get_duration = (lambda cluster_status: log_utils.readable_time_duration(
     cluster_status['launched_at']))

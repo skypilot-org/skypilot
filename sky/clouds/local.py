@@ -130,7 +130,10 @@ class Local(clouds.Cloud):
         # local cloud.
         return instance_type == self.get_default_instance_type()
 
-    def region_exists(self, region: str) -> bool:
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
-        return region == Local.LOCAL_REGION.name
+        assert zone is None
+        if region is None or region != Local.LOCAL_REGION.name:
+            raise ValueError(f'Region {region!r} does not match the Local'
+                             ' cloud region {Local.LOCAL_REGION.name!r}.')

@@ -1075,7 +1075,7 @@ def _process_cli_query(
                  f'{stdout}\n'
                  '**** STDERR ****\n'
                  f'{stderr}')
-    if (cloud == str(sky.Azure()) and returncode == 2 and
+    if (cloud == str(clouds.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
         # Azure CLI has a returncode 2 when the cluster is not found, as
         # --ids <empty> is passed to the query command. In that case, the

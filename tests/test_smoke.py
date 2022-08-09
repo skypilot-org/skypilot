@@ -153,6 +153,22 @@ def test_region():
     run_one_test(test)
 
 
+# ---------- Test zone ----------
+def test_zone():
+    name = _get_cluster_name()
+    test = Test(
+        'zone',
+        [
+            f'sky launch -y -c {name} examples/minimal.yaml --zone us-west-2b',
+            f'sky exec {name} examples/minimal.yaml --zone us-west-2b',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 def test_stale_job():
     name = _get_cluster_name()
     test = Test(
