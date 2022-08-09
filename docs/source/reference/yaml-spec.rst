@@ -35,7 +35,7 @@ describe all fields available.
       region: us-east-1
 
       # The zone to use (optional).
-      region: us-east-1a
+      zone: us-east-1a
 
       # Accelerator name and count per node (optional).
       #
