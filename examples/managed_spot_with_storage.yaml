@@ -15,7 +15,7 @@ file_mounts:
   ~/sky_workdir:
     # Change this to the your own globally unique bucket name.
     name: sky-workdir-zhwu
-    source: .
+    source: ./examples
     persistent: false
     mode: COPY
   /imagenet-image:
@@ -23,5 +23,5 @@ file_mounts:
 
 run: |
   set -ex
-  ls ~/sky_workdir/sky
+  ls ~/sky_workdir/managed_spot_with_storage.yaml
   ls -l /imagenet-image/datasets

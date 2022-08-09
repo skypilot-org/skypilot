@@ -22,6 +22,9 @@ def get_resources_schema():
             'region': {
                 'type': 'string',
             },
+            'zone': {
+                'type': 'string',
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',

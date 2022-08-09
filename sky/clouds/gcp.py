@@ -46,6 +46,7 @@ class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
+    _zones: List[clouds.Zone] = []
 
     #### Regions/Zones ####
 
@@ -115,6 +116,15 @@ class GCP(clouds.Cloud):
         for region in regions:
             for zone in region.zones:
                 yield (region, [zone])
+
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://cloud.google.com/compute/docs/metadata/querying-metadata
+        command_str = (
+            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # pylint: disable=line-too-long
+            ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')
+        return command_str
 
     #### Normal methods ####
 
@@ -318,8 +328,16 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def region_exists(self, region: str) -> bool:
-        return service_catalog.region_exists(region, 'gcp')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region, zone, clouds='gcp')
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

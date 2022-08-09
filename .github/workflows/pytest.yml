@@ -48,7 +48,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install ".[all]"
-          pip install pytest
+          pip install pytest pytest-xdist pytest-env>=0.6
 
       - name: Run tests with pytest
         run: SKY_DISABLE_USAGE_COLLECTION=1 pytest ${{ matrix.test-path }}
