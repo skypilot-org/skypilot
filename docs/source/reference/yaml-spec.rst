@@ -30,11 +30,12 @@ describe all fields available.
     resources:
       cloud: aws  # The cloud to use (optional).
 
-      # The region to use (optional). The Auto-failover will be disabled
+      # The region to use (optional). Auto-failover will be disabled
       # if this is specified.
       region: us-east-1
 
-      # The zone to use (optional).
+      # The zone to use (optional). Auto-failover will be disabled
+      # if this is specified.
       zone: us-east-1a
 
       # Accelerator name and count per node (optional).
