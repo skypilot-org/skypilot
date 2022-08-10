@@ -123,9 +123,9 @@ def _execute(
     # see their own program in the stacktrace. Our CLI impl would not trigger
     # these errors.
     if isinstance(dag, str):
-        raise ValueError(_EXEC_STRING_AS_DAG_HINT_MESSAGE)
+        raise TypeError(_EXEC_STRING_AS_DAG_HINT_MESSAGE)
     elif not isinstance(dag, sky.Dag):
-        raise ValueError(
+        raise TypeError(
             'sky.exec() expects a sky.Dag as first argument; got type: '
             f'{type(dag)}')
 
