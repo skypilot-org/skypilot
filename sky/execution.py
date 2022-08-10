@@ -41,6 +41,27 @@ logger = sky_logging.init_logger(__name__)
 OptimizeTarget = optimizer.OptimizeTarget
 _MAX_SPOT_JOB_LENGTH = 10
 
+# Error message thrown when sky.exec() receives a string instead of a Dag.
+_EXEC_STRING_AS_DAG_HINT_MESSAGE = """\
+Programmatic API sky.exec() expects a sky.Dag but received a string.
+
+If you meant to run a command, make it a Task's run command and wrap as a Dag:
+
+  def to_dag(command, gpu=None):
+      with sky.Dag() as dag:
+          sky.Task(run=command).set_resources(
+              sky.Resources(accelerators=gpu))
+      return dag
+
+  sky.exec(to_dag(cmd), cluster_name=..., ...)
+
+If the task needs accelerators:
+
+  sky.exec(to_dag(cmd, gpu='V100'), cluster_name=..., ...)
+  sky.exec(to_dag(cmd, gpu={'V100': 1}), cluster_name=..., ...)
+  sky.exec(to_dag(cmd, gpu='V100:0.5'), cluster_name=..., ...)
+""".strip()
+
 
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
@@ -98,6 +119,16 @@ def _execute(
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
+    # Not suppressing stacktrace: when calling this via API user may want to
+    # see their own program in the stacktrace. Our CLI impl would not trigger
+    # these errors.
+    if isinstance(dag, str):
+        raise ValueError(_EXEC_STRING_AS_DAG_HINT_MESSAGE)
+    elif not isinstance(dag, sky.Dag):
+        raise ValueError(
+            'sky.exec() expects a sky.Dag as first argument; got type: '
+            f'{type(dag)}')
+
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
