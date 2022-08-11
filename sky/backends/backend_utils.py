@@ -97,9 +97,15 @@ _TEST_IP = 'https://8.8.8.8'
 # '-worker'. Here we do not distinguish these cases and take the lower limit.
 _MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 
-# Allow each CPU thread take 2 tasks.
-# Note: This value cannot be too small, otherwise OOM issue may occur.
-DEFAULT_TASK_CPU_DEMAND = 0.5
+# CPU resource demand: for each task, how many CPUs does it need?
+# NOTE:
+#  - This affects *scheduling*. It does not enforce at OS level each task can
+#    only use this many CPUs.
+#  - In fact, currently each task gets an env var OMP_NUM_THREADS=1. So some
+#    programs may be forced to use or see 1 cpu only (see #243 #951). Thus it's
+#    best to keep this var at 1 to be consistent (also see #1045).
+#  - This value cannot be too small, otherwise OOM issue may occur.
+DEFAULT_TASK_CPU_DEMAND = 1
 
 SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
