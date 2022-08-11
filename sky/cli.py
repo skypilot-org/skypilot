@@ -1379,27 +1379,19 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=True)
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Start all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@click.option(
-    '--idle-minutes-to-autostop',
-    '-i',
-    default=None,
-    type=int,
-    required=False,
-    help=('Automatically stop the cluster after this many minutes '
-          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
-          'Setting this flag is equivalent to '
-          'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
 @click.option(
     '--retry-until-up',
     '-r',
@@ -1409,8 +1401,12 @@ def autostop(
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
 @usage_lib.entrypoint
-def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
-          retry_until_up: bool):
+def start(
+    clusters: Tuple[str], 
+    all: bool, 
+    yes: bool, 
+    retry_until_up: bool
+):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1436,6 +1432,14 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
 
     """
     to_start = []
+
+    if all:
+        if len(clusters) > 0:
+            click.echo(
+                'Both --all and cluster(s) specified for sky start. '
+                'Letting --all take effect.')
+        clusters = [cluster['name'] for cluster in global_user_state.get_clusters()]
+
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
@@ -1444,7 +1448,7 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
             c for c in clusters
             if _warn_if_local_cluster(c, local_clusters, (
                 f'Skipping local cluster {c}, as it does not support '
-                '`sky start`.'))
+                'sky start.'))
         ]
 
         for name in clusters:
@@ -1460,7 +1464,7 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
             #
             #  INIT - ok to restart:
             #    1. It can be a failed-to-provision cluster, so it isn't up
-            #      (Ex: gpunode --gpus=A100:8).  Running `sky start` enables
+            #      (Ex: gpunode --gpus=A100:8).  Running sky start enables
             #      retrying the provisioning - without setup steps being
             #      completed. (Arguably the original command that failed should
             #      be used instead; but using start isn't harmful - after it
@@ -1469,10 +1473,10 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
             #
             #    2. It can be an up cluster that failed one of the setup steps.
             #      This way 'sky start' can change its status to UP, enabling
-            #      'sky ssh' to debug things (otherwise `sky ssh` will fail an
+            #      'sky ssh' to debug things (otherwise sky ssh will fail an
             #      INIT state cluster due to head_ip not being cached).
             #
-            #      This can be replicated by adding `exit 1` to Task.setup.
+            #      This can be replicated by adding exit 1 to Task.setup.
             if cluster_status == global_user_state.ClusterStatus.UP:
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
@@ -1504,12 +1508,8 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
             show_default=True)
 
     for name in to_start:
-        try:
-            core.start(name, idle_minutes_to_autostop, retry_until_up)
-        except exceptions.NotSupportedError as e:
-            click.echo(str(e))
+        _start_cluster(name, retry_until_up=retry_until_up)
         click.secho(f'Cluster {name} started.', fg='green')
-
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters', nargs=-1, required=False)
