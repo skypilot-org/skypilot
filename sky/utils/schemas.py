@@ -161,12 +161,12 @@ def get_cluster_schema():
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
-        'required': [],
+        'required': ['cluster', 'auth'],
         'additionalProperties': False,
         'properties': {
             'cluster': {
                 'type': 'object',
-                'required': [],
+                'required': ['ips', 'name'],
                 'additionalProperties': False,
                 'properties': {
                     'ips': {
@@ -182,7 +182,7 @@ def get_cluster_schema():
             },
             'auth': {
                 'type': 'object',
-                'required': [],
+                'required': ['ssh_user', 'ssh_private_key'],
                 'additionalProperties': False,
                 'properties': {
                     'ssh_user': {
