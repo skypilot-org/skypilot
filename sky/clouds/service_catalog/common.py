@@ -2,6 +2,7 @@
 import os
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+import difflib
 import requests
 import pandas as pd
 
@@ -94,8 +95,43 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
-def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
-    return region in df['Region'].unique()
+def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
+                              zone: Optional[str]):
+    """Validates whether region and zone exist in the catalog."""
+
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
+        candidate_loc = sorted(candidate_loc)
+        candidate_strs = ''
+        if len(candidate_loc) > 0:
+            candidate_strs = ', '.join(candidate_loc)
+            candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
+        return candidate_strs
+
+    if region is not None:
+        all_regions = df['Region'].unique()
+        if region not in all_regions:
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid region {region!r}')
+                error_msg += _get_candidate_str(region, all_regions)
+                raise ValueError(error_msg)
+
+    if zone is not None:
+        all_zones = df['AvailabilityZone'].unique()
+        if zone not in all_zones:
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid zone {zone!r}')
+                error_msg += _get_candidate_str(zone, all_zones)
+                raise ValueError(error_msg)
+
+    if region is not None and zone is not None:
+        if zone not in df[df['Region'] == region]['AvailabilityZone'].unique():
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid zone {zone!r} for region {region!r}')
+                error_msg += _get_candidate_str(
+                    zone,
+                    df[df['Region'] == region]['AvailabilityZone'].unique())
+                raise ValueError(error_msg)
 
 
 def get_hourly_cost_impl(
@@ -225,3 +261,35 @@ def get_region_zones(df: pd.DataFrame,
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions
+
+
+def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
+                           region: str) -> bool:
+    """Returns True if the accelerator is in the region."""
+    return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AcceleratorCount'] == acc_count) &
+                  (df['Region'] == region)]) > 0
+
+
+def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
+                         zone: str) -> bool:
+    """Returns True if the accelerator is in the zone."""
+    return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AcceleratorCount'] == acc_count) &
+                  (df['AvailabilityZone'] == zone)]) > 0
+
+
+def accelerator_in_region_or_zone_impl(
+    df: pd.DataFrame,
+    accelerator_name: str,
+    acc_count: int,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+) -> bool:
+    """Returns True if the accelerator is in the region or zone."""
+    assert region is not None or zone is not None, (
+        'Both region and zone are None.')
+    if zone is None:
+        return _accelerator_in_region(df, accelerator_name, acc_count, region)
+    else:
+        return _accelerator_in_zone(df, accelerator_name, acc_count, zone)

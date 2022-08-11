@@ -79,7 +79,10 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
             log_file.flush()
+            test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(e)
+            # Kill the current process.
+            proc.terminate()
             proc.returncode = 1  # None if we don't set it.
             break
 
@@ -128,7 +131,7 @@ def test_minimal():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
-            f'sky logs {name} --status | grep "Job 2 SUCCEEDED"',  # Equivalent.
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
         ],
         f'sky down -y {name}',
     )
@@ -144,6 +147,40 @@ def test_region():
             f'sky launch -y -c {name} --region us-west-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+# ---------- Test zone ----------
+def test_zone():
+    name = _get_cluster_name()
+    test = Test(
+        'zone',
+        [
+            f'sky launch -y -c {name} examples/minimal.yaml --zone us-west-2b',
+            f'sky exec {name} examples/minimal.yaml --zone us-west-2b',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_stale_job():
+    name = _get_cluster_name()
+    test = Test(
+        'stale-job',
+        [
+            f'sky launch -y -c {name} --cloud gcp "echo hi"',
+            f'sky exec {name} --cloud gcp -d "echo start; sleep 10000"',
+            f'sky stop {name} -y',
+            'sleep 40',
+            f'sky start {name} -y',
+            f'sky logs {name} 1 --status',
+            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
     )
@@ -179,6 +216,28 @@ def test_file_mounts():
         ],
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
+# ---------- CLI logs ----------
+def test_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'cli_logs',
+        [
+            f'sky launch -y -c {name} --num-nodes 2 "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -234,6 +293,7 @@ def test_multi_echo():
         # unfulfilled' error.  If process not found, grep->ssh returns 1.
         [f'ssh {name} \'ps aux | grep "[/]"monitor.py\''],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -338,6 +398,7 @@ def test_gcp_start_stop():
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
+            f'sleep 20',
             f'sky start -y {name}',
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
@@ -481,12 +542,12 @@ def test_spot():
             f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
             f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
             'sleep 5',
-            f'sky spot status | grep {name}-1 | head -n1 | grep STARTING',
-            f'sky spot status | grep {name}-2 | head -n1 | grep STARTING',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
             f'sky spot cancel -y -n {name}-1',
             'sleep 200',
-            f'sky spot status | grep {name}-1 | head -n1 | grep CANCELLED',
-            f'sky spot status | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
     )
@@ -522,7 +583,7 @@ def test_spot_recovery():
         'managed-spot-recovery',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
-            'sleep 200',
+            'sleep 300',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -531,7 +592,7 @@ def test_spot_recovery():
             f'--query Reservations[].Instances[].InstanceId '
             '--output text)',
             'sleep 50',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING\|STARTING"',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
         ],
@@ -608,6 +669,7 @@ def test_custom_image():
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,
     )
     run_one_test(test)
 
@@ -630,6 +692,15 @@ def test_azure_start_stop_two_nodes():
         timeout=30 * 60,  # 30 mins  (it takes around ~23 mins)
     )
     run_one_test(test)
+
+
+# ------- Testing the core API --------
+# Most of the core APIs have been tested in the CLI tests.
+# These tests are for testing the return value of the APIs not fully used in CLI.
+def test_core_api():
+    name = _get_cluster_name()
+    sky.launch
+    # TODO(zhwu): Add a test for core api.
 
 
 # ---------- Testing Storage ----------

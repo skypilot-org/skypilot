@@ -4,10 +4,43 @@ import functools
 import getpass
 import inspect
 import hashlib
+import random
 import os
 import socket
 import sys
+import time
 import yaml
+
+from sky import sky_logging
+
+logger = sky_logging.init_logger(__name__)
+
+
+class Backoff:
+    """Exponential backoff with jittering."""
+    MULTIPLIER = 1.6
+    JITTER = 0.4
+
+    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
+        self._initial = True
+        self._backoff = None
+        self._inital_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._inital_backoff
+
+    # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
+    # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
+
+    def current_backoff(self) -> float:
+        """Backs off once and returns the current backoff in seconds."""
+        if self._initial:
+            self._initial = False
+            self._backoff = min(self._inital_backoff, self._max_backoff)
+        else:
+            self._backoff = min(self._backoff * self.MULTIPLIER,
+                                self._max_backoff)
+        self._backoff += random.uniform(-self.JITTER * self._backoff,
+                                        self.JITTER * self._backoff)
+        return self._backoff
 
 
 def get_pretty_entry_point() -> str:
@@ -129,3 +162,24 @@ def make_decorator(cls, name_or_fn, **ctx_kwargs):
                 return f(*args, **kwargs)
 
         return _record
+
+
+def retry(method, max_retries=3, initial_backoff=1):
+    """Retry a function up to max_retries times with backoff between retries."""
+
+    @functools.wraps(method)
+    def method_with_retries(*args, **kwargs):
+        backoff = Backoff(initial_backoff)
+        try_count = 0
+        while try_count < max_retries:
+            try:
+                return method(*args, **kwargs)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(f'Caught {e}. Retrying.')
+                try_count += 1
+                if try_count < max_retries:
+                    time.sleep(backoff.current_backoff())
+                else:
+                    raise
+
+    return method_with_retries

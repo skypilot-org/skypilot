@@ -15,8 +15,16 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def region_exists(region: str) -> bool:
-    return common.region_exists_impl(_df, region)
+def validate_region_zone(region: Optional[str], zone: Optional[str]):
+    return common.validate_region_zone_impl(_df, region, zone)
+
+
+def accelerator_in_region_or_zone(acc_name: str,
+                                  acc_count: int,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> bool:
+    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+                                                     region, zone)
 
 
 def get_hourly_cost(instance_type: str,

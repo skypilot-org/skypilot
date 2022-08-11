@@ -4,7 +4,6 @@ from typing import Dict, List
 
 import sky
 import time_estimators
-from sky import clouds
 
 IPAddr = str
 
@@ -55,7 +54,7 @@ with sky.Dag() as dag:
                      estimated_size_gigabytes=70)
     train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
     train.set_resources({
-        sky.Resources(clouds.AWS(), 'p3.2xlarge'),
+        sky.Resources(sky.AWS(), 'p3.2xlarge'),
     })
 
 dag = sky.Optimizer.optimize(dag)

@@ -8,6 +8,7 @@ import tempfile
 from typing import Optional
 
 import filelock
+from packaging import version
 
 import sky
 from sky.backends import backend_utils
@@ -36,11 +37,14 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 
 def _get_latest_built_wheel() -> pathlib.Path:
+    wheel_name = (f'{_PACKAGE_WHEEL_NAME}-'
+                  f'{version.parse(sky.__version__)}-*.whl')
     try:
-        latest_wheel = max(WHEEL_DIR.glob(f'{_PACKAGE_WHEEL_NAME}-*.whl'),
-                           key=os.path.getctime)
+        latest_wheel = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
     except ValueError:
-        raise FileNotFoundError('Could not find built Sky wheels.') from None
+        raise FileNotFoundError(
+            f'Could not find built SkyPilot wheels {wheel_name!r} '
+            f'under {WHEEL_DIR!r}') from None
     return latest_wheel
 
 

@@ -5,7 +5,7 @@ Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # SkyPilot requires python >= 3.6 and < 3.10.
+  $ # SkyPilot requires python >= 3.6.
   $ git clone ssh://git@github.com/skypilot-org/skypilot.git
   $ cd skypilot
 
@@ -24,7 +24,7 @@ dependencies installed.
 
 .. note::
 
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing SkyPilot.
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio=1.43.0` prior to installing SkyPilot.
 
 .. note::
 

@@ -151,8 +151,16 @@ def get_instance_type_for_accelerator(
     return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
-def region_exists(region: str) -> bool:
-    return common.region_exists_impl(_df, region)
+def validate_region_zone(region: Optional[str], zone: Optional[str]):
+    return common.validate_region_zone_impl(_df, region, zone)
+
+
+def accelerator_in_region_or_zone(acc_name: str,
+                                  acc_count: int,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> bool:
+    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+                                                     region, zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

@@ -21,6 +21,7 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
+from sky import constants
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
@@ -28,7 +29,7 @@ from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.skylet import job_lib
 from sky.skylet import log_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -39,7 +40,6 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
-_SKY_LOGS_DIRECTORY = job_lib.SKY_LOGS_DIRECTORY
 _SKY_LOCAL_BENCHMARK_DIR = os.path.expanduser('~/.sky/benchmarks')
 _SKY_REMOTE_BENCHMARK_DIR = '~/.sky/sky_benchmark_dir'
 # NOTE: This must be the same as _SKY_REMOTE_BENCHMARK_DIR
@@ -297,8 +297,8 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
             # NOTE: The id of the benchmarking job must be 1.
             # TODO(woosuk): Handle exceptions.
             job_status = backend.get_job_status(handle,
-                                                job_id=1,
-                                                stream_logs=False)
+                                                job_ids=['1'],
+                                                stream_logs=False)['1']
 
     # Update the benchmark status.
     if (cluster_status == global_user_state.ClusterStatus.INIT or
@@ -489,7 +489,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
 
     # Save stdout/stderr from cluster launches.
     run_timestamp = backend_utils.get_run_timestamp()
-    log_dir = os.path.join(_SKY_LOGS_DIRECTORY, run_timestamp)
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
     log_dir = os.path.expanduser(log_dir)
     logger.info(
         f'{colorama.Fore.YELLOW}To view stdout/stderr from individual '
