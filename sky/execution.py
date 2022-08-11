@@ -75,9 +75,8 @@ def _type_check_dag(dag):
     if isinstance(dag, str):
         raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
     elif not isinstance(dag, sky.Dag):
-        raise TypeError(
-            'Expected a sky.Dag but received argument of type: '
-            f'{type(dag)}')
+        raise TypeError('Expected a sky.Dag but received argument of type: '
+                        f'{type(dag)}')
 
 
 class Stage(enum.Enum):
