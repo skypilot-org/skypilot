@@ -41,6 +41,43 @@ logger = sky_logging.init_logger(__name__)
 OptimizeTarget = optimizer.OptimizeTarget
 _MAX_SPOT_JOB_LENGTH = 10
 
+# Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
+# instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
+# this.
+_ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
+Expected a sky.Dag but received a string.
+
+If you meant to run a command, make it a Task's run command and wrap as a Dag:
+
+  def to_dag(command, gpu=None):
+      with sky.Dag() as dag:
+          sky.Task(run=command).set_resources(
+              sky.Resources(accelerators=gpu))
+      return dag
+
+The command can then be run as:
+
+  sky.exec(to_dag(cmd), cluster_name=..., ...)
+  # Or use {'V100': 1}, 'V100:0.5', etc.
+  sky.exec(to_dag(cmd, gpu='V100'), cluster_name=..., ...)
+
+  sky.launch(to_dag(cmd), ...)
+
+  sky.spot_launch(to_dag(cmd), ...)
+""".strip()
+
+
+def _type_check_dag(dag):
+    """Raises TypeError if 'dag' is not a 'sky.Dag'."""
+    # Not suppressing stacktrace: when calling this via API user may want to
+    # see their own program in the stacktrace. Our CLI impl would not trigger
+    # these errors.
+    if isinstance(dag, str):
+        raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
+    elif not isinstance(dag, sky.Dag):
+        raise TypeError('Expected a sky.Dag but received argument of type: '
+                        f'{type(dag)}')
+
 
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
@@ -98,6 +135,7 @@ def _execute(
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
+    _type_check_dag(dag)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -314,6 +352,7 @@ def spot_launch(
     if name is None:
         name = backend_utils.generate_cluster_name()
 
+    _type_check_dag(dag)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
                                  dag)
     task = dag.tasks[0]
