@@ -1103,7 +1103,8 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       ``sky start`` to restart the cluster.
     """
     cluster_records = core.status(all=all, refresh=refresh)
-    local_clusters = onprem_utils.check_and_get_local_clusters()
+    local_clusters = onprem_utils.check_and_get_local_clusters(
+        suppress_error=True)
     status_utils.show_status_table(cluster_records, all)
     status_utils.show_local_status_table(local_clusters)
 
