@@ -20,7 +20,7 @@ import inference
 
 LOCAL_UPLOAD_FOLDER = os.path.abspath("examples/inference_server/uploads/")
 REMOTE_UPLOAD_FOLDER = '/remote/path/to/folder'
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg'}
 
 app = flask.Flask(__name__)
 app.config['UPLOAD_FOLDER'] = LOCAL_UPLOAD_FOLDER
@@ -36,8 +36,7 @@ def run_output(cmd: str, **kwargs) -> str:
 
 
 def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return os.path.splitext(filename)[1].lower() in ALLOWED_EXTENSIONS
 
 
 @app.route("/", methods=["GET", "POST"])
