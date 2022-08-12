@@ -29,7 +29,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 Tasks in SkyPilot are specified as a YAML file containing the resource requirements, data to be synced, setup commands and the task commands. Here is an example.
 
 ```yaml
-# my-task.yaml
+# my_task.yaml
 resources:
   # 1x NVIDIA V100 GPU
   accelerators: V100:1
@@ -39,23 +39,28 @@ num_nodes: 1
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.
-workdir: .
+workdir: ~/torch_examples
 
 # Commands to be run before executing the job
 # Typical use: pip install -r requirements.txt, git clone, etc.
 setup: |
-  echo "Running setup."
+  pip install torch torchvision
 
 # Commands to run as a job
 # Typical use: make use of resources, such as running training.
 run: |
-  echo "Hello, SkyPilot!"
-  conda env list
+  cd mnist
+  python main.py --epochs 1
 ```
 
-This task can be launched on the cloud with the `sky launch` command.
+Prepare the workdir by cloning locally:
 ```bash
-$ sky launch my-task.yaml
+git clone https://github.com/pytorch/examples.git ~/torch_examples
+```
+
+Launch with `sky launch`:
+```bash
+sky launch my_task.yaml
 ```
 SkyPilot will perform multiple functions for you:
 1. Find the lowest priced VM instance type across different clouds
@@ -64,7 +69,10 @@ SkyPilot will perform multiple functions for you:
 4. Run the task's `setup` commands to prepare the VM for running the task 
 5. Run the task's `run` commands
 
-<!---- TODO(romilb): Example GIF goes here ---->
+<p align="center">
+  <img src="https://i.imgur.com/TgamzZ2.gif" alt="SkyPilot Demo"/>
+</p>
+
 Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to use SkyPilot.
 
 ## Issues, feature requests and questions
