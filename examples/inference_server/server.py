@@ -6,6 +6,7 @@ To run the server, run the following command from the root directory:
 """
 
 import os
+import pathlib
 import random
 import re
 import string
@@ -17,7 +18,7 @@ from werkzeug import utils
 
 import inference
 
-LOCAL_UPLOAD_FOLDER = '/Users/isaac/Dropbox/Berkeley/Sky/sky/examples/inference_server/uploads'
+LOCAL_UPLOAD_FOLDER = os.path.abspath("examples/inference_server/uploads/")
 REMOTE_UPLOAD_FOLDER = '/remote/path/to/folder'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
@@ -50,6 +51,7 @@ def run_inference():
         local_image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         remote_image_path = os.path.join(REMOTE_UPLOAD_FOLDER, filename)
 
+        pathlib.Path(app.config['UPLOAD_FOLDER']).mkdir(exist_ok=True)
         image.save(local_image_path)
 
         with sky.Dag() as dag:
