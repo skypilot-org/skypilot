@@ -53,12 +53,12 @@ run: |
   python main.py --epochs 1
 ```
 
-For this example, you can prepare the workdir by cloning the pytorch examples repository. 
+Prepare the workdir by cloning locally:
 ```bash
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
 
-This task can now be launched on the cloud with the `sky launch` command.
+Launch with `sky launch`:
 ```bash
 sky launch my_task.yaml
 ```
