@@ -99,8 +99,8 @@ describe all fields available.
       #
       # If symlinks are present, they are copied as symlinks, and their targets
       # must also be synced using file_mounts to ensure correctness.
-      /remote/dir/file: /local/dir/file
-      /remote/dir: /local/dir
+      /remote/dir1/file: /local/dir1/file
+      /remote/dir2: /local/dir2
 
       # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket

@@ -261,7 +261,6 @@ def queue(cluster_name: str,
     handle = _check_cluster_available(cluster_name, 'getting the job queue')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    print(f'\nJob queue of cluster {cluster_name}')
     returncode, jobs_json, stderr = backend.run_on_head(handle,
                                                         code,
                                                         require_outputs=True)
