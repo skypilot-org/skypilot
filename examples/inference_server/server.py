@@ -18,7 +18,7 @@ from werkzeug import utils
 
 import inference
 
-LOCAL_UPLOAD_FOLDER = os.path.abspath("examples/inference_server/uploads/")
+LOCAL_UPLOAD_FOLDER = os.path.abspath('examples/inference_server/uploads/')
 REMOTE_UPLOAD_FOLDER = '/remote/path/to/folder'
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg'}
 
