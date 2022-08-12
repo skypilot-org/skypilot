@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=58.0"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.yapf]
+based_on_style = "google"
+allow_split_before_dict_value = false
+
+[tool.pytest.ini_options]
+required_plugins = [
+    "pytest-xdist",
+    "pytest-env>=0.6"
+]
+env = [
+    "SKYPILOT_DEBUG=1",
+    "SKYPILOT_DISABLE_USAGE_COLLECTION=1"
+]

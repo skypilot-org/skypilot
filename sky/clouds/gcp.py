@@ -46,6 +46,7 @@ class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
+    _zones: List[clouds.Zone] = []
 
     #### Regions/Zones ####
 
@@ -98,10 +99,13 @@ class GCP(clouds.Cloud):
         use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
-        del instance_type  # unused
         if accelerators is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
+            if instance_type is None:
+                # fallback to manually specified region/zones
+                regions = cls.regions()
+            else:
+                regions = service_catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
@@ -112,6 +116,15 @@ class GCP(clouds.Cloud):
         for region in regions:
             for zone in region.zones:
                 yield (region, [zone])
+
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://cloud.google.com/compute/docs/metadata/querying-metadata
+        command_str = (
+            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # pylint: disable=line-too-long
+            ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')
+        return command_str
 
     #### Normal methods ####
 
@@ -139,9 +152,6 @@ class GCP(clouds.Cloud):
             return 0.11 * num_gigabytes
         else:
             return 0.08 * num_gigabytes
-
-    def __repr__(self):
-        return GCP._REPR
 
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
@@ -302,7 +312,7 @@ class GCP(clouds.Cloud):
                 # ~/.config/gcloud/application_default_credentials.json.
                 '  $ gcloud auth application-default login\n    '
                 'For more info: '
-                'https://sky-proj-sky.readthedocs-hosted.com/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
+                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
         return True, None
 
@@ -318,8 +328,16 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def region_exists(self, region: str) -> bool:
-        return service_catalog.region_exists(region, 'gcp')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region, zone, clouds='gcp')
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

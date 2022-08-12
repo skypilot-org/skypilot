@@ -1,0 +1,60 @@
+# Resnet training example of on-premise task yaml.
+# 
+# To register a local cluster into SkyPilot:
+#   - System admins:
+#       - Create a cluster config file (see examples/local/cluster-config.yaml).
+#       - Run `sky admin deploy cluster-config.yaml`.
+#       - Send generated config (in ~/.sky/local/cluster-config.yaml) to users.
+#   - Normal users:
+#       - Receive generated cluster config from system admins.
+#       - Move cluster config to ~/.sky/local/.
+#       - Add user credentials to cluster config.
+#       - Run `sky launch -c my-local-cluster resnet_local.yaml` on laptop.
+
+name: user1-job
+workdir: ~/Downloads/tpu
+
+# Accelerators here mean task resource specs, not total cluster resources.
+# In this case, Resnet training will occupy 2 V100 GPUs.
+resources:
+  # Optional field, as long as local cluster name is specified in
+  # `sky launch -c [CLUSTER_NAME]`.
+  # Two cases:
+  #   1) When `cloud:local` is specified, users must provide a local cluster
+  #      name, or SkyPilot will raise an error.
+  #   2) When `cloud:local` is not specified, users must still provide a local
+  #      cluster name in order to run on a local cluster. Any other cluster
+  #      name will automatically run on public clouds (AWS, GCP, Azure).
+  cloud: local
+  accelerators: V100:2
+
+setup: |
+  . $(conda info --base)/etc/profile.d/conda.sh
+  pip install --upgrade pip
+
+  conda activate resnet
+
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -n resnet python=3.7 -y
+    conda activate resnet
+    conda install cudatoolkit=11.0 -y
+    pip install tensorflow==2.4.0 pyyaml
+    cd models
+    pip install -e .
+  fi
+
+run: |
+  . $(conda info --base)/etc/profile.d/conda.sh
+  conda activate resnet
+
+  export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
+  export PYTHONPATH="$PYTHONPATH:./models"
+  rm -rf resnet-model-dir-ubuntu
+  python -u models/official/resnet/resnet_main.py --use_tpu=False \
+      --mode=train --train_batch_size=256 --train_steps=1000 \
+      --iterations_per_loop=125 \
+      --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+      --model_dir=resnet-model-dir-ubuntu \
+      --amp --xla --loss_scale=128

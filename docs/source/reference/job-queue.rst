@@ -3,7 +3,7 @@
 Job Queue
 =========
 
-Sky's **job queue** allows multiple jobs to be scheduled on a cluster.
+SkyPilot's **job queue** allows multiple jobs to be scheduled on a cluster.
 This enables parallel experiments or :ref:`hyperparameter tuning <grid-search>`.
 
 Each task submitted by :code:`sky exec` is automatically queued and scheduled
@@ -98,17 +98,17 @@ allocated device IDs will be set).
 Scheduling behavior
 --------------------------------
 
-Sky's scheduler serves two goals:
+SkyPilot's scheduler serves two goals:
 
-1. **Preventing resource oversubscription**: Sky schedules jobs on a cluster
+1. **Preventing resource oversubscription**: SkyPilot schedules jobs on a cluster
    using their resource requirements---either specified in a task YAML's
    :code:`resources` field, or via the :code:`--gpus` option of the :code:`sky
-   exec` CLI command. Sky honors these resource requirements while ensuring that
+   exec` CLI command. SkyPilot honors these resource requirements while ensuring that
    no resource in the cluster is oversubscribed. For example, if a node has 4
    GPUs, it cannot host a combination of tasks whose sum of GPU requirements
    exceeds 4.
 
-2. **Minimizing resource idleness**: If a resource is idle, Sky will schedule a
+2. **Minimizing resource idleness**: If a resource is idle, SkyPilot will schedule a
    queued job that can utilize that resource.
 
 We illustrate the scheduling behavior by revisiting :ref:`Tutorial: DNN Training <huggingface>`.
@@ -123,7 +123,7 @@ In that tutorial, we have a task YAML that specifies these resource requirements
   ...
 
 Since a new cluster was created when we ran :code:`sky launch -c lm-cluster
-dnn.yaml`, Sky provisioned the cluster with exactly the same resources as those
+dnn.yaml`, SkyPilot provisioned the cluster with exactly the same resources as those
 required for the task.  Thus, :code:`lm-cluster` has 4 V100 GPUs.
 
 While this initial job is running, let us submit more tasks:

@@ -3,7 +3,7 @@
 Auto-stopping
 ==============
 
-Sky's **auto-stopping** automatically stops a cluster after it becomes idle.
+The **auto-stopping** feature automatically stops a cluster after it becomes idle.
 
 With auto-stopping, users can simply submit jobs and leave their laptops, while
 **ensuring no unnecessary spending occurs**: after jobs have finished, the

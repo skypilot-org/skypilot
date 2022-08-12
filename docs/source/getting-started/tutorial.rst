@@ -2,7 +2,7 @@
 
 Tutorial: DNN Training
 ======================
-This example uses Sky to train a Transformer-based language model from HuggingFace.
+This example uses SkyPilot to train a Transformer-based language model from HuggingFace.
 
 First, define a task YAML with resource requirements, the setup commands,
 and the commands to run:

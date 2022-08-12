@@ -27,43 +27,53 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import datetime
 import functools
 import getpass
 import os
 import shlex
 import sys
-import tempfile
+import textwrap
 import typing
 from typing import Any, Dict, List, Optional, Tuple
-import yaml
 
 import click
 import colorama
 from rich import progress as rich_progress
+import yaml
 
 import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import data
+from sky import constants
+from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
+from sky import core
 from sky.backends import backend_utils
+from sky.backends import onprem_utils
+from sky.benchmark import benchmark_state
+from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
-from sky.data import data_utils
-from sky.data.storage import StoreType
+from sky.data import storage_utils
 from sky.skylet import job_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
+from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
+from sky.usage import usage_lib
 
 if typing.TYPE_CHECKING:
     from sky.backends import backend as backend_lib
 
 logger = sky_logging.init_logger(__name__)
+
+_CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 _CLUSTER_FLAG_HELP = """\
 A cluster name. If provided, either reuse an existing cluster with that name or
@@ -93,9 +103,23 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
         if len(glob_cluster) == 0:
-            print(f'Cluster {cluster} not found.')
+            if onprem_utils.check_if_local_cloud(cluster):
+                click.echo(
+                    constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
+                        cluster=cluster))
+            else:
+                click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
+
+
+def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
+                           message: str) -> bool:
+    """Raises warning if the cluster name is a local cluster."""
+    if cluster in local_clusters:
+        click.echo(message)
+        return False
+    return True
 
 
 def _interactive_node_cli_command(cli_func):
@@ -226,20 +250,11 @@ _TASK_OPTIONS = [
         help=('The region to use. If specified, overrides the '
               '"resources.region" config. Passing "none" resets the config.')),
     click.option(
-        '--gpus',
+        '--zone',
         required=False,
         type=str,
-        help=
-        ('Type and number of GPUs to use. Example values: '
-         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-         '(fractional counts are supported by the scheduling framework). '
-         'If a new cluster is being launched by this command, this is the '
-         'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
-         'resources and is used for scheduling the task. '
-         'Overrides the "accelerators" '
-         'config in the YAML if both are supplied. '
-         'Passing "none" resets the config.')),
+        help=('The zone to use. If specified, overrides the '
+              '"resources.zone" config. Passing "none" resets the config.')),
     click.option(
         '--num-nodes',
         required=False,
@@ -263,7 +278,7 @@ _TASK_OPTIONS = [
         required=False,
         type=_parse_env_var,
         multiple=True,
-        help="""
+        help="""\
         Environment variable to set on the remote node.
         It can be specified multiple times.
         Examples:
@@ -272,12 +287,37 @@ _TASK_OPTIONS = [
         1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
 
         2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
-        same value of ``$HOME`` in the local environment where the sky command
+        same value of ``$HOME`` in the local environment where the CLI command
         is run.
 
         3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
         same value of ``$MY_ENV3`` in the local environment.""",
     )
+]
+_EXTRA_RESOURCES_OPTIONS = [
+    click.option(
+        '--gpus',
+        required=False,
+        type=str,
+        help=
+        ('Type and number of GPUs to use. Example values: '
+         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
+         '(fractional counts are supported by the scheduling framework). '
+         'If a new cluster is being launched by this command, this is the '
+         'resources to provision. If an existing cluster is being reused, this'
+         ' is seen as the task demand, which must fit the cluster\'s total '
+         'resources and is used for scheduling the task. '
+         'Overrides the "accelerators" '
+         'config in the YAML if both are supplied. '
+         'Passing "none" resets the config.')),
+    click.option(
+        '--instance-type',
+        required=False,
+        type=str,
+        help=('The instance type to use. If specified, overrides the '
+              '"resources.instance_type" config. Passing "none" resets the '
+              'config.'),
+    ),
 ]
 
 
@@ -290,6 +330,53 @@ def _add_click_options(options: List[click.Option]):
         return func
 
     return _add_options
+
+
+def _parse_override_params(cloud: Optional[str] = None,
+                           region: Optional[str] = None,
+                           zone: Optional[str] = None,
+                           gpus: Optional[str] = None,
+                           instance_type: Optional[str] = None,
+                           use_spot: Optional[bool] = None,
+                           image_id: Optional[str] = None,
+                           disk_size: Optional[int] = None) -> Dict[str, Any]:
+    """Parses the override parameters into a dictionary."""
+    override_params = {}
+    if cloud is not None:
+        if cloud.lower() == 'none':
+            override_params['cloud'] = None
+        else:
+            override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
+    if region is not None:
+        if region.lower() == 'none':
+            override_params['region'] = None
+        else:
+            override_params['region'] = region
+    if zone is not None:
+        if zone.lower() == 'none':
+            override_params['zone'] = None
+        else:
+            override_params['zone'] = zone
+    if gpus is not None:
+        if gpus.lower() == 'none':
+            override_params['accelerators'] = None
+        else:
+            override_params['accelerators'] = gpus
+    if instance_type is not None:
+        if instance_type.lower() == 'none':
+            override_params['instance_type'] = None
+        else:
+            override_params['instance_type'] = instance_type
+    if use_spot is not None:
+        override_params['use_spot'] = use_spot
+    if image_id is not None:
+        if image_id.lower() == 'none':
+            override_params['image_id'] = None
+        else:
+            override_params['image_id'] = image_id
+    if disk_size is not None:
+        override_params['disk_size'] = disk_size
+    return override_params
 
 
 def _default_interactive_node_name(node_type: str):
@@ -361,6 +448,7 @@ def _launch_with_confirm(
     idle_minutes_to_autostop: int = -1,
     retry_until_up: bool = False,
     node_type: Optional[str] = None,
+    is_local_cloud: Optional[bool] = False,
 ):
     """Launch a cluster with a DAG."""
     if cluster is None:
@@ -380,7 +468,10 @@ def _launch_with_confirm(
         prompt = None
         if maybe_status is None:
             cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = f'Launching a new cluster{cluster_str}. Proceed?'
+            if is_local_cloud:
+                prompt = f'Initializing local cluster{cluster_str}. Proceed?'
+            else:
+                prompt = f'Launching a new cluster{cluster_str}. Proceed?'
         elif maybe_status == global_user_state.ClusterStatus.STOPPED:
             prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
         if prompt is not None:
@@ -431,6 +522,10 @@ def _create_and_ssh_into_node(
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
+    if onprem_utils.check_if_local_cloud(cluster_name):
+        raise click.BadParameter(
+            f'Name {cluster_name!r} taken by a local cluster and cannot '
+            f'be used for a {node_type}.')
     with sky.Dag() as dag:
         # TODO: Add conda environment replication
         # should be setup =
@@ -497,9 +592,14 @@ def _create_and_ssh_into_node(
     click.secho(f'rsync -rP {cluster_name}:/remote/path /local/path', bold=True)
 
 
-def _check_yaml(entrypoint: str) -> bool:
-    """Checks if entrypoint is a readable YAML file."""
+def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
+    """Checks if entrypoint is a readable YAML file.
+
+    Args:
+        entrypoint: Path to a YAML file.
+    """
     is_yaml = True
+    config = None
     shell_splits = shlex.split(entrypoint)
     yaml_file_provided = len(shell_splits) == 1 and \
         (shell_splits[0].endswith('yaml') or shell_splits[0].endswith('.yml'))
@@ -535,17 +635,70 @@ def _check_yaml(entrypoint: str) -> bool:
                 f'{entrypoint!r} looks like a yaml path but {invalid_reason}\n'
                 'It will be treated as a command to be run remotely. Continue?',
                 abort=True)
-    return is_yaml
+    return is_yaml, config
+
+
+# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
+# this.
+def _check_cluster_config(yaml_config: dict):
+    """Checks if the cluster config has filled-in user credentials."""
+    auth = yaml_config['auth']
+    cluster = yaml_config['cluster']['name']
+
+    if (auth['ssh_user'] == onprem_utils.AUTH_PLACEHOLDER or
+            auth['ssh_private_key'] == onprem_utils.AUTH_PLACEHOLDER):
+        raise ValueError(
+            'Authentication into local cluster requires specifying '
+            '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
+            'Please fill aforementioned fields in '
+            f'{onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
+
+
+# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
+# this.
+def _check_local_cloud_args(cloud: Optional[str] = None,
+                            cluster_name: Optional[str] = None,
+                            yaml_config: Optional[dict] = None) -> bool:
+    """Checks if user-provided arguments satisfies local cloud specs."""
+    yaml_cloud = None
+    if yaml_config is not None and 'resources' in yaml_config:
+        yaml_cloud = yaml_config['resources'].get('cloud')
+
+    if (cluster_name is not None and
+            onprem_utils.check_if_local_cloud(cluster_name)):
+        if cloud is not None and cloud != 'local':
+            raise click.UsageError(f'Local cluster {cluster_name} is '
+                                   f'not part of cloud: {cloud}.')
+        if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
+            raise ValueError(
+                f'Detected Local cluster {cluster_name}. Must specify '
+                '`cloud: local` or no cloud in YAML or CLI args.')
+        return True
+    else:
+        if cloud == 'local' or yaml_cloud == 'local':
+            if cluster_name is not None:
+                raise click.UsageError(
+                    f'Local cluster \'{cluster_name}\' does not exist. \n'
+                    'See `sky status` for local cluster name(s).')
+            else:
+                raise click.UsageError(
+                    'Specify -c [local_cluster] to launch on a local cluster.\n'
+                    'See `sky status` for local cluster name(s).')
+
+        return False
 
 
 def _make_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
+    cluster: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
     region: Optional[str] = None,
+    zone: Optional[str] = None,
     gpus: Optional[str] = None,
+    instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
     image_id: Optional[str] = None,
@@ -555,13 +708,12 @@ def _make_dag_from_entrypoint_with_overrides(
     spot_recovery: Optional[str] = None,
 ) -> sky.Dag:
     entrypoint = ' '.join(entrypoint)
-
     with sky.Dag() as dag:
-        if _check_yaml(entrypoint):
+        is_yaml, yaml_config = _check_yaml(entrypoint)
+        if is_yaml:
             # Treat entrypoint as a yaml.
             click.secho('Task from YAML spec: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
-            task = sky.Task.from_yaml(entrypoint)
         else:
             if not entrypoint:
                 entrypoint = None
@@ -569,38 +721,29 @@ def _make_dag_from_entrypoint_with_overrides(
                 # Treat entrypoint as a bash command.
                 click.secho('Task from command: ', fg='yellow', nl=False)
                 click.secho(entrypoint, bold=True)
+
+        if _check_local_cloud_args(cloud, cluster, yaml_config):
+            cloud = 'local'
+
+        if is_yaml:
+            usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+            task = sky.Task.from_yaml(entrypoint)
+        else:
             task = sky.Task(name='sky-cmd', run=entrypoint)
             task.set_resources({sky.Resources()})
+
         # Override.
         if workdir is not None:
             task.workdir = workdir
 
-        override_params = {}
-        if cloud is not None:
-            if cloud.lower() == 'none':
-                override_params['cloud'] = None
-            else:
-                override_params['cloud'] = clouds.CLOUD_REGISTRY.from_str(cloud)
-        if region is not None:
-            if region.lower() == 'none':
-                override_params['region'] = None
-            else:
-                override_params['region'] = region
-        if gpus is not None:
-            if gpus.lower() == 'none':
-                override_params['accelerators'] = None
-            else:
-                override_params['accelerators'] = gpus
-        if use_spot is not None:
-            override_params['use_spot'] = use_spot
-        if disk_size is not None:
-            override_params['disk_size'] = disk_size
-        if image_id is not None:
-            if image_id.lower() == 'none':
-                override_params['image_id'] = None
-            else:
-                override_params['image_id'] = image_id
-
+        override_params = _parse_override_params(cloud=cloud,
+                                                 region=region,
+                                                 zone=zone,
+                                                 gpus=gpus,
+                                                 instance_type=instance_type,
+                                                 use_spot=use_spot,
+                                                 image_id=image_id,
+                                                 disk_size=disk_size)
         # Spot launch specific.
         if spot_recovery is not None:
             if spot_recovery.lower() == 'none':
@@ -657,6 +800,10 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()
 
+    @usage_lib.entrypoint('sky.cli', fallback=True)
+    def invoke(self, ctx):
+        return super().invoke(ctx)
+
 
 class _DocumentedCodeCommand(click.Command):
     """Corrects help strings for documented commands such that --help displays
@@ -669,7 +816,8 @@ class _DocumentedCodeCommand(click.Command):
         return super().get_help(ctx)
 
 
-@click.group(cls=_NaturalOrderGroup)
+@click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
+@click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
 def cli():
     pass
 
@@ -696,7 +844,7 @@ def cli():
               flag_value=backends.LocalDockerBackend.NAME,
               default=False,
               help='If used, runs locally inside a docker container.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -723,7 +871,7 @@ def cli():
     is_flag=True,
     required=False,
     help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if sky fails to launch the cluster on any possible region/cloud due '
+          'if we fail to launch the cluster on any possible region/cloud due '
           'to unavailability errors.'))
 @click.option('--yes',
               '-y',
@@ -731,6 +879,7 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 def launch(
     entrypoint: str,
     cluster: Optional[str],
@@ -741,7 +890,9 @@ def launch(
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     gpus: Optional[str],
+    instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -767,10 +918,13 @@ def launch(
     dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
+        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
+        zone=zone,
         gpus=gpus,
+        instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
         image_id=image_id,
@@ -795,7 +949,7 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
-    )
+        is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -807,7 +961,8 @@ def launch(
               is_flag=True,
               help='If True, run workdir syncing first (blocking), '
               'then detach from the job\'s execution.')
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(
     cluster: str,
@@ -816,8 +971,10 @@ def exec(
     name: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
+    instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -883,6 +1040,9 @@ def exec(
         cluster, operation_str='Executing task on it')
     handle = global_user_state.get_handle_from_cluster_name(cluster)
     if handle is None:
+        if onprem_utils.check_if_local_cloud(cluster):
+            raise click.BadParameter(
+                constants.UNINITIALIZED_CLUSTER_MESSAGE.format(cluster=cluster))
         raise click.BadParameter(f'Cluster {cluster!r} not found. '
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
@@ -890,10 +1050,13 @@ def exec(
     dag = _make_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
+        cluster=cluster,
         workdir=workdir,
         cloud=cloud,
         region=region,
+        zone=zone,
         gpus=gpus,
+        instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
         num_nodes=num_nodes,
@@ -917,6 +1080,7 @@ def exec(
               is_flag=True,
               required=False,
               help='Query cluster status from the cloud provider.')
+@usage_lib.entrypoint
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
@@ -938,7 +1102,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
     """
-    status_utils.show_status_table(all, refresh)
+    cluster_records = core.status(all=all, refresh=refresh)
+    local_clusters = onprem_utils.check_and_get_local_clusters(
+        suppress_error=True)
+    status_utils.show_status_table(cluster_records, all)
+    status_utils.show_local_status_table(local_clusters)
 
 
 @cli.command()
@@ -955,61 +1123,45 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
               required=False,
               help='Show only pending/running jobs\' information.')
 @click.argument('clusters', required=False, type=str, nargs=-1)
+@usage_lib.entrypoint
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
-    all_jobs = not skip_finished
-
-    username = getpass.getuser()
-    if all_users:
-        username = None
-    code = job_lib.JobLibCodeGen.show_jobs(username, all_jobs)
-
+    show_local_clusters = False
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
+        show_local_clusters = True
         cluster_infos = global_user_state.get_clusters()
         clusters = [c['name'] for c in cluster_infos]
 
     unsupported_clusters = []
     for cluster in clusters:
-        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster)
-        backend = backend_utils.get_backend_from_handle(handle)
-        if isinstance(backend, backends.LocalDockerBackend):
-            # LocalDockerBackend does not support job queues
+        try:
+            job_table = core.queue(cluster, skip_finished, all_users)
+        except exceptions.NotSupportedError as e:
             unsupported_clusters.append(cluster)
+            click.echo(str(e))
             continue
-        if cluster_status != global_user_state.ClusterStatus.UP:
+        except (RuntimeError, exceptions.ClusterNotUpError) as e:
+            click.echo(str(e))
+            continue
+        job_table = job_lib.format_job_queue(job_table)
+        click.echo(f'{job_table}')
+
+    local_clusters = onprem_utils.check_and_get_local_clusters()
+    for local_cluster in local_clusters:
+        if local_cluster not in clusters and show_local_clusters:
             click.secho(
-                f'Cluster {cluster} is not up (status: {cluster_status.value});'
+                f'Local cluster {local_cluster} is uninitialized;'
                 ' skipped.',
                 fg='yellow')
-            continue
-        _show_job_queue_on_cluster(cluster, handle, backend, code)
+
     if unsupported_clusters:
         click.secho(
             f'Note: Job queues are not supported on clusters: '
             f'{", ".join(unsupported_clusters)}',
             fg='yellow')
-
-
-def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
-                               backend: 'backend_lib.Backend', code: str):
-    click.echo(f'\nSky Job Queue of Cluster {cluster}')
-    if handle.head_ip is None:
-        click.echo(
-            f'Cluster {cluster} has been stopped or not properly set up. '
-            'Please re-launch it with `sky launch` to view the job queue.')
-        return
-
-    returncode, job_table, stderr = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True)
-    if returncode != 0:
-        click.echo(stderr)
-        click.secho(f'Failed to get job queue on cluster {cluster}.', fg='red')
-    click.echo(f'{job_table}')
 
 
 @cli.command()
@@ -1027,61 +1179,61 @@ def _show_job_queue_on_cluster(cluster: str, handle: Optional[Any],
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
 @click.argument('cluster', required=True, type=str)
-@click.argument('job_id', required=False, type=str)
+@click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
-def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
+@usage_lib.entrypoint
+def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
     """Tail the log of a job.
 
-    If JOB_ID is not provided, tails the logs of the last job on the cluster.
-    """
-    cluster_name = cluster
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
-    if handle is None:
-        raise click.BadParameter(f'Cluster \'{cluster_name}\' not found'
-                                 ' (see `sky status`).')
-    backend = backend_utils.get_backend_from_handle(handle)
-    if isinstance(backend, backends.LocalDockerBackend):
-        raise click.UsageError('Sky logs is not available with '
-                               'LocalDockerBackend.')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        click.secho(
-            f'Cluster {cluster_name} is not up '
-            f'(status: {cluster_status.value}).',
-            fg='yellow')
-        return
+    If JOB_ID is not provided, the latest job on the cluster will be used.
 
+    1. If no flags are provided, tail the logs of the job_id specified. At most
+    one job_id can be provided.
+    2. If --status is specified, print the status of the job and exit with
+    returncode 0 if the job is succeeded, or 1 otherwise. At most one job_id can
+    be specified.
+    3. If --sync-down is specified, the logs of the job will be downloaded from
+    the cluster and saved to the local machine under `~/sky_logs`. Mulitple
+    job_ids can be specified.
+    """
     if sync_down and status:
         raise click.UsageError(
             'Both --sync_down and --status are specified '
             '(ambiguous). To fix: specify at most one of them.')
 
+    if len(job_ids) > 1 and not sync_down:
+        raise click.UsageError(
+            f'Cannot stream logs of multiple jobs {job_ids}. '
+            'Set --sync-down to download them.')
+
+    job_ids = None if not job_ids else job_ids
+
     if sync_down:
-        click.secho('Syncing down logs to local...', fg='yellow')
-        backend.sync_down_logs(handle, job_id)
+        core.download_logs(cluster, job_ids)
         return
 
-    if job_id is not None and not job_id.isdigit():
-        click.secho(
-            'Only single job ID supported for streaming or status check, '
-            'consider using --sync_down to download logs for multiple jobs.',
-            fg='yellow')
-        return
-    job_id = int(job_id) if job_id is not None else job_id
+    assert job_ids is None or len(job_ids) <= 1, job_ids
+    job_id = None
+    if job_ids:
+        job_id = job_ids[0]
+        if not job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {job_id}. '
+                                   'Job ID must be integers.')
     if status:
-        # FIXME(zongheng,zhwu): non-existent job ids throw:
-        # TypeError: expected str, bytes or os.PathLike object, not tuple
-        job_status = backend.get_job_status(handle, job_id)
+        job_statuses = core.job_status(cluster, job_ids)
+        job_id = list(job_statuses.keys())[0]
+        job_status = list(job_statuses.values())[0]
+        job_status_str = job_status.value if job_status is not None else 'None'
+        click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
             sys.exit(0)
         else:
-            click.secho(
-                f'Job {job_id} status failed with status '
-                f'{job_status.value}',
-                fg='red')
+            if job_status is None:
+                id_str = '' if job_id is None else f'{job_id} '
+                click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
-    else:
-        backend.tail_logs(handle, job_id)
+
+    core.tail_logs(cluster, job_id)
 
 
 @cli.command()
@@ -1093,44 +1245,13 @@ def logs(cluster: str, job_id: Optional[str], sync_down: bool, status: bool):  #
               required=False,
               help='Cancel all jobs on the specified cluster.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
+@usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     """Cancel job(s)."""
-    if len(jobs) == 0 and not all:
-        raise click.UsageError(
-            'sky cancel requires either a job id '
-            f'(see `sky queue {cluster} -s`) or the --all flag.')
-
-    backend_utils.check_cluster_name_not_reserved(
-        cluster, operation_str='Cancelling jobs')
-
-    # Check the status of the cluster.
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster {cluster!r} not found'
-                                 ' (see `sky status`).')
-    backend = backend_utils.get_backend_from_handle(handle)
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        raise click.UsageError(
-            'Job cancelling is only supported for '
-            f'{backends.CloudVmRayBackend.NAME}, but cluster {cluster!r} '
-            f'is created by {backend.NAME}.')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        click.secho(
-            f'Cluster {cluster} is not up (status: {cluster_status.value}); '
-            'skipped.',
-            fg='yellow')
-        return
-
-    if all:
-        click.secho(f'Cancelling all jobs on cluster {cluster}...', fg='yellow')
-        jobs = None
-    else:
-        jobs_str = ', '.join(map(str, jobs))
-        click.secho(f'Cancelling jobs ({jobs_str}) on cluster {cluster}...',
-                    fg='yellow')
-
-    backend.cancel_jobs(handle, jobs)
+    try:
+        core.cancel(cluster, all, jobs)
+    except ValueError as e:
+        raise click.UsageError(str(e))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1146,6 +1267,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 def stop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1209,6 +1331,7 @@ def stop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 def autostop(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1265,19 +1388,35 @@ def autostop(
               required=False,
               help='Skip confirmation prompt.')
 @click.option(
+    '--idle-minutes-to-autostop',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
+          'queue. Idleness starts counting after setup/file_mounts are done; '
+          'the clock gets reset whenever there are running/pending jobs in the '
+          'job queue. '
+          'Setting this flag is equivalent to '
+          'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
+          '. If not set, the cluster will not be auto-stopped.'))
+@click.option(
     '--retry-until-up',
     '-r',
     default=False,
     is_flag=True,
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
-          'if sky fails to start the cluster due to unavailability errors.'))
-def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
+          'if we fail to start the cluster due to unavailability errors.'))
+@usage_lib.entrypoint
+def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
+          retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
-    provisioning/Sky runtime setup (status is INIT), this command will attempt
-    to start the cluster.  (In the second case, any failed setup steps are not
+    provisioning/runtime setup (status is INIT), this command will attempt to
+    start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
     Auto-failover provisioning is not used when restarting stopped
@@ -1301,6 +1440,13 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
+        local_clusters = onprem_utils.check_and_get_local_clusters()
+        clusters = [
+            c for c in clusters
+            if _warn_if_local_cluster(c, local_clusters, (
+                f'Skipping local cluster {c}, as it does not support '
+                '`sky start`.'))
+        ]
 
         for name in clusters:
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -1339,7 +1485,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
                 #    zombied (remains as stopped in the cloud's UI).
                 #
                 #    This is dangerous and unwanted behavior!
-                print(f'Cluster {name} already has status UP.')
+                click.echo(f'Cluster {name} already has status UP.')
                 continue
             assert cluster_status in (
                 global_user_state.ClusterStatus.INIT,
@@ -1359,7 +1505,10 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
             show_default=True)
 
     for name in to_start:
-        _start_cluster(name, retry_until_up=retry_until_up)
+        try:
+            core.start(name, idle_minutes_to_autostop, retry_until_up)
+        except exceptions.NotSupportedError as e:
+            click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
 
 
@@ -1383,6 +1532,7 @@ def start(clusters: Tuple[str], yes: bool, retry_until_up: bool):
               required=False,
               help='Ignore cloud provider errors (if any). '
               'Useful for cleaning up manually deleted cluster(s).')
+@usage_lib.entrypoint
 def down(
     clusters: Tuple[str],
     all: Optional[bool],  # pylint: disable=redefined-builtin
@@ -1395,7 +1545,9 @@ def down(
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Terminating a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost.
+    stops), and any data on the attached disks will be lost. For local clusters,
+    `sky down` does not terminate the local cluster, but instead removes the
+    cluster from `sky status` and terminates the calling user's running jobs.
 
     Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
 
@@ -1459,11 +1611,22 @@ def _terminate_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
+        if not terminate:
+            local_clusters = onprem_utils.check_and_get_local_clusters()
+            # Local clusters are allowed to `sky down`, but not
+            # `sky start/stop`. `sky down` unregisters the local cluster
+            # from sky.
+            names = [
+                c for c in names
+                if _warn_if_local_cluster(c, local_clusters, (
+                    f'Skipping local cluster {c}, as it does not support '
+                    '`sky stop/autostop`.'))
+            ]
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
             if not purge:
-                msg = (f'{operation} Sky reserved cluster(s) '
+                msg = (f'{operation} reserved cluster(s) '
                        f'{reserved_clusters_str} is not supported.')
                 if terminate:
                     msg += (
@@ -1473,7 +1636,7 @@ def _terminate_or_stop_clusters(
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
-                    f'{operation} Sky reserved cluster(s) '
+                    f'{operation} reserved cluster(s) '
                     f'{reserved_clusters_str} with multiple other cluster(s) '
                     f'{names_str} is not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
@@ -1482,8 +1645,9 @@ def _terminate_or_stop_clusters(
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
-            print(f'Both --all and cluster(s) specified for sky {command}. '
-                  'Letting --all take effect.')
+            click.echo(
+                f'Both --all and cluster(s) specified for sky {command}. '
+                'Letting --all take effect.')
         # We should not remove reserved clusters when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a reserved
         # cluster.
@@ -1501,24 +1665,22 @@ def _terminate_or_stop_clusters(
             # controller is not in 'sky status'.  Cluster-not-found message
             # should've been printed by _get_glob_clusters() above.
             continue
-        clusters.append({'name': name, 'handle': handle})
+        clusters.append(name)
+    usage_lib.messages.usage.update_cluster_name(clusters)
 
     if not clusters:
-        print('\nCluster(s) not found (tip: see `sky status`).')
+        click.echo('\nCluster(s) not found (tip: see `sky status`).')
         return
 
     if not no_confirm and len(clusters) > 0:
         cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
-        cluster_list = ', '.join([r['name'] for r in clusters])
+        cluster_list = ', '.join(clusters)
         click.confirm(
             f'{operation} {len(clusters)} {cluster_str}: '
             f'{cluster_list}. Proceed?',
             default=True,
             abort=True,
             show_default=True)
-        # Add a blank line to separate the confirmation prompt from the
-        # progress bar.
-        click.echo()
 
     plural = 's' if len(clusters) > 1 else ''
     progress = rich_progress.Progress(transient=True,
@@ -1528,56 +1690,40 @@ def _terminate_or_stop_clusters(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
 
-    def _terminate_or_stop(record):
-        name = record['name']
-        handle = record['handle']
-        backend = backend_utils.get_backend_from_handle(handle)
+    def _terminate_or_stop(name: str):
         success_progress = False
-        if (isinstance(backend, backends.CloudVmRayBackend) and
-                handle.launched_resources.use_spot and not terminate):
-            # Disable spot instances to be stopped.
-            # TODO(suquark): enable GCP+spot to be stopped in the future.
-            message = (
-                f'{colorama.Fore.YELLOW}Stopping cluster {name}... skipped.'
-                f'{colorama.Style.RESET_ALL}\n'
-                '  Stopping spot instances is not supported as the attached '
-                'disks will be lost.\n'
-                '  To terminate the cluster instead, run: '
-                f'{colorama.Style.BRIGHT}sky down {name}'
-                f'{colorama.Style.RESET_ALL}')
-        elif idle_minutes_to_autostop is not None:
-            (cluster_status,
-             handle) = backend_utils.refresh_cluster_status_handle(name)
-            if not isinstance(backend, backends.CloudVmRayBackend):
-                message = (f'{colorama.Fore.YELLOW}{operation} cluster '
-                           f'{name}... skipped{colorama.Style.RESET_ALL}'
-                           '\n  Auto-stopping is only supported by backend: '
-                           f'{backends.CloudVmRayBackend.NAME}')
-            else:
-                if cluster_status != global_user_state.ClusterStatus.UP:
-                    message = (
-                        f'{colorama.Fore.YELLOW}{operation} cluster '
-                        f'{name} (status: {cluster_status.value})... skipped'
-                        f'{colorama.Style.RESET_ALL}'
-                        '\n  Auto-stop can only be set/unset for '
-                        f'{global_user_state.ClusterStatus.UP.value} clusters.')
-                else:
-                    backend.set_autostop(handle, idle_minutes_to_autostop)
-                    message = (
-                        f'{colorama.Fore.GREEN}{operation} '
-                        f'cluster {name}...done{colorama.Style.RESET_ALL}')
-                    if idle_minutes_to_autostop >= 0:
-                        message += (
-                            f'\n  The cluster will be stopped after '
-                            f'{idle_minutes_to_autostop} minutes of idleness.'
-                            '\n  To cancel the autostop, run: '
-                            f'{colorama.Style.BRIGHT}'
-                            f'sky autostop {name} --cancel'
-                            f'{colorama.Style.RESET_ALL}')
-                    success_progress = True
+        if idle_minutes_to_autostop is not None:
+            try:
+                core.autostop(name, idle_minutes_to_autostop)
+            except (exceptions.NotSupportedError,
+                    exceptions.ClusterNotUpError) as e:
+                message = str(e)
+            else:  # no exception raised
+                success_progress = True
+                message = (f'{colorama.Fore.GREEN}{operation} '
+                           f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
+                if idle_minutes_to_autostop >= 0:
+                    message += (
+                        f'\n  The cluster will be stopped after '
+                        f'{idle_minutes_to_autostop} minutes of idleness.'
+                        '\n  To cancel the autostop, run: '
+                        f'{colorama.Style.BRIGHT}'
+                        f'sky autostop {name} --cancel'
+                        f'{colorama.Style.RESET_ALL}')
         else:
-            success = backend.teardown(handle, terminate=terminate, purge=purge)
-            if success:
+            try:
+                if terminate:
+                    core.down(name, purge=purge)
+                else:
+                    core.stop(name, purge=purge)
+            except RuntimeError:
+                message = (
+                    f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
+                    'Please check the logs and try again.'
+                    f'{colorama.Style.RESET_ALL}')
+            except exceptions.NotSupportedError as e:
+                message = str(e)
+            else:  # no exception raised
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
                     f'{colorama.Style.RESET_ALL}')
@@ -1586,11 +1732,6 @@ def _terminate_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
-            else:
-                message = (
-                    f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    'Please check the logs and try again.'
-                    f'{colorama.Style.RESET_ALL}')
         progress.stop()
         click.echo(message)
         if success_progress:
@@ -1605,6 +1746,7 @@ def _terminate_or_stop_clusters(
 
 
 @_interactive_node_cli_command
+@usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
@@ -1675,6 +1817,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @_interactive_node_cli_command
+@usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
@@ -1740,6 +1883,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @_interactive_node_cli_command
+@usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
@@ -1807,11 +1951,12 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
 
 @cli.command()
+@usage_lib.entrypoint
 def check():
     """Determine the set of clouds available to use.
 
     This checks access credentials for AWS, Azure and GCP; on failure, it shows
-    the reason and suggests correction steps. Sky tasks will only run on clouds
+    the reason and suggests correction steps. Tasks will only run on clouds
     that you have access to.
     """
     sky_check.check()
@@ -1828,6 +1973,7 @@ def check():
               default=None,
               type=str,
               help='Cloud provider to query.')
+@usage_lib.entrypoint
 def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
@@ -1938,46 +2084,24 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
 def storage_ls():
     """List storage objects created."""
-    storage_stat = global_user_state.get_storage()
-    storage_table = log_utils.create_table([
-        'NAME',
-        'CREATED',
-        'STORE',
-        'COMMAND',
-        'STATUS',
-    ])
-
-    for row in storage_stat:
-        launched_at = row['launched_at']
-        storage_table.add_row([
-            # NAME
-            row['name'],
-            # LAUNCHED
-            log_utils.readable_time_duration(launched_at),
-            # CLOUDS
-            ', '.join([s.value for s in row['handle'].sky_stores.keys()]),
-            # COMMAND
-            row['last_use'],
-            # STATUS
-            row['status'].value,
-        ])
-    if storage_stat:
-        click.echo(storage_table)
-    else:
-        click.echo('No existing storage.')
+    storages = sky.storage_ls()
+    storage_table = storage_utils.format_storage_table(storages)
+    click.echo(storage_table)
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
+@click.argument('names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
               default=False,
               is_flag=True,
               required=False,
               help='Delete all storage objects.')
-@click.argument('name', required=False, type=str, nargs=-1)
-def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
+@usage_lib.entrypoint
+def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -1990,34 +2114,90 @@ def storage_delete(all: bool, name: str):  # pylint: disable=redefined-builtin
         # Delete all storage objects.
         sky storage delete -a
     """
+    if sum([len(names) > 0, all]) != 1:
+        raise click.UsageError('Either --all or a name must be specified.')
     if all:
         click.echo('Deleting all storage objects.')
-        storages = global_user_state.get_storage()
-        for row in storages:
-            store_object = data.Storage(name=row['name'],
-                                        source=row['handle'].source,
-                                        sync_on_reconstruction=False)
-            store_object.delete()
-    elif name:
-        for n in name:
-            handle = global_user_state.get_handle_from_storage_name(n)
-            if handle is None:
-                click.echo(f'Storage name {n} not found.')
-            else:
-                click.echo(f'Deleting storage object {n}.')
-                store_object = data.Storage(name=handle.storage_name,
-                                            source=handle.source,
-                                            sync_on_reconstruction=False)
-                store_object.delete()
-    else:
-        raise click.ClickException(
-            'Must pass in \'-a/--all\' or storage names to \'sky '
-            'storage delete\'.')
+        storages = sky.storage_ls()
+        names = [s['name'] for s in storages]
+    for name in names:
+        sky.storage_delete(name)
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def admin():
+    """Sky administrator commands for local clusters."""
+    pass
+
+
+@admin.command('deploy', cls=_DocumentedCodeCommand)
+@click.argument('clusterspec_yaml', required=True, type=str, nargs=-1)
+@usage_lib.entrypoint
+def admin_deploy(clusterspec_yaml: str):
+    """Launches Sky on a local cluster.
+
+    Performs preflight checks (environment setup, cluster resources)
+    and launches Ray to serve sky tasks on the cluster. Finally
+    generates a distributable YAML that can be used by multiple
+    users sharing the cluster.
+
+    This command should be run once by the cluster admin, not cluster users.
+
+    Example:
+
+    .. code-block:: bash
+
+        sky admin deploy examples/local/cluster-config.yaml
+    """
+    steps = 1
+    clusterspec_yaml = ' '.join(clusterspec_yaml)
+    assert clusterspec_yaml
+    is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
+    if not is_yaml:
+        raise ValueError('Must specify cluster config')
+
+    auth_config = yaml_config['auth']
+    ips = yaml_config['cluster']['ips']
+    if not isinstance(ips, list):
+        ips = [ips]
+    local_cluster_name = yaml_config['cluster']['name']
+    usage_lib.messages.usage.update_cluster_name(local_cluster_name)
+    usage_lib.messages.usage.update_cluster_resources(
+        len(ips), sky.Resources(sky.Local()))
+
+    # Check for Ray
+    click.secho(f'[{steps}/4] Checking on-premise environment\n',
+                fg='green',
+                nl=False)
+    onprem_utils.check_local_installation(ips, auth_config)
+    steps += 1
+
+    # Detect what GPUs the cluster has (which can be heterogeneous)
+    click.secho(f'[{steps}/4] Auto-detecting cluster resources\n',
+                fg='green',
+                nl=False)
+    custom_resources = onprem_utils.get_local_cluster_accelerators(
+        ips, auth_config)
+    steps += 1
+
+    # Launching Ray Autoscaler service
+    click.secho(f'[{steps}/4] Launching sky runtime\n', fg='green', nl=False)
+    onprem_utils.launch_ray_on_local_cluster(yaml_config, custom_resources)
+    steps += 1
+
+    # Generate sanitized yaml file to be sent to non-admin users
+    click.secho(f'[{steps}/4] Generating sanitized local yaml file\n',
+                fg='green',
+                nl=False)
+    sanitized_yaml_path = onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(
+        local_cluster_name)
+    onprem_utils.save_distributable_yaml(yaml_config)
+    click.secho(f'Saved in {sanitized_yaml_path} \n', fg='yellow', nl=False)
+    click.secho(f'Successfully deployed local cluster {local_cluster_name!r}\n',
+                fg='green')
 
 
 # Managed Spot CLIs
-
-
 def _is_spot_controller_up(
     stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
@@ -2047,7 +2227,7 @@ def spot():
 @spot.command('launch', cls=_DocumentedCodeCommand)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
               default=None,
               type=str,
@@ -2069,16 +2249,17 @@ def spot():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# FIXME(suquark): adding the following @timeline.event decorator makes docs
-# unable to show the docstring for this CLI command.
-# @timeline.event
+@timeline.event
+@usage_lib.entrypoint
 def spot_launch(
     entrypoint: str,
     name: Optional[str],
     workdir: Optional[str],
     cloud: Optional[str],
     region: Optional[str],
+    zone: Optional[str],
     gpus: Optional[str],
+    instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -2100,7 +2281,9 @@ def spot_launch(
         workdir=workdir,
         cloud=cloud,
         region=region,
+        zone=zone,
         gpus=gpus,
+        instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
         image_id=image_id,
@@ -2114,102 +2297,7 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    assert len(dag.tasks) == 1, dag
-    task = dag.tasks[0]
-    assert len(task.resources) == 1, task
-    resources = list(task.resources)[0]
-
-    change_default_value = dict()
-    if not resources.use_spot_specified:
-        logger.info('Field use_spot not specified; defaulting to True.')
-        change_default_value['use_spot'] = True
-    if resources.spot_recovery is None:
-        logger.info('No spot recovery strategy specified; defaulting to '
-                    f'{spot_lib.SPOT_DEFAULT_STRATEGY}.')
-        change_default_value['spot_recovery'] = spot_lib.SPOT_DEFAULT_STRATEGY
-
-    new_resources = resources.copy(**change_default_value)
-    task.set_resources({new_resources})
-
-    if task.run is None:
-        click.secho(
-            'Skipping the managed spot task as the run section is not set.',
-            fg='green')
-        return
-
-    # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
-    # following validations.
-    # Check the file mounts in the task.
-    # Disallow all local file mounts (copy mounts).
-    if task.workdir is not None:
-        raise click.UsageError('Workdir is not allowed for managed spot jobs.')
-    copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts:
-        copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
-        raise click.UsageError(
-            'Local file mounts are not allowed for managed spot jobs, '
-            f'but following are found: {copy_mounts_str}')
-
-    # Copy the local source to a bucket. The task will not be executed locally,
-    # so we need to copy the files to the bucket manually here before sending to
-    # the remote spot controller.
-    with backend_utils.safe_console_status(
-            '[bold cyan]Copying files to buckets'):
-        with backend_utils.suppress_output():
-            task.add_storage_mounts()
-
-    # Replace the source field that is local path in all storage_mounts with
-    # bucket URI and remove the name field.
-    for storage_obj in task.storage_mounts.values():
-        if (storage_obj.source is not None and
-                not data_utils.is_cloud_store_url(storage_obj.source)):
-            # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the sky storage mount can work on the spot
-            # controller.
-            store_types = list(storage_obj.stores.keys())
-            assert len(store_types) == 1, (
-                'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            if store_type == StoreType.S3:
-                storage_obj.source = f's3://{storage_obj.name}'
-            elif store_type == StoreType.GCS:
-                storage_obj.source = f'gs://{storage_obj.name}'
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Unsupported store type: {store_type}')
-            storage_obj.name = None
-            storage_obj.force_delete = True
-
-    with tempfile.NamedTemporaryFile(prefix=f'sky-spot-task-{name}-',
-                                     mode='w') as f:
-        task_config = task.to_yaml_config()
-        backend_utils.dump_yaml(f.name, task_config)
-
-        controller_name = spot_lib.SPOT_CONTROLLER_NAME
-        yaml_path = backend_utils.fill_template(
-            spot_lib.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot_lib.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
-            },
-            output_prefix=spot_lib.SPOT_CONTROLLER_YAML_PREFIX)
-        with sky.Dag() as dag:
-            controller_task = sky.Task.from_yaml(yaml_path)
-            controller_task.spot_task = task
-            assert len(controller_task.resources) == 1
-        click.secho(
-            f'Launching managed spot job {name} from spot controller...',
-            fg='yellow')
-        click.echo('Launching spot controller...')
-        sky.launch(dag,
-                   stream_logs=True,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=spot_lib.
-                   SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   is_spot_controller_task=True)
+    sky.spot_launch(dag, name, detach_run=detach_run)
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
@@ -2227,6 +2315,7 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_status(all: bool, refresh: bool):
     """Show statuses of managed spot jobs.
@@ -2251,44 +2340,25 @@ def spot_status(all: bool, refresh: bool):
     log can be found with ``sky logs sky-spot-controller job_id``.
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
-    cache = spot_lib.load_job_table_cache()
-    stop_msg = ''
-    if not refresh:
-        stop_msg = 'To view the latest job table: sky spot status --refresh'
-    controller_status, handle = _is_spot_controller_up(stop_msg)
-
-    if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
-    ]):
-        click.secho('Restarting controller for latest status...', fg='yellow')
-        handle = _start_cluster(spot_lib.SPOT_CONTROLLER_NAME,
-                                idle_minutes_to_autostop=spot_lib.
-                                SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
-
-    if handle is None:
-        job_table_str = 'No cached job status table found.'
+    try:
+        job_table = core.spot_status(refresh=refresh)
+    except exceptions.ClusterNotUpError:
+        cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
-            job_table_str = (
+            job_table_json = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
                 f'{cache[1]}\n')
-        click.echo(job_table_str)
+        else:
+            job_table_json = 'No cached job status table found.'
+        click.echo(job_table_json)
         return
+    job_table = spot_lib.format_job_table(job_table, all)
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-
-    code = spot_lib.SpotCodeGen.show_jobs(show_all=all)
-    returncode, job_table_str, stderr = backend.run_on_head(
-        handle, code, require_outputs=True, stream_logs=False)
-    subprocess_utils.handle_returncode(returncode, code,
-                                       'Failed to fetch managed job statuses',
-                                       job_table_str + stderr)
-
-    spot_lib.dump_job_table_cache(job_table_str)
-    click.echo(f'Managed spot jobs:\n{job_table_str}')
+    # Dump cache
+    spot_lib.dump_job_table_cache(job_table)
+    click.echo(f'Managed spot jobs:\n{job_table}')
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
@@ -2310,6 +2380,7 @@ def spot_status(all: bool, refresh: bool):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     """Cancel managed spot jobs.
@@ -2343,36 +2414,16 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
             f'Provided {argument_str!r}.')
 
     if not yes:
-        job_identity_str = f'with IDs {job_id_str}' if job_ids else repr(name)
+        job_identity_str = (f'managed spot jobs with IDs {job_id_str}'
+                            if job_ids else repr(name))
         if all:
             job_identity_str = 'all managed spot jobs'
-        click.confirm(
-            f'Cancelling managed spot job {job_identity_str}. Proceed?',
-            default=True,
-            abort=True,
-            show_default=True)
+        click.confirm(f'Cancelling {job_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
 
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    codegen = spot_lib.SpotCodeGen
-    if all:
-        code = codegen.cancel_jobs_by_id(None)
-    elif job_ids:
-        code = codegen.cancel_jobs_by_id(job_ids)
-    else:
-        code = codegen.cancel_job_by_name(name)
-    # The stderr is redirected to stdout
-    returncode, stdout, _ = backend.run_on_head(handle,
-                                                code,
-                                                require_outputs=True,
-                                                stream_logs=False)
-    subprocess_utils.handle_returncode(returncode, code,
-                                       'Failed to cancel managed spot job',
-                                       stdout)
-
-    click.echo(stdout)
-    if 'Multiple jobs found with name' in stdout:
-        click.echo('Please specify the job ID instead of the job name.')
+    core.spot_cancel(job_ids=job_ids, name=name, all=all)
 
 
 @spot.command('logs', cls=_DocumentedCodeCommand)
@@ -2382,20 +2433,595 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               type=str,
               help='Managed spot job name.')
 @click.argument('job_id', required=False, type=int)
+@usage_lib.entrypoint
 def spot_logs(name: Optional[str], job_id: Optional[int]):
     """Tail the log of a managed spot job."""
-    # TODO(zhwu): Automatically restart the spot controller
-    _, handle = _is_spot_controller_up(
-        'Please restart the spot controller with '
-        '`sky start sky-spot-controller`.')
-    if handle is None:
+    core.spot_tail_logs(name=name, job_id=job_id)
+
+
+# ==============================
+# Sky Benchmark CLIs
+# ==============================
+
+
+@ux_utils.print_exception_no_traceback()
+def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
+    """Gets benchmark candidate configs from a YAML file.
+
+    Benchmark candidates are configured in the YAML file as a list of
+    dictionaries. Each dictionary defines a candidate config
+    by overriding resources. For example:
+
+    resources:
+        cloud: aws
+        candidates:
+        - {accelerators: K80}
+        - {instance_type: g4dn.2xlarge}
+        - {cloud: gcp, accelerators: V100} # overrides cloud
+    """
+    config = common_utils.read_yaml(os.path.expanduser(yaml_path))
+    if not isinstance(config, dict):
+        raise ValueError(f'Invalid YAML file: {yaml_path}. '
+                         'The YAML file should be parsed into a dictionary.')
+    if config.get('resources') is None:
+        return None
+
+    resources = config['resources']
+    if not isinstance(resources, dict):
+        raise ValueError(f'Invalid resources configuration in {yaml_path}. '
+                         'Resources must be a dictionary.')
+    if resources.get('candidates') is None:
+        return None
+
+    candidates = resources['candidates']
+    if not isinstance(candidates, list):
+        raise ValueError('Resource candidates must be a list of dictionaries.')
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            raise ValueError('Each resource candidate must be a dictionary.')
+    return candidates
+
+
+@cli.group(cls=_NaturalOrderGroup)
+def bench():
+    """Sky Benchmark related commands."""
+    pass
+
+
+@bench.command('launch', cls=_DocumentedCodeCommand)
+@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.option('--benchmark',
+              '-b',
+              required=True,
+              type=str,
+              help='Benchmark name.')
+@_add_click_options(_TASK_OPTIONS)
+@click.option('--gpus',
+              required=False,
+              type=str,
+              help=('Comma-separated list of GPUs to run benchmark on. '
+                    'Example values: "T4:4,V100:8" (without blank spaces).'))
+@click.option('--disk-size',
+              default=None,
+              type=int,
+              required=False,
+              help=('OS disk size in GBs.'))
+@click.option(
+    '--idle-minutes-to-autostop',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness after setup/file_mounts. This is equivalent to '
+          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
+          'If not set, the cluster will not be auto-stopped.'))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@usage_lib.entrypoint
+def benchmark_launch(
+    entrypoint: str,
+    benchmark: str,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env: List[Dict[str, str]],
+    disk_size: Optional[int],
+    idle_minutes_to_autostop: Optional[int],
+    yes: bool,
+) -> None:
+    """Benchmark a task on different resources.
+
+    Example usage: `sky bench launch mytask.yaml -b mytask --gpus V100,T4`
+    will benchmark your task on a V100 cluster and a T4 cluster simultaneously.
+    Alternatively, specify the benchmarking resources in your YAML (see doc),
+    which allows benchmarking on many more resource fields.
+    """
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is not None:
+        raise click.BadParameter(f'Benchmark {benchmark} already exists. '
+                                 'To delete the previous benchmark result, '
+                                 f'run `sky bench delete {benchmark}`.')
+
+    entrypoint = ' '.join(entrypoint)
+    if not entrypoint:
+        raise click.BadParameter('Please specify a task yaml to benchmark.')
+
+    is_yaml, config = _check_yaml(entrypoint)
+    if not is_yaml:
+        raise click.BadParameter(
+            'Sky Benchmark does not support command line tasks. '
+            'Please provide a YAML file.')
+
+    click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
+    click.secho(entrypoint, bold=True)
+
+    candidates = _get_candidate_configs(entrypoint)
+    # Check if the candidate configs are specified in both CLI and YAML.
+    if candidates is not None:
+        message = ('is specified in both CLI and resources.candidates '
+                   'in the YAML. Please specify only one of them.')
+        if cloud is not None:
+            if any('cloud' in candidate for candidate in candidates):
+                raise click.BadParameter(f'cloud {message}')
+        if region is not None:
+            if any('region' in candidate for candidate in candidates):
+                raise click.BadParameter(f'region {message}')
+        if zone is not None:
+            if any('zone' in candidate for candidate in candidates):
+                raise click.BadParameter(f'zone {message}')
+        if gpus is not None:
+            if any('accelerators' in candidate for candidate in candidates):
+                raise click.BadParameter(f'gpus (accelerators) {message}')
+        if use_spot is not None:
+            if any('use_spot' in candidate for candidate in candidates):
+                raise click.BadParameter(f'use_spot {message}')
+        if image_id is not None:
+            if any('image_id' in candidate for candidate in candidates):
+                raise click.BadParameter(f'image_id {message}')
+        if disk_size is not None:
+            if any('disk_size' in candidate for candidate in candidates):
+                raise click.BadParameter(f'disk_size {message}')
+
+    # The user can specify the benchmark candidates in either of the two ways:
+    # 1. By specifying resources.candidates in the YAML.
+    # 2. By specifying gpu types as a command line argument (--gpus).
+    if gpus is not None:
+        gpus = gpus.split(',')
+        gpus = [gpu.strip() for gpu in gpus]
+        if '' in gpus:
+            raise click.BadParameter('Remove blanks in --gpus.')
+
+        if len(gpus) == 1:
+            gpus = gpus[0]
+        else:
+            # If len(gpus) > 1, gpus is intrepreted
+            # as a list of benchmark candidates.
+            if candidates is None:
+                candidates = [{'accelerators': gpu} for gpu in gpus]
+                gpus = None
+            else:
+                raise ValueError('Provide benchmark candidates in either '
+                                 '--gpus or resources.candidates in the YAML.')
+    if candidates is None:
+        candidates = [{}]
+
+    if 'resources' not in config:
+        config['resources'] = {}
+    resources_config = config['resources']
+
+    # Override the yaml config with the command line arguments.
+    if name is not None:
+        config['name'] = name
+    if workdir is not None:
+        config['workdir'] = workdir
+    if num_nodes is not None:
+        config['num_nodes'] = num_nodes
+    override_params = _parse_override_params(cloud=cloud,
+                                             region=region,
+                                             zone=zone,
+                                             gpus=gpus,
+                                             use_spot=use_spot,
+                                             image_id=image_id,
+                                             disk_size=disk_size)
+    resources_config.update(override_params)
+    if 'cloud' in resources_config:
+        cloud = resources_config.pop('cloud')
+        if cloud is not None:
+            resources_config['cloud'] = str(cloud)
+    if 'region' in resources_config:
+        if resources_config['region'] is None:
+            resources_config.pop('region')
+    if 'zone' in resources_config:
+        if resources_config['zone'] is None:
+            resources_config.pop('zone')
+    if 'accelerators' in resources_config:
+        if resources_config['accelerators'] is None:
+            resources_config.pop('accelerators')
+    if 'image_id' in resources_config:
+        if resources_config['image_id'] is None:
+            resources_config.pop('image_id')
+
+    # Fully generate the benchmark candidate configs.
+    clusters, candidate_configs = benchmark_utils.generate_benchmark_configs(
+        benchmark, config, candidates)
+    # Show the benchmarking VM instances selected by the optimizer.
+    # This also detects the case where the user requested infeasible resources.
+    benchmark_utils.print_benchmark_clusters(benchmark, clusters, config,
+                                             candidate_configs)
+    if not yes:
+        plural = 's' if len(candidates) > 1 else ''
+        prompt = f'Launching {len(candidates)} cluster{plural}. Proceed?'
+        click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    # Configs that are only accepted by the CLI.
+    commandline_args = {}
+    # Set the default idle minutes to autostop as 5, mimicking
+    # the serverless execution.
+    if idle_minutes_to_autostop is None:
+        idle_minutes_to_autostop = 5
+    commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
+    if len(env) > 0:
+        commandline_args['env'] = [f'{k}={v}' for k, v in env.items()]
+
+    # Launch the benchmarking clusters in detach mode in parallel.
+    benchmark_created = benchmark_utils.launch_benchmark_clusters(
+        benchmark, clusters, candidate_configs, commandline_args)
+
+    # If at least one cluster is created, print the following messages.
+    if benchmark_created:
+        logger.info(
+            f'\n{colorama.Fore.CYAN}Benchmark name: '
+            f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
+            '\nTo see the benchmark results: '
+            f'{backend_utils.BOLD}sky bench show '
+            f'{benchmark}{backend_utils.RESET_BOLD}'
+            '\nTo teardown the clusters: '
+            f'{backend_utils.BOLD}sky bench down '
+            f'{benchmark}{backend_utils.RESET_BOLD}')
+        subprocess_utils.run('sky bench ls')
+    else:
+        logger.error('No benchmarking clusters are created.')
+        subprocess_utils.run('sky status')
+
+
+@bench.command('ls', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def benchmark_ls() -> None:
+    """List the benchmark history."""
+    benchmarks = benchmark_state.get_benchmarks()
+    columns = [
+        'BENCHMARK',
+        'TASK',
+        'LAUNCHED',
+    ]
+
+    max_num_candidates = 1
+    for benchmark in benchmarks:
+        benchmark_results = benchmark_state.get_benchmark_results(
+            benchmark['name'])
+        num_candidates = len(benchmark_results)
+        if num_candidates > max_num_candidates:
+            max_num_candidates = num_candidates
+
+    if max_num_candidates == 1:
+        columns += ['CANDIDATE']
+    else:
+        columns += [f'CANDIDATE {i}' for i in range(1, max_num_candidates + 1)]
+    benchmark_table = log_utils.create_table(columns)
+
+    for benchmark in benchmarks:
+        if benchmark['task'] is not None:
+            task = benchmark['task']
+        else:
+            task = '-'
+        row = [
+            # BENCHMARK
+            benchmark['name'],
+            # TASK
+            task,
+            # LAUNCHED
+            datetime.datetime.fromtimestamp(benchmark['launched_at']),
+        ]
+
+        benchmark_results = benchmark_state.get_benchmark_results(
+            benchmark['name'])
+        # RESOURCES
+        for b in benchmark_results:
+            num_nodes = b['num_nodes']
+            resources = b['resources']
+            postfix_spot = '[Spot]' if resources.use_spot else ''
+            instance_type = resources.instance_type + postfix_spot
+            if resources.accelerators is None:
+                accelerators = ''
+            else:
+                accelerator, count = list(resources.accelerators.items())[0]
+                accelerators = f' ({accelerator}:{count})'
+            # For brevity, skip the cloud names.
+            resources_str = f'{num_nodes}x {instance_type}{accelerators}'
+            row.append(resources_str)
+        row += [''] * (max_num_candidates - len(benchmark_results))
+        benchmark_table.add_row(row)
+    if benchmarks:
+        click.echo(benchmark_table)
+    else:
+        click.echo('No benchmark history found.')
+
+
+@bench.command('show', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+# TODO(woosuk): Add --all option to show all the collected information
+# (e.g., setup time, warmup steps, total steps, etc.).
+@usage_lib.entrypoint
+def benchmark_show(benchmark: str) -> None:
+    """Show a benchmark report."""
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+    benchmark_utils.update_benchmark_state(benchmark)
+
+    click.echo(
+        textwrap.dedent("""\
+        Legend:
+        - #STEPS: Number of steps taken.
+        - SEC/STEP, $/STEP: Average time (cost) per step.
+        - EST(hr), EST($): Estimated total time (cost) to complete the benchmark.
+    """))
+    columns = [
+        'CLUSTER',
+        'RESOURCES',
+        'STATUS',
+        'DURATION',
+        'SPENT($)',
+        '#STEPS',
+        'SEC/STEP',
+        '$/STEP',
+        'EST(hr)',
+        'EST($)',
+    ]
+
+    cluster_table = log_utils.create_table(columns)
+    rows = []
+    benchmark_results = benchmark_state.get_benchmark_results(benchmark)
+    for result in benchmark_results:
+        num_nodes = result['num_nodes']
+        resources = result['resources']
+        row = [
+            # CLUSTER
+            result['cluster'],
+            # RESOURCES
+            f'{num_nodes}x {resources}',
+            # STATUS
+            result['status'].value,
+        ]
+
+        record = result['record']
+        if (record is None or record.start_time is None or
+                record.last_time is None):
+            row += ['-'] * (len(columns) - len(row))
+            rows.append(row)
+            continue
+
+        duration_str = log_utils.readable_time_duration(record.start_time,
+                                                        record.last_time,
+                                                        absolute=True)
+        duration = record.last_time - record.start_time
+        spent = num_nodes * resources.get_cost(duration)
+        spent_str = f'{spent:.4f}'
+
+        num_steps = record.num_steps_so_far
+        if num_steps is None:
+            num_steps = '-'
+
+        seconds_per_step = record.seconds_per_step
+        if seconds_per_step is None:
+            seconds_per_step_str = '-'
+            cost_per_step_str = '-'
+        else:
+            seconds_per_step_str = f'{seconds_per_step:.4f}'
+            cost_per_step = num_nodes * resources.get_cost(seconds_per_step)
+            cost_per_step_str = f'{cost_per_step:.6f}'
+
+        total_time = record.estimated_total_seconds
+        if total_time is None:
+            total_time_str = '-'
+            total_cost_str = '-'
+        else:
+            total_time_str = f'{total_time / 3600:.2f}'
+            total_cost = num_nodes * resources.get_cost(total_time)
+            total_cost_str = f'{total_cost:.2f}'
+
+        row += [
+            # DURATION
+            duration_str,
+            # SPENT($)
+            spent_str,
+            # STEPS
+            num_steps,
+            # SEC/STEP
+            seconds_per_step_str,
+            # $/STEP
+            cost_per_step_str,
+            # EST(hr)
+            total_time_str,
+            # EST($)
+            total_cost_str,
+        ]
+        rows.append(row)
+
+    cluster_table.add_rows(rows)
+    click.echo(cluster_table)
+
+    finished = [
+        row for row in rows
+        if row[2] == benchmark_state.BenchmarkStatus.FINISHED.value
+    ]
+    if any(row[5] == '-' for row in finished):
+        # No #STEPS. SkyCallback was unused.
+        click.secho(
+            'SkyCallback logs are not found in this benchmark. '
+            'Consider using SkyCallback to get more detailed information '
+            'in real time.',
+            fg='yellow')
+    elif any(row[6] != '-' and row[-1] == '-' for row in rows):
+        # No EST($). total_steps is not specified and cannot be inferred.
+        click.secho(
+            'Cannot estimate total time and cost because '
+            'the total number of steps cannot be inferred by SkyCallback. '
+            'To get the estimation, specify the total number of steps in '
+            'either `sky_callback.init` or `Sky*Callback`.',
+            fg='yellow')
+
+
+@bench.command('down', cls=_DocumentedCodeCommand)
+@click.argument('benchmark', required=True, type=str)
+@click.option(
+    '--exclude',
+    '-e',
+    'clusters_to_exclude',
+    required=False,
+    type=str,
+    multiple=True,
+    help=('Cluster name(s) to exclude from termination. '
+          'Typically, you might want to see the benchmark results in '
+          '`sky bench show` and exclude a "winner" cluster from termination '
+          'to finish the running task.'))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@usage_lib.entrypoint
+def benchmark_down(
+    benchmark: str,
+    clusters_to_exclude: List[str],
+    yes: bool,
+) -> None:
+    """Terminate all clusters belonging to a benchmark."""
+    record = benchmark_state.get_benchmark_from_name(benchmark)
+    if record is None:
+        raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
+
+    clusters = benchmark_state.get_benchmark_clusters(benchmark)
+    to_stop = []
+    for cluster in clusters:
+        if cluster in clusters_to_exclude:
+            continue
+        if global_user_state.get_cluster_from_name(cluster) is None:
+            continue
+        to_stop.append(cluster)
+
+    _terminate_or_stop_clusters(to_stop,
+                                apply_to_all=False,
+                                terminate=True,
+                                no_confirm=yes)
+
+
+@bench.command('delete', cls=_DocumentedCodeCommand)
+@click.argument('benchmarks', required=False, type=str, nargs=-1)
+@click.option('--all',
+              '-a',
+              default=None,
+              is_flag=True,
+              help='Tear down all existing clusters.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
+                     yes: bool) -> None:
+    """Delete benchmark reports from the history."""
+    if not benchmarks and all is None:
+        raise click.BadParameter(
+            'Either specify benchmarks or use --all to delete all benchmarks.')
+    to_delete = []
+    if len(benchmarks) > 0:
+        for benchmark in benchmarks:
+            record = benchmark_state.get_benchmark_from_name(benchmark)
+            if record is None:
+                print(f'Benchmark {benchmark} not found.')
+            else:
+                to_delete.append(record)
+    if all:
+        to_delete = benchmark_state.get_benchmarks()
+        if len(benchmarks) > 0:
+            print('Both --all and benchmark(s) specified '
+                  'for sky bench delete. Letting --all take effect.')
+
+    to_delete = [r['name'] for r in to_delete]
+    if not to_delete:
         return
 
-    if name is not None and job_id is not None:
-        click.UsageError('Cannot specify both --name and --job-id.')
-    backend = backend_utils.get_backend_from_handle(handle)
-    # Stream the realtime logs
-    backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+    benchmark_list = ', '.join(to_delete)
+    plural = 's' if len(to_delete) > 1 else ''
+    if not yes:
+        click.confirm(
+            f'Deleting the benchmark{plural}: {benchmark_list}. Proceed?',
+            default=True,
+            abort=True,
+            show_default=True)
+
+    progress = rich_progress.Progress(transient=True,
+                                      redirect_stdout=False,
+                                      redirect_stderr=False)
+    task = progress.add_task(
+        f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
+        total=len(to_delete))
+
+    def _delete_benchmark(benchmark: str) -> None:
+        clusters = benchmark_state.get_benchmark_clusters(benchmark)
+        records = []
+        for cluster in clusters:
+            record = global_user_state.get_cluster_from_name(cluster)
+            records.append(record)
+        num_clusters = len([r for r in records if r is not None])
+
+        if num_clusters > 0:
+            plural = 's' if num_clusters > 1 else ''
+            message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
+                       f'has {num_clusters} un-terminated cluster{plural}. '
+                       f'Terminate the cluster{plural} with '
+                       f'{backend_utils.BOLD} sky bench down {benchmark} '
+                       f'{backend_utils.RESET_BOLD} '
+                       'before deleting the benchmark report.')
+            success = False
+        else:
+            bucket_name = benchmark_state.get_benchmark_from_name(
+                benchmark)['bucket']
+            handle = global_user_state.get_handle_from_storage_name(bucket_name)
+            bucket_type = list(handle.sky_stores.keys())[0]
+            benchmark_utils.remove_benchmark_logs(benchmark, bucket_name,
+                                                  bucket_type)
+            benchmark_state.delete_benchmark(benchmark)
+            message = (f'{colorama.Fore.GREEN}Benchmark report for '
+                       f'{benchmark} deleted.{colorama.Style.RESET_ALL}')
+            success = True
+
+        progress.stop()
+        click.secho(message)
+        if success:
+            progress.update(task, advance=1)
+        progress.start()
+
+    with progress:
+        subprocess_utils.run_in_parallel(_delete_benchmark, to_delete)
+        progress.live.transient = False
+        progress.refresh()
 
 
 def main():

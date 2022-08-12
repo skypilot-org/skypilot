@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import ray
 
-from sky.clouds.service_catalog import common
 from sky.adaptors import aws
 
 REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
@@ -138,5 +137,5 @@ def get_all_regions_instance_types_df():
 if __name__ == '__main__':
     ray.init()
     df = get_all_regions_instance_types_df()
-    df.to_csv(common.get_data_path('aws.csv'), index=False)
+    df.to_csv('aws.csv', index=False)
     print('AWS Service Catalog saved to aws.csv')

@@ -1,6 +1,6 @@
 # A managed spot example with storages.
 #
-# Runs a task that has sky storage configured.
+# Runs a task that has SkyPilot Storage configured.
 #
 # Usage:
 #   sky spot launch -c spot-storage examples/managed_spot_with_storage.yaml
@@ -15,7 +15,7 @@ file_mounts:
   ~/sky_workdir:
     # Change this to the your own globally unique bucket name.
     name: sky-workdir-zhwu
-    source: ./examples/docker
+    source: ./examples
     persistent: false
     mode: COPY
   /imagenet-image:
@@ -23,5 +23,5 @@ file_mounts:
 
 run: |
   set -ex
-  ls ~/sky_workdir/detectron2
+  ls ~/sky_workdir/managed_spot_with_storage.yaml
   ls -l /imagenet-image/datasets

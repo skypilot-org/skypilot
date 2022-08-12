@@ -33,8 +33,8 @@ with sky.Dag() as dag:
         --model_dir=resnet-model-dir \
         --amp --xla --loss_scale=128'
 
-    # If the backend to be added is not specified, then Sky optimizer will
-    # choose the backend bucket to be stored.
+    # If the backend to be added is not specified, then SkyPilot's optimizer
+    # will choose the backend bucket to be stored.
     # S3 Example
     storage = sky.Storage(name="imagenet-bucket", source="s3://imagenet-bucket")
     # GCS Example

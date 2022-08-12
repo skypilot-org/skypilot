@@ -73,9 +73,6 @@ class Azure(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def __repr__(self):
-        return Azure._REPR
-
     def is_same_cloud(self, other):
         return isinstance(other, Azure)
 
@@ -161,6 +158,10 @@ class Azure(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
+
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        return None
 
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
@@ -261,7 +262,7 @@ class Azure(clouds.Cloud):
             return False, (
                 'Azure CLI returned error. Run the following commands '
                 'under sky folder:'
-                # TODO(zhwu): after we publish sky to pypi, change this to
+                # TODO(zhwu): after we publish sky to PyPI, change this to
                 # `pip install sky[azure]`
                 '\n      $ pip install .[azure]'
                 '\n    Credentials may also need to be set.' + help_str)
@@ -284,8 +285,18 @@ class Azure(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
 
-    def region_exists(self, region: str) -> bool:
-        return service_catalog.region_exists(region, 'azure')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region,
+                                                    zone,
+                                                    clouds='azure')
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'azure')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

@@ -1,15 +1,16 @@
-import click
-import pytest
 import tempfile
 import textwrap
 
+import click
 from click import testing as cli_testing
+import pytest
 
 import sky
 from sky import backends
 from sky import cli
 from sky import global_user_state
 from sky import spot
+from sky.utils import db_utils
 
 
 def test_spot_nonexist_strategy():
@@ -35,8 +36,9 @@ class TestReservedClustersOperations:
     def _mock_db_conn(self, monkeypatch, tmp_path):
         tmp_path.mkdir(parents=True, exist_ok=True)
         db_path = tmp_path / 'state_testing.db'
-        monkeypatch.setattr(global_user_state, '_DB',
-                            global_user_state._SQLiteConn(str(db_path)))
+        monkeypatch.setattr(
+            global_user_state, '_DB',
+            db_utils.SQLiteConn(str(db_path), global_user_state.create_table))
 
     @pytest.fixture
     def _mock_cluster_state(self, _mock_db_conn):
@@ -97,7 +99,7 @@ class TestReservedClustersOperations:
 
         result = cli_runner.invoke(cli.down, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Terminating Sky reserved cluster(s) \'sky-spot-controller\' '
+        assert ('Terminating reserved cluster(s) \'sky-spot-controller\' '
                 'is not supported' in result.output)
 
         result = cli_runner.invoke(cli.down, ['sky-spot-con*'])
@@ -121,7 +123,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.stop, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Stopping Sky reserved cluster(s) \'sky-spot-controller\' is '
+        assert ('Stopping reserved cluster(s) \'sky-spot-controller\' is '
                 'not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
@@ -137,7 +139,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, ['sky-spot-controller'])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Scheduling auto-stop on Sky reserved cluster(s) '
+        assert ('Scheduling auto-stop on reserved cluster(s) '
                 '\'sky-spot-controller\' is not supported' in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
@@ -151,5 +153,5 @@ class TestReservedClustersOperations:
     def test_cancel_on_spot_controller(self, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.cancel, ['sky-spot-controller', '-a'])
-        assert isinstance(result.exception, ValueError)
-        assert 'Cancelling jobs is not allowed' in str(result.exception)
+        assert result.exit_code == click.UsageError.exit_code
+        assert 'Cancelling jobs is not allowed' in str(result.output)

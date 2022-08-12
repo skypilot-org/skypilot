@@ -127,7 +127,7 @@ class LocalDockerBackend(backends.Backend):
                    to_provision: Optional['resources.Resources'],
                    dryrun: bool,
                    stream_logs: bool,
-                   cluster_name: Optional[str] = None,
+                   cluster_name: str,
                    retry_until_up: bool = False) -> ResourceHandle:
         """
         Builds docker image for the task and returns the cluster name as handle.
@@ -141,8 +141,6 @@ class LocalDockerBackend(backends.Backend):
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
                 'Ignored the flag.')
-        if cluster_name is None:
-            cluster_name = backend_utils.generate_cluster_name()
         if stream_logs:
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '
@@ -295,7 +293,7 @@ class LocalDockerBackend(backends.Backend):
     def _teardown(self,
                   handle: ResourceHandle,
                   terminate: bool,
-                  purge: bool = False) -> bool:
+                  purge: bool = False):
         """Teardown kills the container."""
         del purge  # Unused.
         if not terminate:
@@ -311,7 +309,6 @@ class LocalDockerBackend(backends.Backend):
             container.remove(force=True)
         cluster_name = handle.get_cluster_name()
         global_user_state.remove_cluster(cluster_name, terminate=True)
-        return True
 
     # --- Utilities ---
 

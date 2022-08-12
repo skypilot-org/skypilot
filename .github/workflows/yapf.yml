@@ -6,9 +6,11 @@ on:
   push:
     branches:
       - master
+      - 'releases/**'
   pull_request:
     branches:
       - master
+      - 'releases/**'
 jobs:
   yapf:
     runs-on: ubuntu-latest
@@ -25,6 +27,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install yapf==0.32.0
+        pip install toml==0.10.2
     - name: Running yapf
       run: |
-        yapf --diff --style .style.yapf --recursive ./ --exclude 'sky/skylet/ray_patches/**' --exclude 'sky/skylet/providers/**'
+        yapf --diff --recursive ./ --exclude 'sky/skylet/ray_patches/**' --exclude 'sky/skylet/providers/**'

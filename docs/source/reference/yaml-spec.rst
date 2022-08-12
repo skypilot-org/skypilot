@@ -3,7 +3,7 @@
 YAML Configuration
 ==================
 
-Sky provides the ability to specify a task, its resource requirements, and take
+SkyPilot provides the ability to specify a task, its resource requirements, and take
 advantage of many other features provided using a YAML interface. Below, we
 describe all fields available.
 
@@ -30,9 +30,13 @@ describe all fields available.
     resources:
       cloud: aws  # The cloud to use (optional).
 
-      # The region to use (optional). The Auto-failover will be disabled
+      # The region to use (optional). Auto-failover will be disabled
       # if this is specified.
       region: us-east-1
+
+      # The zone to use (optional). Auto-failover will be disabled
+      # if this is specified.
+      zone: us-east-1a
 
       # Accelerator name and count per node (optional).
       #
@@ -80,13 +84,14 @@ describe all fields available.
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP. If not specified, sky will use
-      # the default debian-based image suitable for machine learning tasks.
-      # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
+      # instances. Only supported for AWS and GCP. If not specified, SkyPilot
+      # will use the default debian-based image suitable for machine learning tasks.
+      #
       # AWS
+      # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
       image_id: ami-0868a20f5a3bf9702
-      # To find GCP images: https://cloud.google.com/compute/docs/images
       # GCP
+      # To find GCP images: https://cloud.google.com/compute/docs/images
       # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
 
     file_mounts:
@@ -96,7 +101,7 @@ describe all fields available.
       # must also be synced using file_mounts to ensure correctness.
       /remote/path/datasets: /local/path/datasets
 
-      # Uses Sky Storage to create a S3 bucket named sky-dataset, uploads the
+      # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket
       # as persistent (it will not be deleted after the completion of this task).
       # Symlink contents are copied over.
