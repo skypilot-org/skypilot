@@ -383,14 +383,20 @@ def spot_launch(
     # Check the file mounts in the task.
     # Disallow all local file mounts (copy mounts).
     if task.workdir is not None:
-        raise exceptions.NotSupportedError(
-            'Workdir is not allowed for managed spot jobs.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Workdir is currently not allowed for managed spot jobs.\n'
+                'Hint: use Storage to auto-upload the workdir to a cloud '
+                'bucket.')
     copy_mounts = task.get_local_to_remote_file_mounts()
     if copy_mounts:
-        copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
-        raise exceptions.NotSupportedError(
-            'Local file mounts are not allowed for managed spot jobs, '
-            f'but following are found: {copy_mounts_str}')
+        local_sources = '\t' + '\n\t'.join(
+            src for _, src in copy_mounts.items())
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Local file mounts are currently not allowed for managed spot '
+                f'jobs.\nFound local source paths:\n{local_sources}\nHint: use '
+                'Storage to auto-upload local files to a cloud bucket.')
 
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
