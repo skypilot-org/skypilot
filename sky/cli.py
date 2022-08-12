@@ -1147,7 +1147,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             click.echo(str(e))
             continue
         job_table = job_lib.format_job_queue(job_table)
-        click.echo(f'{job_table}')
+        click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
 
     local_clusters = onprem_utils.check_and_get_local_clusters()
     for local_cluster in local_clusters:
