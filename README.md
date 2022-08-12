@@ -53,9 +53,14 @@ run: |
   python main.py --epochs 1
 ```
 
-This task can be launched on the cloud with the `sky launch` command.
+For this example, you can prepare the workdir by cloning the pytorch examples repository. 
 ```bash
-$ sky launch my_task.yaml
+git clone https://github.com/pytorch/examples.git ~/torch_examples
+```
+
+This task can now be launched on the cloud with the `sky launch` command.
+```bash
+sky launch my_task.yaml
 ```
 SkyPilot will perform multiple functions for you:
 1. Find the lowest priced VM instance type across different clouds
