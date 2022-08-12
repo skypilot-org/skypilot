@@ -1446,7 +1446,7 @@ def start(clusters: Tuple[str], all: bool, yes: bool, idle_minutes_to_autostop: 
     """
     to_start = []
 
-    if not len(clusters) and not all:
+    if not clusters and not all:
         raise click.UsageError(
             f'sky start requires either a cluster name (see `sky status`) '
             'or --all.')
