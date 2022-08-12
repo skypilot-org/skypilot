@@ -1440,19 +1440,28 @@ def start(clusters: Tuple[str], all: bool, yes: bool, idle_minutes_to_autostop: 
       # Restart multiple clusters.
       sky start cluster1 cluster2
       \b
-      # Restart all clusterss.
+      # Restart all clusters.
       sky start -a
 
     """
     to_start = []
 
+    if not len(clusters) and not all:
+        raise click.UsageError(
+            f'sky start requires either a cluster name (see `sky status`) '
+            'or --all.')
+
     if all:
         if len(clusters) > 0:
-            click.echo(
+            raise click.UsageError(
                 'Both --all and cluster(s) specified for sky start. '
-                'Letting --all take effect.')
+                'Please only specify one of the above.')
+
         # Get all clusters
-        clusters = [cluster['name'] for cluster in global_user_state.get_clusters()]
+        clusters = [
+            cluster['name'] for cluster in global_user_state.get_clusters() 
+            if cluster['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
 
     if clusters:
         # Get GLOB cluster names
