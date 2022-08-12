@@ -1,8 +1,8 @@
 <p align="center">
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/source/images/skypilot-wide-dark-1k.png">
-  <img alt="SkyPilot" src="docs/source/images/skypilot-wide-light-1k.png" width=55%>
-</picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/source/images/skypilot-wide-dark-1k.png">
+    <img alt="SkyPilot" src="docs/source/images/skypilot-wide-light-1k.png" width=55%>
+  </picture>
 </p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
