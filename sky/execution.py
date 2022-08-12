@@ -372,10 +372,9 @@ def spot_launch(
     task.set_resources({new_resources})
 
     if task.run is None:
-        print(
-            f'{colorama.Fore.GREEN}'
-            'Skipping the managed spot task as the run section is not set.'
-            f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.GREEN}'
+              'Skipping the managed spot task as the run section is not set.'
+              f'{colorama.Style.RESET_ALL}')
         return
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
@@ -446,8 +445,8 @@ def spot_launch(
             controller_task.spot_task = task
             assert len(controller_task.resources) == 1
         print(f'{colorama.Fore.YELLOW}'
-                    f'Launching managed spot job {name} from spot controller...'
-                    f'{colorama.Style.RESET_ALL}')
+              f'Launching managed spot job {name} from spot controller...'
+              f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
             dag=spot_dag,
