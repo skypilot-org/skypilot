@@ -1,5 +1,6 @@
-SkyPilot
-===================================
+.. image:: ../_static/SkyPilot-wide-light-1k.png
+  :width: 60%
+  :alt: SkyPilot
 
 SkyPilot is a framework for easily running machine learning projects on any cloud through a unified interface.
 
