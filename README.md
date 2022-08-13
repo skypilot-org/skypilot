@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/source/images/skypilot-wide-dark-1k.png">
-    <img alt="SkyPilot" src="docs/source/images/skypilot-wide-light-1k.png" width=55%>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/skypilot-org/skypilot/raw/master/docs/source/images/skypilot-wide-dark-1k.png">
+    <img alt="SkyPilot" src="https://github.com/skypilot-org/skypilot/raw/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
   </picture>
 </p>
 
