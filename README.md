@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="https://github.com/skypilot-org/skypilot/raw/master/docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=55%/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
+  </picture>
 </p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
