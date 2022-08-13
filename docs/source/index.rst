@@ -6,11 +6,6 @@ SkyPilot
   :align: center
   :alt: SkyPilot
 
-.. figure:: https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white
-  :align: center
-  :alt: GitHub
-  :target: https://github.com/skypilot-org/skypilot
-
 SkyPilot is a framework for easily running machine learning workloads on any cloud through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
 Key features:
