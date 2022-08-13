@@ -607,8 +607,8 @@ def test_spot_storage():
     name = _get_cluster_name()
     yaml_str = pathlib.Path(
         'examples/managed_spot_with_storage.yaml').read_text()
-    yaml_str = yaml_str.replace('sky-workdir-zhwu',
-                                f'sky-test-{int(time.time())}')
+    storage_name = f'sky-test-{int(time.time())}'
+    yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
         f.flush()
@@ -619,6 +619,7 @@ def test_spot_storage():
                 f'sky spot launch -n {name} {file_path} -y',
                 'sleep 60',  # Wait the spot status to be updated
                 f'sky spot status | grep {name} | grep SUCCEEDED',
+                f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             f'sky spot cancel -y -n {name}',
         )
