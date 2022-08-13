@@ -70,7 +70,7 @@ copybutton_prompt_is_regexp = True
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.
-html_logo = "images/SkyPilot-wide-light-1k.png"
+html_logo = "images/skypilot-wide-light-1k.png"
 
 # The name of an image file (within the static path) to use as favicon of the
 # docs. This file should be a Windows icon file (.ico), 16x16 or 32x32 pixels.
