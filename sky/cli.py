@@ -1453,9 +1453,9 @@ def start(clusters: Tuple[str], all: bool, yes: bool, idle_minutes_to_autostop: 
 
     if all:
         if len(clusters) > 0:
-            raise click.UsageError(
+            click.echo(
                 'Both --all and cluster(s) specified for sky start. '
-                'Please only specify one of the above.')
+                'Letting --all take effect.')
 
         # Get all clusters
         clusters = [
