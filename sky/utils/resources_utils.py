@@ -39,8 +39,8 @@ def canonicalize_accelerator_name(accelerator: str) -> str:
 
     # A new accelerator can be added after upgrading SkyPilot.
     # Search the accelerator name in the service catalog.
-    searched = service_catalog.list_accelerators(
-        name_filter=accelerator, case_sensitive=False)
+    searched = service_catalog.list_accelerators(name_filter=accelerator,
+                                                 case_sensitive=False)
     names = list(searched.keys())
 
     # Exact match.
@@ -57,6 +57,7 @@ def canonicalize_accelerator_name(accelerator: str) -> str:
     if len(names) > 1:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Accelerator name {accelerator} is ambiguous. '
-                            f'Please choose one of {names}.')
+                             f'Please choose one of {names}.')
+
 
 # TODO(woosuk): canonicalize the Azure instance type names.
