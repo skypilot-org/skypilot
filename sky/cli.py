@@ -1416,7 +1416,7 @@ def autostop(
           'if we fail to start the cluster due to unavailability errors.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def start(clusters: Tuple[str], all: bool, yes: bool, 
+def start(clusters: Tuple[str], all: bool, yes: bool,
           idle_minutes_to_autostop: int, retry_until_up: bool):
     """Restart cluster(s).
 
