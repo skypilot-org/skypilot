@@ -208,8 +208,8 @@ class Resources:
 
             # Canonicalize the accelerator names.
             accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(acc): acc_count
-                for acc, acc_count in accelerators.items()
+                accelerator_registry.canonicalize_accelerator_name(acc):
+                acc_count for acc, acc_count in accelerators.items()
             }
 
             acc, _ = list(accelerators.items())[0]
