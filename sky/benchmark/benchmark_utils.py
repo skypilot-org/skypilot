@@ -114,7 +114,12 @@ def _print_candidate_resources(
                 f'{colorama.Style.RESET_ALL}')
 
     columns = [
-        'CLUSTER', 'CLOUD', '# NODES', 'INSTANCE', 'vCPUs', 'ACCELERATORS',
+        'CLUSTER',
+        'CLOUD',
+        '# NODES',
+        'INSTANCE',
+        'vCPUs',
+        'ACCELERATORS',
         'PRICE ($/hr)',
     ]
     table_kwargs = {
@@ -140,8 +145,8 @@ def _print_candidate_resources(
         cost = num_nodes * resources.get_cost(3600)
         spot = '[Spot]' if resources.use_spot else ''
         row = [
-            cluster, cloud, num_nodes, resources.instance_type + spot,
-            vcpus, accelerators, f'{cost:.2f}'
+            cluster, cloud, num_nodes, resources.instance_type + spot, vcpus,
+            accelerators, f'{cost:.2f}'
         ]
         candidate_table.add_row(row)
     logger.info(f'{candidate_table}\n')

@@ -191,8 +191,8 @@ class AWS(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> float:
-        return service_catalog.get_vcpus_from_instance_type(
-            instance_type, clouds='aws')
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='aws')
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',

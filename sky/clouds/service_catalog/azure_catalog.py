@@ -44,7 +44,7 @@ def get_hourly_cost(instance_type: str,
 
 def get_vcpus_from_instance_type(instance_type: str) -> float:
     df = _df[_df['InstanceType'] == instance_type]
-    cpu_info = df['capabilities'].str.replace("'", '"').apply(json.loads)
+    cpu_info = df['capabilities'].str.replace('\'', '"').apply(json.loads)
 
     def get_vcpus(x: List[Dict[str, str]]) -> str:
         for attr in x:

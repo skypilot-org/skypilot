@@ -37,7 +37,7 @@ def get_hourly_cost(instance_type: str,
 
 def get_vcpus_from_instance_type(instance_type: str) -> float:
     df = _df[_df['InstanceType'] == instance_type]
-    cpu_info = df['VCpuInfo'].str.replace("'", '"').apply(json.loads)
+    cpu_info = df['VCpuInfo'].str.replace('\'', '"').apply(json.loads)
     vcpus = cpu_info.apply(lambda x: x['DefaultVCpus'])
     assert len(set(vcpus)) == 1, df
     return float(vcpus.iloc[0])

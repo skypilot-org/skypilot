@@ -650,8 +650,10 @@ class Optimizer:
             elif vcpus.is_integer():
                 vcpus = int(vcpus)
             return [
-                str(cloud), resources.instance_type + spot,
-                str(vcpus), str(accelerators),
+                str(cloud),
+                resources.instance_type + spot,
+                str(vcpus),
+                str(accelerators),
             ]
 
         # Print the list of resouces that the optimizer considered.
