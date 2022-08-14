@@ -2,7 +2,7 @@
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
-# List of all accelerators available on AWS/GCP/Azure.
+# List of all accelerators supported by SkyPilot.
 # NOTE: Must include accelerators supported for local clusters.
 _ACCELERATORS = [
     'A100',
