@@ -275,10 +275,17 @@ def get_a2_df():
             memory = spec['MemoryGiB']
             price = per_cpu_price * cpu + per_memory_price * memory
             spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
-            table.append([instance_type, cpu, memory, price, spot_price, region])
-    a2_df = pd.DataFrame(
-        table,
-        columns=['InstanceType', 'vCPU', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
+            table.append(
+                [instance_type, cpu, memory, price, spot_price, region])
+    a2_df = pd.DataFrame(table,
+                         columns=[
+                             'InstanceType',
+                             'vCPU',
+                             'MemoryGiB',
+                             'Price',
+                             'SpotPrice',
+                             'Region',
+                         ])
 
     a2_df['AcceleratorName'] = None
     a2_df['AcceleratorCount'] = None
