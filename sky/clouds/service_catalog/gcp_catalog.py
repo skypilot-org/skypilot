@@ -114,6 +114,11 @@ def get_hourly_cost(
 
 def get_vcpus_from_instance_type(instance_type: str) -> float:
     df = _df[_df['InstanceType'] == instance_type]
+    # This is for backward compatibility.
+    # The GCP service catalog may not have the 'vCPU' column.
+    if 'vCPU' not in df.columns:
+        return 0.0
+
     vcpus = df['vCPU']
     assert len(set(vcpus)) == 1, df
     return float(vcpus.iloc[0])
