@@ -251,6 +251,18 @@ def get_vm_zones(url):
     # Explode the 'MachineType' column.
     df['MachineType'] = df['MachineType'].str.split(', ')
     df = df.explode('MachineType', ignore_index=True)
+
+    # FIXME(woosuk): This is a hack. Find a better way to do this.
+    # Handle the typos in the GCP web page.
+    # us-central1-b: no comma between T2A and N1
+    df = df[df['MachineType'] != 'T2A N1']
+    df = df.append({'AvailabilityZone': 'us-central1-b', 'MachineType': 'T2A'}, ignore_index=True)
+    df = df.append({'AvailabilityZone': 'us-central1-b', 'MachineType': 'N1'}, ignore_index=True)
+
+    # us-central1-c: no space between C2 and C2D
+    df = df[df['MachineType'] != 'C2,C2D']
+    df = df.append({'AvailabilityZone': 'us-central1-c', 'MachineType': 'C2'}, ignore_index=True)
+    df = df.append({'AvailabilityZone': 'us-central1-c', 'MachineType': 'C2D'}, ignore_index=True)
     return df
 
 
