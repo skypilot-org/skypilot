@@ -1,4 +1,4 @@
-"""Resources related utilities."""
+"""Accelerator registry."""
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
