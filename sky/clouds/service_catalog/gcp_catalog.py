@@ -112,6 +112,13 @@ def get_hourly_cost(
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
+def get_vcpus_from_instance_type(instance_type: str) -> float:
+    df = _df[_df['InstanceType'] == instance_type]
+    vcpus = df['vCPU']
+    assert len(set(vcpus)) == 1, df
+    return float(vcpus.iloc[0])
+
+
 def get_instance_type_for_accelerator(
         acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.

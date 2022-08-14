@@ -643,13 +643,17 @@ class Optimizer:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
+            cloud = resources.cloud
+            vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
+            if vcpus.is_integer():
+                vcpus = int(vcpus)
             return [
-                str(resources.cloud), resources.instance_type + spot,
-                str(accelerators)
+                str(cloud), resources.instance_type + spot,
+                str(vcpus), str(accelerators),
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS']
+        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]

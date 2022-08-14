@@ -274,6 +274,14 @@ class GCP(clouds.Cloud):
         # hence return none here.
         return None
 
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(
+            instance_type, clouds='gcp')
+
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:

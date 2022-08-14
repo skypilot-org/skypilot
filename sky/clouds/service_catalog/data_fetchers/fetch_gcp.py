@@ -78,6 +78,7 @@ COLUMNS = [
     'InstanceType',  # None for accelerators
     'AcceleratorName',
     'AcceleratorCount',
+    'vCPU',
     'MemoryGiB',  # 0 for accelerators
     'GpuInfo',  # Same as AcceleratorName
     'Price',
@@ -227,7 +228,6 @@ def get_vm_price_table(url):
         # MemoryGiB
         df['MemoryGiB'] = df['MemoryGiB'].apply(parse_memory)
 
-        df.drop(columns=['vCPU'], inplace=True)
         df['AcceleratorName'] = None
         df['AcceleratorCount'] = None
         df['GpuInfo'] = None
@@ -275,10 +275,10 @@ def get_a2_df():
             memory = spec['MemoryGiB']
             price = per_cpu_price * cpu + per_memory_price * memory
             spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
-            table.append([instance_type, memory, price, spot_price, region])
+            table.append([instance_type, cpu, memory, price, spot_price, region])
     a2_df = pd.DataFrame(
         table,
-        columns=['InstanceType', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
+        columns=['InstanceType', 'vCPU', 'MemoryGiB', 'Price', 'SpotPrice', 'Region'])
 
     a2_df['AcceleratorName'] = None
     a2_df['AcceleratorCount'] = None
@@ -468,7 +468,8 @@ def get_gpu_df():
     # Add columns for the service catalog.
     gpu_df['InstanceType'] = None
     gpu_df['GpuInfo'] = gpu_df['AcceleratorName']
-    gpu_df['MemoryGiB'] = 0
+    gpu_df['vCPU'] = None
+    gpu_df['MemoryGiB'] = None
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
@@ -505,7 +506,8 @@ def get_tpu_df():
     # Add columns for the service catalog.
     tpu_df['InstanceType'] = None
     tpu_df['GpuInfo'] = tpu_df['AcceleratorName']
-    tpu_df['MemoryGiB'] = 0
+    gpu_df['vCPU'] = None
+    gpu_df['MemoryGiB'] = None
     return tpu_df
 
 

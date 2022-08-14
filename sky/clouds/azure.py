@@ -160,6 +160,14 @@ class Azure(clouds.Cloud):
             instance_type, clouds='azure')
 
     @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(
+            instance_type, clouds='azure')
+
+    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 

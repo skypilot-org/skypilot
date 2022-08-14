@@ -135,6 +135,13 @@ def get_hourly_cost(instance_type: str,
                                use_spot)
 
 
+def get_vcpus_from_instance_type(instance_type: str,
+                                 clouds: CloudFilter = None) -> float:
+    """Returns the number of virtual CPUs from a instance type."""
+    return _map_clouds_catalog(clouds, 'get_vcpus_from_instance_type',
+                               instance_type)
+
+
 def get_accelerators_from_instance_type(
         instance_type: str,
         clouds: CloudFilter = None) -> Optional[Dict[str, int]]:
