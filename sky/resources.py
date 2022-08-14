@@ -6,7 +6,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
-from sky.utils import resources_utils
+from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -208,7 +208,7 @@ class Resources:
 
             # Canonicalize the accelerator names.
             accelerators = {
-                resources_utils.canonicalize_accelerator_name(acc): acc_count
+                accelerator_registry.canonicalize_accelerator_name(acc): acc_count
                 for acc, acc_count in accelerators.items()
             }
 
@@ -653,7 +653,7 @@ class Resources:
             accelerators = state.pop('_accelerators')
             if accelerators is not None:
                 accelerators = {
-                    resources_utils.canonicalize_accelerator_name(acc):
+                    accelerator_registry.canonicalize_accelerator_name(acc):
                     acc_count for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
