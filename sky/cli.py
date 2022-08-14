@@ -1458,7 +1458,7 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
                 'Both --all and cluster(s) specified for sky start. '
                 'Letting --all take effect.')
 
-        # Get all clusters
+        # Get all clusters that are not reserved names.
         clusters = [
             cluster['name']
             for cluster in global_user_state.get_clusters()
