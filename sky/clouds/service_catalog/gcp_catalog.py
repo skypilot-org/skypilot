@@ -107,11 +107,10 @@ def get_hourly_cost(
     use_spot: bool = False,
 ) -> float:
     """Returns the price of a VM instance in the given region and zone."""
-    del zone  # unused
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    return common.get_hourly_cost_impl(_df, instance_type, region, zone, use_spot)
 
 
 def get_instance_type_for_accelerator(
