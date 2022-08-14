@@ -114,8 +114,8 @@ def _print_candidate_resources(
                 f'{colorama.Style.RESET_ALL}')
 
     columns = [
-        'CLUSTER', 'CLOUD', '# NODES', 'INSTANCE', 'ACCELERATORS',
-        'PRICE ($/hr)'
+        'CLUSTER', 'CLOUD', '# NODES', 'INSTANCE', 'vCPUs', 'ACCELERATORS',
+        'PRICE ($/hr)',
     ]
     table_kwargs = {
         'hrules': prettytable.FRAME,
@@ -130,11 +130,18 @@ def _print_candidate_resources(
         else:
             accelerator, count = list(resources.accelerators.items())[0]
             accelerators = f'{accelerator}:{count}'
+        cloud = resources.cloud
+        vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
+        if vcpus == 0.0:
+            vcpus = '-'
+        elif vcpus.is_integer():
+            vcpus = int(vcpus)
+
         cost = num_nodes * resources.get_cost(3600)
         spot = '[Spot]' if resources.use_spot else ''
         row = [
-            cluster, resources.cloud, num_nodes, resources.instance_type + spot,
-            accelerators, f'{cost:.2f}'
+            cluster, cloud, num_nodes, resources.instance_type + spot,
+            vcpus, accelerators, f'{cost:.2f}'
         ]
         candidate_table.add_row(row)
     logger.info(f'{candidate_table}\n')
