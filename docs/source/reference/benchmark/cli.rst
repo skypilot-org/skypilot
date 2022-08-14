@@ -70,7 +70,7 @@ Managing benchmark reports
     $ sky bench ls
 
     BENCHMARK  TASK         LAUNCHED             CANDIDATE 1                    CANDIDATE 2            CANDIDATE 3            CANDIDATE 4               
-    squad      bert_qa      2022-08-10 10:07:27  1x Standard_NC6_Promo (K80:1)  1x g4dn.xlarge (T4:1)  1x g5.xlarge (A10G:1)  1x n1-highmem-8 (V100:1)  
+    bert       bert_qa      2022-08-10 10:07:27  1x Standard_NC6_Promo (K80:1)  1x g4dn.xlarge (T4:1)  1x g5.xlarge (A10G:1)  1x n1-highmem-8 (V100:1)  
     mybench    mytask       2022-08-10 11:24:27  1x n1-highmem-8 (V100:1)       1x g4dn.xlarge (T4:1)
 
 To delete a benchmark report, use ``sky bench delete``:

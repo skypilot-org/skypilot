@@ -43,7 +43,7 @@ You can optionally specify in ``total_steps`` the total number of steps that the
         total_steps=num_epochs * len(train_dataloader), # Optional
     )
 
-Second, mark the beginning and end of each step using one of the three equivalent methods.
+Next, mark the beginning and end of each step using one of the three equivalent methods.
 
 .. code-block:: python
 
@@ -62,6 +62,10 @@ Second, mark the beginning and end of each step using one of the three equivalen
         sky_callback.step_begin()
         ...
         sky_callback.step_end()
+
+That's it.
+Now you can launch your task and get a complete benchmark report using SkyPilot Benchmark CLI.
+`Here <https://github.com/skypilot-org/skypilot/blob/master/examples/benchmark/timm/callback.patch>`_ we provide an example of applying SkyCallback to Pytorch ImageNet training code.
 
 .. note::
     In distributed training, ``global_rank`` should be additionally passed to ``sky_callback.init`` as follows:
@@ -94,6 +98,8 @@ SkyCallback natively supports these frameworks with simple interface.
     # Add the callback to your Keras model.
     model.fit(..., callbacks=[SkyKerasCallback()])
 
+`Here <https://github.com/skypilot-org/skypilot/blob/master/examples/benchmark/keras_asr/callback.patch>`_ you can find an example of applying SkyCallback to Keras ASR model training.
+
 * PytorchLightning example
 
 .. code-block:: python
@@ -103,6 +109,7 @@ SkyCallback natively supports these frameworks with simple interface.
     # Add the callback to your trainer.
     trainer = pl.Trainer(..., callbacks=[SkyLightningCallback()])
 
+`Here <https://github.com/skypilot-org/skypilot/blob/master/examples/benchmark/lightning_gan/callback.patch>`_ you can find an example of applying SkyCallback to PyTorchLightning GAN model training.
 
 * HuggingFace Transformers example
 
@@ -112,6 +119,8 @@ SkyCallback natively supports these frameworks with simple interface.
 
     # Add the callback to your trainer.
     trainer = transformers.Trainer(..., callbacks=[SkyTransformersCallback()])
+
+`Here <https://github.com/skypilot-org/skypilot/blob/master/examples/benchmark/transformers_qa/callback.patch>`_ you can find an example of applying SkyCallback to HuggingFace BERT fine-tuning.
 
 .. note::
     When using the framework-integrated callbacks, do not call ``sky_callback.init`` for initialization.
