@@ -1,0 +1,21 @@
+diff --git a/lightning_examples/basic-gan/gan.py b/lightning_examples/basic-gan/gan.py
+index 24520fa..4a1e988 100644
+--- a/lightning_examples/basic-gan/gan.py
++++ b/lightning_examples/basic-gan/gan.py
+@@ -11,6 +11,7 @@ from pytorch_lightning import LightningDataModule, LightningModule, Trainer
+ from pytorch_lightning.callbacks.progress import TQDMProgressBar
+ from torch.utils.data import DataLoader, random_split
+ from torchvision.datasets import MNIST
++from sky_callback import SkyLightningCallback
+ 
+ PATH_DATASETS = os.environ.get("PATH_DATASETS", ".")
+ BATCH_SIZE = 256 if torch.cuda.is_available() else 64
+@@ -253,7 +254,7 @@ trainer = Trainer(
+     accelerator="auto",
+     devices=1 if torch.cuda.is_available() else None,  # limiting got iPython runs
+     max_epochs=5,
+-    callbacks=[TQDMProgressBar(refresh_rate=20)],
++    callbacks=[TQDMProgressBar(refresh_rate=20), SkyLightningCallback()],
+ )
+ trainer.fit(model, dm)
+ 

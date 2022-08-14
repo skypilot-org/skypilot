@@ -5,7 +5,7 @@ import json
 import pathlib
 import shlex
 import time
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
@@ -16,7 +16,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 from sky.spot import constants
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
@@ -53,8 +53,12 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     status = None
     try:
         logger.info('=== Checking the job status... ===')
-        status = backend.get_job_status(handle, stream_logs=False)
-        logger.info(f'Job status: {status}')
+        statuses = backend.get_job_status(handle, stream_logs=False)
+        status = list(statuses.values())[0]
+        if status is None:
+            logger.info('No job found.')
+        else:
+            logger.info(f'Job status: {status}')
     except exceptions.CommandError:
         logger.info('Failed to connect to the cluster.')
     logger.info('=' * 34)
@@ -121,7 +125,11 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
                 cluster_name)
             if handle is not None:
                 backend = backend_utils.get_backend_from_handle(handle)
-                backend.teardown(handle, terminate=True)
+                try:
+                    backend.teardown(handle, terminate=True)
+                except RuntimeError:
+                    logger.error('Failed to tear down the spot cluster '
+                                 f'{cluster_name!r}.')
 
             # The controller process for this job is not running: it must
             # have exited abnormally, and we should set the job status to
@@ -203,7 +211,7 @@ def stream_logs_by_id(job_id: int) -> str:
     spot_status = spot_state.get_status(job_id)
     while not spot_status.is_terminal():
         if spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'SKY INFO: The log is not ready yet, as the spot job '
+            logger.info(f'INFO: The log is not ready yet, as the spot job '
                         f'is {spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
@@ -216,14 +224,14 @@ def stream_logs_by_id(job_id: int) -> str:
             # SUCCEEDED or FAILED), we can safely break the loop. We use the
             # status in job queue to show the information, as the spot_state is
             # not updated yet.
-            job_status = backend.get_job_status(handle,
-                                                job_id=None,
-                                                stream_logs=False)
+            job_statuses = backend.get_job_status(handle, stream_logs=False)
+            job_status = list(job_statuses.values())[0]
+            assert job_status is not None, 'No job found.'
             logger.info(f'Logs finished for job {job_id} '
                         f'(status: {job_status.value}).')
             break
         logger.info(
-            f'SKY INFO: The return code is {returncode}. '
+            f'INFO: The return code is {returncode}. '
             f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
@@ -251,10 +259,32 @@ def stream_logs_by_name(job_name: str) -> str:
     return ''
 
 
-def show_jobs(show_all: bool) -> str:
-    """Show all spot jobs."""
+def dump_spot_job_queue() -> str:
     jobs = spot_state.get_spot_jobs()
 
+    for job in jobs:
+        end_at = job['end_at']
+        if end_at is None:
+            end_at = time.time()
+        job_duration = end_at - job['last_recovered_at'] + job['job_duration']
+        if job['status'] == spot_state.SpotStatus.RECOVERING:
+            # When job is recovering, the duration is exact job['job_duration']
+            job_duration = job['job_duration']
+        job['job_duration'] = job_duration
+        job['status'] = job['status'].value
+    return json.dumps(jobs, indent=2)
+
+
+def load_spot_job_queue(json_str: str) -> List[Dict[str, Any]]:
+    """Load job queue from json string."""
+    jobs = json.loads(json_str)
+    for job in jobs:
+        job['status'] = spot_state.SpotStatus(job['status'])
+    return jobs
+
+
+def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
+    """Show all spot jobs."""
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
         '#RECOVERIES', 'STATUS'
@@ -262,6 +292,7 @@ def show_jobs(show_all: bool) -> str:
     if show_all:
         columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
+
     status_counts = collections.defaultdict(int)
     for job in jobs:
         job_duration = log_utils.readable_time_duration(
@@ -332,10 +363,10 @@ class SpotCodeGen:
     ]
 
     @classmethod
-    def show_jobs(cls, show_all: bool) -> str:
+    def get_job_table(cls) -> str:
         code = [
-            f'job_table = spot_utils.show_jobs({show_all})',
-            'print(job_table)',
+            'job_table = spot_utils.dump_spot_job_queue()',
+            'print(job_table, flush=True)',
         ]
         return cls._build(code)
 

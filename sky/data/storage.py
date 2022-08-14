@@ -263,8 +263,8 @@ class Storage(object):
         def __init__(
             self,
             *,
-            storage_name: str,
-            source: str,
+            storage_name: Optional[str],
+            source: Optional[str],
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
@@ -339,6 +339,8 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
+
+        self.force_delete = False
 
         # Validate and correct inputs if necessary
         self._validate_storage_spec()
@@ -608,12 +610,16 @@ class Storage(object):
                     global_user_state.remove_storage(self.name)
                 else:
                     global_user_state.set_storage_handle(self.name, self.handle)
+            elif self.force_delete:
+                store.delete()
             # Remove store from bookkeeping
             del self.stores[store_type]
         else:
             for _, store in self.stores.items():
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
+                    store.delete()
+                elif self.force_delete:
                     store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
@@ -649,6 +655,7 @@ class Storage(object):
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+        force_delete = config.pop('_force_delete', False)
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
@@ -667,6 +674,9 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
+
+        # Add force deletion flag
+        storage_obj.force_delete = force_delete
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
@@ -690,6 +700,8 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
+        if self.force_delete:
+            config['_force_delete'] = True
         return config
 
 
@@ -784,14 +796,19 @@ class S3Store(AbstractStore):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to s3://{self.name}/'):
+            # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
+            # to a log file.
             with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE) as process:
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.PIPE) as process:
+                stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
                     str_line = line.decode('utf-8')
                     logger.info(str_line)
+                    stderr.append(line)
                     if 'Access Denied' in str_line:
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
@@ -802,7 +819,10 @@ class S3Store(AbstractStore):
                                 'the bucket is public.')
                 returncode = process.wait()
                 if returncode != 0:
+                    stderr = '\n'.join(stderr)
                     with ux_utils.print_exception_no_traceback():
+                        logger.error(
+                            f'{process.stdout.decode("utf-8")}\n{stderr}')
                         raise exceptions.StorageUploadError(
                             f'Upload to S3 failed for store {self.name} and '
                             f'source {self.source}. Please check the logs.')
@@ -1030,13 +1050,16 @@ class GcsStore(AbstractStore):
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to gs://{self.name}/'):
             with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE) as process:
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.PIPE) as process:
+                stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
                     str_line = line.decode('utf-8')
                     logger.info(str_line)
+                    stderr.append(str_line)
                     if 'AccessDeniedException' in str_line:
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
@@ -1048,6 +1071,9 @@ class GcsStore(AbstractStore):
                 returncode = process.wait()
                 if returncode != 0:
                     with ux_utils.print_exception_no_traceback():
+                        stderr = '\n'.join(stderr)
+                        logger.error(
+                            f'{process.stdout.decode("utf-8")}\n{stderr}')
                         raise exceptions.StorageUploadError(
                             f'Upload to GCS failed for store {self.name} and '
                             f'source {self.source}. Please check logs.')
@@ -1181,7 +1207,7 @@ class GcsStore(AbstractStore):
             with backend_utils.safe_console_status(
                     f'[bold cyan]Deleting [green]bucket {bucket_name}'):
                 if num_files >= _GCS_RM_MAX_OBJS:
-                    remove_obj_command = f'gsutil rm -m -a gs://{bucket_name}/*'
+                    remove_obj_command = f'gsutil -m rm -a gs://{bucket_name}/*'
                     subprocess.check_output(remove_obj_command.split(' '))
                 bucket.delete(force=True)
         except subprocess.CalledProcessError as e:

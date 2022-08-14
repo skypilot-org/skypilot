@@ -4,6 +4,12 @@ import importlib
 import typing
 from typing import Dict, List, Optional, Tuple, Union
 
+from sky.clouds.service_catalog.constants import (
+    HOSTED_CATALOG_DIR_URL,
+    CATALOG_SCHEMA_VERSION,
+    LOCAL_CATALOG_DIR,
+)
+
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
     from sky.clouds.service_catalog import common
@@ -91,9 +97,24 @@ def instance_type_exists(instance_type: str,
     return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
 
-def region_exists(region_name: str, clouds: CloudFilter = None) -> bool:
-    """Returns the region by name."""
-    return _map_clouds_catalog(clouds, 'region_exists', region_name)
+def validate_region_zone(region_name: Optional[str],
+                         zone_name: Optional[str],
+                         clouds: CloudFilter = None) -> bool:
+    """Returns the zone by name."""
+    return _map_clouds_catalog(clouds, 'validate_region_zone', region_name,
+                               zone_name)
+
+
+def accelerator_in_region_or_zone(
+    acc_name: str,
+    acc_count: int,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    clouds: CloudFilter = None,
+) -> bool:
+    """Returns True if the accelerator is in the region or zone."""
+    return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
+                               acc_name, acc_count, region, zone)
 
 
 def get_region_zones_for_instance_type(
@@ -200,4 +221,8 @@ __all__ = [
     'get_region_zones_for_accelerators',
     'get_common_gpus',
     'get_tpus',
+    # Constants
+    'HOSTED_CATALOG_DIR_URL',
+    'CATALOG_SCHEMA_VERSION',
+    'LOCAL_CATALOG_DIR',
 ]

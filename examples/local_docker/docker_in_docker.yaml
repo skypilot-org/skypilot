@@ -1,7 +1,7 @@
-# Runs a docker container as a sky task.
+# Runs a docker container as a SkyPilot task.
 #
 # This demo can be run using the --docker flag, demonstrating the
-# docker-in-docker (dind) capabilities of sky docker mode.
+# docker-in-docker (dind) capabilities of SkyPilot docker mode.
 #
 # Usage:
 #   sky launch --docker -c dind docker_in_docker.yaml

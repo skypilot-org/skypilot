@@ -1,9 +1,9 @@
 .. _sky-storage:
 
-Sky Storage
-===========
+SkyPilot Storage
+=================
 
-A Sky Storage object represents an abstract data store containing large data
+A SkyPilot Storage object represents an abstract data store containing large data
 files required by the task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
 Behind the scenes, storage automatically uploads all data in the source
@@ -25,17 +25,17 @@ A storage object can used in either :code:`MOUNT` mode or :code:`COPY` mode.
     sky.Storage does not guarantee preservation of file
     permissions - you may need to set file permissions during task execution.
 
-Using Sky Storage
------------------
-Sky Storage can be used by specifying additional fields in the
+Using SkyPilot Storage
+----------------------
+SkyPilot Storage can be used by specifying additional fields in the
 :code:`file_mounts`. By default, :code:`file_mounts` uses rsync to
 directly copy files from local to remote VM.
-However, you can have them backed by sky Storage, which uploads
+However, you can have them backed by SkyPilot Storage, which uploads
 the files to a cloud store (e.g. S3, GCS) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
-Your usage of sky storage can fall under four broad use cases:
+Your usage of SkyPilot Storage can fall under four broad use cases:
 
 1.  **You want to upload your local data to remote VM -** specify the name and
     source fields. Name sets the bucket name that will be used, and source
@@ -102,7 +102,7 @@ and storage mounting:
 
       # *** Persistent Data Storage by copying from S3 ***
       #
-      # This uses sky Storage to first create a S3 bucket named sky-dataset,
+      # This uses SkyPilot Storage to first create a S3 bucket named sky-dataset,
       # copies the contents of ~/datasets to the remote bucket and makes the
       # bucket persistent (i.e., the bucket is not deleted after the completion of
       # this sky task, and future invocations of this bucket will be much faster).
@@ -170,15 +170,15 @@ and storage mounting:
     again.
 
 .. note::
-    Symbolic links are handled differently in :code:`file_mounts` depending on whether Sky Storage is used.
-    For mounts backed by Sky Storage, symbolic links are not copied to remote.
-    For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
+    Symbolic links are handled differently in :code:`file_mounts` depending on whether SkyPilot Storage is used.
+    For mounts backed by SkyPilot Storage, symbolic links are not copied to remote.
+    For mounts not using SkyPilot Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
 
 Creating a shared file system
 -----------------------------
 
-Sky Storage can also be used to create a shared file-system that multiple tasks
+SkyPilot Storage can also be used to create a shared file-system that multiple tasks
 on different nodes can read and write to. This allows developers to pass files
 between workers and even use files as a medium for inter-process communication (IPC).
 
@@ -193,12 +193,12 @@ and use mount mode when attaching it to your tasks like so:
         mode: MOUNT
 
 
-Here is a `simple example <https://github.com/sky-proj/sky/blob/master/examples/storage/pingpong.yaml>`_
-using sky storage to perform communication between processes using files.
+Here is a `simple example <https://github.com/skypilot-org/skypilot/blob/master/examples/storage/pingpong.yaml>`_
+using SkyPilot Storage to perform communication between processes using files.
 
 
-Using Sky Storage CLI tools
----------------------------
+Using SkyPilot Storage CLI tools
+--------------------------------
 
 To manage persistent Storage objects, the sky CLI provides two useful commands -
 :code:`sky storage ls` and :code:`sky storage delete`.

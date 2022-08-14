@@ -117,19 +117,24 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+  # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Make sure python3 & pip3 are available on this image.
-  - pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
+  - mkdir -p ~/.ssh; touch ~/.ssh/config;
+    pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
   # GCP TPU VM image does not install conda by default.
-  - which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/gcpuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base false);
-    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
-    sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf; # This is needed for `-o allow_other` option for `goofys`;
-  - pip3 uninstall sky -y &> /dev/null;
-    pip3 install "$(echo {{sky_remote_path}}/*.whl)[gcp]";
-    python3 -c "from sky.skylet.ray_patches import patch; patch()" # patch the buggy ray file
+  - which conda > /dev/null 2>&1 || (wget -nc https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && bash Miniconda3-latest-Linux-x86_64.sh -b && eval "$(/home/gcpuser/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true);
+  # patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  - (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    pip3 uninstall skypilot -y &> /dev/null;
+    pip3 install "$(echo {{sky_remote_path}}/skypilot-{{sky_version}}*.whl)[gcp]";
+    python3 -c "from sky.skylet.ray_patches import patch; patch()";
+    [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf'); # This is needed for `-o allow_other` option for `gcsfuse`;
   # For TPU VM
-  - {{ tpu_vm is none }} || pip3 install --upgrade google-api-python-client
+  {%- if tpu_vm %}
+  - pip3 install --upgrade google-api-python-client
+  {%- endif %}
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:

@@ -2,7 +2,7 @@ GPU-backed Jupyter Notebooks
 ============================
 
 Jupyter notebooks are a useful tool for interactive development, debugging, and
-visualization. Sky makes the process of running a GPU-backed Jupyter notebook
+visualization. SkyPilot makes the process of running a GPU-backed Jupyter notebook
 simple by automatically managing provisioning and port forwarding.
 
 To get a machine with a GPU attached, we recommend using an interactive **GPU node**.
@@ -45,13 +45,13 @@ You can verify that this notebook is running on the GPU-backed instance using :c
   :width: 100%
   :alt: nvidia-smi in notebook
 
-Notebooks in Sky tasks
------------------------
-Jupyter notebooks can also be used in Sky tasks, allowing access to the full
-range of Sky's features including :ref:`mounted storage <sky-storage>` and
+Notebooks in SkyPilot tasks
+---------------------------
+Jupyter notebooks can also be used in SkyPilot tasks, allowing access to the full
+range of SkyPilot's features including :ref:`mounted storage <sky-storage>` and
 :ref:`autostop <auto-stop>`.
 
-The following :code:`jupyter.yaml` is an example of a task specification that can launch notebooks with Sky.
+The following :code:`jupyter.yaml` is an example of a task specification that can launch notebooks with SkyPilot.
 
 .. code:: yaml
 
