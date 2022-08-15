@@ -345,8 +345,6 @@ class Storage(object):
         # this can be deprecated.
         self.force_delete = False
 
-        self.force_delete = False
-
         # Validate and correct inputs if necessary
         self._validate_storage_spec()
 
