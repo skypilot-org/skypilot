@@ -477,7 +477,7 @@ class Task:
     def update_storage_mounts(self, storage_mounts: Dict[str,
                                                          storage_lib.Storage]):
         """Updates the storage mounts for this Task"""
-        if not self.storage_mounts:
+        if not storage_mounts:
             return self
         task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
         task_storage_mounts.update(storage_mounts)
