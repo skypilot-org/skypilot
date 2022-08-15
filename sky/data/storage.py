@@ -340,6 +340,9 @@ class Storage(object):
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
+        # TODO(romilb, zhwu): This is a workaround to support storage deletion
+        # for spot. Once sky storage supports forced management for external
+        # buckets, this can be deprecated.
         self.force_delete = False
 
         # Validate and correct inputs if necessary
