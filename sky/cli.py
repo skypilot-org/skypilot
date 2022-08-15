@@ -1454,9 +1454,8 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
 
     if all:
         if len(clusters) > 0:
-            click.echo(
-                'Both --all and cluster(s) specified for sky start. '
-                'Letting --all take effect.')
+            click.echo('Both --all and cluster(s) specified for sky start. '
+                       'Letting --all take effect.')
 
         # Get all clusters that are not reserved names.
         clusters = [
