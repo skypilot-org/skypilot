@@ -1380,7 +1380,13 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=True)
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Start all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1410,8 +1416,9 @@ def autostop(
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
 @usage_lib.entrypoint
-def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
-          retry_until_up: bool):
+# pylint: disable=redefined-builtin
+def start(clusters: Tuple[str], all: bool, yes: bool,
+          idle_minutes_to_autostop: int, retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1434,9 +1441,30 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
       \b
       # Restart multiple clusters.
       sky start cluster1 cluster2
+      \b
+      # Restart all clusters.
+      sky start -a
 
     """
     to_start = []
+
+    if not clusters and not all:
+        raise click.UsageError(
+            'sky start requires either a cluster name (see `sky status`) '
+            'or --all.')
+
+    if all:
+        if len(clusters) > 0:
+            click.echo('Both --all and cluster(s) specified for sky start. '
+                       'Letting --all take effect.')
+
+        # Get all clusters that are not reserved names.
+        clusters = [
+            cluster['name']
+            for cluster in global_user_state.get_clusters()
+            if cluster['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
+
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)

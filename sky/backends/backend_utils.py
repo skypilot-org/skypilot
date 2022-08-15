@@ -1099,7 +1099,7 @@ def _process_cli_query(
 
 
 @contextlib.contextmanager
-def subpress_output():
+def suppress_output():
     """Suppress stdout and stderr."""
     with open(os.devnull, 'w') as devnull:
         with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
@@ -1116,7 +1116,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_caches')
         return set(ray_launch_hashes)
-    with subpress_output():
+    with suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
@@ -1130,7 +1130,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
-        with subpress_output():
+        with suppress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
         launch_hashes.add(current_hash)

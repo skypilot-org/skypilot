@@ -372,10 +372,9 @@ def spot_launch(
     task.set_resources({new_resources})
 
     if task.run is None:
-        logger.info(
-            f'{colorama.Fore.GREEN}'
-            'Skipping the managed spot task as the run section is not set.'
-            f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.GREEN}'
+              'Skipping the managed spot task as the run section is not set.'
+              f'{colorama.Style.RESET_ALL}')
         return
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
@@ -425,6 +424,7 @@ def spot_launch(
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.name = None
+            storage_obj.force_delete = True
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
@@ -448,10 +448,10 @@ def spot_launch(
             controller_task = sky.Task.from_yaml(yaml_path)
             controller_task.spot_task = task
             assert len(controller_task.resources) == 1
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'Launching managed spot job {name} from spot controller...'
-                    f'{colorama.Style.RESET_ALL}')
-        logger.info('Launching spot controller...')
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching managed spot job {name} from spot controller...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Launching spot controller...')
         _execute(
             dag=spot_dag,
             stream_logs=stream_logs,
