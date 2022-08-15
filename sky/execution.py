@@ -400,6 +400,9 @@ def spot_launch(
             f'Translated workdir {workdir} to cloud storage {bucket_name}.')
 
     copy_mounts = task.get_local_to_remote_file_mounts()
+    # TODO(zhwu): Optimize this by:
+    # 1. Use the same bucket for all the mounts.
+    # 2. When the src is the same, use the same bucket.
     for i, (dst, src) in enumerate(copy_mounts.items()):
         task.file_mounts.pop(dst)
         bucket_name = spot.constants.SPOT_FILE_MOUNT_BUCKET_NAME.format(
@@ -413,15 +416,14 @@ def spot_launch(
             'mode': 'COPY',
         })
         logger.info(
-            f'Translated local file mount {src} to cloud storage {bucket_name}.'
+            f'Translated local file mount {dst} to cloud storage {bucket_name}.'
         )
     task.update_storage_mounts(new_storage_mounts)
 
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
-    with backend_utils.suppress_output():
-        task.add_storage_mounts()
+    task.add_storage_mounts()
 
     # Replace the source field that is local path in all storage_mounts with
     # bucket URI and remove the name field.
