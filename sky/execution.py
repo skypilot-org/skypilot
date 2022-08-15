@@ -13,6 +13,7 @@ Current task launcher:
   - ray exec + each task's commands
 """
 import enum
+import getpass
 import tempfile
 import os
 import time
@@ -377,25 +378,44 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         return
 
-    # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
-    # following validations.
-    # Check the file mounts in the task.
-    # Disallow all local file mounts (copy mounts).
+    # Translate the workdir and local file mounts to cloud file mounts.
+    new_storage_mounts = {}
+    run_id = common_utils.get_run_id()[:8]
+
     if task.workdir is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Workdir is currently not allowed for managed spot jobs.\n'
-                'Hint: use Storage to auto-upload the workdir to a cloud '
-                'bucket.')
+        workdir = task.workdir
+        task.workdir = None
+        bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
+            username=getpass.getuser(),
+            hash=run_id,
+        )
+        new_storage_mounts[backend_utils.SKY_REMOTE_WORKDIR] = (
+            storage.Storage.from_yaml_config({
+                'name': bucket_name,
+                'source': workdir,
+                'persistent': False,
+                'mode': 'COPY',
+            }))
+        logger.info(
+            f'Translated workdir {workdir} to cloud storage {bucket_name}.')
+
     copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts:
-        local_sources = '\t' + '\n\t'.join(
-            src for _, src in copy_mounts.items())
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Local file mounts are currently not allowed for managed spot '
-                f'jobs.\nFound local source paths:\n{local_sources}\nHint: use '
-                'Storage to auto-upload local files to a cloud bucket.')
+    for i, (dst, src) in enumerate(copy_mounts.items()):
+        task.file_mounts.pop(dst)
+        bucket_name = spot.constants.SPOT_FILE_MOUNT_BUCKET_NAME.format(
+            username=getpass.getuser(),
+            hash=f'{run_id}-{i}',
+        )
+        new_storage_mounts[dst] = storage.Storage.from_yaml_config({
+            'name': bucket_name,
+            'source': src,
+            'persistent': False,
+            'mode': 'COPY',
+        })
+        logger.info(
+            f'Translated local file mount {src} to cloud storage {bucket_name}.'
+        )
+    task.update_storage_mounts(new_storage_mounts)
 
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to

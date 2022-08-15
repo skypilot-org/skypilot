@@ -193,7 +193,7 @@ class AbstractStore:
                 continue
             path = os.path.join(local_path, remote_path)
             if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
+                os.makedirs(os.path.dirname(path), exist_ok=True)
             logger.info(f'Downloading {remote_path} to {path}')
             self._download_file(remote_path, path)
 

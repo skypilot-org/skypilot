@@ -9,11 +9,22 @@ import os
 import socket
 import sys
 import time
+import uuid
 import yaml
 
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
+
+_run_id = None
+
+
+def get_run_id():
+    """Returns a unique run id for this logging."""
+    global _run_id
+    if _run_id is None:
+        _run_id = str(uuid.uuid4())
+    return _run_id
 
 
 class Backoff:
