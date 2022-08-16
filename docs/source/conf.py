@@ -67,6 +67,7 @@ epub_show_urls = 'footnote'
 copybutton_prompt_text = r'\$ '
 copybutton_prompt_is_regexp = True
 
+html_show_sourcelink = False
 
 # The name of an image file (relative to this directory) to place at the top
 # of the sidebar.

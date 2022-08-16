@@ -1,5 +1,5 @@
-SkyPilot
-========
+SkyPilot Documentation
+======================
 
 .. image:: ./images/skypilot-wide-light-1k.png
   :width: 60%
