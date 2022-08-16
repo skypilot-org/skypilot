@@ -22,6 +22,6 @@ All fields are described below:
       ssh_user: ubuntu  # User account.
       ssh_private_key: ~/.ssh/ubuntu.pem  # Private keypair.
 
-    # Admin's python path for launchig jobs on the local cluster.
+    # Admin's python path for launching jobs on the local cluster.
     # This field is only visible for regular users.
     admin_python: /usr/bin/python3
