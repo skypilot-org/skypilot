@@ -199,5 +199,8 @@ def get_cluster_schema():
                     },
                 }
             },
+            'admin_python': {
+                'type': 'string',
+            },
         }
     }
