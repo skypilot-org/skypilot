@@ -43,7 +43,7 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 4
+    _VERSION = 5
 
     def __init__(
         self,
@@ -55,12 +55,14 @@ class Resources:
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
+        zone: Optional[str] = None,
         image_id: Optional[str] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
-        self._set_region(region)
+        self._zone: Optional[str] = None
+        self._set_region_zone(region, zone)
 
         self._instance_type = instance_type
 
@@ -123,6 +125,10 @@ class Resources:
     @property
     def region(self):
         return self._region
+
+    @property
+    def zone(self):
+        return self._zone
 
     @property
     def instance_type(self):
@@ -231,42 +237,21 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
-    def _set_region(self, region: Optional[str]) -> None:
-        self._region = region
-        if region is None:
+    def _set_region_zone(self, region: Optional[str],
+                         zone: Optional[str]) -> None:
+        if region is None and zone is None:
             return
 
-        # Validate region.
-        if self._cloud is not None:
-            if not self._cloud.region_exists(region):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid region {region!r} '
-                                     f'for cloud {self.cloud}.')
-        else:
-            # If cloud not specified
-            valid_clouds = []
-            enabled_clouds = global_user_state.get_enabled_clouds()
-            for cloud in enabled_clouds:
-                if cloud.region_exists(region):
-                    valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
-                if len(enabled_clouds) == 1:
-                    cloud_str = f'for cloud {enabled_clouds[0]}'
-                else:
-                    cloud_str = f'for any cloud among {enabled_clouds}'
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Invalid region {region!r} '
-                                     f'{cloud_str}.')
-            if len(valid_clouds) > 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Ambiguous region {region!r}. '
-                        f'Please specify cloud explicitly among {valid_clouds}.'
-                    )
-            logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
-                         f'inferred from the region {region!r}.')
-            self._cloud = valid_clouds[0]
+        if self._cloud is None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified together with region/zone.')
+
+        # Validate whether region and zone exist in the catalog.
+        self._cloud.validate_region_zone(region, zone)
+
         self._region = region
+        self._zone = zone
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -308,7 +293,7 @@ class Resources:
             self._cloud = valid_clouds[0]
 
     def _try_validate_accelerators(self) -> None:
-        """Try-validates accelerators against the instance type."""
+        """Validate accelerators against the instance type and region/zone."""
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
             acc_requested = self.accelerators
@@ -331,6 +316,21 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
+
+        # Validate whether accelerator is available in specified region/zone.
+        if self.accelerators is not None:
+            acc, acc_count = list(self.accelerators.items())[0]
+            if self.region is not None or self.zone is not None:
+                if not self._cloud.accelerator_in_region_or_zone(
+                        acc, acc_count, self.region, self.zone):
+                    error_str = (f'Accelerator "{acc}" is not available in '
+                                 '"{}" region/zone.')
+                    if self.zone:
+                        error_str = error_str.format(self.zone)
+                    else:
+                        error_str = error_str.format(self.region)
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(error_str)
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
@@ -416,6 +416,13 @@ class Resources:
             return False
         # self.region <= other.region
 
+        if (self.zone is None) != (other.zone is None):
+            # self and other's zone should be both None or both not None
+            return False
+
+        if self.zone is not None and self.zone != other.zone:
+            return False
+
         if (self.image_id is None) != (other.image_id is None):
             # self and other's image id should be both None or both not None
             return False
@@ -465,6 +472,10 @@ class Resources:
         if self.region is not None and self.region != other.region:
             return False
         # self.region <= other.region
+
+        if self.zone is not None and self.zone != other.zone:
+            return False
+        # self.zone <= other.zone
 
         if (self.image_id is not None and self.image_id != other.image_id):
             return False
@@ -537,6 +548,7 @@ class Resources:
             spot_recovery=override.pop('spot_recovery', self.spot_recovery),
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
+            zone=override.pop('zone', self.zone),
             image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
@@ -569,6 +581,8 @@ class Resources:
             resources_fields['disk_size'] = int(config.pop('disk_size'))
         if config.get('region') is not None:
             resources_fields['region'] = config.pop('region')
+        if config.get('zone') is not None:
+            resources_fields['zone'] = config.pop('zone')
         if config.get('image_id') is not None:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS/GCP.')
@@ -595,6 +609,7 @@ class Resources:
         config['spot_recovery'] = self.spot_recovery
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
+        add_if_not_none('zone', self.zone)
         add_if_not_none('image_id', self.image_id)
         return config
 
@@ -632,4 +647,7 @@ class Resources:
 
         if version < 4:
             self._image_id = None
+
+        if version < 5:
+            self._zone = None
         self.__dict__.update(state)

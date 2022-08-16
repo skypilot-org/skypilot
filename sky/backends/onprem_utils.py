@@ -209,7 +209,7 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
                     failure_message=f'Failed to run {mkdir_dst} on remote.')
                 if os.path.isdir(src):
                     src = os.path.join(src, '')
-                runner.rsync_up(source=src, target=dst, stream_logs=False)
+                runner.rsync(source=src, target=dst, up=True, stream_logs=False)
 
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
             rc, stdout, _ = runner.run(setup_cmd,
@@ -341,9 +341,10 @@ def get_local_cluster_accelerators(
             fp.write(code)
             fp.flush()
             runner.run(f'mkdir -p {remote_resource_dir}', stream_logs=False)
-            runner.rsync_up(source=fp.name,
-                            target=_SKY_GET_ACCELERATORS_SCRIPT_PATH,
-                            stream_logs=False)
+            runner.rsync(source=fp.name,
+                         target=_SKY_GET_ACCELERATORS_SCRIPT_PATH,
+                         up=True,
+                         stream_logs=False)
             output = run_command_and_handle_ssh_failure(
                 runner,
                 f'python3 {_SKY_GET_ACCELERATORS_SCRIPT_PATH}',
@@ -459,15 +460,17 @@ def launch_ray_on_local_cluster(
                 f'Failed to launch ray on worker node {runner.ip}.')
 
             # Connecting ray dashboard with worker node.
-            runner.rsync_up(source=ssh_key,
-                            target=remote_ssh_key,
-                            stream_logs=False)
+            runner.rsync(source=ssh_key,
+                         target=remote_ssh_key,
+                         up=True,
+                         stream_logs=False)
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(port_cmd)
                 fp.flush()
-                runner.rsync_up(source=fp.name,
-                                target=dashboard_remote_path,
-                                stream_logs=False)
+                runner.rsync(source=fp.name,
+                             target=dashboard_remote_path,
+                             up=True,
+                             stream_logs=False)
             # Kill existing dashboard connection and launch new one
             run_command_and_handle_ssh_failure(
                 runner, f'chmod a+rwx {dashboard_remote_path};'

@@ -94,7 +94,7 @@ setup_commands:
   - (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U ray[default]=={{ray_version}}) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app && touch ~/.sudo_as_admin_successful;
     pip3 uninstall skypilot -y &> /dev/null;
-    pip3 install "$(echo {{sky_remote_path}}/skypilot-*.whl)[azure]";
+    pip3 install "$(echo {{sky_remote_path}}/skypilot-{{sky_version}}*.whl)[azure]";
     python3 -c "from sky.skylet.ray_patches import patch; patch()";
     sudo systemctl stop unattended-upgrades;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;

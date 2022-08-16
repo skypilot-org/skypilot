@@ -30,9 +30,13 @@ describe all fields available.
     resources:
       cloud: aws  # The cloud to use (optional).
 
-      # The region to use (optional). The Auto-failover will be disabled
+      # The region to use (optional). Auto-failover will be disabled
       # if this is specified.
       region: us-east-1
+
+      # The zone to use (optional). Auto-failover will be disabled
+      # if this is specified.
+      zone: us-east-1a
 
       # Accelerator name and count per node (optional).
       #
@@ -74,7 +78,7 @@ describe all fields available.
       # requested and should work for either case. If passing in an incompatible
       # version, GCP will throw an error during provisioning.
       accelerator_args:
-        # Default runtime_version is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
+        # Default is "2.5.0" for TPU node and "tpu-vm-base" for TPU VM.
         runtime_version: 2.5.0
         tpu_name: mytpu
         tpu_vm: False  # False to use TPU nodes (the default); True to use TPU VMs.
@@ -91,11 +95,12 @@ describe all fields available.
       # image_id: projects/deeplearning-platform-release/global/images/family/tf2-ent-2-1-cpu-ubuntu-2004
 
     file_mounts:
-      # Uses rsync to copy local files to all nodes of the cluster.
+      # Uses rsync to sync local files/directories to all nodes of the cluster.
       #
       # If symlinks are present, they are copied as symlinks, and their targets
       # must also be synced using file_mounts to ensure correctness.
-      /remote/path/datasets: /local/path/datasets
+      /remote/dir1/file: /local/dir1/file
+      /remote/dir2: /local/dir2
 
       # Uses SkyPilot Storage to create a S3 bucket named sky-dataset, uploads the
       # contents of /local/path/datasets to the bucket, and marks the bucket
