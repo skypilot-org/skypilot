@@ -68,27 +68,25 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     name_to_path_dict = {}
 
     for path in local_cluster_paths:
-        # TODO(mluo): Define a scheme for cluster config to check if YAML
-        # schema is correct.
         with open(path, 'r') as f:
             yaml_config = yaml.safe_load(f)
+            if not suppress_error:
+                backend_utils.validate_schema(yaml_config,
+                                              schemas.get_cluster_schema(),
+                                              'Invalid cluster YAML: ')
             user_config = yaml_config['auth']
             cluster_name = yaml_config['cluster']['name']
         sky_local_path = SKY_USER_LOCAL_CONFIG_PATH
 
-        if not suppress_error:
-            backend_utils.validate_schema(yaml_config,
-                                          schemas.get_cluster_schema(),
-                                          'Invalid cluster YAML: ')
-            if AUTH_PLACEHOLDER in (user_config['ssh_user'],
-                                    user_config['ssh_private_key']):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Authentication into local cluster requires '
-                        'specifying `ssh_user` and `ssh_private_key` '
-                        'under the `auth` dictionary. Please fill '
-                        'aforementioned fields in '
-                        f'{sky_local_path.format(cluster_name)}.')
+        if not suppress_error and (AUTH_PLACEHOLDER
+                                   in (user_config['ssh_user'],
+                                       user_config['ssh_private_key'])):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Authentication into local cluster requires '
+                                 'specifying `ssh_user` and `ssh_private_key` '
+                                 'under the `auth` dictionary. Please fill '
+                                 'aforementioned fields in '
+                                 f'{sky_local_path.format(cluster_name)}.')
         if cluster_name in local_cluster_names:
             if not suppress_error:
                 with ux_utils.print_exception_no_traceback():
