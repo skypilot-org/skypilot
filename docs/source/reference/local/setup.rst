@@ -23,7 +23,7 @@ To install Ray and SkyPilot for all users, run the following commands on all loc
    $ sudo -H pip3 install ray[default]==1.13.0
 
    $ # SkyPilot requires python >= 3.6.
-   $ git clone ssh://git@github.com/skypilot-org/skypilot.git
+   $ git clone https://github.com/skypilot-org/skypilot.git
    $ cd skypilot
    $ sudo -H pip3 install -e .
 
