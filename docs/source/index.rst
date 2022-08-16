@@ -6,7 +6,9 @@ SkyPilot Documentation
   :align: center
   :alt: SkyPilot
 
-SkyPilot is a framework for easily running machine learning workloads on any cloud through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+SkyPilot is a framework for easily running machine learning workloads on any cloud through a unified interface.
+
+No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
 
 Key features:
 
