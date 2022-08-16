@@ -193,7 +193,7 @@ class AbstractStore:
                 continue
             path = os.path.join(local_path, remote_path)
             if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path), exist_ok=True)
+                os.makedirs(os.path.dirname(path))
             logger.info(f'Downloading {remote_path} to {path}')
             self._download_file(remote_path, path)
 
@@ -802,8 +802,9 @@ class S3Store(AbstractStore):
             # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
             # to a log file.
             with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE,
-                                  stdout=subprocess.PIPE) as process:
+                                stderr=subprocess.PIPE,
+                                stdout=subprocess.DEVNULL
+                ) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
@@ -811,7 +812,7 @@ class S3Store(AbstractStore):
                         break
                     str_line = line.decode('utf-8')
                     logger.info(str_line)
-                    stderr.append(line)
+                    stderr.append(str_line)
                     if 'Access Denied' in str_line:
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
@@ -824,8 +825,7 @@ class S3Store(AbstractStore):
                 if returncode != 0:
                     stderr = '\n'.join(stderr)
                     with ux_utils.print_exception_no_traceback():
-                        logger.error(
-                            f'{process.stdout.decode("utf-8")}\n{stderr}')
+                        logger.error(stderr)
                         raise exceptions.StorageUploadError(
                             f'Upload to S3 failed for store {self.name} and '
                             f'source {self.source}. Please check the logs.')
@@ -1054,7 +1054,7 @@ class GcsStore(AbstractStore):
                 f'[green]{self.source} to gs://{self.name}/'):
             with subprocess.Popen(sync_command.split(' '),
                                   stderr=subprocess.PIPE,
-                                  stdout=subprocess.PIPE) as process:
+                                  stdout=subprocess.DEVNULL) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
@@ -1075,8 +1075,7 @@ class GcsStore(AbstractStore):
                 if returncode != 0:
                     with ux_utils.print_exception_no_traceback():
                         stderr = '\n'.join(stderr)
-                        logger.error(
-                            f'{process.stdout.decode("utf-8")}\n{stderr}')
+                        logger.error(stderr)
                         raise exceptions.StorageUploadError(
                             f'Upload to GCS failed for store {self.name} and '
                             f'source {self.source}. Please check logs.')
