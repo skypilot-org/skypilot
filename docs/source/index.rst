@@ -1,7 +1,7 @@
 SkyPilot Documentation
 ======================
 
-.. image:: ./images/skypilot-wide-light-1k.png
+.. figure:: ./images/skypilot-wide-light-1k.png
   :width: 60%
   :align: center
   :alt: SkyPilot
