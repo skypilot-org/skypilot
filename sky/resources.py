@@ -184,7 +184,7 @@ class Resources:
         if self.accelerators is None:
             return False
         acc, _ = list(self.accelerators.items())[0]
-        return acc not in ['tpu-v2-8', 'tpu-v3-8']
+        return acc.startswith('tpu') and acc not in ['tpu-v2-8', 'tpu-v3-8']
 
     @property
     def tpu_pod_num(self) -> Optional[int]:
