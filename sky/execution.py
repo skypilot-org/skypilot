@@ -469,7 +469,7 @@ def spot_launch(
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
     logger.info(f'{colorama.Fore.YELLOW}Uploading storage from sources...'
-                f'{colorama.Style.RESET_ALL}')
+                f'{colorama.Style.RESET_ALL} See sky storage ls')
     task.add_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
@@ -509,7 +509,7 @@ def spot_launch(
     with open('test-out.yaml', 'w') as f:
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(f.name, task_config)
-    sys.exit(0)
+
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
