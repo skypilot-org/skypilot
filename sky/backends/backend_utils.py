@@ -60,7 +60,6 @@ logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'

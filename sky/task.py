@@ -10,6 +10,7 @@ import yaml
 import sky
 from sky import check
 from sky import clouds
+from sky import constants
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
@@ -466,13 +467,19 @@ class Task:
             self.storage_mounts = None
             return self
         for target, _ in storage_mounts.items():
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot mount to {constants.SKY_REMOTE_WORKDIR!r} '
+                        'when workdir is set.')
+
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Storage mount destination path cannot be cloud storage'
                     )
         # Storage source validation is done in Storage object
-
         self.storage_mounts = storage_mounts
         return self
 
@@ -610,6 +617,12 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot mount to {constants.SKY_REMOTE_WORKDIR!r} '
+                        'when workdir is set.')
 
         self.file_mounts = file_mounts
         return self

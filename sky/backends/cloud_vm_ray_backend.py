@@ -53,7 +53,7 @@ OptimizeTarget = optimizer.OptimizeTarget
 Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
-SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
 
 logger = sky_logging.init_logger(__name__)
 
@@ -169,7 +169,7 @@ class RayCodeGen:
             from sky.skylet import job_lib
             from sky.utils import log_utils
 
-            SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
+            SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init(address = 'ray://localhost:10001', namespace='__sky__{job_id}__', log_to_driver=True)

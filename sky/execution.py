@@ -16,7 +16,6 @@ import enum
 import getpass
 import tempfile
 import os
-import sys
 import time
 from typing import Any, List, Optional
 
@@ -24,6 +23,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -394,14 +394,15 @@ def spot_launch(
         workdir = task.workdir
         task.workdir = None
         new_storage_mounts[
-            backend_utils.
+            constants.
             SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
                 'name': bucket_name,
                 'source': workdir,
                 'persistent': False,
                 'mode': 'COPY',
             })
-
+        # Check of the existance of the workdir in file_mounts is done in
+        # the task construction.
         logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
                     f'{bucket_name!r}.')
 
@@ -433,6 +434,9 @@ def spot_launch(
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
+    original_storage_mounts = {}
+    if task.storage_mounts is not None:
+        original_storage_mounts = task.storage_mounts
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
@@ -454,13 +458,17 @@ def spot_launch(
                 'persistent': False,
                 'mode': 'MOUNT',
             })
-
+        if spot.constants.SPOT_FM_REMOTE_TMP_DIR in original_storage_mounts:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Failed to translate file mounts, due to the default '
+                    f'destination {spot.constants.SPOT_FM_REMOTE_TMP_DIR} '
+                    'is taken.')
         sources = list(src_to_file_id.keys())
         sources_str = '\n\t'.join(sources)
         logger.info(
             f'Sources with file will be synced to cloud storage {bucket_name}:'
             f'\n\t{sources_str}')
-
     task.update_storage_mounts(new_storage_mounts)
 
     # Step 4: Upload storage from sources

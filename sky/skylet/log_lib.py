@@ -14,11 +14,11 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import constants
 from sky import sky_logging
 from sky.skylet import job_lib
 from sky.utils import log_utils
 
-SKY_REMOTE_WORKDIR = '~/sky_workdir'
 _SKY_LOG_WAITING_GAP_SECONDS = 1
 _SKY_LOG_WAITING_MAX_RETRY = 5
 _SKY_LOG_TAILING_GAP_SECONDS = 0.2
@@ -248,7 +248,7 @@ def make_task_bash_script(codegen: str,
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
-            cd {SKY_REMOTE_WORKDIR}"""),
+            cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
     if env_vars is not None:
         for k, v in env_vars.items():
