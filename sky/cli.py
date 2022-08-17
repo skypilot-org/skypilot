@@ -62,6 +62,7 @@ from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -1103,7 +1104,8 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       ``sky start`` to restart the cluster.
     """
     cluster_records = core.status(all=all, refresh=refresh)
-    local_clusters = onprem_utils.check_and_get_local_clusters()
+    local_clusters = onprem_utils.check_and_get_local_clusters(
+        suppress_error=True)
     status_utils.show_status_table(cluster_records, all)
     status_utils.show_local_status_table(local_clusters)
 
@@ -1146,7 +1148,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
             click.echo(str(e))
             continue
         job_table = job_lib.format_job_queue(job_table)
-        click.echo(f'{job_table}')
+        click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
 
     local_clusters = onprem_utils.check_and_get_local_clusters()
     for local_cluster in local_clusters:
@@ -1379,7 +1381,13 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=True)
+@click.argument('clusters', nargs=-1, required=False)
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Start all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1409,8 +1417,9 @@ def autostop(
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
 @usage_lib.entrypoint
-def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
-          retry_until_up: bool):
+# pylint: disable=redefined-builtin
+def start(clusters: Tuple[str], all: bool, yes: bool,
+          idle_minutes_to_autostop: int, retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1433,9 +1442,30 @@ def start(clusters: Tuple[str], yes: bool, idle_minutes_to_autostop: int,
       \b
       # Restart multiple clusters.
       sky start cluster1 cluster2
+      \b
+      # Restart all clusters.
+      sky start -a
 
     """
     to_start = []
+
+    if not clusters and not all:
+        raise click.UsageError(
+            'sky start requires either a cluster name (see `sky status`) '
+            'or --all.')
+
+    if all:
+        if len(clusters) > 0:
+            click.echo('Both --all and cluster(s) specified for sky start. '
+                       'Letting --all take effect.')
+
+        # Get all clusters that are not reserved names.
+        clusters = [
+            cluster['name']
+            for cluster in global_user_state.get_clusters()
+            if cluster['name'] not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
+
     if clusters:
         # Get GLOB cluster names
         clusters = _get_glob_clusters(clusters)
@@ -2152,6 +2182,8 @@ def admin_deploy(clusterspec_yaml: str):
     clusterspec_yaml = ' '.join(clusterspec_yaml)
     assert clusterspec_yaml
     is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
+    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
+                                  'Invalid cluster YAML: ')
     if not is_yaml:
         raise ValueError('Must specify cluster config')
 

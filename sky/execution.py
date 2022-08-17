@@ -372,10 +372,9 @@ def spot_launch(
     task.set_resources({new_resources})
 
     if task.run is None:
-        logger.info(
-            f'{colorama.Fore.GREEN}'
-            'Skipping the managed spot task as the run section is not set.'
-            f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.GREEN}'
+              'Skipping the managed spot task as the run section is not set.'
+              f'{colorama.Style.RESET_ALL}')
         return
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
@@ -383,19 +382,26 @@ def spot_launch(
     # Check the file mounts in the task.
     # Disallow all local file mounts (copy mounts).
     if task.workdir is not None:
-        raise exceptions.NotSupportedError(
-            'Workdir is not allowed for managed spot jobs.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Workdir is currently not allowed for managed spot jobs.\n'
+                'Hint: use Storage to auto-upload the workdir to a cloud '
+                'bucket.')
     copy_mounts = task.get_local_to_remote_file_mounts()
     if copy_mounts:
-        copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
-        raise exceptions.NotSupportedError(
-            'Local file mounts are not allowed for managed spot jobs, '
-            f'but following are found: {copy_mounts_str}')
+        local_sources = '\t' + '\n\t'.join(
+            src for _, src in copy_mounts.items())
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Local file mounts are currently not allowed for managed spot '
+                f'jobs.\nFound local source paths:\n{local_sources}\nHint: use '
+                'Storage to auto-upload local files to a cloud bucket.')
 
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
-    task.add_storage_mounts()
+    with backend_utils.suppress_output():
+        task.add_storage_mounts()
 
     # Replace the source field that is local path in all storage_mounts with
     # bucket URI and remove the name field.
@@ -418,6 +424,7 @@ def spot_launch(
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.name = None
+            storage_obj.force_delete = True
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
@@ -441,10 +448,10 @@ def spot_launch(
             controller_task = sky.Task.from_yaml(yaml_path)
             controller_task.spot_task = task
             assert len(controller_task.resources) == 1
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'Launching managed spot job {name} from spot controller...'
-                    f'{colorama.Style.RESET_ALL}')
-        logger.info('Launching spot controller...')
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching managed spot job {name} from spot controller...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Launching spot controller...')
         _execute(
             dag=spot_dag,
             stream_logs=stream_logs,

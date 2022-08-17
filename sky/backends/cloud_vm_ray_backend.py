@@ -2701,7 +2701,7 @@ class CloudVmRayBackend(backends.Backend):
                 subprocess_utils.handle_returncode(
                     returncode, symlink_command,
                     'Failed to create symlinks. The target destination '
-                    'may already exist')
+                    f'may already exist. Log: {log_path}')
 
             subprocess_utils.run_in_parallel(_symlink_node, runners)
         end = time.time()
