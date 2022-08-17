@@ -645,9 +645,9 @@ class Optimizer:
             spot = '[Spot]' if resources.use_spot else ''
             cloud = resources.cloud
             vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
-            if vcpus == 0.0:
+            if vcpus is None:
                 vcpus = '-'
-            elif vcpus.is_integer():
+            elif isinstance(vcpus, float) and vcpus.is_integer():
                 vcpus = int(vcpus)
             return [
                 str(cloud),
