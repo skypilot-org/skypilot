@@ -134,7 +134,7 @@ def get_local_auth_config(cluster_name: str) -> List[str]:
 def get_admin_python(cluster_name: str) -> List[str]:
     """Returns admin python's path."""
     config = get_local_cluster_config_or_error(cluster_name)
-    return config['admin_python']
+    return config['python']
 
 
 def get_job_owner(cluster_yaml: dict) -> str:
@@ -505,7 +505,7 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     # Admin authentication must be censored out.
     cluster_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
-    cluster_config['admin_python'] = run_command_and_handle_ssh_failure(
+    cluster_config['python'] = run_command_and_handle_ssh_failure(
         head_runner,
         'sudo which python3',
         failure_message='Failed to obtain admin python path.').split()[0]

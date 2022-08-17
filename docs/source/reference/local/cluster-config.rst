@@ -24,4 +24,4 @@ All fields are described below:
 
     # Admin's python path for launching jobs on the local cluster.
     # This field is only visible for regular users.
-    admin_python: /usr/bin/python3
+    python: /usr/bin/python3
