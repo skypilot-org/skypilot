@@ -10,10 +10,7 @@ You can use SkyPilot Benchmark by simply replacing your ``sky launch`` command w
 
 .. code-block:: bash
 
-    # Normal launch command
-    $ sky launch mytask.yaml --gpus V100
-
-    # Benchmark launch command
+    # Launch mytask on a V100 VM and a T4 VM
     $ sky bench launch mytask.yaml --gpus V100,T4 --benchmark mybench
 
 The second command will launch ``mytask.yaml`` on a V100 VM and a T4 VM simultaneously, with a benchmark name ``mybench``.

@@ -33,15 +33,11 @@ The SkyCallback generic APIs are for **PyTorch, TensorFlow, and JAX** programs w
 Below we provide the instructions for using the APIs.
 
 First, import the SkyCallback package and initialize it using ``init``.
-You can optionally specify in ``total_steps`` the total number of steps that the task will iterate through.
 
 .. code-block:: python
 
     import sky_callback
-    ...
-    sky_callback.init(
-        total_steps=num_epochs * len(train_dataloader), # Optional
-    )
+    sky_callback.init()
 
 Next, mark the beginning and end of each step using one of the three equivalent methods.
 
@@ -64,8 +60,19 @@ Next, mark the beginning and end of each step using one of the three equivalent 
         sky_callback.step_end()
 
 That's it.
-Now you can launch your task and get a complete benchmark report using SkyPilot Benchmark CLI.
-`Here <https://github.com/skypilot-org/skypilot/blob/master/examples/benchmark/timm/callback.patch>`_ we provide an example of applying SkyCallback to Pytorch ImageNet training code.
+Now you can launch your task and get a detailed benchmark report using SkyPilot Benchmark CLI.
+`Here <https://github.com/skypilot-org/skypilot/blob/master/examples/benchmark/timm/callback.patch>`_ we provide an example of applying SkyCallback to Pytorch ImageNet training.
+
+.. note::
+    
+    Optionally in ``sky_callback.init``, you can specify the total number of steps that the task will iterate through.
+    This information is needed to estimate the total execution time/cost of your task.
+
+    .. code-block:: python
+    
+        sky_callback.init(
+            total_steps=num_epochs * len(train_dataloader), # Optional
+        )
 
 .. note::
     In distributed training, ``global_rank`` should be additionally passed to ``sky_callback.init`` as follows:
@@ -125,6 +132,3 @@ SkyCallback natively supports these frameworks with simple interface.
 .. note::
     When using the framework-integrated callbacks, do not call ``sky_callback.init`` for initialization.
     The callbacks will do it for you.
-
-.. SkyCallback for containerized jobs (Advanced)
-.. --------------------------------------------
