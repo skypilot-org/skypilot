@@ -11,7 +11,6 @@ import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
-from Crypto.PublicKey import RSA
 
 from sky import sky_logging
 from sky.adaptors import aws, gcp
@@ -93,6 +92,7 @@ def get_or_generate_keys(private_key_path: str, public_key_path: str):
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_aws_authentication(config):
+    from Crypto.PublicKey import RSA  # pylint: disable=import-outside-toplevel
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
     if private_key_path is None:
