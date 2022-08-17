@@ -86,7 +86,8 @@ class Local(clouds.Cloud):
         return Local._DEFAULT_INSTANCE_TYPE
 
     @classmethod
-    def get_vcpus_from_instance_type(cls, instance_type: str) -> Optional[float]:
+    def get_vcpus_from_instance_type(cls,
+                                     instance_type: str) -> Optional[float]:
         return None
 
     @classmethod
