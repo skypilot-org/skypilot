@@ -1156,18 +1156,12 @@ class RetryingVmProvisioner(object):
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.
-            # Last line looks like: 'ssh ... <user>@<head_ip>\n'
+            # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
-            if position == -1:
+            head_ip = stdout[position + 1:].strip()
+            if not backend_utils.is_ip(head_ip):
                 # Something's wrong. Ok to not return a head_ip.
                 head_ip = None
-            else:
-                head_ip = stdout[position + 1:].strip()
-                # Basic check: it should have at most 3*4 + 3 chars.
-                if len(head_ip) > 15:
-                    # Something's wrong. Ok to not return a head_ip.
-                    head_ip = None
-
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip)
 

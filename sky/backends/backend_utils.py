@@ -108,6 +108,11 @@ CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
 
 
+def is_ip(s: str) -> bool:
+    """Returns whether this string matches IP_ADDR_REGEX."""
+    return len(re.findall(IP_ADDR_REGEX, s)) == 1
+
+
 def fill_template(template_name: str,
                   variables: Dict,
                   output_path: Optional[str] = None,
