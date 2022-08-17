@@ -341,21 +341,15 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    def get_job_status(job_id) -> Optional[JobStatus]:
-        try:
-            # The return value is a string, e.g. 'RUNNING', which conflicts
-            # with the return type in ray code.
-            ray_status = job_client.get_job_status(job_id)
-            return _RAY_TO_JOB_STATUS_MAP[ray_status]
-        except RuntimeError as e:
-            # If the job does not exist or if the request to the
-            # job server fails.
-            if 'does not exist' in str(e):
-                return None
-            raise
-
-    ray_statuses: List[JobStatus] = subprocess_utils.run_in_parallel(
-        get_job_status, ray_job_ids)
+    ray_job_infos = job_client.list_jobs()
+    ray_statuses: List[JobStatus] = []
+    for ray_job_id in ray_job_ids:
+        if ray_job_id not in ray_job_infos:
+            ray_statuses.append(None)
+            continue
+        ray_status = ray_job_infos[ray_job_id].status
+        ray_statuses.append(_RAY_TO_JOB_STATUS_MAP[ray_status])
+    
     assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
 
     statuses = []

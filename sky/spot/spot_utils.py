@@ -116,7 +116,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         controller_status = job_lib.get_status(job_id)
         if controller_status.is_terminal():
             logger.error(f'Controller for job {job_id} have exited abnormally. '
-                         'Set the job status to FAILED.')
+                         'Set the job status to FAILED_CONTROLLER.')
             task_name = spot_state.get_task_name_by_job_id(job_id)
 
             # Tear down the abnormal spot cluster to avoid resource leakage.
