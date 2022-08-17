@@ -820,7 +820,7 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
-        [('s3://tcga-2-open', storage_lib.StoreType.S3),
+        [('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
@@ -831,6 +831,13 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.parametrize(
+        'nonexist_bucket', [f's3://{str(uuid.uuid4())}', f'gs://{str(uuid.uuid4())}'])
+    def test_nonexistent_bucket(self, nonexist_bucket):
+        # Attempts to create fetch a stroage with a non-existent source.
+        with pytest.raises(sky.exceptions.StorageBucketGetError, match='Attempted to connect to a non-existent bucket'):
+            storage_obj = storage_lib.Storage(source=nonexist_bucket)
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name):
