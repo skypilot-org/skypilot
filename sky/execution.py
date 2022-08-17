@@ -386,7 +386,7 @@ def spot_launch(
 
     # Step 1: Translate the workdir SkyPilot storage.
     logger.info(f'{colorama.Fore.YELLOW}Translating local file_mounts '
-    f'to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+                f'to SkyPilot Storage...{colorama.Style.RESET_ALL}')
     new_storage_mounts = dict()
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
@@ -403,7 +403,8 @@ def spot_launch(
             })
 
         logger.info(
-            f'Workdir {workdir!r} will be synced to cloud storage {bucket_name}.')
+            f'Workdir {workdir!r} will be synced to cloud storage {bucket_name}.'
+        )
 
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
@@ -429,8 +430,7 @@ def spot_launch(
         })
         logger.info(
             f'Folder in local file mount {src!r} will be synced to SkyPilot '
-            f'storage {bucket_name}.'
-        )
+            f'storage {bucket_name}.')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
@@ -469,7 +469,7 @@ def spot_launch(
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
     logger.info(f'{colorama.Fore.YELLOW}Uploading storage from sources...'
-    f'{colorama.Style.RESET_ALL}')
+                f'{colorama.Style.RESET_ALL}')
     task.add_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
