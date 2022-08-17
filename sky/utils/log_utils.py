@@ -1,4 +1,4 @@
-"""Sky logging utils."""
+"""Logging utils."""
 import enum
 from typing import List, Optional
 
