@@ -833,19 +833,23 @@ class TestStorageWithCredentials:
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.parametrize(
-        'nonexist_bucket', [f's3://{str(uuid.uuid4())}', f'gs://{str(uuid.uuid4())}'])
+        'nonexist_bucket',
+        [f's3://{str(uuid.uuid4())}', f'gs://{str(uuid.uuid4())}'])
     def test_nonexistent_bucket(self, nonexist_bucket):
         # Attempts to create fetch a stroage with a non-existent source.
-        with pytest.raises(sky.exceptions.StorageBucketGetError, match='Attempted to connect to a non-existent bucket'):
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match='Attempted to connect to a non-existent bucket'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket)
 
-    @pytest.mark.parametrize(
-        'nonexist_bucket', [f's3://imagenet', f'gs://imagenet'])
+    @pytest.mark.parametrize('nonexist_bucket',
+                             [f's3://imagenet', f'gs://imagenet'])
     def test_private_bucket(self, nonexist_bucket):
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        with pytest.raises(sky.exceptions.StorageBucketGetError, match='the bucket name is taken'):
+        with pytest.raises(sky.exceptions.StorageBucketGetError,
+                           match='the bucket name is taken'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket)
 
     @staticmethod
