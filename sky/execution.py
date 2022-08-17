@@ -16,6 +16,7 @@ import enum
 import getpass
 import tempfile
 import os
+import sys
 import time
 from typing import Any, List, Optional
 
@@ -384,6 +385,8 @@ def spot_launch(
     run_id = common_utils.get_run_id()[:8]
 
     # Step 1: Translate the workdir SkyPilot storage.
+    logger.info(f'{colorama.Fore.YELLOW}Translating local file_mounts '
+    f'to SkyPilot Storage...{colorama.Style.RESET_ALL}')
     new_storage_mounts = dict()
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
@@ -400,8 +403,7 @@ def spot_launch(
             })
 
         logger.info(
-            f'Workdir {workdir} will be synced to cloud storage {bucket_name}. '
-            'See sky storage ls')
+            f'Workdir {workdir!r} will be synced to cloud storage {bucket_name}.')
 
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
@@ -426,7 +428,8 @@ def spot_launch(
             'mode': 'COPY',
         })
         logger.info(
-            f'Translated local file mount {dst} to cloud storage {bucket_name}.'
+            f'Folder in local file mount {src!r} will be synced to SkyPilot '
+            f'storage {bucket_name}.'
         )
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
@@ -438,7 +441,9 @@ def spot_launch(
     file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
         username=getpass.getuser(), id=run_id)
     if copy_mounts_with_file_in_src:
-        for i, (dst, src) in enumerate(copy_mounts_with_file_in_src.items()):
+        src_to_file_id = dict()
+        for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
+            src_to_file_id[src] = i
             os.link(os.path.abspath(os.path.expanduser(src)),
                     os.path.join(local_fm_path, f'file-{i}'))
 
@@ -451,27 +456,36 @@ def spot_launch(
                 'mode': 'MOUNT',
             })
 
+        sources = list(src_to_file_id.keys())
+        sources_str = '\n\t'.join(sources)
+        logger.info(
+            f'Sources with file will be synced to cloud storage {bucket_name}:'
+            f'\n\t{sources_str}')
+
     task.update_storage_mounts(new_storage_mounts)
 
     # Step 4: Upload storage from sources
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
+    logger.info(f'{colorama.Fore.YELLOW}Uploading storage from sources...'
+    f'{colorama.Style.RESET_ALL}')
     task.add_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
     #  /origin-dst: s3://spot-fm-file-only-bucket-name/file-0
     new_file_mounts = dict()
-    for i, (dst, src) in enumerate(copy_mounts_with_file_in_src.items()):
+    for dst, src in copy_mounts_with_file_in_src.items():
         storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
         store_type = list(storage.stores.keys())[0]
         store_prefix = storage_lib.get_store_prefix(store_type)
         bucket_url = store_prefix + file_bucket_name
-        new_file_mounts[dst] = bucket_url + f'/file-{i}'
+        file_id = src_to_file_id[src]
+        new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
     task.update_file_mounts(new_file_mounts)
 
-    # Replace the source field that is local path in all storage_mounts with
-    # bucket URI and remove the name field.
+    # Step 5: Replace the source field that is local path in all storage_mounts
+    # with bucket URI and remove the name field.
     for storage_obj in task.storage_mounts.values():
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
@@ -492,7 +506,10 @@ def spot_launch(
                         f'Unsupported store type: {store_type}')
             storage_obj.name = None
             storage_obj.force_delete = True
-
+    with open('test-out.yaml', 'w') as f:
+        task_config = task.to_yaml_config()
+        common_utils.dump_yaml(f.name, task_config)
+    sys.exit(0)
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
         task_config = task.to_yaml_config()
