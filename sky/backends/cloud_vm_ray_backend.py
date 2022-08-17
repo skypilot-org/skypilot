@@ -2580,7 +2580,9 @@ class CloudVmRayBackend(backends.Backend):
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, handle.launched_resources, handle.launched_nodes,
+                cluster_name,
+                handle.launched_resources,
+                handle.launched_nodes,
                 cluster_exists=True)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
