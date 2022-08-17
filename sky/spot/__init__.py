@@ -1,6 +1,7 @@
 """Modules for managed spot clusters."""
 import pathlib
 
+from sky import clouds
 from sky.spot.constants import (
     SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
     SPOT_CONTROLLER_NAME,
@@ -19,11 +20,13 @@ from sky.spot.spot_utils import load_spot_job_queue
 
 pathlib.Path(SPOT_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                               exist_ok=True)
+SPOT_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 
 __all__ = [
     'SpotController',
     'SPOT_STRATEGIES',
     'SPOT_DEFAULT_STRATEGY',
+    'SPOT_ENABLED_CLOUDS',
     # Constants
     'SPOT_CONTROLLER_NAME',
     'SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP',

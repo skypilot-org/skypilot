@@ -444,6 +444,9 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
         stop_msg = 'To view the latest job table: sky spot status --refresh'
     controller_status, handle = _is_spot_controller_up(stop_msg)
 
+    if controller_status is None:
+        return []
+
     if (refresh and controller_status in [
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.INIT

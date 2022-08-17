@@ -283,7 +283,7 @@ def load_spot_job_queue(json_str: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
+def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
     """Show all spot jobs."""
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',

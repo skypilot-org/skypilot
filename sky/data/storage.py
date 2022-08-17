@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
+from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
@@ -43,6 +44,29 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+
+
+def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
+    if isinstance(cloud, clouds.AWS):
+        return StoreType.S3
+    elif isinstance(cloud, clouds.GCP):
+        return StoreType.GCS
+    elif isinstance(cloud, clouds.Azure):
+        return StoreType.AZURE
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown cloud type: {cloud}')
+
+
+def get_store_prefix(storetype: StoreType) -> str:
+    if storetype == StoreType.S3:
+        return 's3://'
+    elif storetype == StoreType.GCS:
+        return 'gs://'
+    elif storetype == StoreType.AZURE:
+        return 'azure://'
+    else:
+        raise ValueError(f'Unknown storetype: {storetype}')
 
 
 def _get_storetype_from_store(store: 'Storage') -> StoreType:
@@ -802,9 +826,8 @@ class S3Store(AbstractStore):
             # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
             # to a log file.
             with subprocess.Popen(sync_command.split(' '),
-                                stderr=subprocess.PIPE,
-                                stdout=subprocess.DEVNULL
-                ) as process:
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
