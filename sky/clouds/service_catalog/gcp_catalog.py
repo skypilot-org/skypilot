@@ -223,9 +223,11 @@ def get_accelerator_hourly_cost(accelerator: str,
 def list_accelerators(
     gpus_only: bool,
     name_filter: Optional[str] = None,
+    case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
+                                            case_sensitive)
 
     a100_infos = results.get('A100', None)
     if a100_infos is None:

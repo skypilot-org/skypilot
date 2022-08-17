@@ -400,10 +400,8 @@ def spot_launch(
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
-    with backend_utils.safe_console_status(
-            '[bold cyan]Copying files to buckets'):
-        with backend_utils.suppress_output():
-            task.add_storage_mounts()
+    with backend_utils.suppress_output():
+        task.add_storage_mounts()
 
     # Replace the source field that is local path in all storage_mounts with
     # bucket URI and remove the name field.
