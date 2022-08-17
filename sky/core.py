@@ -112,6 +112,10 @@ def stop(cluster_name: str, purge: bool = False):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+    if handle.launched_resources.use_tpu_pod:
+        raise exceptions.NotSupportedError(
+            f'Stopping cluster {cluster_name!r} with TPU pod '
+            'is not supported.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     if (isinstance(backend, backends.CloudVmRayBackend) and
@@ -172,6 +176,10 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
      handle) = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+    if handle.launched_resources.use_tpu_pod:
+        raise exceptions.NotSupportedError(
+            f'{operation} cluster {cluster_name!r} with TPU pod '
+            'is not supported.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
