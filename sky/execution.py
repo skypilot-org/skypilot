@@ -23,7 +23,6 @@ import colorama
 
 import sky
 from sky import backends
-from sky import check
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -31,7 +30,7 @@ from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
 from sky.data import data_utils
-from sky.data import storage
+from sky.data import storage as storage_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import env_options, timeline
@@ -383,23 +382,6 @@ def spot_launch(
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
     run_id = common_utils.get_run_id()[:8]
-    storage_cloud = resources.cloud
-    if storage_cloud is None:
-        # Get the first enabled cloud.
-        enabled_clouds = global_user_state.get_enabled_clouds()
-        if len(enabled_clouds) == 0:
-            check.check(quiet=True)
-            enabled_clouds = global_user_state.get_enabled_clouds()
-        if len(enabled_clouds) == 0:
-            raise ValueError('No enabled clouds.')
-
-        for cloud in spot.SPOT_ENABLED_CLOUDS:
-            for enabled_cloud in enabled_clouds:
-                if cloud.is_same_cloud(enabled_cloud):
-                    storage_cloud = cloud
-                    break
-    store_type = storage.get_storetype_from_cloud(storage_cloud)
-    store_prefix = storage.get_store_prefix(store_type)
 
     # Step 1: Translate the workdir SkyPilot storage.
     new_storage_mounts = dict()
@@ -410,16 +392,16 @@ def spot_launch(
         task.workdir = None
         new_storage_mounts[
             backend_utils.
-            SKY_REMOTE_WORKDIR] = storage.Storage.from_yaml_config({
+            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
                 'name': bucket_name,
                 'source': workdir,
                 'persistent': False,
-                'store': store_type.value.lower(),
                 'mode': 'COPY',
             })
 
         logger.info(
-            f'Translated workdir {workdir} to cloud storage {bucket_name}.')
+            f'Workdir {workdir} will be synced to cloud storage {bucket_name}. '
+            'See sky storage ls')
 
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
@@ -437,11 +419,10 @@ def spot_launch(
             username=getpass.getuser(),
             id=f'{run_id}-{i}',
         )
-        new_storage_mounts[dst] = storage.Storage.from_yaml_config({
+        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
             'name': bucket_name,
             'source': src,
             'persistent': False,
-            'store': store_type.value.lower(),
             'mode': 'COPY',
         })
         logger.info(
@@ -450,39 +431,44 @@ def spot_launch(
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    new_file_mounts = dict()
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
+    os.makedirs(local_fm_path, exist_ok=True)
+    file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
+        username=getpass.getuser(), id=run_id)
     if copy_mounts_with_file_in_src:
-        bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
-            username=getpass.getuser(), id=run_id)
-        bucket_url = store_prefix + bucket_name
         for i, (dst, src) in enumerate(copy_mounts_with_file_in_src.items()):
             os.link(os.path.abspath(os.path.expanduser(src)),
                     os.path.join(local_fm_path, f'file-{i}'))
-            new_file_mounts[dst] = bucket_url + f'/file-{i}'
 
         new_storage_mounts[
             spot.constants.
-            SPOT_FM_REMOTE_TMP_DIR] = storage.Storage.from_yaml_config({
-                'name': bucket_name,
+            SPOT_FM_REMOTE_TMP_DIR] = storage_lib.Storage.from_yaml_config({
+                'name': file_bucket_name,
                 'source': local_fm_path,
                 'persistent': False,
-                'store': store_type.value.lower(),
                 'mode': 'MOUNT',
             })
 
     task.update_storage_mounts(new_storage_mounts)
-    task.update_file_mounts(new_file_mounts)
 
-    # ================================================================
-    # Upload storage from sources
-    # ================================================================
+    # Step 4: Upload storage from sources
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
     task.add_storage_mounts()
+
+    # Step 5: Add the file download into the file mounts, such as
+    #  /origin-dst: s3://spot-fm-file-only-bucket-name/file-0
+    new_file_mounts = dict()
+    for i, (dst, src) in enumerate(copy_mounts_with_file_in_src.items()):
+        storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
+        store_type = list(storage.stores.keys())[0]
+        store_prefix = storage_lib.get_store_prefix(store_type)
+        bucket_url = store_prefix + file_bucket_name
+        new_file_mounts[dst] = bucket_url + f'/file-{i}'
+    task.update_file_mounts(new_file_mounts)
 
     # Replace the source field that is local path in all storage_mounts with
     # bucket URI and remove the name field.
@@ -496,9 +482,9 @@ def spot_launch(
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
             store_type = store_types[0]
-            if store_type == storage.StoreType.S3:
+            if store_type == storage_lib.StoreType.S3:
                 storage_obj.source = f's3://{storage_obj.name}'
-            elif store_type == storage.StoreType.GCS:
+            elif store_type == storage_lib.StoreType.GCS:
                 storage_obj.source = f'gs://{storage_obj.name}'
             else:
                 with ux_utils.print_exception_no_traceback():

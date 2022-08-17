@@ -8,7 +8,9 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
+from sky import check
 from sky import clouds
+from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_transfer as data_transfer_lib
@@ -485,13 +487,42 @@ class Task:
 
     def add_storage_mounts(self) -> None:
         """Adds storage mounts to the Task."""
-        # TODO(romilb): The optimizer should look at the source and destination
-        #  to figure out the right stores to use. For now, we hardcode
-        #  storage_plans to AWS as the optimal plan.
+        # TODO(zhwu, romilb): The optimizer should look at the source and
+        #  destination to figure out the right stores to use. For now, we
+        #  use a heuristic solution to find the store type by the following
+        #  order:
+        #  1. cloud decided in best_resources.
+        #  2. cloud specified in the task resources.
+        #  3. the first enabled cloud.
+        assert len(self.resources) == 1, self.resources
+        storage_cloud = None
+        if self.best_resources is not None:
+            storage_cloud = self.best_resources.cloud
+        else:
+            resources = list(self.resources)[0]
+            storage_cloud = resources.cloud
+            if storage_cloud is None:
+                # Get the first enabled cloud.
+                enabled_clouds = global_user_state.get_enabled_clouds()
+                if len(enabled_clouds) == 0:
+                    check.check(quiet=True)
+                    enabled_clouds = global_user_state.get_enabled_clouds()
+                if len(enabled_clouds) == 0:
+                    raise ValueError('No enabled clouds.')
+
+                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
+                    for enabled_cloud in enabled_clouds:
+                        if cloud.is_same_cloud(enabled_cloud):
+                            storage_cloud = cloud
+                            break
+        if storage_cloud is None:
+            raise ValueError('No available cloud to mount storage.')
+        store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
+
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
-                self.storage_plans[storage] = storage_lib.StoreType.S3
-                storage.add_store(storage_lib.StoreType.S3)
+                self.storage_plans[storage] = store_type
+                storage.add_store(store_type)
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]

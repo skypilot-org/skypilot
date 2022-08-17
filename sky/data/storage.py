@@ -25,6 +25,8 @@ Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
 
+STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
+
 # Max number of objects a GCS bucket can be directly deleted with
 _GCS_RM_MAX_OBJS = 256
 
