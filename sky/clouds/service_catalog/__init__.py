@@ -50,6 +50,7 @@ def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
     clouds: CloudFilter = None,
+    case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
 
@@ -57,7 +58,7 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter)
+                                  name_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret = collections.defaultdict(list)

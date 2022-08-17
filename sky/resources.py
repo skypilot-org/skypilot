@@ -6,6 +6,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -43,7 +44,7 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 5
+    _VERSION = 6
 
     def __init__(
         self,
@@ -204,6 +205,12 @@ class Resources:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
             assert len(accelerators) == 1, accelerators
+
+            # Canonicalize the accelerator names.
+            accelerators = {
+                accelerator_registry.canonicalize_accelerator_name(acc):
+                acc_count for acc, acc_count in accelerators.items()
+            }
 
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
@@ -485,23 +492,14 @@ class Resources:
             return False
         # self._instance_type <= other.instance_type
 
-        # For case insensitive comparison.
-        # TODO(wei-lin): This is a hack. We may need to use our catalog to
-        # handle this.
         other_accelerators = other.accelerators
-        if other_accelerators is not None:
-            other_accelerators = {
-                acc.upper(): num_acc
-                for acc, num_acc in other_accelerators.items()
-            }
-        if self.accelerators is not None and other_accelerators is None:
-            return False
-
         if self.accelerators is not None:
+            if other_accelerators is None:
+                return False
             for acc in self.accelerators:
-                if acc.upper() not in other_accelerators:
+                if acc not in other_accelerators:
                     return False
-                if self.accelerators[acc] > other_accelerators[acc.upper()]:
+                if self.accelerators[acc] > other_accelerators[acc]:
                     return False
         # self.accelerators <= other.accelerators
 
@@ -650,4 +648,14 @@ class Resources:
 
         if version < 5:
             self._zone = None
+
+        if version < 6:
+            accelerators = state.pop('_accelerators')
+            if accelerators is not None:
+                accelerators = {
+                    accelerator_registry.canonicalize_accelerator_name(acc):
+                    acc_count for acc, acc_count in accelerators.items()
+                }
+            state['_accelerators'] = accelerators
+
         self.__dict__.update(state)
