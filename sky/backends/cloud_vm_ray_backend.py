@@ -1898,7 +1898,7 @@ class CloudVmRayBackend(backends.Backend):
                                                    command=cmd,
                                                    error_msg=error_message)
 
-            num_nodes = handle.launched_nodes
+            num_nodes = len(ip_list)
             plural = 's' if num_nodes > 1 else ''
             logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                         f'{style.RESET_ALL}')
