@@ -75,7 +75,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # sky.launch().
             'ControlMaster': 'auto',
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
-            'ControlPersist': '120s',
+            'ControlPersist': '300s',
         })
     ssh_key_option = [
         '-i',
