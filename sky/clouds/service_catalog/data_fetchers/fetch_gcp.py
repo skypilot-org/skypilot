@@ -248,8 +248,23 @@ def get_vm_zones(url):
     # Remove unnecessary columns.
     df = df[['AvailabilityZone', 'MachineType']]
 
+    def parse_machine_type_list(list_str):
+        machine_types = list_str.split(', ')
+        returns = []
+        # Handle the typos in the GCP web page.
+        for m in machine_types:
+            if ' ' in m:
+                # us-central1-b: no comma between T2A and N1
+                returns += m.split(' ')
+            elif ',' in m:
+                # us-central1-c: no space between C2 and C2D
+                returns += m.split(',')
+            else:
+                returns.append(m)
+        return returns
+
     # Explode the 'MachineType' column.
-    df['MachineType'] = df['MachineType'].str.split(', ')
+    df['MachineType'] = df['MachineType'].apply(parse_machine_type_list)
     df = df.explode('MachineType', ignore_index=True)
     return df
 
