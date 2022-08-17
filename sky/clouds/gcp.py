@@ -27,8 +27,7 @@ _CREDENTIAL_FILES = [
     'legacy_credentials',
 ]
 
-_IMAGE_ID_PREFIX = (
-    'projects/deeplearning-platform-release/global/images/')
+_IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
 
 def _run_output(cmd):
