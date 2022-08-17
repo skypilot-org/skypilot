@@ -839,6 +839,15 @@ class TestStorageWithCredentials:
         with pytest.raises(sky.exceptions.StorageBucketGetError, match='Attempted to connect to a non-existent bucket'):
             storage_obj = storage_lib.Storage(source=nonexist_bucket)
 
+    @pytest.mark.parametrize(
+        'nonexist_bucket', [f's3://imagenet', f'gs://imagenet'])
+    def test_private_bucket(self, nonexist_bucket):
+        # Attempts to access private buckets not belonging to the user.
+        # These buckets are known to be private, but may need to be updated if
+        # they are removed by their owners.
+        with pytest.raises(sky.exceptions.StorageBucketGetError, match='the bucket name is taken'):
+            storage_obj = storage_lib.Storage(source=nonexist_bucket)
+
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name):
         if store_type == storage_lib.StoreType.S3:
