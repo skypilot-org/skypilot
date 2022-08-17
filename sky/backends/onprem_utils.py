@@ -164,7 +164,10 @@ def run_command_and_handle_ssh_failure(
     return stdout
 
 
-def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
+def do_filemounts_and_setup_on_local_workers(
+        cluster_config_file: str,
+        worker_ips: List[str] = None,
+        extra_setup_cmds: List[str] = None):
     """Completes filemounting and setup on worker nodes.
 
     Syncs filemounts and runs setup on worker nodes for a local cluster. This
@@ -176,10 +179,13 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
 
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_config_file)
-    worker_ips = config['provider']['worker_ips']
+    if worker_ips is None:
+        worker_ips = config['provider']['worker_ips']
     file_mounts = config['file_mounts']
 
     setup_cmds = config['setup_commands']
+    if extra_setup_cmds is not None:
+        setup_cmds += extra_setup_cmds
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(

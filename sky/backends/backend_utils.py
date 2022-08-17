@@ -956,23 +956,33 @@ def get_node_ips(cluster_yaml: str,
     """Returns the IPs of all nodes in the cluster."""
 
     ray_config = common_utils.read_yaml(cluster_yaml)
-    if ray_config['provider']['_has_tpus']:
+    use_tpu_pod = handle.launched_resources.use_tpu_pod if handle is not None else False
+    if use_tpu_pod:
         cluster_name = ray_config['cluster_name']
         zone = ray_config['provider']['availability_zone']
         query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                    f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                    f'--zone={zone} --format=value\\(name\\)')
+                     f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                     f'--zone={zone} --format=value\\(name\\)')
         tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                    f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                    '(networkEndpoints.accessConfig.externalIp)"')
+                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                     '(networkEndpoints.accessConfig.externalIp)"')
 
-        returncode, stdout, stderr = log_lib.run_with_log(
-                        tpuvm_cmd,
-                        '/dev/null',
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
+        rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+                                                     '/dev/null',
+                                                     shell=True,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+        if rcode != 0:
+            failure_massage = ('Failed to run gcloud to get TPU pod IPs.\n'
+                               '**** STDOUT ****\n'
+                               '{stdout}\n'
+                               '**** STDERR ****\n'
+                               '{stderr}')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    failure_massage.format(stdout=stdout, stderr=stderr))
         all_ips = re.findall(IP_ADDR_REGEX, stdout)
+        # TODO(weilin): check #all_ips == expected_num_nodes
         return all_ips
 
     # Try optimize for the common case where we have 1 node.
