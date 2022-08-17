@@ -402,10 +402,8 @@ def spot_launch(
                 'mode': 'COPY',
             })
 
-        logger.info(
-            f'Workdir {workdir!r} will be synced to cloud storage '
-            f'{bucket_name!r}.'
-        )
+        logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
+                    f'{bucket_name!r}.')
 
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
