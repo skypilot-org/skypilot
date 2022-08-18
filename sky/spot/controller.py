@@ -167,7 +167,7 @@ class SpotController:
                     signal = spot_utils.UserSignal(signal)
                 # Remove the signal file, after reading the signal.
                 signal_file.unlink()
-        if signal is not None:
+        if signal is None:
             return
         if signal == spot_utils.UserSignal.CANCEL:
             raise exceptions.SpotUserCancelledError(
