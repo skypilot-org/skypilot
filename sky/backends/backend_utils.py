@@ -805,9 +805,9 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out: waited for workers to be provisioned '
-                    f'for more than {nodes_launching_progress_timeout} seconds.'
-                )
+                    'Timed out: waited for more than '
+                    f'{nodes_launching_progress_timeout} seconds for new '
+                    'workers to be provisioned, but no progress.')
                 return False  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:

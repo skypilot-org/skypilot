@@ -2065,6 +2065,7 @@ class CloudVmRayBackend(backends.Backend):
         detach_run: bool,
     ) -> None:
         if task.run is None:
+            logger.info('Run commands not specified or empty.')
             return
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
