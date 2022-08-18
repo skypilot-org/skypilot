@@ -14,6 +14,7 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.data import storage as storage_lib
+from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -180,6 +181,34 @@ def test_stale_job():
             'sleep 40',
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
+            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_stale_job_manual_restart():
+    name = _get_cluster_name()
+    region = 'us-west-2'
+    test = Test(
+        'stale-job',
+        [
+            f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
+            f'sky exec {name} -d "echo start; sleep 10000"',
+            # Stop the cluster manually.
+            f'id=`aws ec2 describe-instances --region {region} --filters '
+            f'Name=tag:ray-cluster-name,Values={name} '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text`; '
+            f'aws ec2 stop-instances --region {region} '
+            '--instance-ids $id',
+            'sleep 40',
+            f'sky launch -c {name} -y "echo hi"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 3 --status',
+            # Ensure the skylet updated the staled job status.
+            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
         ],
         f'sky down -y {name}',

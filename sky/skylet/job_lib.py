@@ -349,7 +349,7 @@ def update_job_status(job_owner: str,
             continue
         ray_status = ray_job_infos[ray_job_id].status
         ray_statuses.append(_RAY_TO_JOB_STATUS_MAP[ray_status])
-    
+
     assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
 
     statuses = []
