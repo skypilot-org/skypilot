@@ -1,5 +1,4 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
-import contextlib
 import functools
 import time
 import typing
@@ -31,6 +30,7 @@ def _maybe_retry_until_up(method):
 
     @functools.wraps(method)
     def method_with_retries(self, *args, **kwargs):
+        backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         retry_cnt = 0
         while True:
             retry_cnt += 1
@@ -39,13 +39,18 @@ def _maybe_retry_until_up(method):
             except exceptions.ResourcesUnavailableError as e:
                 if not self.retry_until_up:
                     raise
+                retry_gap = backoff.current_backoff()
                 logger.info(f'{e}\nRetrying until resources are available '
-                            f'(attempt: {retry_cnt})...')
+                            f'in {retry_gap} seconds (attempt: {retry_cnt})...')
+                time.sleep(retry_gap)
+
     return method_with_retries
 
 
 class StrategyExecutor:
     """Handle each launching, recovery and termination of the spot clusters."""
+
+    RETRY_INIT_GAP_SECONDS = 60
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
                  task: 'task_lib.Task', retry_until_up: bool,
@@ -126,14 +131,11 @@ class StrategyExecutor:
                     f'Failed to terminate the spot cluster {self.cluster_name}.'
                 )
 
-    def _launch(self,
-                max_retry=3,
-                retry_init_gap_seconds=60,
-                raise_on_failure=True) -> Optional[float]:
+    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch()."""
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
-        backoff = common_utils.Backoff(retry_init_gap_seconds)
+        backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
             # Check the signal every time to be more responsive to user
@@ -189,7 +191,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     """Failover strategy: wait in same region and failover after timout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
-    _RETRY_INIT_GAP_SECONDS = 60
 
     @_maybe_retry_until_up
     def recover(self) -> float:
@@ -219,7 +220,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         launched_cloud = handle.launched_resources.cloud
         launched_region = handle.launched_resources.region
         new_resources = resources.copy(cloud=launched_cloud,
-                                        region=launched_region)
+                                       region=launched_region)
         task.set_resources({new_resources})
         # Not using self.launch to avoid the retry until up logic.
         launched_time = self._launch(raise_on_failure=False)
@@ -234,12 +235,10 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
         # Step 3
         logger.debug('Relaunch the cluster  without constraining to prior '
-                        'cloud/region.')
+                     'cloud/region.')
         # Not using self.launch to avoid the retry until up logic.
-        launched_time = self._launch(
-            max_retry=self._MAX_RETRY_CNT,
-            retry_init_gap_seconds=self._RETRY_INIT_GAP_SECONDS,
-            raise_on_failure=False)
+        launched_time = self._launch(max_retry=self._MAX_RETRY_CNT,
+                                     raise_on_failure=False)
         if launched_time is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
