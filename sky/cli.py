@@ -62,6 +62,7 @@ from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -2181,6 +2182,8 @@ def admin_deploy(clusterspec_yaml: str):
     clusterspec_yaml = ' '.join(clusterspec_yaml)
     assert clusterspec_yaml
     is_yaml, yaml_config = _check_yaml(clusterspec_yaml)
+    backend_utils.validate_schema(yaml_config, schemas.get_cluster_schema(),
+                                  'Invalid cluster YAML: ')
     if not is_yaml:
         raise ValueError('Must specify cluster config')
 
