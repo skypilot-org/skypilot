@@ -833,14 +833,46 @@ class TestStorageWithCredentials:
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.parametrize(
-        'nonexist_bucket',
-        [f's3://{str(uuid.uuid4())}', f'gs://{str(uuid.uuid4())}'])
-    def test_nonexistent_bucket(self, nonexist_bucket):
+        'nonexist_bucket_url',
+        ['s3://{random_name}', 'gs://{random_name}'])
+    def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
+        # Generate a random bucket name and verify it doesn't exist:
+        retry_count = 0
+        while True:
+            nonexist_bucket_name = str(uuid.uuid4())
+            if nonexist_bucket_url.startswith('s3'):
+                command = ['aws', 's3api', 'head-bucket', '--bucket',
+                           nonexist_bucket_name]
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('gs'):
+                command = ['gsutil', 'ls', nonexist_bucket_url.format(
+                    random_name=nonexist_bucket_name)]
+                expected_output = 'BucketNotFoundException'
+            else:
+                raise ValueError('Unsupported bucket type '
+                                 f'{nonexist_bucket_url}')
+
+            # Check if bucket exists using the cli:
+            try:
+                out = subprocess.check_output(command, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as e:
+                out = e.output
+            out = out.decode('utf-8')
+            if expected_output in out:
+                break
+            else:
+                retry_count += 1
+                if retry_count > 3:
+                    raise RuntimeError('Could find a nonexistent bucket to use.'
+                                       ' This is higly unlikely to happen - '
+                                       'check if the tests are correct.')
+
         with pytest.raises(
                 sky.exceptions.StorageBucketGetError,
                 match='Attempted to connect to a non-existent bucket'):
-            storage_obj = storage_lib.Storage(source=nonexist_bucket)
+            storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
+                random_name=nonexist_bucket_name))
 
     @pytest.mark.parametrize('private_bucket',
                              [f's3://imagenet', f'gs://imagenet'])
