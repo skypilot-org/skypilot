@@ -186,9 +186,6 @@ if __name__ == '__main__':
     parser.add_argument('--retry-until-up',
                         action='store_true',
                         help='Retry until the cluster is up.')
-    parser.add_argument('--no-retry-until-up',
-                        dest='retry-until-up',
-                        action='store_false')
     parser.add_argument('task_yaml',
                         type=str,
                         help='The path to the user spot task yaml file. '
