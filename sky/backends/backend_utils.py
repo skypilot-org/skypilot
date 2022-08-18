@@ -37,12 +37,12 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
+from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner

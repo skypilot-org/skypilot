@@ -14,8 +14,8 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
 
-from sky import constants
 from sky import sky_logging
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 

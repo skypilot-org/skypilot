@@ -22,7 +22,6 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
@@ -36,6 +35,7 @@ from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
 from sky.skylet import autostop_lib
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
@@ -166,6 +166,7 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
+            from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
 

@@ -23,7 +23,6 @@ import colorama
 
 import sky
 from sky import backends
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -33,6 +32,7 @@ from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.usage import usage_lib
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
@@ -513,9 +513,6 @@ def spot_launch(
                         f'Unsupported store type: {store_type}')
             storage_obj.name = None
             storage_obj.force_delete = True
-    with open('test-out.yaml', 'w') as f:
-        task_config = task.to_yaml_config()
-        common_utils.dump_yaml(f.name, task_config)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
