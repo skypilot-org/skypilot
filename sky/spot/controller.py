@@ -172,7 +172,7 @@ class SpotController:
         if signal == spot_utils.UserSignal.CANCEL:
             raise exceptions.SpotUserCancelledError(
                 f'User sent {signal.value} signal.')
-        
+
         raise exceptions.SpotUnknownSignalError(
             f'Unknown signal received: {signal.value}.')
 
