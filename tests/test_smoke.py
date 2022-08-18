@@ -832,9 +832,8 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize(
-        'nonexist_bucket_url',
-        ['s3://{random_name}', 'gs://{random_name}'])
+    @pytest.mark.parametrize('nonexist_bucket_url',
+                             ['s3://{random_name}', 'gs://{random_name}'])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
         # Generate a random bucket name and verify it doesn't exist:
@@ -842,12 +841,16 @@ class TestStorageWithCredentials:
         while True:
             nonexist_bucket_name = str(uuid.uuid4())
             if nonexist_bucket_url.startswith('s3'):
-                command = ['aws', 's3api', 'head-bucket', '--bucket',
-                           nonexist_bucket_name]
+                command = [
+                    'aws', 's3api', 'head-bucket', '--bucket',
+                    nonexist_bucket_name
+                ]
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('gs'):
-                command = ['gsutil', 'ls', nonexist_bucket_url.format(
-                    random_name=nonexist_bucket_name)]
+                command = [
+                    'gsutil', 'ls',
+                    nonexist_bucket_url.format(random_name=nonexist_bucket_name)
+                ]
                 expected_output = 'BucketNotFoundException'
             else:
                 raise ValueError('Unsupported bucket type '
