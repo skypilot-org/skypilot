@@ -59,7 +59,8 @@ logger = sky_logging.init_logger(__name__)
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
-# Timeout for provision a cluster and wait for it to be ready in seconds.
+# Timeout (seconds) for provision progress: if in this duration no new nodes
+# are launched, abort and failover.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
 
 # Time gap between retries after failing to provision in all possible places.
@@ -1168,6 +1169,8 @@ class RetryingVmProvisioner(object):
         if returncode != 0:
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
+        # All code below is handling num_nodes > 1.
+
         provision_str = 'Successfully provisioned or found existing head VM.'
         if isinstance(to_provision_cloud, clouds.Local):
             provision_str = 'Successfully connected to head node.'
@@ -1681,33 +1684,29 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
             # Get actual zone info and save it into handle.
-            if (handle.launched_nodes == 1 and
-                    handle.launched_resources.cloud.is_same_cloud(
-                        clouds.GCP())):
-                # Optimization for 1-node + GCP: 'zones' will contain the exact
-                # zone since GCP uses per-zone provisioning.
-                zones = config_dict['zones']
-                assert len(zones) == 1, zones
+            # NOTE: querying zones is expensive, observed 1node GCP >=4s.
+            zones = config_dict['zones']
+            if len(zones) == 1:
+                # Optimization for if the provision request was for 1 zone
+                # (currently happens only for GCP since it uses per-zone
+                # provisioning), then we know the exact zone already.
                 handle.launched_resources = handle.launched_resources.copy(
                     zone=zones[0].name)
-            else:
-                # NOTE: querying zones is expensive, observed 1node GCP >=4s.
-                logger.info('get actual zone')
+            elif (task.num_nodes == 1 or
+                  handle.launched_resources.zone is not None):
+                # Query zone if the cluster has 1 node, or a zone is
+                # specifically requested for a multinode cluster.  Otherwise
+                # leave the zone field to None because head and worker nodes
+                # can be launched in different zones.
                 get_zone_cmd = (
                     handle.launched_resources.cloud.get_zone_shell_cmd())
                 if get_zone_cmd is not None:
-                    # We leave the zone field to None for multi-node cases
-                    # if zone is not specified because head and worker nodes
-                    # can be launched in different zones.
-                    if (task.num_nodes == 1 or
-                            handle.launched_resources.zone is not None):
-                        returncode, stdout, _ = self.run_on_head(
-                            handle, get_zone_cmd, require_outputs=True)
-                        # zone will be checked during Resources cls
-                        # initialization.
-                        handle.launched_resources = (
-                            handle.launched_resources.copy(zone=stdout.strip()))
-                logger.info('done get actual zone')
+                    returncode, stdout, _ = self.run_on_head(
+                        handle, get_zone_cmd, require_outputs=True)
+                    # zone will be checked during Resources cls
+                    # initialization.
+                    handle.launched_resources = handle.launched_resources.copy(
+                        zone=stdout.strip())
 
             usage_lib.messages.usage.update_cluster_resources(
                 handle.launched_nodes, handle.launched_resources)
