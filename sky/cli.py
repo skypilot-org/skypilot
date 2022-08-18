@@ -2274,6 +2274,16 @@ def spot():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
+@click.option(
+    '--retry-until-up',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Whether to retry provisioning infinitely until the cluster is up, '
+          'if we fail to launch the cluster on any possible region/cloud due '
+          'to unavailability errors. This applies to recovery after preemption '
+          'as well.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2298,6 +2308,7 @@ def spot_launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     detach_run: bool,
+    retry_until_up: bool,
     yes: bool,
 ):
     """Launch a managed spot job."""
@@ -2328,7 +2339,10 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.spot_launch(dag, name, detach_run=detach_run)
+    sky.spot_launch(dag,
+                    name,
+                    detach_run=detach_run,
+                    retry_until_up=retry_until_up)
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
