@@ -115,6 +115,7 @@ def get_hourly_cost(
 def get_vcpus_from_instance_type(instance_type: str) -> float:
     df = _df[_df['InstanceType'] == instance_type]
     vcpus = df['vCPU']
+    # FIXME(woosuk): Support TPU-VM.
     assert len(set(vcpus)) == 1, df
     return float(vcpus.iloc[0])
 
@@ -233,7 +234,7 @@ def list_accelerators(
     # Thus, we can show their exact cost including the host VM prices.
     new_infos = []
     for info in a100_infos:
-        assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
         a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
         df = _df[_df['InstanceType'] == a100_host_vm_type]
         memory = df['MemoryGiB'].iloc[0]

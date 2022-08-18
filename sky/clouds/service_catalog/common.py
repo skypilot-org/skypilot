@@ -32,10 +32,11 @@ class InstanceTypeInfo(NamedTuple):
     - spot_price: Spot instance price per hour (cheapest across all regions).
     """
     cloud: str
-    instance_type: str
+    instance_type: Optional[str]
     accelerator_name: str
     accelerator_count: int
-    memory: float
+    cpu: Optional[float]
+    memory: Optional[float]
     price: float
     spot_price: float
 
@@ -217,6 +218,7 @@ def list_accelerators_impl(
     """
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
+    # FIXME(woosuk): Add vCPU column.
     df = df[[
         'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB',
         'Price', 'SpotPrice'
@@ -240,6 +242,7 @@ def list_accelerators_impl(
                 row['InstanceType'],
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
+                row[''],
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
