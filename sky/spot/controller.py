@@ -110,9 +110,8 @@ class SpotController:
                         failure_type=spot_state.SpotStatus.FAILED,
                         end_time=end_time)
                     break
-                assert (cluster_status == global_user_state.ClusterStatus.
-                        STOPPED), ('The cluster should be STOPPED, but is '
-                                   f'{cluster_status.value}.')
+            # cluster can be down, INIT or STOPPED, based on the interruption
+            # behavior of the cloud.
             # Failed to connect to the cluster or the cluster is partially down.
             # job_status is None or job_status == job_lib.JobStatus.FAILED
             logger.info('The cluster is preempted.')
