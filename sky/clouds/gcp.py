@@ -180,7 +180,7 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu'
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
 
         r = resources
         # Find GPU spec, if any.
