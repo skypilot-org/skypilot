@@ -5,19 +5,16 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky.clouds import service_catalog
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-
-def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-    return proc.stdout.decode('ascii')
+# Minimum set of files under ~/.aws that grant AWS access.
+_CREDENTIAL_FILES = [
+    'credentials',
+]
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -26,9 +23,7 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def regions(cls):
-        cls._regions = [
-            clouds.Region('us-tx-1')
-        ]
+        cls._regions = [clouds.Region('us-tx-1')]
         return cls._regions
 
     @classmethod
@@ -42,20 +37,23 @@ class Lambda(clouds.Cloud):
         del instance_type
         del use_spot
         del accelerators  # unused
+
         for region in cls.regions():
             yield region, region.zones
 
     def instance_type_to_hourly_cost(self, instance_type: str,
                                      use_spot: bool) -> float:
-        return 0.0
+        return service_catalog.get_hourly_cost(instance_type,
+                                               region=None,
+                                               use_spot=use_spot,
+                                               clouds='lambda')
 
     def accelerators_to_hourly_cost(self, accelerators,
                                     use_spot: bool) -> float:
-        # Hourly cost of accelerators is 0 for local cloud.
+        # Lambda includes accelerators as part of the instance type.
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        # Egress cost from a local cluster is assumed to be 0.
         return 0.0
 
     def __repr__(self):
@@ -74,10 +72,8 @@ class Lambda(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, int]]:
-        # This function is called, as the instance_type is `on-prem`.
-        # Local cloud will return no accelerators. This is deferred to
-        # the ResourceHandle, which calculates the accelerators in the cluster.
-        return None
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='lambda')
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
@@ -87,17 +83,45 @@ class Lambda(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        # The entire local cluster's resources is considered launchable, as the
-        # check for task resources is deferred later.
-        # The check for task resources meeting cluster resources is run in
-        # cloud_vm_ray_backend._check_task_resources_smaller_than_cluster.
-        resources = resources.copy(
-            instance_type=Lambda.get_default_instance_type(),
-            # Setting this to None as AWS doesn't separately bill /
-            # attach the accelerators.  Billed as part of the VM type.
-            accelerators=None,
-        )
-        return [resources], []
+        # TODO: In some cases, launching a larger VM will be cheaper than
+        # launching a smaller VM with the exact requirements on another cloud.
+        # This is not implemented yet.
+        fuzzy_candidate_list = []
+        if resources.instance_type is not None:
+            assert resources.is_launchable(), resources
+            # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
+            resources = resources.copy(accelerators=None)
+            return ([resources], fuzzy_candidate_list)
+
+        def _make(instance_list):
+            resource_list = []
+            for instance_type in instance_list:
+                r = resources.copy(
+                    cloud=Lambda(),
+                    instance_type=instance_type,
+                    # Setting this to None as Lambda doesn't separately bill /
+                    # attach the accelerators.  Billed as part of the VM type.
+                    accelerators=None,
+                )
+                resource_list.append(r)
+            return resource_list
+
+        # Currently, handle a filter on accelerators only.
+        accelerators = resources.accelerators
+        if accelerators is None:
+            # No requirements to filter, so just return a default VM type.
+            return (_make([Lambda.get_default_instance_type()]),
+                    fuzzy_candidate_list)
+
+        assert len(accelerators) == 1, resources
+        acc, acc_count = list(accelerators.items())[0]
+        (instance_list, fuzzy_candidate_list
+        ) = service_catalog.get_instance_type_for_accelerator(acc,
+                                                              acc_count,
+                                                              clouds='lambda')
+        if instance_list is None:
+            return ([], fuzzy_candidate_list)
+        return (_make(instance_list), fuzzy_candidate_list)
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
@@ -107,29 +131,23 @@ class Lambda(clouds.Cloud):
             # TODO: add dependency check
             # _run_output('lambda -h')
         except (AssertionError, subprocess.CalledProcessError,
-                FileNotFoundError, KeyError,
-                ImportError):
+                FileNotFoundError, KeyError, ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
-            return False, (
-                'Lambda Labs credentials are not set. '
-                'Run the following command:\n    '
-                '  $ lambda auth\n    '
-            )
+            return False, ('Lambda Labs credentials are not set. '
+                           'Run the following command:\n    '
+                           '  $ lambda auth\n    ')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # There are no credentials to upload to remote in Local mode.
-        return {}
+        return {
+            f'~/.lambda/{filename}': f'~/.lambda/{filename}'
+            for filename in _CREDENTIAL_FILES
+        }
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        # Checks if instance_type matches on-prem, the only instance type for
-        # local cloud.
-        return instance_type == self.get_default_instance_type()
+        return service_catalog.instance_type_exists(instance_type, 'lambda')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        # Returns true if the region name is same as Local cloud's
-        # one and only region: 'Local'.
-        assert zone is None
-        if region is None or region != Lambda.LOCAL_REGION.name:
-            raise ValueError(f'Region {region!r} does not match the Local'
-                             ' cloud region {Lambda.LOCAL_REGION.name!r}.')
+        return service_catalog.validate_region_zone(region,
+                                                    zone,
+                                                    clouds='lambda')

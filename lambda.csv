@@ -1,0 +1,10 @@
+InstanceType,AcceleratorName,AcceleratorCount,MemoryGiB,Price,Region,GpuInfo,SpotPrice
+gpu.1x.rtx6000,RTX 6000,1,46,0.50,us-tx-1,"{'Gpus': [{'Name': 'RTX 6000', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 24576}}], 'TotalGpuMemoryInMiB': 24576}",
+gpu.1x.a100,A100,1,200,1.10,us-tx-1,"{'Gpus': [{'Name': 'A100', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 40960}}], 'TotalGpuMemoryInMiB': 40960}",
+gpu.2x.a100,A100,2,400,2.20,us-tx-1,"{'Gpus': [{'Name': 'A100', 'Manufacturer': 'NVIDIA', 'Count': 2, 'MemoryInfo': {'SizeInMiB': 40960}}], 'TotalGpuMemoryInMiB': 81920}",
+gpu.4x.a100,A100,4,800,4.40,us-tx-1,"{'Gpus': [{'Name': 'A100', 'Manufacturer': 'NVIDIA', 'Count': 4, 'MemoryInfo': {'SizeInMiB': 40960}}], 'TotalGpuMemoryInMiB': 163840}",
+gpu.8x.a100,A100,8,1800,8.80,us-tx-1,"{'Gpus': [{'Name': 'A100', 'Manufacturer': 'NVIDIA', 'Count': 8, 'MemoryInfo': {'SizeInMiB': 40960}}], 'TotalGpuMemoryInMiB': 327680}",
+gpu.1x.a6000,A6000,1,100,0.80,us-tx-1,"{'Gpus': [{'Name': 'A6000', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 49152}}], 'TotalGpuMemoryInMiB': 49152}",
+gpu.2x.a6000,A6000,2,200,1.60,us-tx-1,"{'Gpus': [{'Name': 'A6000', 'Manufacturer': 'NVIDIA', 'Count': 2, 'MemoryInfo': {'SizeInMiB': 49152}}], 'TotalGpuMemoryInMiB': 98304}",
+gpu.4x.a6000,A6000,4,400,3.20,us-tx-1,"{'Gpus': [{'Name': 'A6000', 'Manufacturer': 'NVIDIA', 'Count': 4, 'MemoryInfo': {'SizeInMiB': 49152}}], 'TotalGpuMemoryInMiB': 196608}",
+gpu.8x.v100,V100,8,448,4.40,us-tx-1,"{'Gpus': [{'Name': 'V100', 'Manufacturer': 'NVIDIA', 'Count': 8, 'MemoryInfo': {'SizeInMiB': 16384}}], 'TotalGpuMemoryInMiB': 131072}",
