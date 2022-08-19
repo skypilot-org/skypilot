@@ -48,6 +48,8 @@ MAX_POLLS = 12
 # considerably - this probably could be smaller
 # TPU deletion uses MAX_POLLS
 MAX_POLLS_TPU = MAX_POLLS * 8
+# Stopping instances can take several minutes, so we increase the timeout
+MAX_POLLS_STOP =  MAX_POLLS * 8
 POLL_INTERVAL = 5
 
 

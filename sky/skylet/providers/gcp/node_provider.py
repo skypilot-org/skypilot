@@ -29,6 +29,8 @@ from sky.skylet.providers.gcp.node import (  # noqa
     GCPNodeType,
     INSTANCE_NAME_MAX_LEN,
     INSTANCE_NAME_UUID_LEN,
+    MAX_POLLS_STOP,
+    POLL_INTERVAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -232,8 +234,6 @@ class GCPNodeProvider(NodeProvider):
 
                     # Check if the instance is actually stopped.
                     # GCP does not fully stop an instance even after the stop operation is finished.
-                    MAX_POLLS_STOP = 8
-                    POLL_INTERVAL = 8
                     for _ in range(MAX_POLLS_STOP):
                         instance = resource.get_instance(node_id=node_id)
                         if instance.is_stopped():
