@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 import textwrap
 import threading
 import time
@@ -107,6 +108,9 @@ SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
 
+# Remote dir that holds our runtime files.
+_REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -133,13 +137,66 @@ def fill_template(template_name: str,
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
 
-    # Add yaml file path to the template variables.
+    # Runtime files handling
+    #
+    # List of runtime files to be uploaded to cluster:
+    #   - yaml config (for autostopping)
+    #   - wheel
+    #   - credentials
+    # Format is {dst: src}.
+    file_mounts = {
+        SKY_RAY_YAML_REMOTE_PATH: output_path,
+        variables['sky_remote_path']: variables['sky_local_path'],
+    }
+    file_mounts.update(variables['credentials'])
+    variables['credentials'] = {}
+    # Putting these in file_mounts hurts provisioning speed, as each file
+    # opens/closes an SSH connection.  Instead, we:
+    #  - cp locally them into a directory
+    #  - upload that directory as a file mount (1 connection)
+    #  - use a remote command to move all runtime files to their right places.
+
+    # yaml config
     variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
     variables['sky_ray_yaml_local_path'] = output_path
+
+    # Local tmp dir holding runtime files.
+    local_runtime_files_dir = tempfile.mkdtemp()
+    variables['local_runtime_files_dir'] = local_runtime_files_dir
+    # Remote dir.
+    variables['remote_runtime_files_dir'] = _REMOTE_RUNTIME_FILES_DIR
+
+    # Build a command that moves runtime files to their right destinations.
+    commands = []
+    for dst, src in file_mounts.items():
+        # Our runtime files (wheel, yaml, credentials) do not have backslashes.
+        assert not src.endswith('/'), src
+        assert not dst.endswith('/'), dst
+        src_basename = os.path.basename(src)
+        dst_basename = os.path.basename(dst)
+        dst_parent_dir = os.path.dirname(dst)
+        # Our runtime files (wheel, yaml, credentials) are not relative paths.
+        assert dst_parent_dir, dst_parent_dir
+        mkdir_parent = f'mkdir -p {dst_parent_dir};'
+        mv = (f'mv {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+              f'{dst_parent_dir}/{dst_basename}')
+        fragment = f'({mkdir_parent} {mv})'
+        commands.append(fragment)
+    variables['postprocess_runtime_files_command'] = ' && '.join(commands)
+
+    # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
+
+    # Move all runtime files, including the just-written yaml, to
+    # local_runtime_files_dir/.
+    all_local_sources = ' '.join(
+        local_src for local_src in file_mounts.values())
+    subprocess_utils.run(
+        f'cp -r {all_local_sources} {local_runtime_files_dir}/ || true')
+
     return output_path
 
 
@@ -153,8 +210,9 @@ def path_size_megabytes(path: str) -> int:
             str(resolved_path / command_runner.GIT_EXCLUDE))
     rsync_output = str(
         subprocess.check_output(
-            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} {command_runner.RSYNC_FILTER_OPTION}'
-            f' {git_exclude_filter} --dry-run {path}',
+            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+            f'{command_runner.RSYNC_FILTER_OPTION} '
+            f'{git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
@@ -607,6 +665,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
+
     yaml_path = fill_template(
         cluster_config_template,
         dict(
