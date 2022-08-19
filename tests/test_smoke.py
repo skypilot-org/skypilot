@@ -820,7 +820,8 @@ class TestStorageWithCredentials:
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
-        [('s3://digitalcorpora', storage_lib.StoreType.S3),
+        [('s3://tcga-2-open', storage_lib.StoreType.S3),
+         ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
