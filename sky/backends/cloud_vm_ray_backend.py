@@ -508,6 +508,9 @@ class RetryingVmProvisioner(object):
                     # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
                     # This seems to be not documented by GCP.
                     self._blocked_zones.add(zone.name)
+                elif code in ['RESOURCE_NOT_READY']:
+                    # This code is returned when the VM is still STOPPING.
+                    self._blocked_zones.add(zone.name)
                 elif code == 8:
                     # Error code 8 means TPU resources is out of capacity. Example:
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
