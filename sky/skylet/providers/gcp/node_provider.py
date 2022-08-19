@@ -229,6 +229,23 @@ class GCPNodeProvider(NodeProvider):
                         ),
                     )
                     result = resource.stop_instance(node_id=node_id)
+
+                    # Check if the instance is actually stopped.
+                    # GCP does not fully stop an instance even after the stop operation is finished.
+                    MAX_POLLS_STOP = 8
+                    POLL_INTERVAL = 8
+                    for _ in range(MAX_POLLS_STOP):
+                        instance = resource.get_instance(node_id=node_id)
+                        if instance.is_stopped():
+                            logger.info(f'Instance {node_id} is stopped.')
+                            break
+                        elif instance.is_stopping():
+                            time.sleep(POLL_INTERVAL)
+                        else:
+                            raise RuntimeError(f'Unexpected instance status. Details: {instance}')
+
+                    if instance.is_stopping():
+                        raise RuntimeError(f'Maximum number of polls: {MAX_POLLS_STOP} reached. Instance {node_id} is still not terminated.')
                 else:
                     result = resource.delete_instance(
                         node_id=node_id,

@@ -134,6 +134,8 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
 
     NON_TERMINATED_STATUSES = None
     RUNNING_STATUSES = None
+    STOPPED_STATUSES = None
+    STOPPING_STATUSES = None
     STATUS_FIELD = None
 
     def __init__(self, base_dict: dict, resource: "GCPResource", **kwargs) -> None:
@@ -146,6 +148,12 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
 
     def is_terminated(self) -> bool:
         return self.get(self.STATUS_FIELD) not in self.NON_TERMINATED_STATUSES
+
+    def is_stopped(self) -> bool:
+        return self.get(self.STATUS_FIELD) in self.STOPPED_STATUSES
+
+    def is_stopping(self) -> bool:
+        return self.get(self.STATUS_FIELD) in self.STOPPING_STATUSES
 
     @property
     def id(self) -> str:
@@ -173,6 +181,8 @@ class GCPComputeNode(GCPNode):
     # https://cloud.google.com/compute/docs/instances/instance-life-cycle
     NON_TERMINATED_STATUSES = {"PROVISIONING", "STAGING", "RUNNING"}
     RUNNING_STATUSES = {"RUNNING"}
+    STOPPED_STATUSES = {"TERMINATED"}
+    STOPPING_STATUSES = {"STOPPING"}
     STATUS_FIELD = "status"
 
     def get_labels(self) -> dict:
@@ -196,12 +206,13 @@ class GCPTPUNode(GCPNode):
 
     NON_TERMINATED_STATUSES = {"CREATING", "STARTING", "RESTARTING", "READY"}
     RUNNING_STATUSES = {"READY"}
+    STOPPED_STATUSES = {"STOPPED"}
+    STOPPING_STATUSES = {"STOPPING"}
     STATUS_FIELD = "state"
 
     # SKY: get status of TPU VM for status filtering
     def get_status(self) -> str:
         return self.get(self.STATUS_FIELD)
-
 
     def get_labels(self) -> dict:
         return self.get("labels", {})
