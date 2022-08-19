@@ -127,4 +127,3 @@ class ClusterStatusFetchingError(Exception):
 class SpotUserCancelledError(Exception):
     """Raised when a spot user cancels the job."""
     pass
-

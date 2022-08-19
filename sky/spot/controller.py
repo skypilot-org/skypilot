@@ -172,8 +172,7 @@ class SpotController:
             raise exceptions.SpotUserCancelledError(
                 f'User sent {signal.value} signal.')
 
-        raise RuntimeError(
-            f'Unknown signal received: {signal.value}.')
+        raise RuntimeError(f'Unknown SkyPilot signal received: {signal.value}.')
 
 
 if __name__ == '__main__':

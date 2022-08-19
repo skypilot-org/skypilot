@@ -105,7 +105,7 @@ SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
-CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 
 def fill_template(template_name: str,
