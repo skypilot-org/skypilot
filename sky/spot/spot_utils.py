@@ -16,13 +16,16 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
+from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.spot import constants
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Add user hash so that two users don't have the same controller VM on
+# shared-account clouds such as GCP.
+SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -200,7 +203,7 @@ def stream_logs_by_id(job_id: int) -> str:
         if job_status.is_failed():
             job_msg = ('\nFor detailed error message, please check: '
                        f'{colorama.Style.BRIGHT}sky logs '
-                       f'{constants.SPOT_CONTROLLER_NAME} {job_id}'
+                       f'{SPOT_CONTROLLER_NAME} {job_id}'
                        f'{colorama.Style.RESET_ALL}')
         return (
             f'Job {job_id} is already in terminal state {job_status.value}. '
