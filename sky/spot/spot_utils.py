@@ -323,8 +323,7 @@ def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
-            job_duration
-            if job['status'] != spot_state.SpotStatus.PENDING else '-',
+            job_duration,
             job['recovery_count'],
             job['status'].value,
         ]
