@@ -415,9 +415,9 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     nonterminal_jobs = _get_jobs(username=None,
                                  status_list=JobStatus.nonterminal_statuses(),
                                  submitted_gap_sec=submitted_gap_sec)
-    running_job_ids = [job['job_id'] for job in nonterminal_jobs]
+    nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
-    update_job_status(job_owner, running_job_ids)
+    update_job_status(job_owner, nonterminal_job_ids)
 
 
 def is_cluster_idle() -> bool:
