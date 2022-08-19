@@ -177,7 +177,7 @@ def test_stale_job():
             f'sky launch -y -c {name} --cloud gcp "echo hi"',
             f'sky exec {name} --cloud gcp -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
-            'sleep 40',
+            'sleep 100',  # Ensure this is large enough, else GCP leaks.
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
             f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',

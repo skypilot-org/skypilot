@@ -446,7 +446,7 @@ def _launch_with_confirm(
     dryrun: bool,
     detach_run: bool,
     no_confirm: bool = False,
-    idle_minutes_to_autostop: int = -1,
+    idle_minutes_to_autostop: Optional[int] = None,
     retry_until_up: bool = False,
     node_type: Optional[str] = None,
     is_local_cloud: Optional[bool] = False,
@@ -536,7 +536,6 @@ def _create_and_ssh_into_node(
             node_type,
             workdir=None,
             setup=None,
-            run='',
         )
         task.set_resources(resources)
 
@@ -2319,6 +2318,12 @@ def spot_status(all: bool, refresh: bool):
 
     If the job failed, either due to user code or spot unavailability, the error
     log can be found with ``sky logs sky-spot-controller job_id``.
+
+    (Tip) To fetch job statuses every 60 seconds, use ``watch``:
+
+    .. code-block:: bash
+
+      watch -n60 sky spot status
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
