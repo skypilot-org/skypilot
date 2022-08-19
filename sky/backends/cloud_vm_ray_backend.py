@@ -100,6 +100,7 @@ def _get_cluster_config_template(cloud):
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
+        clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -447,7 +448,7 @@ class RetryingVmProvisioner(object):
             return True
         # We do not keep track of zones in Azure and Local,
         # as both clouds do not have zones.
-        if isinstance(cloud, (clouds.Azure, clouds.Local)):
+        if isinstance(cloud, (clouds.Azure, clouds.Local, clouds.Lambda)):
             return False
         assert zones, (cloud, region, zones)
         for zone in zones:
@@ -616,6 +617,10 @@ class RetryingVmProvisioner(object):
         else:
             self._blocked_regions.add(region.name)
 
+    def _update_blocklist_on_lambda_error(self, region, zones, stdout, stderr):
+        del zones  # Unused.
+        import pdb; pdb.set_trace()
+
     def _update_blocklist_on_local_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
         style = colorama.Style
@@ -667,6 +672,10 @@ class RetryingVmProvisioner(object):
         if isinstance(cloud, clouds.Azure):
             return self._update_blocklist_on_azure_error(
                 region, zones, stdout, stderr)
+
+        if isinstance(cloud, clouds.Lambda):
+            return self._update_blocklist_on_lambda_error(region, zones, stdout,
+                                                        stderr)
 
         if isinstance(cloud, clouds.Local):
             return self._update_blocklist_on_local_error(
