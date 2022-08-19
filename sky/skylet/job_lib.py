@@ -341,25 +341,19 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    def get_job_status(job_id) -> Optional[JobStatus]:
-        try:
-            # The return value is a string, e.g. 'RUNNING', which conflicts
-            # with the return type in ray code.
-            ray_status = job_client.get_job_status(job_id)
-            return _RAY_TO_JOB_STATUS_MAP[ray_status]
-        except RuntimeError as e:
-            # If the job does not exist or if the request to the
-            # job server fails.
-            if 'does not exist' in str(e):
-                return None
-            raise
+    # In ray 1.13.0, job_client.list_jobs returns a dict of job_id to job_info,
+    # where job_info contains the job status (str).
+    ray_job_infos = job_client.list_jobs()
+    job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
+    for i, ray_job_id in enumerate(ray_job_ids):
+        if ray_job_id in ray_job_infos:
+            ray_status = ray_job_infos[ray_job_id].status
+            job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
 
-    ray_statuses: List[JobStatus] = subprocess_utils.run_in_parallel(
-        get_job_status, ray_job_ids)
-    assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
+    assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
 
     statuses = []
-    for job_id, status in zip(job_ids, ray_statuses):
+    for job_id, status in zip(job_ids, job_statuses):
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
@@ -418,12 +412,12 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # function, as the ray job status does not exist due to the app
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
-    running_jobs = _get_jobs(username=None,
-                             status_list=JobStatus.nonterminal_statuses(),
-                             submitted_gap_sec=submitted_gap_sec)
-    running_job_ids = [job['job_id'] for job in running_jobs]
+    nonterminal_jobs = _get_jobs(username=None,
+                                 status_list=JobStatus.nonterminal_statuses(),
+                                 submitted_gap_sec=submitted_gap_sec)
+    nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
-    update_job_status(job_owner, running_job_ids)
+    update_job_status(job_owner, nonterminal_job_ids)
 
 
 def is_cluster_idle() -> bool:
