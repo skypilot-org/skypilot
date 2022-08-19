@@ -303,7 +303,7 @@ def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
 
     status_counts = collections.defaultdict(int)
     for job in jobs:
-        # The job['job_duration'] is already calculated in 
+        # The job['job_duration'] is already calculated in
         # dump_spot_job_queue().
         job_duration = log_utils.readable_time_duration(0,
                                                         job['job_duration'],
