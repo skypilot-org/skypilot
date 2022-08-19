@@ -144,12 +144,15 @@ def fill_template(template_name: str,
     #   - wheel
     #   - credentials
     # Format is {dst: src}.
-    file_mounts = {
-        SKY_RAY_YAML_REMOTE_PATH: output_path,
-        variables['sky_remote_path']: variables['sky_local_path'],
-    }
-    file_mounts.update(variables['credentials'])
-    variables['credentials'] = {}
+    file_mounts = {SKY_RAY_YAML_REMOTE_PATH: output_path}
+
+    # fill_template() is also called to fill TPU/spot controller templates,
+    # which don't have all variables.
+    if 'sky_remote_path' in variables and 'sky_local_path' in variables:
+        file_mounts[variables['sky_remote_path']] = variables['sky_local_path']
+    if 'credentials' in variables:
+        file_mounts.update(variables['credentials'])
+        variables['credentials'] = {}
     # Putting these in file_mounts hurts provisioning speed, as each file
     # opens/closes an SSH connection.  Instead, we:
     #  - cp locally them into a directory
