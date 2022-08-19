@@ -269,10 +269,15 @@ def dump_spot_job_queue() -> str:
         end_at = job['end_at']
         if end_at is None:
             end_at = time.time()
-        job_duration = end_at - job['last_recovered_at'] + job['job_duration']
+
+        job_start_at = job['last_recovered_at'] - job['job_duration']
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
+        elif job_start_at > 0:
+            job_duration = end_at - job_start_at
+        else:
+            job_duration = 0
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
     return json.dumps(jobs, indent=2)
@@ -298,15 +303,11 @@ def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
 
     status_counts = collections.defaultdict(int)
     for job in jobs:
-        job_duration = log_utils.readable_time_duration(
-            job['last_recovered_at'] - job['job_duration'],
-            job['end_at'],
-            absolute=True)
-        if job['status'] == spot_state.SpotStatus.RECOVERING:
-            # When job is recovering, the duration is exact job['job_duration']
-            job_duration = log_utils.readable_time_duration(0,
-                                                            job['job_duration'],
-                                                            absolute=True)
+        # The job['job_duration'] is already calculated in 
+        # dump_spot_job_queue().
+        job_duration = log_utils.readable_time_duration(0,
+                                                        job['job_duration'],
+                                                        absolute=True)
         ago_suffix = ' ago' if show_all else ''
         submitted = log_utils.readable_time_duration(job['submitted_at'],
                                                      absolute=show_all)
@@ -320,7 +321,8 @@ def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
                                              absolute=True),
-            job_duration,
+            job_duration
+            if job['status'] != spot_state.SpotStatus.PENDING else '-',
             job['recovery_count'],
             job['status'].value,
         ]
