@@ -16,6 +16,26 @@ from sky import sky_logging
 logger = sky_logging.init_logger(__name__)
 
 
+def get_user_hash():
+    """Returns a unique user-machine specific hash as a user id."""
+    hash_str = user_and_hostname_hash()
+    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+
+
+def docstr_param(*substitutions):
+    """Decorator to add docstring parameter substitution.
+
+    Args:
+        substitutions: The substitutions to be made in the docstring.
+    """
+
+    def _docstr_param(func):
+        func.__doc__ = func.__doc__.format(*substitutions)
+        return func
+
+    return _docstr_param
+
+
 class Backoff:
     """Exponential backoff with jittering."""
     MULTIPLIER = 1.6
