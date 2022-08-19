@@ -23,6 +23,8 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Add user hash so that two users don't have the same controller VM on
+# shared-account clouds such as GCP.
 SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.

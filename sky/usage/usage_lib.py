@@ -43,7 +43,7 @@ def _get_current_timestamp_ns() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
 
 
-def get_user_hash():
+def _get_user_hash():
     """Returns a unique user-machine specific hash as a user id for logging."""
     user_id = os.getenv(constants.USAGE_USER_ENV)
     if user_id and len(user_id) == 8:
@@ -87,7 +87,7 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = get_user_hash()
+        self.user: str = _get_user_hash()
         self.run_id: str = _get_logging_run_id()
         self.sky_version: str = sky.__version__
 
