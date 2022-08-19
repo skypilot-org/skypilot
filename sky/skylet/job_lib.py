@@ -341,19 +341,19 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
+    # In ray 1.13.0, job_client.list_jobs returns a dict of job_id to job_info,
+    # where job_info contains the job status (str).
     ray_job_infos = job_client.list_jobs()
-    ray_statuses: List[JobStatus] = []
-    for ray_job_id in ray_job_ids:
+    job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
+    for i, ray_job_id in enumerate(ray_job_ids):
         if ray_job_id not in ray_job_infos:
-            ray_statuses.append(None)
-            continue
-        ray_status = ray_job_infos[ray_job_id].status
-        ray_statuses.append(_RAY_TO_JOB_STATUS_MAP[ray_status])
+            ray_status = ray_job_infos[ray_job_id].status
+            job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
 
-    assert len(ray_statuses) == len(job_ids), (ray_statuses, job_ids)
+    assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
 
     statuses = []
-    for job_id, status in zip(job_ids, ray_statuses):
+    for job_id, status in zip(job_ids, job_statuses):
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
@@ -412,10 +412,10 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # function, as the ray job status does not exist due to the app
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
-    running_jobs = _get_jobs(username=None,
+    nonterminal_jobs = _get_jobs(username=None,
                              status_list=JobStatus.nonterminal_statuses(),
                              submitted_gap_sec=submitted_gap_sec)
-    running_job_ids = [job['job_id'] for job in running_jobs]
+    running_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
     update_job_status(job_owner, running_job_ids)
 
