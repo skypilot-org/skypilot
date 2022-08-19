@@ -42,7 +42,7 @@ class SpotController:
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
             self._cluster_name, self.backend, self._task, retry_until_up,
-            self._check_signal)
+            self._handle_signal)
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery."""
@@ -55,7 +55,7 @@ class SpotController:
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
             # Handle the signal if it is sent by the user.
-            self._check_signal()
+            self._handle_signal()
 
             # Check the network connection to avoid false alarm for job failure.
             # Network glitch was observed even in the VM.
@@ -149,8 +149,8 @@ class SpotController:
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)
 
-    def _check_signal(self):
-        """Check if the user has sent down signal."""
+    def _handle_signal(self):
+        """Handle the signal if the user sent it."""
         signal_file = pathlib.Path(
             spot_utils.SIGNAL_FILE_PREFIX.format(self._job_id))
         signal = None
@@ -172,7 +172,7 @@ class SpotController:
             raise exceptions.SpotUserCancelledError(
                 f'User sent {signal.value} signal.')
 
-        raise exceptions.SpotUnknownSignalError(
+        raise RuntimeError(
             f'Unknown signal received: {signal.value}.')
 
 
@@ -184,7 +184,7 @@ if __name__ == '__main__':
                         help='Job id for the controller job.')
     parser.add_argument('--retry-until-up',
                         action='store_true',
-                        help='Retry until the cluster is up.')
+                        help='Retry until the spot cluster is up.')
     parser.add_argument('task_yaml',
                         type=str,
                         help='The path to the user spot task yaml file. '

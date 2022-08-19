@@ -128,7 +128,3 @@ class SpotUserCancelledError(Exception):
     """Raised when a spot user cancels the job."""
     pass
 
-
-class SpotUnknownSignalError(Exception):
-    """Raised when a spot user sends an unknown signal."""
-    pass
