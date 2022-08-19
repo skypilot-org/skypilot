@@ -346,7 +346,7 @@ def update_job_status(job_owner: str,
     ray_job_infos = job_client.list_jobs()
     job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
-        if ray_job_id not in ray_job_infos:
+        if ray_job_id in ray_job_infos:
             ray_status = ray_job_infos[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
 
