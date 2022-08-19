@@ -413,8 +413,8 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
     # not submitted yet. It will be then reset to PENDING / RUNNING when the
     # app starts.
     nonterminal_jobs = _get_jobs(username=None,
-                             status_list=JobStatus.nonterminal_statuses(),
-                             submitted_gap_sec=submitted_gap_sec)
+                                 status_list=JobStatus.nonterminal_statuses(),
+                                 submitted_gap_sec=submitted_gap_sec)
     running_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
     update_job_status(job_owner, running_job_ids)

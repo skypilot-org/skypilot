@@ -207,7 +207,7 @@ def test_stale_job_manual_restart():
             f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
-            # Ensure the skylet updated the staled job status.
+            # Ensure the skylet updated the stale job status.
             f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
         ],
