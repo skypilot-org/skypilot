@@ -868,8 +868,8 @@ class TestStorageWithCredentials:
             else:
                 retry_count += 1
                 if retry_count > 3:
-                    raise RuntimeError('Could find a nonexistent bucket to use.'
-                                       ' This is higly unlikely to happen - '
+                    raise RuntimeError('Unable to find a nonexistent bucket '
+                                       'to use. This is higly unlikely - '
                                        'check if the tests are correct.')
 
         with pytest.raises(
