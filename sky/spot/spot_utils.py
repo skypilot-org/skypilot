@@ -277,6 +277,8 @@ def dump_spot_job_queue() -> str:
         elif job_start_at > 0:
             job_duration = end_at - job_start_at
         else:
+            # When job_start_at <= 0, that means the last_recovered_at is not
+            # set yet, i.e. the job is not started.
             job_duration = 0
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
