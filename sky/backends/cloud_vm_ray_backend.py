@@ -1686,7 +1686,7 @@ class CloudVmRayBackend(backends.Backend):
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
             zones = config_dict['zones']
-            if len(zones) == 1:
+            if zones is not None and len(zones) == 1:  # zones is None for Azure
                 # Optimization for if the provision request was for 1 zone
                 # (currently happens only for GCP since it uses per-zone
                 # provisioning), then we know the exact zone already.

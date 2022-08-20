@@ -120,7 +120,8 @@ def is_ip(s: str) -> bool:
 def fill_template(template_name: str,
                   variables: Dict,
                   output_path: Optional[str] = None,
-                  output_prefix: str = SKY_USER_FILE_PATH) -> str:
+                  output_prefix: str = SKY_USER_FILE_PATH,
+                  dryrun: bool = False) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -207,10 +208,11 @@ def fill_template(template_name: str,
 
     # (For local) Move all runtime files, including the just-written yaml, to
     # local_runtime_files_dir/.
-    all_local_sources = ' '.join(
-        local_src for local_src in file_mounts.values())
-    subprocess_utils.run(
-        f'cp -r {all_local_sources} {local_runtime_files_dir}/')
+    if not dryrun:
+        all_local_sources = ' '.join(
+            local_src for local_src in file_mounts.values())
+        subprocess_utils.run(
+            f'cp -r {all_local_sources} {local_runtime_files_dir}/')
 
     return output_path
 
@@ -717,7 +719,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     (None if auth_config is None else auth_config['ssh_user']),
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
-            }))
+            }),
+        dryrun=dryrun,
+    )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
