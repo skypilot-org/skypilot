@@ -16,13 +16,16 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
+from sky.utils import common_utils
 from sky.utils import log_utils
-from sky.spot import constants
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Add user hash so that two users don't have the same controller VM on
+# shared-account clouds such as GCP.
+SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -116,7 +119,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         controller_status = job_lib.get_status(job_id)
         if controller_status.is_terminal():
             logger.error(f'Controller for job {job_id} have exited abnormally. '
-                         'Set the job status to FAILED.')
+                         'Setting the job status to FAILED_CONTROLLER.')
             task_name = spot_state.get_task_name_by_job_id(job_id)
 
             # Tear down the abnormal spot cluster to avoid resource leakage.
@@ -200,7 +203,7 @@ def stream_logs_by_id(job_id: int) -> str:
         if job_status.is_failed():
             job_msg = ('\nFor detailed error message, please check: '
                        f'{colorama.Style.BRIGHT}sky logs '
-                       f'{constants.SPOT_CONTROLLER_NAME} {job_id}'
+                       f'{SPOT_CONTROLLER_NAME} {job_id}'
                        f'{colorama.Style.RESET_ALL}')
         return (
             f'Job {job_id} is already in terminal state {job_status.value}. '

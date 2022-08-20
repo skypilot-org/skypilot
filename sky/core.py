@@ -541,7 +541,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
     # TODO(zhwu): Automatically restart the spot controller
     controller_status, handle = _is_spot_controller_up(
         'Please restart the spot controller with '
-        '`sky start sky-spot-controller -i 5`.')
+        f'`sky start {spot.SPOT_CONTROLLER_NAME} -i 5`.')
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:

@@ -12,8 +12,17 @@ To get original versions, go to the Ray branch with version:
 
   sky.constants.SKY_REMOTE_RAY_VERSION
 
-Example:
-- https://raw.githubusercontent.com/ray-project/ray/releases/1.13.0/python/ray/worker.py
+Example workflow:
+
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/1.13.0/python/ray/autoscaler/_private/command_runner.py
+  >> cp command_runner.py command_runner.py.1
+
+  >> # Make some edits to command_runner.py.1...
+
+  >> diff command_runner.py command_runner.py.1 >command_runner.py.patch
+
+  >> # Inspect command_runner.py.patch.
+  >> # Edit this file to include command_runner.py.patch.
 """
 import os
 import subprocess
@@ -57,9 +66,12 @@ def patch() -> None:
     from ray.dashboard.modules.job import cli
     _run_patch(cli.__file__, _to_absolute('cli.py.patch'))
 
+    from ray.autoscaler._private import autoscaler
+    _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
+
+    from ray.autoscaler._private import command_runner
+    _run_patch(command_runner.__file__, _to_absolute('command_runner.py.patch'))
+
     from ray.autoscaler._private import resource_demand_scheduler
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
-
-    from ray.autoscaler._private import autoscaler
-    _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))

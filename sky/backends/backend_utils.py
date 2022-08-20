@@ -108,6 +108,11 @@ CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
 
+def is_ip(s: str) -> bool:
+    """Returns whether this string matches IP_ADDR_REGEX."""
+    return len(re.findall(IP_ADDR_REGEX, s)) == 1
+
+
 def fill_template(template_name: str,
                   variables: Dict,
                   output_path: Optional[str] = None,
@@ -800,9 +805,9 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out: waited for workers to be provisioned '
-                    f'for more than {nodes_launching_progress_timeout} seconds.'
-                )
+                    'Timed out: waited for more than '
+                    f'{nodes_launching_progress_timeout} seconds for new '
+                    'workers to be provisioned, but no progress.')
                 return False  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
