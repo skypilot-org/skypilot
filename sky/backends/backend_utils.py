@@ -152,7 +152,6 @@ def fill_template(template_name: str,
         file_mounts[variables['sky_remote_path']] = variables['sky_local_path']
     if 'credentials' in variables:
         file_mounts.update(variables['credentials'])
-        variables['credentials'] = {}
     # Putting these in file_mounts hurts provisioning speed, as each file
     # opens/closes an SSH connection.  Instead, we:
     #  - cp locally them into a directory
@@ -169,21 +168,34 @@ def fill_template(template_name: str,
     # Remote dir.
     variables['remote_runtime_files_dir'] = _REMOTE_RUNTIME_FILES_DIR
 
-    # Build a command that moves runtime files to their right destinations.
+    # (For remote) Build a command that copies runtime files to their right
+    # destinations.
+    # NOTE: we copy rather than move, because when launching >1 node, head node
+    # is fully set up first, and if moving then head node's files would already
+    # move out of _REMOTE_RUNTIME_FILES_DIR, which would cause setting up
+    # workers (from the head's files) to fail.  An alternative is softlink
+    # (then we need to make sure the usage of runtime files follow links).
     commands = []
+    basenames = set()
     for dst, src in file_mounts.items():
-        # Our runtime files (wheel, yaml, credentials) do not have backslashes.
-        assert not src.endswith('/'), src
-        assert not dst.endswith('/'), dst
         src_basename = os.path.basename(src)
         dst_basename = os.path.basename(dst)
         dst_parent_dir = os.path.dirname(dst)
+
+        # Validate by asserts here as these files are added by our backend.
+        # Our runtime files (wheel, yaml, credentials) do not have backslashes.
+        assert not src.endswith('/'), src
+        assert not dst.endswith('/'), dst
+        assert src_basename not in basenames, (
+            f'Duplicated src basename: {src_basename}; mounts: {file_mounts}')
+        basenames.add(src_basename)
         # Our runtime files (wheel, yaml, credentials) are not relative paths.
-        assert dst_parent_dir, dst_parent_dir
-        mkdir_parent = f'mkdir -p {dst_parent_dir};'
-        mv = (f'mv {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+        assert dst_parent_dir, f'Found relative destination path: {dst}'
+
+        mkdir_parent = f'mkdir -p {dst_parent_dir}'
+        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
               f'{dst_parent_dir}/{dst_basename}')
-        fragment = f'({mkdir_parent} {mv})'
+        fragment = f'({mkdir_parent} && {mv})'
         commands.append(fragment)
     variables['postprocess_runtime_files_command'] = ' && '.join(commands)
 
@@ -193,12 +205,12 @@ def fill_template(template_name: str,
     with open(output_path, 'w') as fout:
         fout.write(content)
 
-    # Move all runtime files, including the just-written yaml, to
+    # (For local) Move all runtime files, including the just-written yaml, to
     # local_runtime_files_dir/.
     all_local_sources = ' '.join(
         local_src for local_src in file_mounts.values())
     subprocess_utils.run(
-        f'cp -r {all_local_sources} {local_runtime_files_dir}/ || true')
+        f'cp -r {all_local_sources} {local_runtime_files_dir}/')
 
     return output_path
 

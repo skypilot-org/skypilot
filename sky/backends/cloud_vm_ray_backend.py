@@ -2893,13 +2893,6 @@ class CloudVmRayBackend(backends.Backend):
             )
 
         codegen.add_epilogue()
-
-        # Logger.
-        colorama.init()
-        fore = colorama.Fore
-        style = colorama.Style
-        logger.info(f'\n{fore.CYAN}Starting Task execution.{style.RESET_ALL}')
-
         # TODO(zhanghao): Add help info for downloading logs.
         self._exec_code_on_head(handle,
                                 codegen.build(),
