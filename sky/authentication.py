@@ -31,7 +31,7 @@ MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
-GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.config/gcloud/configurations/.sky_config_default'
+GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.config/gcloud/configurations/.sky_config_default'  # pylint: disable=line-too-long
 
 
 def generate_rsa_key_pair():
