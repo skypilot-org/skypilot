@@ -31,6 +31,7 @@ MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
+GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.config/gcloud/configurations/.sky_config_default'
 
 
 def generate_rsa_key_pair():
@@ -207,12 +208,20 @@ def setup_gcp_authentication(config):
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
         config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
+        sky_backup_config_path = os.path.expanduser(
+            GCP_CONFIGURE_SKY_BACKUP_PATH)
         if not os.path.exists(config_path):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
                     'GCP authentication failed, as the oslogin is enabled but '
                     f'the file {config_path} is not found.')
-        with open(config_path, 'r') as infile:
+
+        if not os.path.exists(sky_backup_config_path):
+            subprocess.run(f'cp {config_path} {sky_backup_config_path}',
+                           shell=True,
+                           check=True)
+
+        with open(sky_backup_config_path, 'r') as infile:
             for line in infile:
                 if line.startswith('account'):
                     account = line.split('=')[1].strip()
