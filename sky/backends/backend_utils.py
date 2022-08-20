@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 import textwrap
 import threading
 import time
@@ -107,6 +108,9 @@ SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
 CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 
+# Remote dir that holds our runtime files.
+_REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
@@ -116,7 +120,8 @@ def is_ip(s: str) -> bool:
 def fill_template(template_name: str,
                   variables: Dict,
                   output_path: Optional[str] = None,
-                  output_prefix: str = SKY_USER_FILE_PATH) -> str:
+                  output_prefix: str = SKY_USER_FILE_PATH,
+                  dryrun: bool = False) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -133,13 +138,83 @@ def fill_template(template_name: str,
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
 
-    # Add yaml file path to the template variables.
+    # Runtime files handling
+    #
+    # List of runtime files to be uploaded to cluster:
+    #   - yaml config (for autostopping)
+    #   - wheel
+    #   - credentials
+    # Format is {dst: src}.
+    file_mounts = {SKY_RAY_YAML_REMOTE_PATH: output_path}
+
+    # fill_template() is also called to fill TPU/spot controller templates,
+    # which don't have all variables.
+    if 'sky_remote_path' in variables and 'sky_local_path' in variables:
+        file_mounts[variables['sky_remote_path']] = variables['sky_local_path']
+    if 'credentials' in variables:
+        file_mounts.update(variables['credentials'])
+    # Putting these in file_mounts hurts provisioning speed, as each file
+    # opens/closes an SSH connection.  Instead, we:
+    #  - cp locally them into a directory
+    #  - upload that directory as a file mount (1 connection)
+    #  - use a remote command to move all runtime files to their right places.
+
+    # yaml config
     variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
     variables['sky_ray_yaml_local_path'] = output_path
+
+    # Local tmp dir holding runtime files.
+    local_runtime_files_dir = tempfile.mkdtemp()
+    variables['local_runtime_files_dir'] = local_runtime_files_dir
+    # Remote dir.
+    variables['remote_runtime_files_dir'] = _REMOTE_RUNTIME_FILES_DIR
+
+    # (For remote) Build a command that copies runtime files to their right
+    # destinations.
+    # NOTE: we copy rather than move, because when launching >1 node, head node
+    # is fully set up first, and if moving then head node's files would already
+    # move out of _REMOTE_RUNTIME_FILES_DIR, which would cause setting up
+    # workers (from the head's files) to fail.  An alternative is softlink
+    # (then we need to make sure the usage of runtime files follow links).
+    commands = []
+    basenames = set()
+    for dst, src in file_mounts.items():
+        src_basename = os.path.basename(src)
+        dst_basename = os.path.basename(dst)
+        dst_parent_dir = os.path.dirname(dst)
+
+        # Validate by asserts here as these files are added by our backend.
+        # Our runtime files (wheel, yaml, credentials) do not have backslashes.
+        assert not src.endswith('/'), src
+        assert not dst.endswith('/'), dst
+        assert src_basename not in basenames, (
+            f'Duplicated src basename: {src_basename}; mounts: {file_mounts}')
+        basenames.add(src_basename)
+        # Our runtime files (wheel, yaml, credentials) are not relative paths.
+        assert dst_parent_dir, f'Found relative destination path: {dst}'
+
+        mkdir_parent = f'mkdir -p {dst_parent_dir}'
+        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+              f'{dst_parent_dir}/{dst_basename}')
+        fragment = f'({mkdir_parent} && {mv})'
+        commands.append(fragment)
+    variables['postprocess_runtime_files_command'] = ' && '.join(commands)
+
+    # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
+
+    # (For local) Move all runtime files, including the just-written yaml, to
+    # local_runtime_files_dir/.
+    if not dryrun:
+        all_local_sources = ' '.join(
+            local_src for local_src in file_mounts.values())
+        # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
+        subprocess_utils.run(
+            f'cp -r {all_local_sources} {local_runtime_files_dir}/')
+
     return output_path
 
 
@@ -153,8 +228,9 @@ def path_size_megabytes(path: str) -> int:
             str(resolved_path / command_runner.GIT_EXCLUDE))
     rsync_output = str(
         subprocess.check_output(
-            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} {command_runner.RSYNC_FILTER_OPTION}'
-            f' {git_exclude_filter} --dry-run {path}',
+            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+            f'{command_runner.RSYNC_FILTER_OPTION} '
+            f'{git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
@@ -607,6 +683,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
+
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -643,7 +720,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     (None if auth_config is None else auth_config['ssh_user']),
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
-            }))
+            }),
+        dryrun=dryrun,
+    )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:

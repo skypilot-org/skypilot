@@ -465,9 +465,11 @@ def test_autostop():
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop -y {name} -i 1',
-            f'sky status | grep {name} | grep "1 min"',  # Ensure autostop is set.
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1 min"',
             'sleep 180',
-            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
+            # Ensure the cluster is STOPPED.
+            f'sky status --refresh | grep {name} | grep STOPPED',
             f'sky start -y {name}',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} examples/minimal.yaml',
