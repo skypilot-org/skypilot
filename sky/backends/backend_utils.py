@@ -211,6 +211,7 @@ def fill_template(template_name: str,
     if not dryrun:
         all_local_sources = ' '.join(
             local_src for local_src in file_mounts.values())
+        # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
         subprocess_utils.run(
             f'cp -r {all_local_sources} {local_runtime_files_dir}/')
 
