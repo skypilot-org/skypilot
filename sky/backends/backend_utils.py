@@ -199,7 +199,7 @@ def fill_template(template_name: str,
             # directly copy the folder will create a subfolder under the dst.
             mkdir_parent = f'mkdir -p {dst}'
             src_basename = f'{src_basename}/*'
-        mv = (f'rsync -az {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
               f'{dst_parent_dir}/{dst_basename}')
         fragment = f'({mkdir_parent} && {mv})'
         commands.append(fragment)
