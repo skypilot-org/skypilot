@@ -216,6 +216,10 @@ def setup_gcp_authentication(config):
                     'GCP authentication failed, as the oslogin is enabled but '
                     f'the file {config_path} is not found.')
 
+        # Create a backup of the config_default file in the same folder (the
+        # folder will be uploaded by `sky launch`), as the original file can
+        # be modified on the remote cluster by ray causing failure of launching
+        # GCP cluster on a remote cluster.
         if not os.path.exists(sky_backup_config_path):
             subprocess.run(f'cp {config_path} {sky_backup_config_path}',
                            shell=True,
