@@ -82,6 +82,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             log_file.flush()
             test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(e)
+            log_file.write(f'Timeout after {test.timeout} seconds.\n')
+            log_file.flush()
             # Kill the current process.
             proc.terminate()
             proc.returncode = 1  # None if we don't set it.
