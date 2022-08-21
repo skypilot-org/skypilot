@@ -85,6 +85,8 @@ def readable_time_duration(start: Optional[int],
     # It is only used in spot_utils.show_jobs() for job duration calculation.
     if start is None or start < 0:
         return '-'
+    if end == start == 0:
+        return '-'
     if end is not None:
         end = pendulum.from_timestamp(end)
     start_time = pendulum.from_timestamp(start)
