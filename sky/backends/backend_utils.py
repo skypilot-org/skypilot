@@ -734,9 +734,9 @@ def write_cluster_config(to_provision: 'resources.Resources',
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
     # Delay the optimization of the config until the authentication files is added.
-    if isinstance(cloud, clouds.GCP):
-        # Only optimize the file mounts for GCP now, as it has not been fully tested
-        # for other clouds yet.
+    if not isinstance(cloud, clouds.Local):
+        # Only optimize the file mounts for public clouds now, as it has not been
+        # fully tested local yet.
         _optimize_file_mounts(yaml_path)
 
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
