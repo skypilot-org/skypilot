@@ -205,7 +205,8 @@ def _optimize_file_mounts(yaml_path: str):
 
     setup_commands = yaml_config.get('setup_commands', [])
     if setup_commands:
-        setup_commands[0] = f'{postprocess_runtime_files_command}; {setup_commands[0]}'
+        setup_commands[
+            0] = f'{postprocess_runtime_files_command}; {setup_commands[0]}'
     else:
         setup_commands = [postprocess_runtime_files_command]
 
@@ -217,7 +218,8 @@ def _optimize_file_mounts(yaml_path: str):
     all_local_sources = ' '.join(
         local_src for local_src in file_mounts.values())
     # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
-    subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/', shell=True)
+    subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/',
+                   shell=True)
 
     common_utils.dump_yaml(yaml_path, yaml_config)
 
