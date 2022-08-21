@@ -137,7 +137,7 @@ def down(cluster_name: str, purge: bool = False):
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if (cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES and not purge):
         raise exceptions.NotSupportedError(
             f'Tearing down sky reserved cluster {cluster_name!r} '
             f'is not supported.')
