@@ -8,18 +8,25 @@
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
 [![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
 
-SkyPilot is a framework for easily running machine learning[^1] workloads on any cloud through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
 
-### Key features
+Start using the clouds **easily** and **cheaply**, without needing to learn cloud infra.
+
+
+
+_Ease of use & productivity_
 * **Run existing projects on the cloud** with zero code changes
-* **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
-* **Minimize costs** by leveraging spot instances and automatically stopping idle clusters
-* **Automatic recovery from spot instance failures**
-* **Automatic fail-over** to find resources across regions and clouds
+* **Easily manage jobs** across multiple clusters
+* **Automatic fail-over** to find scarce resources (GPUs) across regions and clouds
 * **Store datasets on the cloud** and access them like you would on a local file system 
-* **Easily manage job queues** across multiple clusters
+* **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
 
+_Saving cost_
+* Minimize costs by leveraging **spot instances** and **automatically stopping idle clusters**
+* **Automatic recovery** from spot instance failures
+* One-click use of **TPUs**, for high-performance, cost-effective training
+* Automatically benchmark and find the best hardware for your job
 
 ## Getting Started
 You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
@@ -65,7 +72,7 @@ Launch with `sky launch`:
 ```bash
 sky launch my_task.yaml
 ```
-SkyPilot will perform multiple functions for you:
+SkyPilot will perform multiple actions for you:
 1. Find the lowest priced VM instance type across different clouds
 2. Provision the VM
 3. Copy the local contents of `workdir` to the VM
@@ -87,4 +94,4 @@ We are excited to hear your feedback! SkyPilot has two channels for engaging wit
 We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
 
 <!-- Footnote -->
-[^1]: SkyPilot is primarily targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
+[^1]: SkyPilot is currently targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
