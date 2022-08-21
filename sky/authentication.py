@@ -31,6 +31,8 @@ MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
+# Do not place the backup under the gcloud config directory, as ray
+# autoscaler can overwrite that directory on the remote nodes.
 GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 
@@ -203,9 +205,6 @@ def setup_gcp_authentication(config):
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
 
-    config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
-    sky_backup_config_path = os.path.expanduser(GCP_CONFIGURE_SKY_BACKUP_PATH)
-
     if project_oslogin.lower() == 'true':
         # project.
         logger.info(
@@ -213,6 +212,9 @@ def setup_gcp_authentication(config):
             'additional authentication steps.')
         # Read the account information from the credential file, since the user
         # should be set according the account, when the oslogin is enabled.
+        config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
+        sky_backup_config_path = os.path.expanduser(
+            GCP_CONFIGURE_SKY_BACKUP_PATH)
         if not os.path.exists(sky_backup_config_path):
             if not os.path.exists(config_path):
                 with ux_utils.print_exception_no_traceback():
