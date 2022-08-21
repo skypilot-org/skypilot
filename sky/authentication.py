@@ -31,7 +31,7 @@ MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
-GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.config/gcloud/configurations/.sky_config_default'  # pylint: disable=line-too-long
+GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 
 def generate_rsa_key_pair():
@@ -202,31 +202,36 @@ def setup_gcp_authentication(config):
     project_oslogin = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
+
+    config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
+    sky_backup_config_path = os.path.expanduser(
+        GCP_CONFIGURE_SKY_BACKUP_PATH)
+
+    # Read the account information from the credential file, since the user
+    # should be set according the account, when the oslogin is enabled.
+    if not os.path.exists(sky_backup_config_path):
+        if not os.path.exists(config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'GCP authentication failed, as the oslogin is enabled '
+                    f'but the file {config_path} is not found.')
+
+        # Create a backup of the config_default file in the same folder (the
+        # folder will be uploaded by `sky launch`), as the original file can
+        # be modified on the remote cluster by ray causing failure of
+        # launching GCP cluster on a remote cluster.
+        subprocess.run(f'cp {config_path} {sky_backup_config_path}',
+                        shell=True,
+                        check=True)
+    new_file_mounts = config.get('file_mounts', {})
+    new_file_mounts[GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
+    config['file_mounts'] = new_file_mounts
+    # config['file_mounts'] = 
     if project_oslogin.lower() == 'true':
         # project.
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
-        config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
-        sky_backup_config_path = os.path.expanduser(
-            GCP_CONFIGURE_SKY_BACKUP_PATH)
-
-        # Read the account information from the credential file, since the user
-        # should be set according the account, when the oslogin is enabled.
-        if not os.path.exists(sky_backup_config_path):
-            if not os.path.exists(config_path):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} is not found.')
-
-            # Create a backup of the config_default file in the same folder (the
-            # folder will be uploaded by `sky launch`), as the original file can
-            # be modified on the remote cluster by ray causing failure of
-            # launching GCP cluster on a remote cluster.
-            subprocess.run(f'cp {config_path} {sky_backup_config_path}',
-                           shell=True,
-                           check=True)
 
         with open(sky_backup_config_path, 'r') as infile:
             for line in infile:

@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import threading
@@ -120,8 +121,7 @@ def is_ip(s: str) -> bool:
 def fill_template(template_name: str,
                   variables: Dict,
                   output_path: Optional[str] = None,
-                  output_prefix: str = SKY_USER_FILE_PATH,
-                  dryrun: bool = False) -> str:
+                  output_prefix: str = SKY_USER_FILE_PATH) -> str:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
     template_path = os.path.join(sky.__root_dir__, 'templates', template_name)
@@ -138,36 +138,34 @@ def fill_template(template_name: str,
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
 
-    # Runtime files handling
-    #
-    # List of runtime files to be uploaded to cluster:
-    #   - yaml config (for autostopping)
-    #   - wheel
-    #   - credentials
-    # Format is {dst: src}.
-    file_mounts = {SKY_RAY_YAML_REMOTE_PATH: output_path}
+    # Write out yaml config.
+    template = jinja2.Template(template)
+    content = template.render(**variables)
+    with open(output_path, 'w') as fout:
+        fout.write(content)
+    return output_path
 
-    # fill_template() is also called to fill TPU/spot controller templates,
-    # which don't have all variables.
-    if 'sky_remote_path' in variables and 'sky_local_path' in variables:
-        file_mounts[variables['sky_remote_path']] = variables['sky_local_path']
-    if 'credentials' in variables:
-        file_mounts.update(variables['credentials'])
+
+def _optimize_file_mounts(yaml_path: str):
+    """Optimize file mounts in the given ray yaml file."""
+    with open(yaml_path, 'r') as f:
+        yaml_config = yaml.safe_load(f)
+
+    file_mounts = yaml_config.get('file_mounts', {})
+    # Remove the file mounts added by the newline.
+    if '' in file_mounts:
+        assert file_mounts[''] == '', file_mounts['']
+        file_mounts.pop('')
+
     # Putting these in file_mounts hurts provisioning speed, as each file
     # opens/closes an SSH connection.  Instead, we:
     #  - cp locally them into a directory
     #  - upload that directory as a file mount (1 connection)
     #  - use a remote command to move all runtime files to their right places.
 
-    # yaml config
-    variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
-    variables['sky_ray_yaml_local_path'] = output_path
-
     # Local tmp dir holding runtime files.
     local_runtime_files_dir = tempfile.mkdtemp()
-    variables['local_runtime_files_dir'] = local_runtime_files_dir
-    # Remote dir.
-    variables['remote_runtime_files_dir'] = _REMOTE_RUNTIME_FILES_DIR
+    new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
 
     # (For remote) Build a command that copies runtime files to their right
     # destinations.
@@ -203,24 +201,25 @@ def fill_template(template_name: str,
               f'{dst_parent_dir}/{dst_basename}')
         fragment = f'({mkdir_parent} && {mv})'
         commands.append(fragment)
-    variables['postprocess_runtime_files_command'] = ' && '.join(commands)
+    postprocess_runtime_files_command = ' && '.join(commands)
 
-    # Write out yaml config.
-    template = jinja2.Template(template)
-    content = template.render(**variables)
-    with open(output_path, 'w') as fout:
-        fout.write(content)
+    setup_commands = yaml_config.get('setup_commands', [])
+    if setup_commands:
+        setup_commands[0] = f'{postprocess_runtime_files_command}; {setup_commands[0]}'
+    else:
+        setup_commands = [postprocess_runtime_files_command]
+
+    yaml_config['file_mounts'] = new_file_mounts
+    yaml_config['setup_commands'] = setup_commands
 
     # (For local) Move all runtime files, including the just-written yaml, to
     # local_runtime_files_dir/.
-    if not dryrun:
-        all_local_sources = ' '.join(
-            local_src for local_src in file_mounts.values())
-        # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
-        subprocess_utils.run(
-            f'cp -r {all_local_sources} {local_runtime_files_dir}/')
+    all_local_sources = ' '.join(
+        local_src for local_src in file_mounts.values())
+    # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
+    subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/', shell=True)
 
-    return output_path
+    common_utils.dump_yaml(yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -726,13 +725,18 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
             }),
-        dryrun=dryrun,
     )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    # Delay the optimization of the config until the authentication files is added.
+    if isinstance(cloud, clouds.GCP):
+        # Only optimize the file mounts for GCP now, as it has not been fully tested
+        # for other clouds yet.
+        _optimize_file_mounts(yaml_path)
+
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
