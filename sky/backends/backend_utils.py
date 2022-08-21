@@ -31,7 +31,6 @@ from ray.autoscaler._private import commands as ray_commands
 from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
-import yaml
 
 import sky
 from sky import authentication as auth
@@ -148,10 +147,17 @@ def fill_template(template_name: str,
     return output_path
 
 
-def _optimize_file_mounts(yaml_path: str):
-    """Optimize file mounts in the given ray yaml file."""
-    with open(yaml_path, 'r') as f:
-        yaml_config = yaml.safe_load(f)
+def _optimize_file_mounts(yaml_path: str) -> None:
+    """Optimize file mounts in the given ray yaml file.
+
+    Runtime files handling:
+    List of runtime files to be uploaded to cluster:
+      - yaml config (for autostopping)
+      - wheel
+      - credentials
+    Format is {dst: src}.
+    """
+    yaml_config = common_utils.read_yaml(yaml_path)
 
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
@@ -738,8 +744,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
     _add_auth_to_cluster_config(cloud, yaml_path)
     # Delay the optimization of the config until the authentication files is added.
     if not isinstance(cloud, clouds.Local):
-        # Only optimize the file mounts for public clouds now, as it has not been
-        # fully tested local yet.
+        # Only optimize the file mounts for public clouds now, as local has not
+        # been fully tested yet.
         _optimize_file_mounts(yaml_path)
 
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
@@ -777,8 +783,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-    with open(cluster_config_file, 'r') as f:
-        config = yaml.safe_load(f)
+    config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
     if isinstance(cloud, clouds.AWS):
         config = auth.setup_aws_authentication(config)
