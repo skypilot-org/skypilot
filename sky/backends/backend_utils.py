@@ -10,7 +10,6 @@ import os
 import pathlib
 import re
 import subprocess
-import sys
 import tempfile
 import textwrap
 import threading
@@ -219,7 +218,8 @@ def _optimize_file_mounts(yaml_path: str):
         local_src for local_src in file_mounts.values())
     # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
     subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/',
-                   shell=True)
+                   shell=True,
+                   check=True)
 
     common_utils.dump_yaml(yaml_path, yaml_config)
 
