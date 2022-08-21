@@ -137,6 +137,9 @@ def fill_template(template_name: str,
         output_path = str(output_path)
     output_path = os.path.abspath(output_path)
 
+    # Add yaml file path to the template variables.
+    variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
+    variables['sky_ray_yaml_local_path'] = output_path
     # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
