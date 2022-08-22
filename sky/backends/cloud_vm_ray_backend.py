@@ -510,6 +510,9 @@ class RetryingVmProvisioner(object):
                     # when VM is preempted during creation.  This seems to be
                     # not documented by GCP.
                     self._blocked_zones.add(zone.name)
+                elif code in ['RESOURCE_NOT_READY']:
+                    # This code is returned when the VM is still STOPPING.
+                    self._blocked_zones.add(zone.name)
                 elif code == 8:
                     # Error code 8 means TPU resources is out of
                     # capacity. Example:
