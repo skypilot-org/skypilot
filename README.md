@@ -10,10 +10,7 @@
 
 SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
-
-Use the clouds **easily** and with **low cost**, all without needing to learn cloud infra.
-
-
+Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
 
 _Ease of use & productivity_
 * **Run existing projects on the cloud** with zero code changes
@@ -24,9 +21,9 @@ _Ease of use & productivity_
 
 _Cost saving_
 * Run jobs on **spot instances** with **automatic recovery** from preemptions
-* Hands-free life cycle: **automatically stop idle clusters**
+* Hands-free cluster management: **automatically stopping idle clusters**
 * One-click use of **TPUs**, for high-performance, cost-effective training
-* Automatically benchmark and find the best hardware for your job
+* Automatically benchmark and find the cheapest hardware for your job
 
 ## Getting Started
 You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
