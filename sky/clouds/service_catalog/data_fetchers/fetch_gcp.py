@@ -34,23 +34,23 @@ GPU_TYPES_TO_COUNTS = {
 A2_PRICING_URL = '/compute/vm-instance-pricing_500ae19db0b58b862da0bc662dafc1b90ed3365a4e002c244f84fa5cae0da2fc.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
-        'vCPU': 12,
+        'vCPUs': 12,
         'MemoryGiB': 85,
     },
     'a2-highgpu-2g': {
-        'vCPU': 24,
+        'vCPUs': 24,
         'MemoryGiB': 170,
     },
     'a2-highgpu-4g': {
-        'vCPU': 48,
+        'vCPUs': 48,
         'MemoryGiB': 340,
     },
     'a2-highgpu-8g': {
-        'vCPU': 96,
+        'vCPUs': 96,
         'MemoryGiB': 680,
     },
     'a2-megagpu-16g': {
-        'vCPU': 96,
+        'vCPUs': 96,
         'MemoryGiB': 1360,
     },
 }
@@ -78,8 +78,8 @@ COLUMNS = [
     'InstanceType',  # None for accelerators
     'AcceleratorName',
     'AcceleratorCount',
-    'vCPU',
-    'MemoryGiB',  # 0 for accelerators
+    'vCPUs',  # None for accelerators
+    'MemoryGiB',  # None for accelerators
     'GpuInfo',  # Same as AcceleratorName
     'Price',
     'SpotPrice',
@@ -160,9 +160,9 @@ def get_vm_price_table(url):
     column_remapping = {
         # InstanceType
         'Machine type': 'InstanceType',
-        # vCPU
-        'Virtual CPUs': 'vCPU',
-        'vCPUs': 'vCPU',
+        # vCPUs
+        'Virtual CPUs': 'vCPUs',
+        'vCPU': 'vCPUs',
         # MemoryGiB
         'Memory': 'MemoryGiB',
         'Memory(GB)': 'MemoryGiB',
@@ -221,10 +221,15 @@ def get_vm_price_table(url):
 
         # Price table for specific VM types.
         df = df[[
-            'InstanceType', 'vCPU', 'MemoryGiB', 'Region', 'Price', 'SpotPrice'
+            'InstanceType',
+            'vCPUs',
+            'MemoryGiB',
+            'Region',
+            'Price',
+            'SpotPrice',
         ]]
-        # vCPU
-        df['vCPU'] = df['vCPU'].astype(float)
+        # vCPUs
+        df['vCPUs'] = df['vCPUs'].astype(float)
         # MemoryGiB
         df['MemoryGiB'] = df['MemoryGiB'].apply(parse_memory)
 
@@ -286,7 +291,7 @@ def get_a2_df():
                                                region]['SpotPrice'].values[0]
 
         for instance_type, spec in A2_INSTANCE_TYPES.items():
-            cpu = spec['vCPU']
+            cpu = spec['vCPUs']
             memory = spec['MemoryGiB']
             price = per_cpu_price * cpu + per_memory_price * memory
             spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
@@ -295,7 +300,7 @@ def get_a2_df():
     a2_df = pd.DataFrame(table,
                          columns=[
                              'InstanceType',
-                             'vCPU',
+                             'vCPUs',
                              'MemoryGiB',
                              'Price',
                              'SpotPrice',
@@ -490,7 +495,7 @@ def get_gpu_df():
     # Add columns for the service catalog.
     gpu_df['InstanceType'] = None
     gpu_df['GpuInfo'] = gpu_df['AcceleratorName']
-    gpu_df['vCPU'] = None
+    gpu_df['vCPUs'] = None
     gpu_df['MemoryGiB'] = None
 
     # Block non-US regions.
@@ -528,7 +533,7 @@ def get_tpu_df():
     # Add columns for the service catalog.
     tpu_df['InstanceType'] = None
     tpu_df['GpuInfo'] = tpu_df['AcceleratorName']
-    gpu_df['vCPU'] = None
+    gpu_df['vCPUs'] = None
     gpu_df['MemoryGiB'] = None
     return tpu_df
 
