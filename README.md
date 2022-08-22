@@ -86,7 +86,7 @@ SkyPilot will perform multiple actions for you:
 </p>
 
 
-More YAML examples can be found in the [**`examples`**](./examples) folder.  
+See [**`examples`**](./examples) for more YAMLs that run popular ML frameworks on the cloud with one command (PyTorch/Distributed PyTorch, TensorFlow/Distributed TensorFlow, HuggingFace, JAX, Flax, Docker).  
 
 Besides YAML and CLI, SkyPilot offers a corresponding [Python API](https://github.com/skypilot-org/skypilot/blob/master/sky/core.py) for more advanced programmatic use.
 
