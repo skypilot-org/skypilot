@@ -155,9 +155,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str, int]] = None
-                                 ) -> str:
+    def get_default_instance_type(cls) -> str:
         raise NotImplementedError
 
     @classmethod

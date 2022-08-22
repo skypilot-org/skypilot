@@ -27,8 +27,7 @@ _CREDENTIAL_FILES = [
     'legacy_credentials',
 ]
 
-_IMAGE_ID_PREFIX = (
-    'projects/deeplearning-platform-release/global/images/family/')
+_IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
 
 def _run_output(cmd):
@@ -181,7 +180,7 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu'
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
 
         r = resources
         # Find GPU spec, if any.
@@ -216,8 +215,12 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                # CUDA driver version 470.103.01, CUDA Library 11.3
-                image_id = _IMAGE_ID_PREFIX + 'common-cu113'
+                if acc == 'K80':
+                    # CUDA driver version 470.57.02, CUDA Library 11.4
+                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
+                else:
+                    # CUDA driver version 510.47.03, CUDA Library 11.6
+                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220806'
 
         if resources.image_id is not None:
             image_id = resources.image_id

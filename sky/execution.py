@@ -335,6 +335,7 @@ def spot_launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
+    retry_until_up: bool = False,
 ):
     """Launch a managed spot job.
 
@@ -441,7 +442,8 @@ def spot_launch(
                 'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
                 'is_dev': env_options.Options.IS_DEVELOPER.get(),
                 'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': usage_lib.get_logging_user_hash()
+                'logging_user_hash': common_utils.get_user_hash(),
+                'retry_until_up': retry_until_up,
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as spot_dag:

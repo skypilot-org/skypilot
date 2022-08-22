@@ -446,7 +446,7 @@ def _launch_with_confirm(
     dryrun: bool,
     detach_run: bool,
     no_confirm: bool = False,
-    idle_minutes_to_autostop: int = -1,
+    idle_minutes_to_autostop: Optional[int] = None,
     retry_until_up: bool = False,
     node_type: Optional[str] = None,
     is_local_cloud: Optional[bool] = False,
@@ -536,7 +536,6 @@ def _create_and_ssh_into_node(
             node_type,
             workdir=None,
             setup=None,
-            run='',
         )
         task.set_resources(resources)
 
@@ -639,56 +638,6 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
     return is_yaml, config
 
 
-# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
-# this.
-def _check_cluster_config(yaml_config: dict):
-    """Checks if the cluster config has filled-in user credentials."""
-    auth = yaml_config['auth']
-    cluster = yaml_config['cluster']['name']
-
-    if (auth['ssh_user'] == onprem_utils.AUTH_PLACEHOLDER or
-            auth['ssh_private_key'] == onprem_utils.AUTH_PLACEHOLDER):
-        raise ValueError(
-            'Authentication into local cluster requires specifying '
-            '`ssh_user` and `ssh_private_key` under the `auth` dictionary. '
-            'Please fill aforementioned fields in '
-            f'{onprem_utils.SKY_USER_LOCAL_CONFIG_PATH.format(cluster)}.')
-
-
-# TODO(mluo): Refactor out of cli.py. Currently programmatic API doesn't check
-# this.
-def _check_local_cloud_args(cloud: Optional[str] = None,
-                            cluster_name: Optional[str] = None,
-                            yaml_config: Optional[dict] = None) -> bool:
-    """Checks if user-provided arguments satisfies local cloud specs."""
-    yaml_cloud = None
-    if yaml_config is not None and 'resources' in yaml_config:
-        yaml_cloud = yaml_config['resources'].get('cloud')
-
-    if (cluster_name is not None and
-            onprem_utils.check_if_local_cloud(cluster_name)):
-        if cloud is not None and cloud != 'local':
-            raise click.UsageError(f'Local cluster {cluster_name} is '
-                                   f'not part of cloud: {cloud}.')
-        if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
-            raise ValueError(
-                f'Detected Local cluster {cluster_name}. Must specify '
-                '`cloud: local` or no cloud in YAML or CLI args.')
-        return True
-    else:
-        if cloud == 'local' or yaml_cloud == 'local':
-            if cluster_name is not None:
-                raise click.UsageError(
-                    f'Local cluster \'{cluster_name}\' does not exist. \n'
-                    'See `sky status` for local cluster name(s).')
-            else:
-                raise click.UsageError(
-                    'Specify -c [local_cluster] to launch on a local cluster.\n'
-                    'See `sky status` for local cluster name(s).')
-
-        return False
-
-
 def _make_dag_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
@@ -723,7 +672,7 @@ def _make_dag_from_entrypoint_with_overrides(
                 click.secho('Task from command: ', fg='yellow', nl=False)
                 click.secho(entrypoint, bold=True)
 
-        if _check_local_cloud_args(cloud, cluster, yaml_config):
+        if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
             cloud = 'local'
 
         if is_yaml:
@@ -2276,6 +2225,16 @@ def spot():
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
+@click.option(
+    '--retry-until-up',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Whether to retry provisioning infinitely until the cluster is up, '
+          'if we fail to launch the cluster on any possible region/cloud due '
+          'to unavailability errors. This applies to launching the the spot '
+          'clusters (both initial and recovery attempts).'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2300,6 +2259,7 @@ def spot_launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     detach_run: bool,
+    retry_until_up: bool,
     yes: bool,
 ):
     """Launch a managed spot job."""
@@ -2330,7 +2290,10 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.spot_launch(dag, name, detach_run=detach_run)
+    sky.spot_launch(dag,
+                    name,
+                    detach_run=detach_run,
+                    retry_until_up=retry_until_up)
 
 
 @spot.command('status', cls=_DocumentedCodeCommand)
@@ -2370,7 +2333,14 @@ def spot_status(all: bool, refresh: bool):
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error
-    log can be found with ``sky logs sky-spot-controller job_id``.
+    log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
+    Please find your exact spot controller name with ``sky status -a``.
+
+    (Tip) To fetch job statuses every 60 seconds, use ``watch``:
+
+    .. code-block:: bash
+
+      watch -n60 sky spot status
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:

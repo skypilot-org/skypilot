@@ -1,14 +1,16 @@
 """SkyPilot.
 
-SkyPilot is a framework for easily running machine learning* workloads on any cloud
-through a unified interface. No knowledge of cloud offerings is required or expected –
-you simply define the workload and its resource requirements, and SkyPilot will
-automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+SkyPilot is a framework for easily running machine learning* workloads on any
+cloud through a unified interface. No knowledge of cloud offerings is required
+or expected – you simply define the workload and its resource requirements, and
+SkyPilot will automatically execute it on AWS, Google Cloud Platform or
+Microsoft Azure.
 
-*: SkyPilot is primarily targeted at machine learning workloads, but it can also
-support many general workloads. We're excited to hear about your use case and would
-love to hear more about how we can better support your requirements - please join us
-in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
+*: SkyPilot is primarily targeted at machine learning workloads, but it can
+also support many general workloads. We're excited to hear about your use case
+and would love to hear more about how we can better support your requirements -
+please join us in [this
+discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
 """
 
 import io
@@ -35,7 +37,8 @@ if system == 'Darwin':
 
 def find_version(*filepath):
     # Extract version information from filepath
-    # Adapted from: https://github.com/ray-project/ray/blob/master/python/setup.py
+    # Adapted from:
+    #  https://github.com/ray-project/ray/blob/master/python/setup.py
     with open(os.path.join(ROOT_DIR, *filepath)) as fp:
         version_match = re.search(r'^__version__ = [\'"]([^\'"]*)[\'"]',
                                   fp.read(), re.M)
@@ -61,7 +64,6 @@ install_requires = [
     'networkx',
     'oauth2client',
     'pandas',
-    'pycryptodome==3.12.0',
     'pendulum',
     'PrettyTable',
     # Lower local ray version is not fully supported, due to the
@@ -84,7 +86,12 @@ install_requires = [
 ]
 
 extras_require = {
-    'aws': ['awscli', 'boto3'],
+    'aws': [
+        'awscli',
+        'boto3',
+        # 'Crypto' module used in authentication.py for AWS.
+        'pycryptodome==3.12.0',
+    ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     'azure': ['azure-cli==2.30.0'],
@@ -100,8 +107,8 @@ install_requires += extras_require['aws']
 
 long_description = ''
 readme_filepath = 'README.md'
-# When sky/backends/wheel_utils.py builds wheels, it will not contain the README.
-# Skip the description for that case.
+# When sky/backends/wheel_utils.py builds wheels, it will not contain the
+# README.  Skip the description for that case.
 if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
     long_description = parse_footnote(long_description)
