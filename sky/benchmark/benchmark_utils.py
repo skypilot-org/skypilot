@@ -118,7 +118,7 @@ def _print_candidate_resources(
         'CLOUD',
         '# NODES',
         'INSTANCE',
-        'vCPUs',
+        'vCPUS',
         'ACCELERATORS',
         'PRICE ($/hr)',
     ]
@@ -139,9 +139,11 @@ def _print_candidate_resources(
         vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
         if vcpus is None:
             vcpus = '-'
-        elif isinstance(vcpus, float) and vcpus.is_integer():
-            vcpus = int(vcpus)
-
+        elif isinstance(vcpus, float):
+            if vcpus.is_integer():
+                vcpus = str(int(vcpus))
+            else:
+                vcpus = f'{vcpus:.1f}'
         cost = num_nodes * resources.get_cost(3600)
         spot = '[Spot]' if resources.use_spot else ''
         row = [

@@ -647,17 +647,20 @@ class Optimizer:
             vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
             if vcpus is None:
                 vcpus = '-'
-            elif isinstance(vcpus, float) and vcpus.is_integer():
-                vcpus = int(vcpus)
+            elif isinstance(vcpus, float):
+                if vcpus.is_integer():
+                    vcpus = str(int(vcpus))
+                else:
+                    vcpus = f'{vcpus:.1f}'
             return [
                 str(cloud),
                 resources.instance_type + spot,
-                str(vcpus),
+                vcpus,
                 str(accelerators),
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS']
+        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUS', 'ACCELERATORS']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]

@@ -3,7 +3,6 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
-import json
 from typing import Dict, List, Optional, Tuple
 
 from sky.clouds import cloud
@@ -35,12 +34,8 @@ def get_hourly_cost(instance_type: str,
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
-def get_vcpus_from_instance_type(instance_type: str) -> float:
-    df = _df[_df['InstanceType'] == instance_type]
-    cpu_info = df['VCpuInfo'].str.replace('\'', '"').apply(json.loads)
-    vcpus = cpu_info.apply(lambda x: x['DefaultVCpus'])
-    assert len(set(vcpus)) == 1, df
-    return float(vcpus.iloc[0])
+def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
 def get_accelerators_from_instance_type(

@@ -2034,15 +2034,24 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
-                cpu_str = '-'
-                mem_str = f'{item.memory:.0f}GB' if not pd.isna(item.memory) else '-'
+                cpu_count = item.cpu_count
+                if pd.isna(cpu_count):
+                    cpu_str = '-'
+                elif isinstance(cpu_count, float):
+                    if cpu_count.is_integer():
+                        cpu_str = str(int(cpu_count))
+                    else:
+                        cpu_str = f'{cpu_count:.1f}'
+                mem_str = f'{item.memory:.0f}GB' if not pd.isna(
+                    item.memory) else '-'
                 price_str = f'$ {item.price:.3f}' if not pd.isna(
                     item.price) else '-'
                 spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                     item.spot_price) else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, cpu_str, mem_str, price_str, spot_price_str
+                    instance_type_str, cpu_str, mem_str, price_str,
+                    spot_price_str
                 ])
 
             if i != 0:
