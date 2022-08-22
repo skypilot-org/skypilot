@@ -7,7 +7,7 @@
 <                 await job_supervisor.ping.remote()
 ---
 >                 # Simulate the await behavior, in case some unexpected exception happens
->                 # and block the program.
+>                 # and this will not yield for other coroutines.
 >                 # https://ray-distributed.slack.com/archives/CP950VC76/p1661206198489669?thread_ts=1660955297.652409&cid=CP950VC76
 >                 ref = job_supervisor.ping.remote()
 >                 not_ready = [ref]
