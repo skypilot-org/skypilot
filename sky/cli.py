@@ -2026,7 +2026,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 'QTY',
                 'CLOUD',
                 'INSTANCE_TYPE',
-                'CPU',
+                'vCPUS',
                 'HOST_MEMORY',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
