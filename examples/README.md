@@ -12,38 +12,38 @@ python examples/<name>.py
 Machine learning examples:
 
 
-1. [**`huggingface_glue_imdb_app.yaml`**](./huggingface_glue_imdb_app.yaml): Use [Huggingface Transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
+- [**`huggingface_glue_imdb_app.yaml`**](./huggingface_glue_imdb_app.yaml): Use [Huggingface Transformers](https://github.com/huggingface/transformers/) to finetune a pretrained BERT model.
 
-1. [**`resnet_distributed_torch.yaml`**](./resnet_distributed_torch.yaml): Run Distributed PyTorch (DDP) training of ResNet50 on 2 nodes.
+- [**`resnet_distributed_torch.yaml`**](./resnet_distributed_torch.yaml): Run Distributed PyTorch (DDP) training of ResNet50 on 2 nodes.
 
-1. [**`detectron2_app.yaml`**](./detectron2_app.yaml): Run Detectron2 on a V100 GPU.
+- [**`detectron2_app.yaml`**](./detectron2_app.yaml): Run Detectron2 on a V100 GPU.
 
-1. TPU examples
+- TPU examples
   - [**`tpu/tpu_app.yaml`**](./tpu/tpu_app.yaml): Train on a **TPU node** on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
   - [**`tpu/tpuvm_mnist.yaml`**](./tpu/tpuvm_mnist.yaml): Train on a **TPU VM** on GCP.  Train on MNIST in Flax (based on JAX).
 
-1. [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu). 
+- [**`resnet_app.py`**](./resnet_app.py): ResNet50 training on GPUs, adapted from [tensorflow/tpu](https://github.com/tensorflow/tpu). 
   
     The training data is currently a public, "fake_imagenet" dataset (`gs://cloud-tpu-test-datasets/fake_imagenet`, 70GB).
 
   
-1. [**`resnet_distributed_tf_app.py`**](./resnet_distributed_tf_app.py): **Distributed training** variant of the above, via TensorFlow Distributed.
+- [**`resnet_distributed_tf_app.py`**](./resnet_distributed_tf_app.py): **Distributed training** variant of the above, via TensorFlow Distributed.
 
-1. [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): Run **grid search** on the above.  Run many trials concurrently on the same VM.
+- [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): Run **grid search** on the above.  Run many trials concurrently on the same VM.
 
 
 ...and many more.
 
 General examples:
 
-1. [**`detectron2_docker.yaml`**](./detectron2_docker.yaml): Using Docker to run Detectron2 on GPUs.
+- [**`detectron2_docker.yaml`**](./detectron2_docker.yaml): Using Docker to run Detectron2 on GPUs.
 
-1. [**`using_file_mounts.yaml`**](./using_file_mounts.yaml): Using the `file_mounts` field to upload local/cloud paths to a cluster.
+- [**`using_file_mounts.yaml`**](./using_file_mounts.yaml): Using the `file_mounts` field to upload local/cloud paths to a cluster.
 
-1. [**`multi_hostname.yaml`**](./multi_hostname.yaml): Run a command on multiple nodes.
+- [**`multi_hostname.yaml`**](./multi_hostname.yaml): Run a command on multiple nodes.
 
-1. [**`env_check.yaml`**](./env_check.yaml): Using environment variables in the `run` commands.
+- [**`env_check.yaml`**](./env_check.yaml): Using environment variables in the `run` commands.
 
-1. [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands in the clouds, with configurable resources.  Similar to grid search.
+- [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands in the clouds, with configurable resources.  Similar to grid search.
 
 ...and many more.
