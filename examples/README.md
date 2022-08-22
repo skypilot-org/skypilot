@@ -21,11 +21,11 @@ Machine learning examples:
 
 6. [**`tpu_app.py`**](./tpu/tpu_app.py): **Train on a TPU** (v3-8) on GCP.  Finetune BERT on Amazon Reviews for sentiment analysis.
 
+...and much more!
 
 General examples:
 
 1. [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands in the cloud, with configurable resources.  Similar to grid search.
 
-## TODO: non-runnable apps
-1. [**`timm_app.py`**](./timm_app.py): the [PyTorch image models (timm)](https://github.com/rwightman/pytorch-image-models) package.
-  - Not runnable due to requiring ImageNet images, not tfrecords; consider using https://github.com/mlcommons/inference/blob/master/vision/classification_and_detection/tools/make_fake_imagenet.sh.
+
+...and much more!
