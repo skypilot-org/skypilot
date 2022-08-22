@@ -49,6 +49,7 @@ Key features:
    reference/job-queue
    reference/auto-stop
    examples/spot-jobs
+   reference/benchmark/index
 
 .. toctree::
    :maxdepth: 1

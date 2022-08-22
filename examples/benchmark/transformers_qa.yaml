@@ -12,8 +12,7 @@ setup: |
   conda activate hf
 
   # Install SkyCallback
-  git clone git@github.com:skypilot-org/skypilot.git
-  pip install skypilot/sky/callbacks/
+  pip install "git+https://github.com/skypilot-org/skypilot.git#egg=sky-callback&subdirectory=sky/callbacks/"
 
   # User setup
   pip install transformers
