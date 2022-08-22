@@ -118,7 +118,7 @@ def _print_candidate_resources(
         'CLOUD',
         '# NODES',
         'INSTANCE',
-        'vCPUS',
+        'vCPUs',
         'ACCELERATORS',
         'PRICE ($/hr)',
     ]
