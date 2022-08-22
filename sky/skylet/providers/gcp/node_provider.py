@@ -29,6 +29,8 @@ from sky.skylet.providers.gcp.node import (  # noqa
     GCPNodeType,
     INSTANCE_NAME_MAX_LEN,
     INSTANCE_NAME_UUID_LEN,
+    MAX_POLLS_STOP,
+    POLL_INTERVAL,
 )
 
 logger = logging.getLogger(__name__)
@@ -190,10 +192,12 @@ class GCPNodeProvider(NodeProvider):
                 if TAG_RAY_USER_NODE_TYPE in labels:
                     filters[TAG_RAY_USER_NODE_TYPE] = labels[TAG_RAY_USER_NODE_TYPE]
                 # SKY: "TERMINATED" for compute VM, "STOPPED" for TPU VM
+                # "STOPPING" means the VM is being stopped, which needs
+                # to be included to avoid creating a new VM.
                 if isinstance(resource, GCPCompute):
-                    STOPPED_STATUS = ["TERMINATED"]
+                    STOPPED_STATUS = ["TERMINATED", "STOPPING"]
                 else:
-                    STOPPED_STATUS = ["STOPPED"]
+                    STOPPED_STATUS = ["STOPPED", "STOPPING"]
                 reuse_nodes = resource._list_instances(
                     filters, STOPPED_STATUS)[:count]
                 reuse_node_ids = [n.id for n in reuse_nodes]
@@ -229,6 +233,26 @@ class GCPNodeProvider(NodeProvider):
                         ),
                     )
                     result = resource.stop_instance(node_id=node_id)
+
+                    # Check if the instance is actually stopped.
+                    # GCP does not fully stop an instance even after
+                    # the stop operation is finished.
+                    for _ in range(MAX_POLLS_STOP):
+                        instance = resource.get_instance(node_id=node_id)
+                        if instance.is_stopped():
+                            logger.info(f"Instance {node_id} is stopped.")
+                            break
+                        elif instance.is_stopping():
+                            time.sleep(POLL_INTERVAL)
+                        else:
+                            raise RuntimeError(f"Unexpected instance status."
+                                               " Details: {instance}")
+
+                    if instance.is_stopping():
+                        raise RuntimeError(f"Maximum number of polls: "
+                                           f"{MAX_POLLS_STOP} reached. "
+                                           f"Instance {node_id} is still in "
+                                           "STOPPING status.")
                 else:
                     result = resource.delete_instance(
                         node_id=node_id,
