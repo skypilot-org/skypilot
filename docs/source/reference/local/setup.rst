@@ -118,7 +118,7 @@ Under the hood, :code:`sky admin deploy` automatically stores a public **distrib
       ssh_user: PLACEHOLDER
       ssh_private_key: PLACEHOLDER
 
-    # Do NOT modify
+    # Path to the python binary to be used by SkyPilot. Must be the same on all nodes and executable by all users.
     python: /usr/bin/python3
 
 The distributable cluster YAML can be published on the company's website or sent privately between users. Regular users store this yaml in :code:`~/.sky/local/`, and replace :code:`PLACEHOLDER` with their credentials.

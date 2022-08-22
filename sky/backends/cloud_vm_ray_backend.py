@@ -1954,7 +1954,7 @@ class CloudVmRayBackend(backends.Backend):
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
             # Temporary workaround - wrap the run command in a script, and
             # execute it as the specified user.
-            executable = onprem_utils.get_admin_python(handle.cluster_name)
+            executable = onprem_utils.get_python_executable(handle.cluster_name)
             ray_command = (f'{cd} && {executable} -u {script_path} '
                            f'> {remote_log_path} 2>&1')
             job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(

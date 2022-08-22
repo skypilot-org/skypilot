@@ -132,7 +132,7 @@ def get_local_auth_config(cluster_name: str) -> List[str]:
     return config['auth']
 
 
-def get_admin_python(cluster_name: str) -> List[str]:
+def get_python_executable(cluster_name: str) -> str:
     """Returns admin python's path."""
     config = get_local_cluster_config_or_error(cluster_name)
     return config['python']
