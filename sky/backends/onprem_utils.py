@@ -7,6 +7,7 @@ import tempfile
 import textwrap
 from typing import Any, Dict, List, Optional, Tuple
 
+import click
 import rich.console as rich_console
 import yaml
 
@@ -515,3 +516,41 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     abs_yaml_path = os.path.expanduser(yaml_path)
     os.makedirs(os.path.dirname(abs_yaml_path), exist_ok=True)
     common_utils.dump_yaml(abs_yaml_path, cluster_config)
+
+
+# Currently, programmatic API doesn't check this.
+def check_local_cloud_args(cloud: Optional[str] = None,
+                           cluster_name: Optional[str] = None,
+                           yaml_config: Optional[dict] = None) -> bool:
+    """Checks if user-provided arguments satisfies local cloud specs.
+
+    Args:
+        cloud: Cloud type (AWS, GCP, Azure, or Local).
+        cluster_name: Cluster name.
+        yaml_config: User's task yaml loaded into a JSON dictionary.
+    """
+    yaml_cloud = None
+    if yaml_config is not None and 'resources' in yaml_config:
+        yaml_cloud = yaml_config['resources'].get('cloud')
+
+    if (cluster_name is not None and check_if_local_cloud(cluster_name)):
+        if cloud is not None and cloud != 'local':
+            raise click.UsageError(f'Local cluster {cluster_name} is '
+                                   f'not part of cloud: {cloud}.')
+        if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
+            raise ValueError(
+                f'Detected Local cluster {cluster_name}. Must specify '
+                '`cloud: local` or no cloud in YAML or CLI args.')
+        return True
+    else:
+        if cloud == 'local' or yaml_cloud == 'local':
+            if cluster_name is not None:
+                raise click.UsageError(
+                    f'Local cluster \'{cluster_name}\' does not exist. \n'
+                    'See `sky status` for local cluster name(s).')
+            else:
+                raise click.UsageError(
+                    'Specify -c [local_cluster] to launch on a local cluster.\n'
+                    'See `sky status` for local cluster name(s).')
+
+        return False

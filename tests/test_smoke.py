@@ -14,6 +14,7 @@ import pytest
 import sky
 from sky import global_user_state
 from sky.data import storage as storage_lib
+from sky.skylet import events
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
@@ -81,6 +82,8 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             log_file.flush()
             test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(e)
+            log_file.write(f'Timeout after {test.timeout} seconds.\n')
+            log_file.flush()
             # Kill the current process.
             proc.terminate()
             proc.returncode = 1  # None if we don't set it.
@@ -177,9 +180,37 @@ def test_stale_job():
             f'sky launch -y -c {name} --cloud gcp "echo hi"',
             f'sky exec {name} --cloud gcp -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
-            'sleep 40',
+            'sleep 100',  # Ensure this is large enough, else GCP leaks.
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
+            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_stale_job_manual_restart():
+    name = _get_cluster_name()
+    region = 'us-west-2'
+    test = Test(
+        'stale-job',
+        [
+            f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
+            f'sky exec {name} -d "echo start; sleep 10000"',
+            # Stop the cluster manually.
+            f'id=`aws ec2 describe-instances --region {region} --filters '
+            f'Name=tag:ray-cluster-name,Values={name} '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text`; '
+            f'aws ec2 stop-instances --region {region} '
+            '--instance-ids $id',
+            'sleep 40',
+            f'sky launch -c {name} -y "echo hi"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 3 --status',
+            # Ensure the skylet updated the stale job status.
+            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -436,9 +467,11 @@ def test_autostop():
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop -y {name} -i 1',
-            f'sky status | grep {name} | grep "1 min"',  # Ensure autostop is set.
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1 min"',
             'sleep 180',
-            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
+            # Ensure the cluster is STOPPED.
+            f'sky status --refresh | grep {name} | grep STOPPED',
             f'sky start -y {name}',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} examples/minimal.yaml',

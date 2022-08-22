@@ -59,7 +59,8 @@ logger = sky_logging.init_logger(__name__)
 
 _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
-# Timeout for provision a cluster and wait for it to be ready in seconds.
+# Timeout (seconds) for provision progress: if in this duration no new nodes
+# are launched, abort and failover.
 _NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
 
 # Time gap between retries after failing to provision in all possible places.
@@ -505,11 +506,16 @@ class RetryingVmProvisioner(object):
                         'UNSUPPORTED_OPERATION'
                 ]:  # Per zone.
                     # Return codes can be found at https://cloud.google.com/compute/docs/troubleshooting/troubleshooting-vm-creation # pylint: disable=line-too-long
-                    # However, UNSUPPORTED_OPERATION is observed empirically when VM is preempted during creation.
-                    # This seems to be not documented by GCP.
+                    # However, UNSUPPORTED_OPERATION is observed empirically
+                    # when VM is preempted during creation.  This seems to be
+                    # not documented by GCP.
+                    self._blocked_zones.add(zone.name)
+                elif code in ['RESOURCE_NOT_READY']:
+                    # This code is returned when the VM is still STOPPING.
                     self._blocked_zones.add(zone.name)
                 elif code == 8:
-                    # Error code 8 means TPU resources is out of capacity. Example:
+                    # Error code 8 means TPU resources is out of
+                    # capacity. Example:
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
                     self._blocked_zones.add(zone.name)
                 else:
@@ -517,7 +523,8 @@ class RetryingVmProvisioner(object):
         elif len(httperror_str) >= 1:
             # Parse HttpError for unauthorized regions. Example:
             # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
-            # Details: "Location us-east1-d is not found or access is unauthorized.">
+            # Details: "Location us-east1-d is not found or access is
+            # unauthorized.">
             logger.info(f'Got {httperror_str[0]}')
             self._blocked_zones.add(zone.name)
         else:
@@ -945,25 +952,40 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            status, stdout, stderr = self._gang_schedule_ray_up(
+            status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                 to_provision.cloud, num_nodes, cluster_config_file,
                 log_abs_path, stream_logs, logging_info, to_provision.use_spot)
 
-            # The cluster is not ready.
             if status == self.GangSchedulingStatus.CLUSTER_READY:
-                # However, ray processes may not be up due to 'ray up
-                # --no-restart' flag.  Ensure so.
-                self._ensure_cluster_ray_started(handle, log_abs_path)
+                if cluster_exists:
+                    # Guard against the case where there's an existing cluster
+                    # with ray runtime messed up (e.g., manually killed) by (1)
+                    # querying ray status (2) restarting ray if needed.
+                    #
+                    # The above 'ray up' will not restart it automatically due
+                    # to 'ray up # --no-restart' flag.
+                    #
+                    # NOTE: this is performance sensitive and has been observed
+                    # to take 9s. Only do this for existing clusters, not
+                    # freshly launched ones (which should have ray runtime
+                    # started).
+                    self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
                 config_dict['launched_resources'] = to_provision.copy(
                     region=region.name)
                 config_dict['launched_nodes'] = num_nodes
+                # Optimizations: head_ip and zones may or may not be None. In
+                # the latter case, the caller doesn't need to query them again.
+                config_dict['head_ip'] = head_ip
+                config_dict['zones'] = zones
                 plural = '' if num_nodes == 1 else 's'
                 if not isinstance(to_provision.cloud, clouds.Local):
                     logger.info(f'{fore.GREEN}Successfully provisioned or found'
                                 f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
+
+            # The cluster is not ready.
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
@@ -1017,12 +1039,12 @@ class RetryingVmProvisioner(object):
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, num_nodes: int,
             cluster_config_file: str, log_abs_path: str, stream_logs: bool,
-            logging_info: dict,
-            use_spot: bool) -> Tuple[GangSchedulingStatus, str, str]:
+            logging_info: dict, use_spot: bool
+    ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
-          (GangSchedulingStatus; stdout; stderr).
+          (GangSchedulingStatus; stdout; stderr; optional head_ip).
         """
         # FIXME(zhwu,zongheng): ray up on multiple nodes ups the head node then
         # waits for all workers; turn it into real gang scheduling.
@@ -1137,9 +1159,20 @@ class RetryingVmProvisioner(object):
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
-            return self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr
+            # Optimization: Try parse head ip from 'ray up' stdout.
+            # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
+            position = stdout.rfind('@')
+            head_ip = stdout[position + 1:].strip()
+            if not backend_utils.is_ip(head_ip):
+                # Something's wrong. Ok to not return a head_ip.
+                head_ip = None
+            return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
+                    head_ip)
+
         if returncode != 0:
-            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr
+            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
+
+        # All code below is handling num_nodes > 1.
 
         provision_str = 'Successfully provisioned or found existing head VM.'
         if isinstance(to_provision_cloud, clouds.Local):
@@ -1179,13 +1212,14 @@ class RetryingVmProvisioner(object):
                 logger.debug(
                     f'Upscaling reset takes {time.time() - start} seconds.')
                 if returncode != 0:
-                    return self.GangSchedulingStatus.GANG_FAILED, stdout, stderr
+                    return (self.GangSchedulingStatus.GANG_FAILED, stdout,
+                            stderr, None)
         else:
             cluster_status = self.GangSchedulingStatus.GANG_FAILED
 
         # Do not need stdout/stderr if gang scheduling failed.
         # gang_succeeded = False, if head OK, but workers failed.
-        return cluster_status, '', ''
+        return cluster_status, '', '', None
 
     def _ensure_cluster_ray_started(self,
                                     handle: 'CloudVmRayBackend.ResourceHandle',
@@ -1557,6 +1591,7 @@ class CloudVmRayBackend(backends.Backend):
 
             # TODO(suquark): once we have sky on PyPI, we should directly
             # install sky from PyPI.
+            # NOTE: can take ~2s.
             with timeline.Event('backend.provision.wheel_build'):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
@@ -1624,13 +1659,21 @@ class CloudVmRayBackend(backends.Backend):
                                    config_dict['launched_nodes'],
                                    config_dict['tpu_name'])
 
-            with timeline.Event('backend.provision.get_node_ips'):
-                ip_list = backend_utils.get_node_ips(
-                    cluster_config_file,
-                    config_dict['launched_nodes'],
-                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
-                head_ip = ip_list[0]
+            if config_dict['launched_nodes'] == 1 and config_dict[
+                    'head_ip'] is not None:
+                # Optimization for 1-node: we may have parsed the stdout of
+                # 'ray up' to get the head_ip already.
+                head_ip = config_dict['head_ip']
+                ip_list = [head_ip]
+            else:
+                # NOTE: querying node_ips is expensive, observed 1node GCP >=4s.
+                with timeline.Event('backend.provision.get_node_ips'):
+                    ip_list = backend_utils.get_node_ips(
+                        cluster_config_file,
+                        config_dict['launched_nodes'],
+                        head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                        worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
+                    head_ip = ip_list[0]
 
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
@@ -1643,17 +1686,28 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
-            # Get actual zone info and save it into handle
-            get_zone_cmd = handle.launched_resources.cloud.get_zone_shell_cmd()
-            if get_zone_cmd is not None:
-                # We leave the zone field to None for multi-node cases
-                # if zone is not specified because head and worker nodes
+            # Get actual zone info and save it into handle.
+            # NOTE: querying zones is expensive, observed 1node GCP >=4s.
+            zones = config_dict['zones']
+            if zones is not None and len(zones) == 1:  # zones is None for Azure
+                # Optimization for if the provision request was for 1 zone
+                # (currently happens only for GCP since it uses per-zone
+                # provisioning), then we know the exact zone already.
+                handle.launched_resources = handle.launched_resources.copy(
+                    zone=zones[0].name)
+            elif (task.num_nodes == 1 or
+                  handle.launched_resources.zone is not None):
+                # Query zone if the cluster has 1 node, or a zone is
+                # specifically requested for a multinode cluster.  Otherwise
+                # leave the zone field to None because head and worker nodes
                 # can be launched in different zones.
-                if (task.num_nodes == 1 or
-                        handle.launched_resources.zone is not None):
+                get_zone_cmd = (
+                    handle.launched_resources.cloud.get_zone_shell_cmd())
+                if get_zone_cmd is not None:
                     returncode, stdout, _ = self.run_on_head(
                         handle, get_zone_cmd, require_outputs=True)
-                    # zone will be checked during Resources cls initialization.
+                    # zone will be checked during Resources cls
+                    # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
                         zone=stdout.strip())
 
@@ -2014,14 +2068,12 @@ class CloudVmRayBackend(backends.Backend):
         task: task_lib.Task,
         detach_run: bool,
     ) -> None:
+        if task.run is None:
+            logger.info('Run commands not specified or empty.')
+            return
         # Check the task resources vs the cluster resources. Since `sky exec`
         # will not run the provision and _check_existing_cluster
         self.check_resources_fit_cluster(handle, task)
-
-        # Otherwise, handle a basic Task.
-        if task.run is None:
-            logger.info('Nothing to run (Task.run not specified).')
-            return
 
         resources_str = backend_utils.get_task_resources_str(task)
         job_id = self._add_job(handle, task.name, resources_str)
@@ -2526,8 +2578,10 @@ class CloudVmRayBackend(backends.Backend):
             # Use the existing cluster.
             assert handle.launched_resources is not None, (cluster_name, handle)
             return RetryingVmProvisioner.ToProvisionConfig(
-                cluster_name, handle.launched_resources, handle.launched_nodes,
-                True)
+                cluster_name,
+                handle.launched_resources,
+                handle.launched_nodes,
+                cluster_exists=True)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
         resources = list(task.resources)[0]
@@ -2843,13 +2897,6 @@ class CloudVmRayBackend(backends.Backend):
             )
 
         codegen.add_epilogue()
-
-        # Logger.
-        colorama.init()
-        fore = colorama.Fore
-        style = colorama.Style
-        logger.info(f'\n{fore.CYAN}Starting Task execution.{style.RESET_ALL}')
-
         # TODO(zhanghao): Add help info for downloading logs.
         self._exec_code_on_head(handle,
                                 codegen.build(),

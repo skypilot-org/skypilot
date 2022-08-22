@@ -4,7 +4,6 @@ import enum
 import click
 import contextlib
 import datetime
-import hashlib
 import inspect
 import json
 import os
@@ -44,13 +43,12 @@ def _get_current_timestamp_ns() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
 
 
-def get_logging_user_hash():
-    """Returns a unique user-machine specific hash as a user id."""
+def _get_user_hash():
+    """Returns a unique user-machine specific hash as a user id for logging."""
     user_id = os.getenv(constants.USAGE_USER_ENV)
     if user_id and len(user_id) == 8:
         return user_id
-    hash_str = common_utils.user_and_hostname_hash()
-    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    return common_utils.get_user_hash()
 
 
 class MessageType(enum.Enum):
@@ -89,7 +87,7 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = get_logging_user_hash()
+        self.user: str = _get_user_hash()
         self.run_id: str = _get_logging_run_id()
         self.sky_version: str = sky.__version__
 
