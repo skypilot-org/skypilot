@@ -13,7 +13,7 @@ project = 'SkyPilot'
 copyright = '2022, SkyPilot Team'
 author = 'the SkyPilot authors'
 
-release = '0.1'
+release = '0.1.0'
 version = '0.1.0'
 
 # -- General configuration
