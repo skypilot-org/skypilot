@@ -11,7 +11,7 @@
 SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
 
-Start using the clouds **easily** and **cheaply**, without needing to learn cloud infra.
+Use the clouds **easily** and with **low cost**, all without needing to learn cloud infra.
 
 
 
@@ -22,9 +22,9 @@ _Ease of use & productivity_
 * **Store datasets on the cloud** and access them like you would on a local file system 
 * **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
 
-_Saving cost_
-* Minimize costs by leveraging **spot instances** and **automatically stopping idle clusters**
-* **Automatic recovery** from spot instance failures
+_Cost saving_
+* Run jobs on **spot instances** with **automatic recovery** from preemptions
+* Hands-free life cycle: **automatically stop idle clusters**
 * One-click use of **TPUs**, for high-performance, cost-effective training
 * Automatically benchmark and find the best hardware for your job
 
@@ -36,7 +36,9 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 ## Example SkyPilot Task
 
-Tasks in SkyPilot are specified as a YAML file containing the resource requirements, data to be synced, setup commands and the task commands. Here is an example.
+A SkyPilot task is specified as a YAML file containing the resource requirements, data to be synced, setup commands, and the task commands. 
+
+Once written in a YAML, the task can be launched on any available cloud. Example:
 
 ```yaml
 # my_task.yaml
@@ -83,7 +85,13 @@ SkyPilot will perform multiple actions for you:
   <img src="https://i.imgur.com/TgamzZ2.gif" alt="SkyPilot Demo"/>
 </p>
 
-Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to use SkyPilot.
+
+More YAML examples can be found in the [**`examples`**](./examples) folder.  
+
+Besides YAML and CLI, SkyPilot offers a corresponding [Python API](https://github.com/skypilot-org/skypilot/blob/master/sky/core.py) for more advanced programmatic use.
+
+Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to get started with SkyPilot.
+
 
 ## Issues, feature requests and questions
 We are excited to hear your feedback! SkyPilot has two channels for engaging with the community - [GitHub Issues](https://github.com/skypilot-org/skypilot/issues) and [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
