@@ -29,7 +29,7 @@ Machine learning examples:
   
 - [**`resnet_distributed_tf_app.py`**](./resnet_distributed_tf_app.py): **Distributed training** variant of the above, via TensorFlow Distributed.
 
-- [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): Run **grid search** on the above.  Run many trials concurrently on the same VM.
+- [**`huggingface_glue_imdb_grid_search_app.py`**](./huggingface_glue_imdb_grid_search_app.py): **Grid search**: run many trials concurrently on the same VM.
 
 
 ...and many more.
@@ -38,12 +38,12 @@ General examples:
 
 - [**`detectron2_docker.yaml`**](./detectron2_docker.yaml): Using Docker to run Detectron2 on GPUs.
 
-- [**`using_file_mounts.yaml`**](./using_file_mounts.yaml): Using the `file_mounts` field to upload local/cloud paths to a cluster.
+- [**`using_file_mounts.yaml`**](./using_file_mounts.yaml): Using `file_mounts` to upload local/cloud paths to a cluster.
 
 - [**`multi_hostname.yaml`**](./multi_hostname.yaml): Run a command on multiple nodes.
 
 - [**`env_check.yaml`**](./env_check.yaml): Using environment variables in the `run` commands.
 
-- [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands in the clouds, with configurable resources.  Similar to grid search.
+- [**`multi_echo.py`**](./multi_echo.py): Launch and schedule hundreds of bash commands on the clouds, with configurable resources.  Similar to grid search.
 
 ...and many more.
