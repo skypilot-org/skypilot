@@ -1921,6 +1921,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         use_spot = default_resources.use_spot
     if tpu_vm:
         accelerator_args = default_resources.accelerator_args
+        accelerator_args['runtime_version'] = 'tpu-vm-base'
         accelerator_args['tpu_vm'] = True
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
