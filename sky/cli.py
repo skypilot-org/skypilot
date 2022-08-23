@@ -176,6 +176,11 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
+    tpuvm_option = click.option('--tpu-vm',
+                                default=None,
+                                is_flag=True,
+                                help='If true, use TPU VMs.')
+
     disk_size = click.option('--disk-size',
                              default=None,
                              type=int,
@@ -200,6 +205,7 @@ def _interactive_node_cli_command(cli_func):
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
+        *([tpuvm_option] if cli_func.__name__ == 'tpunode' else []),
 
         # Attach options
         screen_option,
@@ -1865,8 +1871,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            use_spot: Optional[bool], tpu_vm: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -1905,15 +1912,20 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (instance_type is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
+    accelerator_args = None
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
         tpus = default_resources.accelerators
     if use_spot is None:
         use_spot = default_resources.use_spot
+    if tpu_vm:
+        accelerator_args = default_resources.accelerator_args
+        accelerator_args['tpu_vm'] = True
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
+                              accelerator_args=accelerator_args,
                               use_spot=use_spot,
                               disk_size=disk_size)
 
