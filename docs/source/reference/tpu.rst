@@ -15,7 +15,19 @@ For TPU Nodes, a host VM communicates with the TPU host over gRPC.
 For TPU VMs, you can SSH directly into a VM that is physically connected to the TPU device.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
-In this tutorial we demonstrate how to run MNIST training on both TPU Nodes and TPU VMs with SkyPilot.
+
+Getting TPU in one command
+--------------------------------
+
+Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to get an interactive TPU resource:
+
+.. code-block:: bash
+
+   sky tpunode                  # TPU v3-8 is used as default
+   sky tpunode --use-spot       # Preemptible TPUs
+   sky tpunode --tpus tpu-v2-8  # Change TPU type to tpu-v2-8
+
+Below we demonstrate how to run MNIST training on both TPU Nodes and TPU VMs with SkyPilot YAML.
 
 TPU Nodes
 --------------------------------
