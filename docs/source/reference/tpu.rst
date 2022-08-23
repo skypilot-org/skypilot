@@ -26,7 +26,7 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quic
    sky tpunode --use-spot                     # Preemptible TPUs
    sky tpunode --tpus tpu-v2-8                # Change TPU type to tpu-v2-8
    sky tpunode --instance-type n1-highmem-16  # Change the host VM type to n1-highmem-16
-   sky tpunode --tpu-vm                       # Switch to TPU VM from TPU Node
+   sky tpunode --tpu-vm                       # Use TPU VM (instead of TPU Node)
 
 After the command has finished, you will be dropped into the host VM and can start develop code right away!
 
