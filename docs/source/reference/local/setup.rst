@@ -20,10 +20,10 @@ To install Ray and SkyPilot for all users, run the following commands on all loc
 
 .. code-block:: console
 
-   $ sudo -H pip3 install ray[default]==1.13.0
+   $ pip3 install ray[default]==1.13.0
 
    $ # SkyPilot requires python >= 3.6.
-   $ sudo -H pip3 install skypilot
+   $ pip3 install skypilot
 
 
 Launching SkyPilot services
@@ -86,20 +86,6 @@ Finally, to check if SkyPilot services have been installed correctly, run the fo
     0.00/142.900 GiB object_store_memory
 
 The console should display a list of healthy nodes the size of the local cluster.
-
-.. note::
-    If :code:`sky admin deploy` can not find SkyPilot and/or Ray, a quick fix is to symlink SkyPilot's and Ray's installation paths to :code:`/usr/bin`. An example is provided below.
-    
-    .. code-block::
-   
-       $ sudo which ray
-       ray not found
-
-       $ # Symlink Ray to /usr/bin
-       $ sudo ln -s /usr/local/bin/ray /usr/bin/ray
-
-       $ sudo which ray
-       /usr/bin/ray
 
 
 Publishing cluster YAML

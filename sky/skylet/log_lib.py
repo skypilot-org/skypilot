@@ -150,6 +150,9 @@ def run_with_log(
         # Sudo case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
         subprocess.run(f'sudo mkdir -p {dirname}', shell=True, check=True)
+        subprocess.run(f'sudo touch {log_path}; sudo chmod a+rwx {log_path}',
+                       shell=True,
+                       check=True)
         # Hack: Subprocess Popen does not accept sudo.
         # subprocess.Popen in local mode with shell=True does not work,
         # as it does not understand what -H means for sudo.

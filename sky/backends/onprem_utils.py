@@ -251,13 +251,13 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
         # Checks for global python3 installation.
         run_command_and_handle_ssh_failure(
             runner,
-            'sudo python3 --version',
+            'python3 --version',
             failure_message=f'Python3 is not installed on {runner.ip}.')
 
         # Checks for global Ray installation (accessible by all users).
         run_command_and_handle_ssh_failure(
             runner,
-            'sudo ray --version',
+            'ray --version',
             failure_message=f'Ray is not installed on {runner.ip}.')
 
         # Checks for global Sky installation (accessible by all users). When
@@ -268,12 +268,12 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
         # TODO(mluo): Make Sky admin only.
         run_command_and_handle_ssh_failure(
             runner,
-            'sudo sky --help',
+            'sky --help',
             failure_message=f'Sky is not installed on {runner.ip}.')
 
         # Patches global Ray.
         run_command_and_handle_ssh_failure(
-            runner, ('sudo python3 -c "from sky.skylet.ray_patches '
+            runner, ('python3 -c "from sky.skylet.ray_patches '
                      'import patch; patch()"'),
             failure_message=f'Failed to patch ray on {runner.ip}.')
 
@@ -402,7 +402,7 @@ def launch_ray_on_local_cluster(
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             run_command_and_handle_ssh_failure(
                 runner,
-                'sudo ray stop -f',
+                'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
 
         subprocess_utils.run_in_parallel(_stop_ray_workers,
@@ -410,7 +410,7 @@ def launch_ray_on_local_cluster(
 
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
-    head_cmd = ('sudo ray start --head --port=6379 '
+    head_cmd = ('ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={head_resources!r}')
 
@@ -446,12 +446,12 @@ def launch_ray_on_local_cluster(
             runner, idx = runner_tuple
             run_command_and_handle_ssh_failure(
                 runner,
-                'sudo ray stop -f',
+                'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
 
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
-            worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
+            worker_cmd = (f'ray start --address={head_ip}:6379 '
                           '--object-manager-port=8076 --dashboard-port 8265 '
                           f'--resources={worker_resources!r}')
             run_command_and_handle_ssh_failure(
