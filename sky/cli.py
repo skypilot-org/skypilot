@@ -92,7 +92,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
-                             accelerators={'tpu-v3-8': 1},
+                             accelerators={'tpu-v2-8': 1},
                              accelerator_args={'runtime_version': '2.5.0'},
                              use_spot=False),
 }

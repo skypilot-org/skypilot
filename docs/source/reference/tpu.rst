@@ -29,9 +29,9 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quic
 
 .. code-block:: bash
 
-   sky tpunode                                # By default TPU v3-8 is used
+   sky tpunode                                # By default TPU v2-8 is used
    sky tpunode --use-spot                     # Preemptible TPUs
-   sky tpunode --tpus tpu-v2-8                # Change TPU type to tpu-v2-8
+   sky tpunode --tpus tpu-v3-8                # Change TPU type to tpu-v3-8
    sky tpunode --instance-type n1-highmem-16  # Change the host VM type to n1-highmem-16
    sky tpunode --tpu-vm                       # Use TPU VM (instead of TPU Node)
 
