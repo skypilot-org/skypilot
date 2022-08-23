@@ -23,9 +23,12 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to get 
 
 .. code-block:: bash
 
-   sky tpunode                  # TPU v3-8 is used as default
-   sky tpunode --use-spot       # Preemptible TPUs
-   sky tpunode --tpus tpu-v2-8  # Change TPU type to tpu-v2-8
+   sky tpunode                                # By default TPU v3-8 is used
+   sky tpunode --use-spot                     # Preemptible TPUs
+   sky tpunode --tpus tpu-v2-8                # Change TPU type to tpu-v2-8
+   sky tpunode --instance-type n1-highmem-16  # Change the host VM type to n1-highmem-16
+
+After the command finished, you can SSH into the host VM and develop codes right away!
 
 Below we demonstrate how to run MNIST training on both TPU Nodes and TPU VMs with SkyPilot YAML.
 
