@@ -15,6 +15,11 @@ For TPU VMs, you can SSH directly into a VM that is physically connected to the 
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
+.. note::
+
+   We encourage researchers to apply free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program.
+
+
 Getting TPUs in one command
 --------------------------------
 
