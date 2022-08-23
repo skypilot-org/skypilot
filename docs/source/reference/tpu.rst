@@ -3,23 +3,22 @@
 Cloud TPU
 ================================
 
-SkyPilot supports running jobs on `Cloud TPU <https://cloud.google.com/tpu/docs/intro-to-tpu>`_
-which is Google's customized hardware for accelerating machine learning workloads.
+SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/tpu/docs/intro-to-tpu>`_.
 Two different TPU architectures are available on GCP:
 
 - `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
 - `TPU VMs <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
 
-The way to interact with the two architectures can be different.
+Both are supported by SkyPilot. The two architectures differ as follows.
 For TPU Nodes, a host VM communicates with the TPU host over gRPC.
 For TPU VMs, you can SSH directly into a VM that is physically connected to the TPU device.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
-Getting TPU in one command
+Getting TPUs in one command
 --------------------------------
 
-Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to get an interactive TPU resource:
+Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quickly get TPUs for development:
 
 .. code-block:: bash
 
@@ -27,8 +26,9 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to get 
    sky tpunode --use-spot                     # Preemptible TPUs
    sky tpunode --tpus tpu-v2-8                # Change TPU type to tpu-v2-8
    sky tpunode --instance-type n1-highmem-16  # Change the host VM type to n1-highmem-16
+   sky tpunode --tpu-vm                       # Switch to TPU VM from TPU Node
 
-After the command finished, you can SSH into the host VM and develop codes right away!
+After the command has finished, you will be dropped into the host VM and can start develop code right away!
 
 Below we demonstrate how to run MNIST training on both TPU Nodes and TPU VMs with SkyPilot YAML.
 
@@ -48,9 +48,9 @@ SkyPilot automates the above process with a simple interface:
 
 The above YAML considers :code:`n1-highmem-8` as the host machine and :code:`tpu-v2-8` as the TPU node resource.
 You may modify the host instance type or TPU type as you wish.
-To show more TPU accelerators, you may run the command :code:`sky show-gpus --all` or refer to GCP's `documentation <https://cloud.google.com/tpu/docs/regions-zones>`_.
+To show more TPU accelerators, you may run the command :code:`sky show-gpus`.
 
-Now, we show a complete YAML for running `mnist training <https://cloud.google.com/tpu/docs/tutorials/mnist-2.x>`_ on TPU node with TensorFlow.
+Now, we show a complete YAML for running `MNIST training <https://cloud.google.com/tpu/docs/tutorials/mnist-2.x>`_ on TPU node with TensorFlow.
 
 .. code-block:: yaml
 
@@ -112,12 +112,12 @@ With the above YAML, you should be able to launch the training job with :code:`s
 
    $ sky launch mnist-tpu-node.yaml -c mycluster
    ...
-   (tpu_app pid=28961) Epoch 9/10
-   (tpu_app pid=28961) 58/58 [==============================] - 1s 19ms/step - loss: 0.1181 - sparse_categorical_accuracy: 0.9646 - val_loss: 0.0921 - val_sparse_categorical_accuracy: 0.9719
-   (tpu_app pid=28961) Epoch 10/10
-   (tpu_app pid=28961) 58/58 [==============================] - 1s 20ms/step - loss: 0.1139 - sparse_categorical_accuracy: 0.9655 - val_loss: 0.0831 - val_sparse_categorical_accuracy: 0.9742
+   (mnist-tpu-node pid=28961) Epoch 9/10
+   (mnist-tpu-node pid=28961) 58/58 [==============================] - 1s 19ms/step - loss: 0.1181 - sparse_categorical_accuracy: 0.9646 - val_loss: 0.0921 - val_sparse_categorical_accuracy: 0.9719
+   (mnist-tpu-node pid=28961) Epoch 10/10
+   (mnist-tpu-node pid=28961) 58/58 [==============================] - 1s 20ms/step - loss: 0.1139 - sparse_categorical_accuracy: 0.9655 - val_loss: 0.0831 - val_sparse_categorical_accuracy: 0.9742
    ...
-   (tpu_app pid=28961) {'accuracy_top_1': 0.9741753339767456, 'eval_loss': 0.0831054300069809, 'loss': 0.11388632655143738, 'training_accuracy_top_1': 0.9654667377471924}
+   (mnist-tpu-node pid=28961) {'accuracy_top_1': 0.9741753339767456, 'eval_loss': 0.0831054300069809, 'loss': 0.11388632655143738, 'training_accuracy_top_1': 0.9654667377471924}
 
 
 
@@ -172,8 +172,8 @@ Now we show an example of running `mnist training <https://cloud.google.com/tpu/
       --config.learning_rate=0.05 \
       --config.num_epochs=10
 
-This time a GCS bucket is not required as the TPU VM is physically linked to the TPU device, which can access data directly.
-You are expected to see the below outputs when the job finished.
+A GCS bucket is not required as the TPU VM is physically linked to the TPU device, which can access data directly.
+You are expected to see the below outputs when the job finishes.
 
 .. code-block:: console
 
