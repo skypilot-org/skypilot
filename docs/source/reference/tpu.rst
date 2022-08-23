@@ -9,7 +9,9 @@ Two different TPU architectures are available on GCP:
 - `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
 - `TPU VMs <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
 
-Both are supported by SkyPilot. The two architectures differ as follows.
+Both are supported by SkyPilot.
+
+The two architectures differ as follows.
 For TPU Nodes, a host VM communicates with the TPU host over gRPC.
 For TPU VMs, you can SSH directly into a VM that is physically connected to the TPU device.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
@@ -17,7 +19,7 @@ For more details please refer to GCP `documentation <https://cloud.google.com/tp
 
 .. note::
 
-   We encourage researchers to apply free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program.
+   We encourage researchers to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program.
 
 
 Getting TPUs in one command
@@ -110,6 +112,9 @@ Now, we show a complete YAML for running `MNIST training <https://cloud.google.c
 
    TPU node requires loading data from a GCS bucket, so we add a :code:`file_mounts` to create a new bucket.
    Check :ref:`SkyPilot Storage <sky-storage>` for more details.
+
+.. note::
+   The environment variable :code:`$TPU_NAME` is automatically set by SkyPilot for connecting TPU devices.
 
 With the above YAML, you should be able to launch the training job with :code:`sky launch`!
 

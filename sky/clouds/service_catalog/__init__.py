@@ -190,7 +190,7 @@ def get_common_gpus() -> List[str]:
 
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
-    # TODO(weilin): refactor below hard-coded list.
+    # TODO(wei-lin): refactor below hard-coded list.
     return [
         'tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v2-256', 'tpu-v2-512',
         'tpu-v3-8', 'tpu-v3-32', 'tpu-v3-64', 'tpu-v3-128', 'tpu-v3-256',
