@@ -95,14 +95,6 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              accelerators={'tpu-v3-8': 1},
                              accelerator_args={'runtime_version': '2.5.0'},
                              use_spot=False),
-    'tpuvm': sky.Resources(cloud=sky.GCP(),
-                           instance_type=None,
-                           accelerators={'tpu-v3-8': 1},
-                           accelerator_args={
-                               'runtime_version': 'tpu-vm-base',
-                               'tpu_vm': True
-                           },
-                           use_spot=False),
 }
 
 
@@ -185,7 +177,7 @@ def _interactive_node_cli_command(cli_func):
                                help='If true, use spot instances.')
 
     tpuvm_option = click.option('--tpu-vm',
-                                default=None,
+                                default=False,
                                 is_flag=True,
                                 help='If true, use TPU VMs.')
 
@@ -1919,11 +1911,11 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (instance_type is None and tpus is None and
                                     use_spot is None)
-    if tpu_vm:
-        default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpuvm']
-    else:
-        default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
+    default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
+    if tpu_vm:
+        accelerator_args['tpu_vm'] = True
+        accelerator_args['runtime_version'] = 'tpu-vm-base'
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
