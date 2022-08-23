@@ -103,6 +103,9 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             return None, np.nan
         return accelerator['Name'], accelerator['Count']
 
+    def get_vcpus(row) -> float:
+        return float(row['VCpuInfo']['DefaultVCpus'])
+
     def get_memory_gib(row) -> float:
         return row['MemoryInfo']['SizeInMiB'] // 1024
 
@@ -117,6 +120,7 @@ def get_instance_types_df(region: str) -> pd.DataFrame:
             'SpotPrice': get_spot_price(row),
             'AcceleratorName': acc_name,
             'AcceleratorCount': acc_count,
+            'vCPUs': get_vcpus(row),
             'MemoryGiB': get_memory_gib(row),
         })
 
