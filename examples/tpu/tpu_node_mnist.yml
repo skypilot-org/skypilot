@@ -44,4 +44,3 @@ run: |
     --train_epochs=10 \
     --distribution_strategy=tpu \
     --download
-  
