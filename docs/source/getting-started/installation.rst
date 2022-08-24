@@ -6,16 +6,19 @@ Install SkyPilot using pip:
 .. code-block:: console
 
   $ # SkyPilot requires python >= 3.6.
-  $ git clone ssh://git@github.com/skypilot-org/skypilot.git
-  $ cd skypilot
-
   $ # Recommended: use a new conda env to avoid package conflicts.
   $ conda create -n sky python=3.7
   $ conda activate sky
 
+  # Choose an extra dependency (default: [aws])
+  $ pip install skypilot
+  $ pip install skypilot[gcp]
+  $ pip install skypilot[all]
+
+  # You may also install SkyPilot from source.
+  $ git clone ssh://git@github.com/skypilot-org/skypilot.git
+  $ cd skypilot
   $ pip install ".[all]"
-  $ # To install AWS dependencies only:
-  $ # pip install ".[aws]"
 
 SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
 only have access to certain clouds, use any combination of
