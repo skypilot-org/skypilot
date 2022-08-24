@@ -132,6 +132,12 @@ def get_local_auth_config(cluster_name: str) -> List[str]:
     return config['auth']
 
 
+def get_python_executable(cluster_name: str) -> str:
+    """Returns the Ray cluster's python path."""
+    config = get_local_cluster_config_or_error(cluster_name)
+    return config['python']
+
+
 def get_job_owner(cluster_yaml: dict) -> str:
     """Get the owner of the job."""
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
@@ -491,9 +497,19 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
           Contains cluster-specific hyperparameters and the authentication
           config.
     """
+    auth_config = cluster_config['auth']
+    head_ip = cluster_config['cluster']['ips'][0]
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
+    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+    head_runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
     # Admin authentication must be censored out.
     cluster_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
+    cluster_config['python'] = run_command_and_handle_ssh_failure(
+        head_runner,
+        'sudo which python3',
+        failure_message='Failed to obtain admin python path.').split()[0]
 
     cluster_name = cluster_config['cluster']['name']
     yaml_path = SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)
