@@ -21,3 +21,7 @@ All fields are described below:
     auth:
       ssh_user: ubuntu  # User account.
       ssh_private_key: ~/.ssh/ubuntu.pem  # Private keypair.
+
+    # Path to the python binary to be used by SkyPilot. Must be the same on all nodes and executable by all users.  
+    # This field is only specified in the distributable YAMLs for users.
+    python: /usr/bin/python3
