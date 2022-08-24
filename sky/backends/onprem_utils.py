@@ -11,6 +11,7 @@ import click
 import rich.console as rich_console
 import yaml
 
+from sky import constants
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -231,8 +232,8 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
         subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
 
 
-def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
-    """Checks if the Sky dependencies are properly installed on the machine.
+def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
+    """Installs and checks for Sky dependencies on the local cluster.
 
     This function checks for the following dependencies on the root user:
         - Sky
@@ -253,17 +254,20 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ips, *ssh_credentials)
 
-    def _check_dependencies(runner: command_runner.SSHCommandRunner) -> None:
+    def _install_and_check_dependencies(
+            runner: command_runner.SSHCommandRunner) -> None:
         # Checks for global python3 installation.
         run_command_and_handle_ssh_failure(
-            runner,
-            'sudo python3 --version',
+            runner, ('python3 --version || '
+                     '(sudo apt -y update && sudo apt -y install python3-pip)'),
             failure_message=f'Python3 is not installed on {runner.ip}.')
 
         # Checks for global Ray installation (accessible by all users).
         run_command_and_handle_ssh_failure(
             runner,
-            'sudo ray --version',
+            ('ray --version || '
+             f'(pip3 install ray[default]=={constants.SKY_REMOTE_RAY_VERSION})'
+            ),
             failure_message=f'Ray is not installed on {runner.ip}.')
 
         # Checks for global Sky installation (accessible by all users). When
@@ -274,16 +278,16 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
         # TODO(mluo): Make Sky admin only.
         run_command_and_handle_ssh_failure(
             runner,
-            'sudo sky --help',
+            'sky --help || (pip3 install skypilot)',
             failure_message=f'Sky is not installed on {runner.ip}.')
 
         # Patches global Ray.
         run_command_and_handle_ssh_failure(
-            runner, ('sudo python3 -c "from sky.skylet.ray_patches '
+            runner, ('python3 -c "from sky.skylet.ray_patches '
                      'import patch; patch()"'),
             failure_message=f'Failed to patch ray on {runner.ip}.')
 
-    subprocess_utils.run_in_parallel(_check_dependencies, runners)
+    subprocess_utils.run_in_parallel(_install_and_check_dependencies, runners)
 
 
 def get_local_cluster_accelerators(
