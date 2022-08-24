@@ -10,20 +10,26 @@ Install SkyPilot using pip:
   $ conda create -n sky python=3.7
   $ conda activate sky
 
-  # Choose an extra dependency (default: [aws])
+  $ # Choose an extra (default: [aws])
   $ pip install skypilot
-  $ pip install skypilot[gcp]
-  $ pip install skypilot[all]
+  $ # pip install skypilot[gcp]
+  $ # pip install skypilot[azure]
+  $ # pip install skypilot[all]
 
-  # You may also install SkyPilot from source.
+
+SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
+only have access to certain clouds, use any combination of
+:code:`"[aws,azure,gcp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
+dependencies installed.
+
+You may also install SkyPilot from source.
+
+.. code-block:: console
+
   $ git clone ssh://git@github.com/skypilot-org/skypilot.git
   $ cd skypilot
   $ pip install ".[all]"
 
-SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
-only have access to certain clouds, use any combination of
-:code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
-dependencies installed.
 
 .. note::
 
