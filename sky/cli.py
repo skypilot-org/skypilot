@@ -2100,6 +2100,9 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         # Delete two storage objects.
         sky storage delete imagenet cifar10
         \b
+        # Delete all storage objects matching glob pattern 'imagenet*'.
+        sky storage delete "imagenet*"
+        \b
         # Delete all storage objects.
         sky storage delete -a
     """
@@ -2109,6 +2112,11 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
         names = [s['name'] for s in storages]
+    else:
+        names = [
+            name for name in _get_glob_clusters(names)
+            if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
+        ]
     for name in names:
         sky.storage_delete(name)
 
