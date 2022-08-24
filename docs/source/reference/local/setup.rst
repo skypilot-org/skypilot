@@ -91,7 +91,7 @@ The console should display a list of healthy nodes the size of the local cluster
 Publishing cluster YAML
 ---------------------------
 
-Under the hood, :code:`sky admin deploy` automatically stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
+Under the hood, :code:`sky admin deploy` automatically stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows a similar structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
 
 .. code-block:: yaml
 
@@ -103,5 +103,8 @@ Under the hood, :code:`sky admin deploy` automatically stores a public **distrib
     auth:
       ssh_user: PLACEHOLDER
       ssh_private_key: PLACEHOLDER
+
+    # Path to the python binary to be used by SkyPilot. Must be the same on all nodes and executable by all users.
+    python: /usr/bin/python3
 
 The distributable cluster YAML can be published on the company's website or sent privately between users. Regular users store this yaml in :code:`~/.sky/local/`, and replace :code:`PLACEHOLDER` with their credentials.

@@ -27,15 +27,17 @@ class InstanceTypeInfo(NamedTuple):
       type. E.g. `p3.2xlarge`.
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
+    - cpu_count: Number of vCPUs offered by this instance type.
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
     """
     cloud: str
-    instance_type: str
+    instance_type: Optional[str]
     accelerator_name: str
     accelerator_count: int
-    memory: float
+    cpu_count: Optional[float]
+    memory: Optional[float]
     price: float
     spot_price: float
 
@@ -52,7 +54,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
-    cloud = filename.split('.csv')[0]
+    cloud = cloud_lib.CLOUD_REGISTRY.from_str(filename.split('.csv')[0])
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -67,6 +69,8 @@ def read_catalog(filename: str) -> pd.DataFrame:
         # Save the catalog to a local file.
         with open(catalog_path, 'w') as f:
             f.write(r.text)
+        logger.info(f'A new {cloud} catalog has been downloaded to '
+                    f'{catalog_path}')
 
     try:
         df = pd.read_csv(catalog_path)
@@ -155,6 +159,23 @@ def get_hourly_cost_impl(
     return cheapest[price_str]
 
 
+def get_vcpus_from_instance_type_impl(
+    df: pd.DataFrame,
+    instance_type: str,
+) -> Optional[float]:
+    df = _get_instance_type(df, instance_type, None)
+    if len(df) == 0:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
+    assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
+                                        f'of the instance type {instance_type}.'
+                                        f'\n{df}')
+    vcpus = df['vCPUs'].iloc[0]
+    if pd.isna(vcpus):
+        return None
+    return float(vcpus)
+
+
 def get_accelerators_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
@@ -218,8 +239,13 @@ def list_accelerators_impl(
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
     df = df[[
-        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB',
-        'Price', 'SpotPrice'
+        'InstanceType',
+        'AcceleratorName',
+        'AcceleratorCount',
+        'vCPUs',
+        'MemoryGiB',
+        'Price',
+        'SpotPrice',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
@@ -231,7 +257,8 @@ def list_accelerators_impl(
     def make_list_from_df(rows):
         # Only keep the lowest prices across regions.
         rows = rows.groupby([
-            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB'
         ],
                             dropna=False).aggregate(min).reset_index()
         ret = rows.apply(
@@ -240,13 +267,15 @@ def list_accelerators_impl(
                 row['InstanceType'],
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
+                row['vCPUs'],
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.memory))
+        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
+                                   if info.cpu_count is not None else 0))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
