@@ -45,13 +45,12 @@ sky_yaml_config = {
 }
 
 cli_runner = cli_testing.CliRunner()
-# onprem_name = f'onprem-cluster-{uuid.uuid4().hex[:6]}'
-# with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-#     yaml.dump(sky_yaml_config, f)
-#     file_path = f.name
-#     cli_runner.invoke(cli.launch, ['-c', onprem_name, file_path])
+onprem_name = f'onprem-cluster-{uuid.uuid4().hex[:6]}'
+with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+    yaml.dump(sky_yaml_config, f)
+    file_path = f.name
+    cli_runner.invoke(cli.launch, ['-c', onprem_name, file_path])
 
-onprem_name = 'onprem-cluster-246835'
 handle = global_user_state.get_handle_from_cluster_name(onprem_name)
 head_ip = handle.head_ip
 
