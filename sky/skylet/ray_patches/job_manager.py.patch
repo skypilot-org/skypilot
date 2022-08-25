@@ -9,8 +9,8 @@
 >                 # Simulate the await behavior, in case some unexpected exception happens
 >                 # and this will not yield for other coroutines.
 >                 # https://ray-distributed.slack.com/archives/CP950VC76/p1661206198489669?thread_ts=1660955297.652409&cid=CP950VC76
->                 ref = job_supervisor.ping.remote()
->                 not_ready = [ref]
+>                 ref = [job_supervisor.ping.remote()]
+>                 not_ready = ref
 >                 while not_ready:
 >                     ready, not_ready = ray.wait(ref, timeout=0.1)
 >                     if ready:
