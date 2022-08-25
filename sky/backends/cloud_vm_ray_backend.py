@@ -1039,14 +1039,10 @@ class RetryingVmProvisioner(object):
             'Failed to get private IP from head node.',
             stderr=stdout + stderr)
         head_ip_private = stdout.strip()
-        custom_resources = json.dumps(
-            cluster_handle.launched_resources.accelerators,
-            separators=(',', ':'))
-        worker_start_ray_commands = [
-            'sudo bash -c \'rm -rf /etc/security/limits.d; echo "* soft nofile 65535" >> /etc/security/limits.conf; echo "* hard nofile 65535" >> /etc/security/limits.conf;\'; (grep -Pzo -q "Host \\*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;',  # pylint: disable=line-too-long
-            'SKY_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKY_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l); grep "export SKY_NUM_GPUS" ~/.bashrc > /dev/null || echo "export SKY_NUM_GPUS=$SKY_NUM_GPUS" >> ~/.bashrc',  # pylint: disable=line-too-long
-            f'ray stop; ray start --address={head_ip_private}:6379 --object-manager-port=8076 --resources=\'{custom_resources}\' --num-gpus=$SKY_NUM_GPUS'  # pylint: disable=line-too-long
-        ]
+
+        ray_config = common_utils.read_yaml(cluster_yaml)
+        worker_start_ray_commands = [f'echo "export RAY_HEAD_IP={head_ip_private}" >> ~/.bashrc && source ~/.bashrc']  # pylint: disable=line-too-long
+        worker_start_ray_commands += ray_config['worker_start_ray_commands']
 
         # Setup TPU Pod workers and launch Ray cluster.
         onprem_utils.do_filemounts_and_setup_on_local_workers(
