@@ -1014,17 +1014,22 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(message)
 
     def tpu_pod_setup(self, cluster_yaml: str,
-                      cluster_handle: 'backends.Backend.ResourceHandle'):
+                      cluster_handle: 'backends.Backend.ResourceHandle',
+                      num_nodes: int):
         """Completes setup and start Ray cluster on TPU Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
         run setup or launch ray cluster on TPU Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        num_tpu_device = cluster_handle.launched_resources.num_tpu_device
         all_ips = backend_utils.get_node_ips(cluster_yaml,
-                                             num_tpu_device,
+                                             num_nodes,
                                              handle=cluster_handle)
+        num_tpu_device = cluster_handle.launched_resources.num_tpu_device
+        if len(all_ips) != num_tpu_device:
+            raise RuntimeError(
+                f'Number of nodes IPs: {len(all_ips)} does not'
+                f'match number of TPU devices: {num_tpu_device}.')
 
         # Get the private IP of head node for connecting Ray cluster.
         head_runner = command_runner.SSHCommandRunner(all_ips[0],
@@ -1178,7 +1183,7 @@ class RetryingVmProvisioner(object):
         resources = cluster_handle.launched_resources
         if resources.use_tpu_vm and resources.use_tpu_pod:
             logger.info('Setting up TPU Pod workers...')
-            self.tpu_pod_setup(cluster_config_file, cluster_handle)
+            self.tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
@@ -2068,14 +2073,11 @@ class CloudVmRayBackend(backends.Backend):
         resources_str = backend_utils.get_task_resources_str(task)
         job_id = self._add_job(handle, task.name, resources_str)
 
-        if handle.launched_resources.use_tpu_pod:
-            task.num_nodes = handle.launched_resources.num_tpu_device
         # Case: task_lib.Task(run, num_nodes=1)
-        if task.num_nodes == 1:
+        if task.num_nodes == 1 and not handle.launched_resources.use_tpu_pod:
             self._execute_task_one_node(handle, task, job_id, detach_run)
         else:
-            # Case: task_lib.Task(run, num_nodes=N)
-            assert task.num_nodes > 1, task.num_nodes
+            # Case: task_lib.Task(run, num_nodes=N) or TPU Pods
             self._execute_task_n_nodes(handle, task, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
@@ -2858,9 +2860,15 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
+        # If TPU Pods is used, #num_nodes should be #num_tpu_device
+        if handle.launched_resources.use_tpu_pod:
+            num_actual_nodes = handle.launched_resources.num_tpu_device
+        else:
+            num_actual_nodes = task.num_nodes
+
         codegen = RayCodeGen()
         codegen.add_prologue(job_id, spot_task=task.spot_task)
-        codegen.add_gang_scheduling_placement_group(task.num_nodes,
+        codegen.add_gang_scheduling_placement_group(num_actual_nodes,
                                                     accelerator_dict)
 
         if callable(task.run):
@@ -2869,7 +2877,7 @@ class CloudVmRayBackend(backends.Backend):
             codegen.register_run_fn(run_fn_code, run_fn_name)
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
-        for i in range(task.num_nodes):
+        for i in range(num_actual_nodes):
             command_for_node = task.run if isinstance(task.run, str) else None
 
             # Ray's per-node resources, to constrain scheduling each command to

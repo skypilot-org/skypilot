@@ -955,14 +955,14 @@ def get_node_ips(cluster_yaml: str,
                  worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
 
-    # When ray up launches TPU Pod, Pod workers (except for the head)
-    # are not connected to Ray cluster. Thus "ray get-worker-ips"
-    # does not work and we need to query the node IPs with gcloud
+    # When ray up launches TPU VM Pod, Pod workers (except for the head)
+    # won't be connected to Ray cluster. Thus "ray get-worker-ips"
+    # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_pod_ips.
-    use_tpu_pod = (handle.launched_resources.use_tpu_pod
-                   if handle is not None else False)
-    if use_tpu_pod:
-        return _get_tpu_pod_ips(cluster_yaml, expected_num_nodes)
+    ray_config = common_utils.read_yaml(cluster_yaml)
+    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
+    if use_tpu_vm:
+        return _get_tpu_pod_ips(ray_config)
 
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
@@ -1022,11 +1022,9 @@ def get_node_ips(cluster_yaml: str,
 
 
 @timeline.event
-def _get_tpu_pod_ips(cluster_yaml: str, expected_num_nodes: int) -> List[str]:
+def _get_tpu_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
     """Returns the IPs of all TPU Pod workers using gcloud."""
-    del expected_num_nodes
 
-    ray_config = common_utils.read_yaml(cluster_yaml)
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
@@ -1051,7 +1049,6 @@ def _get_tpu_pod_ips(cluster_yaml: str, expected_num_nodes: int) -> List[str]:
             raise RuntimeError(
                 failure_massage.format(stdout=stdout, stderr=stderr))
     all_ips = re.findall(IP_ADDR_REGEX, stdout)
-    # TODO(weilin): check len(all_ips) == expected_num_nodes
     return all_ips
 
 
