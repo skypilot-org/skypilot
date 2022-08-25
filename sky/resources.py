@@ -187,7 +187,7 @@ class Resources:
         return acc.startswith('tpu') and acc not in ['tpu-v2-8', 'tpu-v3-8']
 
     @property
-    def tpu_pod_num(self) -> Optional[int]:
+    def num_tpu_device(self) -> Optional[int]:
         if not self.use_tpu_pod:
             return None
         acc, _ = list(self.accelerators.items())[0]

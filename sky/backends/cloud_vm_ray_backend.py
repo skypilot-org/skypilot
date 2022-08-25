@@ -1021,9 +1021,9 @@ class RetryingVmProvisioner(object):
         run setup or launch ray cluster on TPU Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        tpu_pod_num = cluster_handle.launched_resources.tpu_pod_num
+        num_tpu_device = cluster_handle.launched_resources.num_tpu_device
         all_ips = backend_utils.get_node_ips(cluster_yaml,
-                                             tpu_pod_num,
+                                             num_tpu_device,
                                              handle=cluster_handle)
 
         # Get the private IP of head node for connecting Ray cluster.
@@ -2073,7 +2073,7 @@ class CloudVmRayBackend(backends.Backend):
         job_id = self._add_job(handle, task.name, resources_str)
 
         if handle.launched_resources.use_tpu_pod:
-            task.num_nodes = handle.launched_resources.tpu_pod_num
+            task.num_nodes = handle.launched_resources.num_tpu_device
         # Case: task_lib.Task(run, num_nodes=1)
         if task.num_nodes == 1:
             self._execute_task_one_node(handle, task, job_id, detach_run)
