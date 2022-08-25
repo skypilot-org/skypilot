@@ -265,11 +265,11 @@ class Azure(clouds.Cloud):
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
             return False, (
-                'Azure CLI returned error. Run the following commands '
-                'under sky folder:'
-                # TODO(zhwu): after we publish sky to PyPI, change this to
-                # `pip install sky[azure]`
-                '\n      $ pip install .[azure]'
+                'Azure CLI returned error. Run the following commands:'
+                '\n      $ pip install skypilot[azure]  # if installed from '
+                'PyPI'
+                '\n    Or:'
+                '\n      $ pip install .[azure]  # if installed from source'
                 '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return something like:
         #   {"id": ..., "user": ...}
