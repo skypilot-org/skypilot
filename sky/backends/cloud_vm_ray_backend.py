@@ -1037,8 +1037,8 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(message)
 
     def _tpu_pod_setup(self, cluster_yaml: str,
-                      cluster_handle: 'backends.Backend.ResourceHandle',
-                      num_nodes: int):
+                       cluster_handle: 'backends.Backend.ResourceHandle',
+                       num_nodes: int):
         """Completes setup and start Ray cluster on TPU Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
@@ -1207,7 +1207,8 @@ class RetryingVmProvisioner(object):
 
         resources = cluster_handle.launched_resources
         if tpu_utils.is_tpu_vm(resources) and tpu_utils.is_tpu_pod(resources):
-            logger.info('{style.BRIGHT}Setting up TPU Pod workers...{style.RESET_ALL}')
+            logger.info(
+                '{style.BRIGHT}Setting up TPU Pod workers...{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
         # Only 1 node or head node provisioning failure.
