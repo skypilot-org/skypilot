@@ -1208,7 +1208,7 @@ class RetryingVmProvisioner(object):
         resources = cluster_handle.launched_resources
         if tpu_utils.is_tpu_vm(resources) and tpu_utils.is_tpu_pod(resources):
             logger.info(
-                '{style.BRIGHT}Setting up TPU Pod workers...{style.RESET_ALL}')
+                f'{style.BRIGHT}Setting up TPU Pod workers...{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
         # Only 1 node or head node provisioning failure.
