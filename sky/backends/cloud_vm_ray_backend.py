@@ -1083,7 +1083,8 @@ class RetryingVmProvisioner(object):
             cluster_config_file: str,
             cluster_handle: 'backends.Backend.ResourceHandle',
             log_abs_path: str, stream_logs: bool, logging_info: dict,
-            use_spot: bool) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
+            use_spot: bool
+    ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
         Returns:
@@ -1200,7 +1201,7 @@ class RetryingVmProvisioner(object):
         logger.debug(f'Ray up takes {time.time() - start} seconds with '
                      f'{retry_cnt} retries.')
         if returncode != 0:
-            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr
+            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
         resources = cluster_handle.launched_resources
         if resources.use_tpu_vm and resources.use_tpu_pod:
@@ -1218,9 +1219,6 @@ class RetryingVmProvisioner(object):
                 head_ip = None
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip)
-
-        if returncode != 0:
-            return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
         # All code below is handling num_nodes > 1.
 
