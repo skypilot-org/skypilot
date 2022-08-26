@@ -17,9 +17,9 @@ def is_tpu_pod(resources: resources_lib.Resources) -> bool:
     return acc.startswith('tpu') and acc not in ['tpu-v2-8', 'tpu-v3-8']
 
 
-def get_num_tpu_devices(resources: resources_lib.Resources) -> Optional[bool]:
+def get_num_tpu_devices(resources: resources_lib.Resources) -> Optional[int]:
     if not is_tpu_vm(resources):
         return None
     acc, _ = list(resources.accelerators.items())[0]
-    num_tpu_dev = int(int(acc.split('-')[2]) / 8)
-    return num_tpu_dev
+    num_tpu_devices = int(int(acc.split('-')[2]) / 8)
+    return num_tpu_devices

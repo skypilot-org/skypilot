@@ -1036,7 +1036,7 @@ class RetryingVmProvisioner(object):
                    'Try changing resource requirements or use another cloud.')
         raise exceptions.ResourcesUnavailableError(message)
 
-    def tpu_pod_setup(self, cluster_yaml: str,
+    def _tpu_pod_setup(self, cluster_yaml: str,
                       cluster_handle: 'backends.Backend.ResourceHandle',
                       num_nodes: int):
         """Completes setup and start Ray cluster on TPU Pod nodes.
@@ -1074,7 +1074,7 @@ class RetryingVmProvisioner(object):
         worker_start_ray_commands += ray_config['worker_start_ray_commands']
 
         # Setup TPU Pod workers and launch Ray cluster.
-        onprem_utils.do_filemounts_and_setup_on_local_workers(
+        backend_utils.do_filemounts_and_setup_on_local_workers(
             cluster_yaml,
             worker_ips=all_ips[1:],
             extra_setup_cmds=worker_start_ray_commands)
@@ -1207,8 +1207,8 @@ class RetryingVmProvisioner(object):
 
         resources = cluster_handle.launched_resources
         if tpu_utils.is_tpu_vm(resources) and tpu_utils.is_tpu_pod(resources):
-            logger.info('Setting up TPU Pod workers...')
-            self.tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
+            logger.info('{style.BRIGHT}Setting up TPU Pod workers...{style.RESET_ALL}')
+            self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
@@ -1236,7 +1236,7 @@ class RetryingVmProvisioner(object):
         # nodes. Hence, this method here replicates what the Ray autoscaler
         # would do were it for public cloud.
         if isinstance(to_provision_cloud, clouds.Local):
-            onprem_utils.do_filemounts_and_setup_on_local_workers(
+            backend_utils.do_filemounts_and_setup_on_local_workers(
                 cluster_config_file)
 
         # FIXME(zongheng): the below requires ray processes are up on head. To
