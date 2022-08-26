@@ -2125,10 +2125,8 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         storages = sky.storage_ls()
         names = [s['name'] for s in storages]
     else:
-        names = [
-            name for name in _get_glob_clusters(names)
-            if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
-        ]
+        names = _get_glob_storages(names)
+
     for name in names:
         sky.storage_delete(name)
 
