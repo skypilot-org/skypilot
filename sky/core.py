@@ -15,6 +15,7 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.skylet import job_lib
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
 
@@ -112,7 +113,7 @@ def stop(cluster_name: str, purge: bool = False):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if handle.launched_resources.use_tpu_pod:
+    if tpu_utils.is_tpu_pod(handle.launched_resources):
         raise exceptions.NotSupportedError(
             f'Stopping cluster {cluster_name!r} with TPU pod '
             'is not supported.')
@@ -176,7 +177,7 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
      handle) = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if handle.launched_resources.use_tpu_pod:
+    if tpu_utils.is_tpu_pod(handle.launched_resources):
         # Reference:
         # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
         raise exceptions.NotSupportedError(

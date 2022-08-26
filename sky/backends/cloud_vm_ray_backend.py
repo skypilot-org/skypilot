@@ -44,6 +44,7 @@ from sky.utils import command_runner
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -1047,11 +1048,12 @@ class RetryingVmProvisioner(object):
         all_ips = backend_utils.get_node_ips(cluster_yaml,
                                              num_nodes,
                                              handle=cluster_handle)
-        num_tpu_device = cluster_handle.launched_resources.num_tpu_device
-        if len(all_ips) != num_tpu_device:
+        num_tpu_devices = tpu_utils.get_num_tpu_devices(
+            cluster_handle.launched_resources)
+        if len(all_ips) != num_tpu_devices:
             raise RuntimeError(
                 f'Number of nodes IPs: {len(all_ips)} does not'
-                f'match number of TPU devices: {num_tpu_device}.')
+                f'match number of TPU devices: {num_tpu_devices}.')
 
         # Get the private IP of head node for connecting Ray cluster.
         head_runner = command_runner.SSHCommandRunner(all_ips[0],
@@ -1204,7 +1206,7 @@ class RetryingVmProvisioner(object):
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
         resources = cluster_handle.launched_resources
-        if resources.use_tpu_vm and resources.use_tpu_pod:
+        if tpu_utils.is_tpu_vm(resources) and tpu_utils.is_tpu_pod(resources):
             logger.info('Setting up TPU Pod workers...')
             self.tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
@@ -2127,7 +2129,8 @@ class CloudVmRayBackend(backends.Backend):
         job_id = self._add_job(handle, task.name, resources_str)
 
         # Case: task_lib.Task(run, num_nodes=1)
-        if task.num_nodes == 1 and not handle.launched_resources.use_tpu_pod:
+        is_tpu_pod = tpu_utils.is_tpu_pod(handle.launched_resources)
+        if task.num_nodes == 1 and not is_tpu_pod:
             self._execute_task_one_node(handle, task, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=N) or TPU Pods
@@ -2915,9 +2918,11 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
-        # If TPU Pods is used, #num_nodes should be #num_tpu_device
-        if handle.launched_resources.use_tpu_pod:
-            num_actual_nodes = handle.launched_resources.num_tpu_device
+        # If TPU Pods is used, #num_nodes should be #num_tpu_devices
+        is_tpu_pod = tpu_utils.is_tpu_pod(handle.launched_resources)
+        if is_tpu_pod:
+            num_actual_nodes = tpu_utils.get_num_tpu_devices(
+                handle.launched_resources)
         else:
             num_actual_nodes = task.num_nodes
 

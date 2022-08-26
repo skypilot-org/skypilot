@@ -174,27 +174,6 @@ class Resources:
     def image_id(self) -> Optional[str]:
         return self._image_id
 
-    @property
-    def use_tpu_vm(self) -> bool:
-        if self.accelerator_args is None:
-            return False
-        return self.accelerator_args.get('tpu_vm', False)
-
-    @property
-    def use_tpu_pod(self) -> bool:
-        if self.accelerators is None:
-            return False
-        acc, _ = list(self.accelerators.items())[0]
-        return acc.startswith('tpu') and acc not in ['tpu-v2-8', 'tpu-v3-8']
-
-    @property
-    def num_tpu_device(self) -> Optional[int]:
-        if not self.use_tpu_pod:
-            return None
-        acc, _ = list(self.accelerators.items())[0]
-        pod_num = int(int(acc.split('-')[2]) / 8)
-        return pod_num
-
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, int]],
