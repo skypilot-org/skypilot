@@ -128,7 +128,7 @@ setup_commands:
   # Line 'which conda ..': some images (TPU VM) do not install conda by
   # default. 'source ~/.bashrc' is needed so conda takes effect for the next
   # commands.
-  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/guide.html?highlight=ulimit#system-configuration
+  # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid error when the number of jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
@@ -160,6 +160,8 @@ setup_commands:
 head_start_ray_commands:
   # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
+  # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
+  # all the sessions to be reloaded. This is a workaround.
   - ((ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
     export SKY_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKY_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
     ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKY_NUM_GPUS;
