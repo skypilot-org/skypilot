@@ -116,7 +116,7 @@ setup_commands:
 # items! The same comment applies for worker_start_ray_commands.
 #
 # Increment the following for catching performance bugs easier:
-#   current num items (num SSH connections): 2
+#   current num items (num SSH connections): 1
 head_start_ray_commands:
   # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before sky is installed.)
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
