@@ -57,7 +57,7 @@ def _start(cluster_name: str,
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if cluster_status == global_user_state.ClusterStatus.UP:
-        logger.info(f'Cluster {cluster_name!r} is already up.')
+        print(f'Cluster {cluster_name!r} is already up.')
         return
     assert cluster_status in (
         global_user_state.ClusterStatus.INIT,
@@ -141,7 +141,7 @@ def down(cluster_name: str, purge: bool = False):
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if (cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES and not purge):
         raise exceptions.NotSupportedError(
             f'Tearing down sky reserved cluster {cluster_name!r} '
             f'is not supported.')
@@ -271,7 +271,6 @@ def queue(cluster_name: str,
     handle = _check_cluster_available(cluster_name, 'getting the job queue')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    logger.info(f'\nSky Job Queue of Cluster {cluster_name}')
     returncode, jobs_json, stderr = backend.run_on_head(handle,
                                                         code,
                                                         require_outputs=True)
@@ -310,16 +309,15 @@ def cancel(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'Cancelling all jobs on cluster {cluster_name!r}...'
-                    f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.YELLOW}'
+              f'Cancelling all jobs on cluster {cluster_name!r}...'
+              f'{colorama.Style.RESET_ALL}')
         job_ids = None
     else:
         jobs_str = ', '.join(map(str, job_ids))
-        logger.info(
-            f'{colorama.Fore.YELLOW}'
-            f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
-            f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.YELLOW}'
+              f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
+              f'{colorama.Style.RESET_ALL}')
 
     backend.cancel_jobs(handle, job_ids)
 
@@ -341,9 +339,9 @@ def tail_logs(cluster_name: str, job_id: Optional[str]):
     job_str = f'job {job_id}'
     if job_id is None:
         job_str = 'the last job'
-    logger.info(f'{colorama.Fore.YELLOW}'
-                f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
-                f'{colorama.Style.RESET_ALL}')
+    print(f'{colorama.Fore.YELLOW}'
+          f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
+          f'{colorama.Style.RESET_ALL}')
 
     backend.tail_logs(handle, job_id)
 
@@ -367,9 +365,9 @@ def download_logs(
     if job_ids is not None and len(job_ids) == 0:
         return []
 
-    logger.info(f'{colorama.Fore.YELLOW}'
-                'Syncing down logs to local...'
-                f'{colorama.Style.RESET_ALL}')
+    print(f'{colorama.Fore.YELLOW}'
+          'Syncing down logs to local...'
+          f'{colorama.Style.RESET_ALL}')
     local_log_dirs = backend.sync_down_logs(handle, job_ids, local_dir)
     return local_log_dirs
 
@@ -396,9 +394,9 @@ def job_status(
     if job_ids is not None and len(job_ids) == 0:
         return []
 
-    logger.info(f'{colorama.Fore.YELLOW}'
-                'Getting job status...'
-                f'{colorama.Style.RESET_ALL}')
+    print(f'{colorama.Fore.YELLOW}'
+          'Getting job status...'
+          f'{colorama.Style.RESET_ALL}')
 
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
     return statuses
@@ -416,7 +414,7 @@ def _is_spot_controller_up(
     controller_status, handle = backend_utils.refresh_cluster_status_handle(
         spot.SPOT_CONTROLLER_NAME, force_refresh=True)
     if controller_status is None:
-        logger.info('No managed spot job has been run.')
+        print('No managed spot job has been run.')
     elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {spot.SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
@@ -424,7 +422,7 @@ def _is_spot_controller_up(
             msg += f'\n{stopped_message}'
         if controller_status == global_user_state.ClusterStatus.INIT:
             msg += '\nPlease wait for the controller to be ready.'
-        logger.info(msg)
+        print(msg)
         handle = None
     return controller_status, handle
 
@@ -460,9 +458,9 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.INIT
     ]):
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    'Restarting controller for latest status...'
-                    f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.YELLOW}'
+              'Restarting controller for latest status...'
+              f'{colorama.Style.RESET_ALL}')
 
         handle = _start(spot.SPOT_CONTROLLER_NAME,
                         idle_minutes_to_autostop=spot.
@@ -534,7 +532,7 @@ def spot_cancel(name: Optional[str] = None,
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    logger.info(stdout)
+    print(stdout)
     if 'Multiple jobs found with name' in stdout:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -551,11 +549,15 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    _, handle = _is_spot_controller_up(
+    controller_status, handle = _is_spot_controller_up(
         'Please restart the spot controller with '
-        '`sky start sky-spot-controller -i 5`.')
+        f'`sky start {spot.SPOT_CONTROLLER_NAME} -i 5`.')
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('All jobs finished.')
+        msg = 'All jobs finished.'
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg = ''
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(msg)
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')
@@ -597,7 +599,7 @@ def storage_delete(name: Optional[str] = None):
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')
     else:
-        logger.info(f'Deleting storage object {name!r}.')
+        print(f'Deleting storage object {name!r}.')
         store_object = data.Storage(name=handle.storage_name,
                                     source=handle.source,
                                     sync_on_reconstruction=False)

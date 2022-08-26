@@ -50,6 +50,7 @@ def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
     clouds: CloudFilter = None,
+    case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
 
@@ -57,7 +58,7 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter)
+                                  name_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret = collections.defaultdict(list)
@@ -135,6 +136,13 @@ def get_hourly_cost(instance_type: str,
                                use_spot)
 
 
+def get_vcpus_from_instance_type(instance_type: str,
+                                 clouds: CloudFilter = None) -> Optional[float]:
+    """Returns the number of virtual CPUs from a instance type."""
+    return _map_clouds_catalog(clouds, 'get_vcpus_from_instance_type',
+                               instance_type)
+
+
 def get_accelerators_from_instance_type(
         instance_type: str,
         clouds: CloudFilter = None) -> Optional[Dict[str, int]]:
@@ -189,7 +197,12 @@ def get_common_gpus() -> List[str]:
 
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
-    return ['tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v3-8']
+    # TODO(wei-lin): refactor below hard-coded list.
+    return [
+        'tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v2-256', 'tpu-v2-512',
+        'tpu-v3-8', 'tpu-v3-32', 'tpu-v3-64', 'tpu-v3-128', 'tpu-v3-256',
+        'tpu-v3-512', 'tpu-v3-1024', 'tpu-v3-2048'
+    ]
 
 
 __all__ = [

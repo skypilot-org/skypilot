@@ -124,10 +124,10 @@ def _save_timeline(file_path: str):
         'traceEvents': _events,
         'displayTimeUnit': 'ms',
         'otherData': {
-            'log_dir': os.path.dirname(file_path),
+            'log_dir': os.path.dirname(os.path.abspath(file_path)),
         }
     }
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
     with open(file_path, 'w') as f:
         json.dump(json_output, f)
 

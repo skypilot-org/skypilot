@@ -181,8 +181,6 @@ _get_launched = (lambda cluster_status: log_utils.readable_time_duration(
     cluster_status['launched_at']))
 _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
-_get_zone = (
-    lambda clusters_status: clusters_status['handle'].launched_resources.zone)
 _get_status = (lambda cluster_status: cluster_status['status'].value)
 _get_duration = (lambda cluster_status: log_utils.readable_time_duration(
     cluster_status['launched_at']))
@@ -203,6 +201,13 @@ def _get_resources(cluster_status):
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
+
+
+def _get_zone(cluster_status):
+    zone_str = cluster_status['handle'].launched_resources.zone
+    if zone_str is None:
+        zone_str = '-'
+    return zone_str
 
 
 def _get_autostop(cluster_status):

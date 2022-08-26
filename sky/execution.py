@@ -41,6 +41,43 @@ logger = sky_logging.init_logger(__name__)
 OptimizeTarget = optimizer.OptimizeTarget
 _MAX_SPOT_JOB_LENGTH = 10
 
+# Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
+# instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
+# this.
+_ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
+Expected a sky.Dag but received a string.
+
+If you meant to run a command, make it a Task's run command and wrap as a Dag:
+
+  def to_dag(command, gpu=None):
+      with sky.Dag() as dag:
+          sky.Task(run=command).set_resources(
+              sky.Resources(accelerators=gpu))
+      return dag
+
+The command can then be run as:
+
+  sky.exec(to_dag(cmd), cluster_name=..., ...)
+  # Or use {'V100': 1}, 'V100:0.5', etc.
+  sky.exec(to_dag(cmd, gpu='V100'), cluster_name=..., ...)
+
+  sky.launch(to_dag(cmd), ...)
+
+  sky.spot_launch(to_dag(cmd), ...)
+""".strip()
+
+
+def _type_check_dag(dag):
+    """Raises TypeError if 'dag' is not a 'sky.Dag'."""
+    # Not suppressing stacktrace: when calling this via API user may want to
+    # see their own program in the stacktrace. Our CLI impl would not trigger
+    # these errors.
+    if isinstance(dag, str):
+        raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
+    elif not isinstance(dag, sky.Dag):
+        raise TypeError('Expected a sky.Dag but received argument of type: '
+                        f'{type(dag)}')
+
 
 class Stage(enum.Enum):
     """Stages for a run of a sky.Task."""
@@ -98,6 +135,7 @@ def _execute(
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
+    _type_check_dag(dag)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -297,6 +335,7 @@ def spot_launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
+    retry_until_up: bool = False,
 ):
     """Launch a managed spot job.
 
@@ -314,6 +353,7 @@ def spot_launch(
     if name is None:
         name = backend_utils.generate_cluster_name()
 
+    _type_check_dag(dag)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
                                  dag)
     task = dag.tasks[0]
@@ -333,10 +373,9 @@ def spot_launch(
     task.set_resources({new_resources})
 
     if task.run is None:
-        logger.info(
-            f'{colorama.Fore.GREEN}'
-            'Skipping the managed spot task as the run section is not set.'
-            f'{colorama.Style.RESET_ALL}')
+        print(f'{colorama.Fore.GREEN}'
+              'Skipping the managed spot task as the run section is not set.'
+              f'{colorama.Style.RESET_ALL}')
         return
 
     # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
@@ -344,19 +383,26 @@ def spot_launch(
     # Check the file mounts in the task.
     # Disallow all local file mounts (copy mounts).
     if task.workdir is not None:
-        raise exceptions.NotSupportedError(
-            'Workdir is not allowed for managed spot jobs.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Workdir is currently not allowed for managed spot jobs.\n'
+                'Hint: use Storage to auto-upload the workdir to a cloud '
+                'bucket.')
     copy_mounts = task.get_local_to_remote_file_mounts()
     if copy_mounts:
-        copy_mounts_str = '\n\t'.join(': '.join(m) for m in copy_mounts)
-        raise exceptions.NotSupportedError(
-            'Local file mounts are not allowed for managed spot jobs, '
-            f'but following are found: {copy_mounts_str}')
+        local_sources = '\t' + '\n\t'.join(
+            src for _, src in copy_mounts.items())
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Local file mounts are currently not allowed for managed spot '
+                f'jobs.\nFound local source paths:\n{local_sources}\nHint: use '
+                'Storage to auto-upload local files to a cloud bucket.')
 
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
-    task.add_storage_mounts()
+    with backend_utils.suppress_output():
+        task.add_storage_mounts()
 
     # Replace the source field that is local path in all storage_mounts with
     # bucket URI and remove the name field.
@@ -379,6 +425,7 @@ def spot_launch(
                     raise exceptions.NotSupportedError(
                         f'Unsupported store type: {store_type}')
             storage_obj.name = None
+            storage_obj.force_delete = True
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
@@ -395,17 +442,18 @@ def spot_launch(
                 'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
                 'is_dev': env_options.Options.IS_DEVELOPER.get(),
                 'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': usage_lib.get_logging_user_hash()
+                'logging_user_hash': common_utils.get_user_hash(),
+                'retry_until_up': retry_until_up,
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as spot_dag:
             controller_task = sky.Task.from_yaml(yaml_path)
             controller_task.spot_task = task
             assert len(controller_task.resources) == 1
-        logger.info(f'{colorama.Fore.YELLOW}'
-                    f'Launching managed spot job {name} from spot controller...'
-                    f'{colorama.Style.RESET_ALL}')
-        logger.info('Launching spot controller...')
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching managed spot job {name} from spot controller...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Launching spot controller...')
         _execute(
             dag=spot_dag,
             stream_logs=stream_logs,

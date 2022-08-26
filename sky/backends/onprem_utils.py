@@ -7,6 +7,7 @@ import tempfile
 import textwrap
 from typing import Any, Dict, List, Optional, Tuple
 
+import click
 import rich.console as rich_console
 import yaml
 
@@ -16,6 +17,7 @@ from sky.backends import backend_utils
 from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -65,17 +67,21 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
 
     local_cluster_names = []
     name_to_path_dict = {}
+
     for path in local_cluster_paths:
-        # TODO(mluo): Define a scheme for cluster config to check if YAML
-        # schema is correct.
         with open(path, 'r') as f:
             yaml_config = yaml.safe_load(f)
+            if not suppress_error:
+                backend_utils.validate_schema(yaml_config,
+                                              schemas.get_cluster_schema(),
+                                              'Invalid cluster YAML: ')
             user_config = yaml_config['auth']
             cluster_name = yaml_config['cluster']['name']
         sky_local_path = SKY_USER_LOCAL_CONFIG_PATH
-        if (AUTH_PLACEHOLDER
-                in (user_config['ssh_user'], user_config['ssh_private_key']) and
-                not suppress_error):
+
+        if not suppress_error and (AUTH_PLACEHOLDER
+                                   in (user_config['ssh_user'],
+                                       user_config['ssh_private_key'])):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Authentication into local cluster requires '
                                  'specifying `ssh_user` and `ssh_private_key` '
@@ -124,6 +130,12 @@ def get_local_auth_config(cluster_name: str) -> List[str]:
     """Returns IP addresses of the local cluster."""
     config = get_local_cluster_config_or_error(cluster_name)
     return config['auth']
+
+
+def get_python_executable(cluster_name: str) -> str:
+    """Returns the Ray cluster's python path."""
+    config = get_local_cluster_config_or_error(cluster_name)
+    return config['python']
 
 
 def get_job_owner(cluster_yaml: dict) -> str:
@@ -491,12 +503,60 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
           Contains cluster-specific hyperparameters and the authentication
           config.
     """
+    auth_config = cluster_config['auth']
+    head_ip = cluster_config['cluster']['ips'][0]
+    ssh_user = auth_config['ssh_user']
+    ssh_key = auth_config['ssh_private_key']
+    ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
+    head_runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
     # Admin authentication must be censored out.
     cluster_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
+    cluster_config['python'] = run_command_and_handle_ssh_failure(
+        head_runner,
+        'sudo which python3',
+        failure_message='Failed to obtain admin python path.').split()[0]
 
     cluster_name = cluster_config['cluster']['name']
     yaml_path = SKY_USER_LOCAL_CONFIG_PATH.format(cluster_name)
     abs_yaml_path = os.path.expanduser(yaml_path)
     os.makedirs(os.path.dirname(abs_yaml_path), exist_ok=True)
     common_utils.dump_yaml(abs_yaml_path, cluster_config)
+
+
+# Currently, programmatic API doesn't check this.
+def check_local_cloud_args(cloud: Optional[str] = None,
+                           cluster_name: Optional[str] = None,
+                           yaml_config: Optional[dict] = None) -> bool:
+    """Checks if user-provided arguments satisfies local cloud specs.
+
+    Args:
+        cloud: Cloud type (AWS, GCP, Azure, or Local).
+        cluster_name: Cluster name.
+        yaml_config: User's task yaml loaded into a JSON dictionary.
+    """
+    yaml_cloud = None
+    if yaml_config is not None and 'resources' in yaml_config:
+        yaml_cloud = yaml_config['resources'].get('cloud')
+
+    if (cluster_name is not None and check_if_local_cloud(cluster_name)):
+        if cloud is not None and cloud != 'local':
+            raise click.UsageError(f'Local cluster {cluster_name} is '
+                                   f'not part of cloud: {cloud}.')
+        if cloud is None and yaml_cloud is not None and yaml_cloud != 'local':
+            raise ValueError(
+                f'Detected Local cluster {cluster_name}. Must specify '
+                '`cloud: local` or no cloud in YAML or CLI args.')
+        return True
+    else:
+        if cloud == 'local' or yaml_cloud == 'local':
+            if cluster_name is not None:
+                raise click.UsageError(
+                    f'Local cluster \'{cluster_name}\' does not exist. \n'
+                    'See `sky status` for local cluster name(s).')
+            else:
+                raise click.UsageError(
+                    'Specify -c [local_cluster] to launch on a local cluster.\n'
+                    'See `sky status` for local cluster name(s).')
+
+        return False

@@ -77,10 +77,7 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str, int]] = None
-                                 ) -> str:
-        del accelerators
+    def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'Standard_D8_v4'
 
@@ -158,6 +155,14 @@ class Azure(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
+
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='azure')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
