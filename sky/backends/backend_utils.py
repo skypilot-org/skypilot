@@ -665,7 +665,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          auth_config: Optional[Dict[str, str]] = None,
-                         dryrun: bool = False) -> Dict[str, str]:
+                         dryrun: bool = False,
+                         service=None) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -697,6 +698,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
     if isinstance(cloud, clouds.Local):
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
+    elif service:
+        ip_list = ['0.0.0.0', '0.0.0.0']
+        # sky-key-a13938
+        auth_config = {
+            'ssh_user': 'hadoop',
+            'ssh_private_key': '~/.ssh/sky-key'
+        }
     region_name = resources_vars.get('region')
 
     yaml_path = fill_template(
@@ -741,9 +749,10 @@ def write_cluster_config(to_provision: 'resources.Resources',
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
-    _add_auth_to_cluster_config(cloud, yaml_path)
+    if not service:
+        _add_auth_to_cluster_config(cloud, yaml_path)
     # Delay the optimization of the config until the authentication files is added.
-    if not isinstance(cloud, clouds.Local):
+    if not isinstance(cloud, clouds.Local) or service:
         # Only optimize the file mounts for public clouds now, as local has not
         # been fully tested yet.
         _optimize_file_mounts(yaml_path)

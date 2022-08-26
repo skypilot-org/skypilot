@@ -45,6 +45,7 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.services import emr
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -95,13 +96,15 @@ _MAX_RAY_UP_RETRY = 5
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 
 
-def _get_cluster_config_template(cloud):
+def _get_cluster_config_template(cloud, service=None):
     cloud_to_template = {
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
+    if service:
+        return 'local-ray.yml.j2'
     return cloud_to_template[type(cloud)]
 
 
@@ -677,8 +680,11 @@ class RetryingVmProvisioner(object):
 
         assert False, f'Unknown cloud: {cloud}.'
 
-    def _yield_region_zones(self, to_provision: resources_lib.Resources,
-                            cluster_name: str, cluster_exists: bool):
+    def _yield_region_zones(self,
+                            to_provision: resources_lib.Resources,
+                            cluster_name: str,
+                            cluster_exists: bool,
+                            service=None):
         cloud = to_provision.cloud
         region = None
         zones = None
@@ -691,34 +697,39 @@ class RetryingVmProvisioner(object):
             try:
                 config = common_utils.read_yaml(handle.cluster_yaml)
                 prev_resources = handle.launched_resources
-                if prev_resources is not None and cloud.is_same_cloud(
-                        prev_resources.cloud):
-                    if cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
-                            clouds.AWS()):
-                        region = config['provider']['region']
-                        zones = config['provider']['availability_zone']
-                    elif cloud.is_same_cloud(clouds.Azure()):
-                        region = config['provider']['location']
-                        zones = None
-                    elif cloud.is_same_cloud(clouds.Local()):
-                        local_regions = clouds.Local.regions()
-                        region = local_regions[0].name
-                        zones = None
-                    else:
-                        assert False, cloud
-                    assert region == prev_resources.region, (
-                        f'Region mismatch. The region in '
-                        f'{handle.cluster_yaml} '
-                        'has been changed from '
-                        f'{prev_resources.region} to {region}.')
-                    assert (zones is None or prev_resources.zone is None or
-                            prev_resources.zone
-                            in zones), (f'{prev_resources.zone} not found in '
-                                        f'zones of {handle.cluster_yaml}.')
-                    # Note that we don't overwrite the zone field in Ray YAML
-                    # even if prev_resources.zone != zones.
-                    # This is because Ray will consider the YAML hash changed
-                    # and not reuse the existing cluster.
+                if service:
+                    region = prev_resources.region
+                    zones = prev_resources.zone
+                else:
+                    if prev_resources is not None and cloud.is_same_cloud(
+                            prev_resources.cloud):
+                        if cloud.is_same_cloud(
+                                clouds.GCP()) or cloud.is_same_cloud(
+                                    clouds.AWS()):
+                            region = config['provider']['region']
+                            zones = config['provider']['availability_zone']
+                        elif cloud.is_same_cloud(clouds.Azure()):
+                            region = config['provider']['location']
+                            zones = None
+                        elif cloud.is_same_cloud(clouds.Local()):
+                            local_regions = clouds.Local.regions()
+                            region = local_regions[0].name
+                            zones = None
+                        else:
+                            assert False, cloud
+                        assert region == prev_resources.region, (
+                            f'Region mismatch. The region in '
+                            f'{handle.cluster_yaml} '
+                            'has been changed from '
+                            f'{prev_resources.region} to {region}.')
+                        assert (zones is None or prev_resources.zone is None or
+                                prev_resources.zone in zones), (
+                                    f'{prev_resources.zone} not found in '
+                                    f'zones of {handle.cluster_yaml}.')
+                        # Note that we don't overwrite the zone field in Ray YAML
+                        # even if prev_resources.zone != zones.
+                        # This is because Ray will consider the YAML hash changed
+                        # and not reuse the existing cluster.
             except FileNotFoundError:
                 # Happens if no previous cluster.yaml exists.
                 pass
@@ -875,13 +886,16 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self,
-                            to_provision: resources_lib.Resources,
-                            num_nodes: int,
-                            dryrun: bool,
-                            stream_logs: bool,
-                            cluster_name: str,
-                            cluster_exists: bool = False):
+    def _retry_region_zones(
+        self,
+        to_provision: resources_lib.Resources,
+        num_nodes: int,
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        cluster_exists: bool = False,
+        service=None,
+    ):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -899,7 +913,7 @@ class RetryingVmProvisioner(object):
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
                                                       cluster_name,
-                                                      cluster_exists):
+                                                      cluster_exists, service):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
             zone_str = ','.join(
@@ -907,12 +921,13 @@ class RetryingVmProvisioner(object):
             config_dict = backend_utils.write_cluster_config(
                 to_provision,
                 num_nodes,
-                _get_cluster_config_template(to_provision.cloud),
+                _get_cluster_config_template(to_provision.cloud, service),
                 cluster_name,
                 self._local_wheel_path,
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                service=service)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -927,7 +942,8 @@ class RetryingVmProvisioner(object):
                 # OK for this to be shown in CLI as status == INIT.
                 launched_resources=to_provision.copy(region=region.name),
                 tpu_create_script=config_dict.get('tpu-create-script'),
-                tpu_delete_script=config_dict.get('tpu-delete-script'))
+                tpu_delete_script=config_dict.get('tpu-delete-script'),
+                service=service)
             usage_lib.messages.usage.update_final_cluster_status(
                 global_user_state.ClusterStatus.INIT)
 
@@ -953,8 +969,15 @@ class RetryingVmProvisioner(object):
                 'zone_str': zone_str,
             }
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
-                to_provision.cloud, num_nodes, cluster_config_file,
-                log_abs_path, stream_logs, logging_info, to_provision.use_spot)
+                to_provision.cloud,
+                num_nodes,
+                cluster_config_file,
+                log_abs_path,
+                stream_logs,
+                logging_info,
+                to_provision.use_spot,
+                service,
+                cluster_already_exists=(prev_cluster_status is not None))
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1037,9 +1060,16 @@ class RetryingVmProvisioner(object):
 
     @timeline.event
     def _gang_schedule_ray_up(
-            self, to_provision_cloud: clouds.Cloud, num_nodes: int,
-            cluster_config_file: str, log_abs_path: str, stream_logs: bool,
-            logging_info: dict, use_spot: bool
+        self,
+        to_provision_cloud: clouds.Cloud,
+        num_nodes: int,
+        cluster_config_file: str,
+        log_abs_path: str,
+        stream_logs: bool,
+        logging_info: dict,
+        use_spot: bool,
+        service=None,
+        cluster_already_exists=False,
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster via 'ray up' and wait until fully provisioned.
 
@@ -1050,7 +1080,7 @@ class RetryingVmProvisioner(object):
         # waits for all workers; turn it into real gang scheduling.
         # FIXME: refactor code path to remove use of stream_logs
         del stream_logs
-
+        print(cluster_already_exists)
         style = colorama.Style
 
         def ray_up():
@@ -1086,6 +1116,26 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
+
+        if service and isinstance(to_provision_cloud, clouds.AWS):
+            yaml_config = common_utils.read_yaml(cluster_config_file)
+            print(cluster_already_exists)
+            if service[
+                    'type'] == 'data-analytics' and not cluster_already_exists:
+                ips = emr.provision_cluster(
+                    yaml_config['cluster_name'],
+                    spark_version=service['dependencies']['spark'],
+                    instance_type='m5.xlarge',
+                    num_nodes=num_nodes,
+                    # Hardcode for now....
+                    region='us-east-2')
+                # Post process Ray YAML
+                yaml_config['provider']['head_ip'] = ips[0]
+                if len(ips[0]) > 1:
+                    yaml_config['provider']['worker_ips'] = ips[1:]
+                else:
+                    del yaml_config['provider']['worker_ips']
+                common_utils.dump_yaml(cluster_config_file, yaml_config)
 
         if isinstance(to_provision_cloud, clouds.Local):
             cluster_name = logging_info['cluster_name']
@@ -1185,7 +1235,7 @@ class RetryingVmProvisioner(object):
         # autoscaler bug, where filemounting and setup does not run on worker
         # nodes. Hence, this method here replicates what the Ray autoscaler
         # would do were it for public cloud.
-        if isinstance(to_provision_cloud, clouds.Local):
+        if isinstance(to_provision_cloud, clouds.Local) or service:
             onprem_utils.do_filemounts_and_setup_on_local_workers(
                 cluster_config_file)
 
@@ -1300,7 +1350,8 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
-                    cluster_exists=cluster_exists)
+                    cluster_exists=cluster_exists,
+                    service=task.service)
                 if dryrun:
                     return
             except exceptions.ResourcesUnavailableError as e:
@@ -1382,7 +1433,8 @@ class CloudVmRayBackend(backends.Backend):
                      launched_resources: Optional[
                          resources_lib.Resources] = None,
                      tpu_create_script: Optional[str] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+                     tpu_delete_script: Optional[str] = None,
+                     service=None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
             self.cluster_yaml = cluster_yaml
@@ -1392,6 +1444,7 @@ class CloudVmRayBackend(backends.Backend):
             self.tpu_create_script = tpu_create_script
             self.tpu_delete_script = tpu_delete_script
             self._maybe_make_local_handle()
+            self.service = service
 
         def __repr__(self):
             return (f'ResourceHandle('
@@ -1684,19 +1737,22 @@ class CloudVmRayBackend(backends.Backend):
                 launched_resources=config_dict['launched_resources'],
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
-                tpu_delete_script=config_dict.get('tpu-delete-script'))
+                tpu_delete_script=config_dict.get('tpu-delete-script'),
+                service=task.service)
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
             zones = config_dict['zones']
-            if zones is not None and len(zones) == 1:  # zones is None for Azure
+            if zones is not None and len(
+                    zones) == 1 and not task.service:  # zones is None for Azure
                 # Optimization for if the provision request was for 1 zone
                 # (currently happens only for GCP since it uses per-zone
                 # provisioning), then we know the exact zone already.
                 handle.launched_resources = handle.launched_resources.copy(
                     zone=zones[0].name)
             elif (task.num_nodes == 1 or
-                  handle.launched_resources.zone is not None):
+                  handle.launched_resources.zone is not None and
+                  not task.service):
                 # Query zone if the cluster has 1 node, or a zone is
                 # specifically requested for a multinode cluster.  Otherwise
                 # leave the zone field to None because head and worker nodes
@@ -1965,7 +2021,6 @@ class CloudVmRayBackend(backends.Backend):
                 f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} '
                 '--no-wait -- '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
-
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
                                                       stream_logs=False,
@@ -2135,6 +2190,7 @@ class CloudVmRayBackend(backends.Backend):
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(handle, terminate, purge)
+
             if success and terminate:
                 os.remove(lock_path)
         except filelock.Timeout as e:
@@ -2329,7 +2385,12 @@ class CloudVmRayBackend(backends.Backend):
             handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
-        if terminate and isinstance(cloud, clouds.Azure):
+        if terminate and handle.service:
+            if isinstance(handle.launched_resources.cloud, clouds.AWS):
+                emr.terminate_emr_cluster(handle.cluster_name)
+
+            returncode = 0
+        elif terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
             resource_group = config['provider']['resource_group']

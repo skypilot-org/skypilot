@@ -465,7 +465,6 @@ def _launch_with_confirm(
         # Show the optimize log before the prompt if the cluster does not exist.
         dag = sky.optimize(dag)
     task = dag.tasks[0]
-
     _check_resources_match(backend, cluster, task, node_type=node_type)
 
     confirm_shown = False
@@ -887,7 +886,6 @@ def launch(
         env=env,
         disk_size=disk_size,
     )
-
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
     elif backend_name == backends.CloudVmRayBackend.NAME:

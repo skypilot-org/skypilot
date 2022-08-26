@@ -80,6 +80,7 @@ class Task:
         num_nodes: Optional[int] = None,
         # Advanced:
         docker_image: Optional[str] = None,
+        service: Optional[dict] = None,
     ):
         """Initializes a Task.
 
@@ -124,6 +125,7 @@ class Task:
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
         self.num_nodes = num_nodes
+        self.service = service
 
         self.inputs = None
         self.outputs = None
@@ -219,17 +221,16 @@ class Task:
         if config is None:
             config = {}
 
-        backend_utils.validate_schema(config, schemas.get_task_schema(),
-                                      'Invalid task YAML: ')
+        # backend_utils.validate_schema(config, schemas.get_task_schema(),
+        #                               'Invalid task YAML: ')
 
-        task = Task(
-            config.pop('name', None),
-            run=config.pop('run', None),
-            workdir=config.pop('workdir', None),
-            setup=config.pop('setup', None),
-            num_nodes=config.pop('num_nodes', None),
-            envs=config.pop('envs', None),
-        )
+        task = Task(config.pop('name', None),
+                    run=config.pop('run', None),
+                    workdir=config.pop('workdir', None),
+                    setup=config.pop('setup', None),
+                    num_nodes=config.pop('num_nodes', None),
+                    envs=config.pop('envs', None),
+                    service=config.pop('service', None))
 
         # Create lists to store storage objects inlined in file_mounts.
         # These are retained in dicts in the YAML schema and later parsed to

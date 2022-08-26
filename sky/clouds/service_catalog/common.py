@@ -119,7 +119,6 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
                 error_msg = (f'Invalid region {region!r}')
                 error_msg += _get_candidate_str(region, all_regions)
                 raise ValueError(error_msg)
-
     if zone is not None:
         all_zones = df['AvailabilityZone'].unique()
         if zone not in all_zones:

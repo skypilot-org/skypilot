@@ -676,15 +676,25 @@ class Optimizer:
 
         metric = 'COST ($)' if minimize_cost else 'TIME (hr)'
         field_names = resource_fields + [metric, 'CHOSEN']
+        for task, v in ordered_node_to_cost_map.items():
+            if task.service:
+                field_names.insert(1, 'SERVICE')
+                break
 
         num_tasks = len(ordered_node_to_cost_map)
         for task, v in ordered_node_to_cost_map.items():
             task_str = f'for Task {repr(task)!r}' if num_tasks > 1 else ''
             plural = 's' if task.num_nodes > 1 else ''
-            logger.info(
-                f'{colorama.Style.BRIGHT}Considered resources {task_str}'
-                f'({task.num_nodes} node{plural}):'
-                f'{colorama.Style.RESET_ALL}')
+            if task.service:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Considered services {task_str}'
+                    f'({task.num_nodes} node{plural}):'
+                    f'{colorama.Style.RESET_ALL}')
+            else:
+                logger.info(
+                    f'{colorama.Style.BRIGHT}Considered resources {task_str}'
+                    f'({task.num_nodes} node{plural}):'
+                    f'{colorama.Style.RESET_ALL}')
             rows = []
             for resources, cost in v.items():
                 if minimize_cost:
@@ -693,6 +703,13 @@ class Optimizer:
                     cost = f'{cost / 3600:.2f}'
 
                 row = [*_get_resources_element_list(resources), cost, '']
+                if task.service:
+                    if row[0] == 'AWS':
+                        row.insert(1, 'EMR')
+                    elif row[0] == 'GCP':
+                        row.insert(1, 'Dataproc')
+                    elif row[0] == 'Azure':
+                        row.insert(1, 'HDInsight')
                 if resources == best_plan[task]:
                     # Use tick sign for the chosen resources.
                     row[-1] = (colorama.Fore.GREEN + '   ' + u'\u2714' +
