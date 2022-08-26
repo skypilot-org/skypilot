@@ -114,8 +114,10 @@ def stop(cluster_name: str, purge: bool = False):
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
     if tpu_utils.is_tpu_pod(handle.launched_resources):
+        # Reference:
+        # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
         raise exceptions.NotSupportedError(
-            f'Stopping cluster {cluster_name!r} with TPU pod '
+            f'Stopping cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
 
     backend = backend_utils.get_backend_from_handle(handle)
