@@ -3,6 +3,7 @@ from typing import Optional
 
 from sky import resources as resources_lib
 
+
 def is_tpu_vm(resources: resources_lib.Resources) -> bool:
     if resources.accelerator_args is None:
         return False
