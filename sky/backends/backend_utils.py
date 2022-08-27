@@ -700,11 +700,16 @@ def write_cluster_config(to_provision: 'resources.Resources',
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     elif service:
         ip_list = ['0.0.0.0', '0.0.0.0']
-        # sky-key-a13938
-        auth_config = {
-            'ssh_user': 'hadoop',
-            'ssh_private_key': '~/.ssh/sky-key'
-        }
+        if isinstance(cloud, clouds.AWS):
+            auth_config = {
+                'ssh_user': 'hadoop',
+                'ssh_private_key': '~/.ssh/sky-key'
+            }
+        elif isinstance(cloud, clouds.GCP):
+            auth_config = {
+                'ssh_user': 'michael_luo',
+                'ssh_private_key': '~/.ssh/google_compute_engine'
+            }
     region_name = resources_vars.get('region')
 
     yaml_path = fill_template(

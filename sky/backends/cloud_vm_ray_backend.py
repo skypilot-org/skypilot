@@ -45,7 +45,7 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
-from sky.services import emr
+from sky.services import emr, dataproc
 
 if typing.TYPE_CHECKING:
     from sky import dag
@@ -1117,18 +1117,24 @@ class RetryingVmProvisioner(object):
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
 
-        if service and isinstance(to_provision_cloud, clouds.AWS):
+        if service:
             yaml_config = common_utils.read_yaml(cluster_config_file)
+            print(yaml_config)
             print(cluster_already_exists)
-            if service[
-                    'type'] == 'data-analytics' and not cluster_already_exists:
-                ips = emr.provision_cluster(
-                    yaml_config['cluster_name'],
-                    spark_version=service['dependencies']['spark'],
-                    instance_type='m5.xlarge',
-                    num_nodes=num_nodes,
-                    # Hardcode for now....
-                    region='us-east-2')
+            if service['type'] == 'data-analytics':
+                if isinstance(to_provision_cloud, clouds.AWS):
+                    ips = emr.provision_cluster(
+                        yaml_config['cluster_name'],
+                        spark_version=service['dependencies']['spark'],
+                        instance_type='m5.xlarge',
+                        num_nodes=num_nodes,
+                        skip_provision=cluster_already_exists)
+                elif isinstance(to_provision_cloud, clouds.GCP):
+                    ips = dataproc.provision_cluster(
+                        yaml_config['cluster_name'],
+                        spark_version=service['dependencies']['spark'],
+                        num_nodes=num_nodes,
+                        skip_provision=cluster_already_exists)
                 # Post process Ray YAML
                 yaml_config['provider']['head_ip'] = ips[0]
                 if len(ips[0]) > 1:
@@ -2387,7 +2393,9 @@ class CloudVmRayBackend(backends.Backend):
         use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and handle.service:
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
-                emr.terminate_emr_cluster(handle.cluster_name)
+                emr.terminate_cluster(handle.cluster_name)
+            elif isinstance(handle.launched_resources.cloud, clouds.GCP):
+                dataproc.terminate_cluster(handle.cluster_name)
 
             returncode = 0
         elif terminate and isinstance(cloud, clouds.Azure):

@@ -7,37 +7,20 @@ def provision_cluster(cluster_name,
                       spark_version='3.2.1',
                       instance_type='m5.xlarge',
                       num_nodes=1,
-                      region='us-east-2'):
+                      region='us-east-2',
+                      skip_provision=False):
 
     service_dict = {'3.2.1': 'emr-6.7.0'}
     client = boto3.client('emr', region_name=region)
 
-    instance_groups = [
-        {
-            'Name': 'Master',
-            'Market': 'ON_DEMAND',
-            'InstanceRole': 'MASTER',
-            'InstanceType': instance_type,
-            'InstanceCount': 1,
-            'EbsConfiguration': {
-                'EbsBlockDeviceConfigs': [{
-                    'VolumeSpecification': {
-                        'VolumeType': 'gp2',
-                        'SizeInGB': 100
-                    },
-                    'VolumesPerInstance': 1
-                },],
-            }
-        },
-    ]
-    if num_nodes > 1:
-        instance_groups.append(
+    if not skip_provision:
+        instance_groups = [
             {
-                'Name': 'Core',
+                'Name': 'Master',
                 'Market': 'ON_DEMAND',
-                'InstanceRole': 'CORE',
+                'InstanceRole': 'MASTER',
                 'InstanceType': instance_type,
-                'InstanceCount': num_nodes - 1,
+                'InstanceCount': 1,
                 'EbsConfiguration': {
                     'EbsBlockDeviceConfigs': [{
                         'VolumeSpecification': {
@@ -47,25 +30,44 @@ def provision_cluster(cluster_name,
                         'VolumesPerInstance': 1
                     },],
                 }
-            },)
-    response = client.run_job_flow(
-        Name=cluster_name,
-        ReleaseLabel=service_dict[spark_version],
-        Instances={
-            'TerminationProtected': False,
-            'KeepJobFlowAliveWhenNoSteps': True,
-            'InstanceGroups': instance_groups,
-            'Ec2KeyName': 'sky-key-a13938'
-        },
-        Applications=[{
-            'Name': 'Spark'
-        }, {
-            'Name': 'Hadoop'
-        }],
-        VisibleToAllUsers=True,
-        ServiceRole='EMR_DefaultRole',
-        JobFlowRole='EMR_EC2_DefaultRole',
-        AutoScalingRole="EMR_AutoScaling_DefaultRole")
+            },
+        ]
+        if num_nodes > 1:
+            instance_groups.append(
+                {
+                    'Name': 'Core',
+                    'Market': 'ON_DEMAND',
+                    'InstanceRole': 'CORE',
+                    'InstanceType': instance_type,
+                    'InstanceCount': num_nodes - 1,
+                    'EbsConfiguration': {
+                        'EbsBlockDeviceConfigs': [{
+                            'VolumeSpecification': {
+                                'VolumeType': 'gp2',
+                                'SizeInGB': 100
+                            },
+                            'VolumesPerInstance': 1
+                        },],
+                    }
+                },)
+        response = client.run_job_flow(
+            Name=cluster_name,
+            ReleaseLabel=service_dict[spark_version],
+            Instances={
+                'TerminationProtected': False,
+                'KeepJobFlowAliveWhenNoSteps': True,
+                'InstanceGroups': instance_groups,
+                'Ec2KeyName': 'sky-key-a13938'
+            },
+            Applications=[{
+                'Name': 'Spark'
+            }, {
+                'Name': 'Hadoop'
+            }],
+            VisibleToAllUsers=True,
+            ServiceRole='EMR_DefaultRole',
+            JobFlowRole='EMR_EC2_DefaultRole',
+            AutoScalingRole="EMR_AutoScaling_DefaultRole")
     cluster_ready = False
     while not cluster_ready:
         wait_response = client.list_clusters(ClusterStates=['WAITING'])
