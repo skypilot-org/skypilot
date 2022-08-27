@@ -113,7 +113,7 @@ def stop(cluster_name: str, purge: bool = False):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if tpu_utils.is_tpu_pod(handle.launched_resources):
+    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
         # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
         raise exceptions.NotSupportedError(
@@ -179,7 +179,7 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
      handle) = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if tpu_utils.is_tpu_pod(handle.launched_resources):
+    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
         # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
         raise exceptions.NotSupportedError(

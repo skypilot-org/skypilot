@@ -1039,10 +1039,10 @@ class RetryingVmProvisioner(object):
     def _tpu_pod_setup(self, cluster_yaml: str,
                        cluster_handle: 'backends.Backend.ResourceHandle',
                        num_nodes: int):
-        """Completes setup and start Ray cluster on TPU Pod nodes.
+        """Completes setup and start Ray cluster on TPU VM Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
-        run setup or launch ray cluster on TPU Pod nodes.
+        run setup or launch ray cluster on TPU VM Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
         all_ips = backend_utils.get_node_ips(cluster_yaml,
@@ -1073,7 +1073,7 @@ class RetryingVmProvisioner(object):
         worker_start_ray_commands = [f'echo "export RAY_HEAD_IP={head_ip_private}" >> ~/.bashrc && source ~/.bashrc']  # pylint: disable=line-too-long
         worker_start_ray_commands += ray_config['worker_start_ray_commands']
 
-        # Setup TPU Pod workers and launch Ray cluster.
+        # Setup TPU VM Pod workers and launch Ray cluster.
         backend_utils.do_filemounts_and_setup_on_local_workers(
             cluster_yaml,
             worker_ips=all_ips[1:],
@@ -1206,9 +1206,9 @@ class RetryingVmProvisioner(object):
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
 
         resources = cluster_handle.launched_resources
-        if tpu_utils.is_tpu_vm(resources) and tpu_utils.is_tpu_pod(resources):
-            logger.info(
-                f'{style.BRIGHT}Setting up TPU Pod workers...{style.RESET_ALL}')
+        if tpu_utils.is_tpu_vm_pod(resources):
+            logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
+                        f'{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
         # Only 1 node or head node provisioning failure.
@@ -2129,13 +2129,13 @@ class CloudVmRayBackend(backends.Backend):
         resources_str = backend_utils.get_task_resources_str(task)
         job_id = self._add_job(handle, task.name, resources_str)
 
-        # Case: task_lib.Task(run, num_nodes=1)
-        is_tpu_pod = tpu_utils.is_tpu_pod(handle.launched_resources)
-        if task.num_nodes == 1 and not is_tpu_pod:
-            self._execute_task_one_node(handle, task, job_id, detach_run)
-        else:
-            # Case: task_lib.Task(run, num_nodes=N) or TPU Pods
+        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+        # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
+        if task.num_nodes > 1 or is_tpu_vm_pod:
             self._execute_task_n_nodes(handle, task, job_id, detach_run)
+        else:
+            # Case: task_lib.Task(run, num_nodes=1)
+            self._execute_task_one_node(handle, task, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
         colorama.init()
@@ -2919,9 +2919,9 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
-        # If TPU Pods is used, #num_nodes should be #num_tpu_devices
-        is_tpu_pod = tpu_utils.is_tpu_pod(handle.launched_resources)
-        if is_tpu_pod:
+        # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
+        is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+        if is_tpu_vm_pod:
             num_actual_nodes = tpu_utils.get_num_tpu_devices(
                 handle.launched_resources)
         else:

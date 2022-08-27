@@ -386,8 +386,8 @@ def test_tpu_vm():
     run_one_test(test)
 
 
-# ---------- TPU Pod VM. ----------
-def test_tpu_pod():
+# ---------- TPU VM Pod. ----------
+def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
         'tpu_pod',

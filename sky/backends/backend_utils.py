@@ -1061,11 +1061,11 @@ def get_node_ips(cluster_yaml: str,
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
     # won't work and we need to query the node IPs with gcloud as
-    # implmented in _get_tpu_pod_ips.
+    # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        return _get_tpu_pod_ips(ray_config)
+        return _get_tpu_vm_pod_ips(ray_config)
 
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
@@ -1125,8 +1125,8 @@ def get_node_ips(cluster_yaml: str,
 
 
 @timeline.event
-def _get_tpu_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
-    """Returns the IPs of all TPU Pod workers using gcloud."""
+def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
+    """Returns the IPs of all TPU VM Pod workers using gcloud."""
 
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
@@ -1143,7 +1143,7 @@ def _get_tpu_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
                                                  stream_logs=False,
                                                  require_outputs=True)
     if rcode != 0:
-        failure_massage = ('Failed to run gcloud to get TPU pod IPs.\n'
+        failure_massage = ('Failed to run gcloud to get TPU VM Pod IPs.\n'
                            '**** STDOUT ****\n'
                            '{stdout}\n'
                            '**** STDERR ****\n'
