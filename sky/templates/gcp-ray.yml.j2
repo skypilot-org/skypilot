@@ -165,13 +165,13 @@ head_start_ray_commands:
   - ((ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
     export SKY_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKY_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
     ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKY_NUM_GPUS;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do prlimit --nofile=1048576:1048576 --pid=$id; done;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
   - SKY_NUM_GPUS=0 && which nvidia-smi > /dev/null && SKY_NUM_GPUS=$(nvidia-smi --query-gpu=index,name --format=csv,noheader | wc -l);
     ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus=$SKY_NUM_GPUS;
-    which prlimit && for id in $(pgrep -f raylet/raylet); do prlimit --nofile=1048576:1048576 --pid=$id; done;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
 {%- else %}
 worker_start_ray_commands: []
 {%- endif %}
