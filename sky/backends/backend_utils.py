@@ -1521,6 +1521,10 @@ def _update_cluster_status_no_lock(
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        # This happens to a stopped TPU VM as we use gcloud to query the IP.
+        if len(ips) == 0:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
             # Check the ray cluster status. We have to check it for single node
             # case, since the get_node_ips() does not require ray cluster to be
