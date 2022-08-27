@@ -387,6 +387,8 @@ def test_tpu_vm():
 
 
 # ---------- TPU VM Pod. ----------
+# Mark slow because it's expensive to run.
+@pytest.mark.slow
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
