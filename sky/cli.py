@@ -118,10 +118,11 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
     for storage_object in storages:
-        glob_storage = global_user_state.get_handle_from_storage_name(
-            storage_object)
+        glob_storage = global_user_state.get_glob_storage_name(storage_object)
         if len(glob_storage) == 0:
             click.echo(f'Storage {storage_object} not found.')
+        else:
+            click.echo(f'Deleting {len(glob_storage)} storage objects.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
