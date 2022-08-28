@@ -1040,9 +1040,11 @@ def exec(
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
-    The following metadata for each cluster is stored: cluster name, time since
-    last launch, resources, region, status, duration, autostop, command, hourly
-    price. Display all metadata using ``sky status -a``.
+    The following fields for each cluster are recorded: cluster name, time
+    since last launch, resources, region, zone, hourly price, status, autostop,
+    command.
+
+    Display all fields using ``sky status -a``.
 
     \b
     Each cluster can have one of the following statuses:
@@ -1057,6 +1059,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       live.  (The most recent ``sky launch`` has completed successfully.)
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
+
     """
     cluster_records = core.status(all=all, refresh=refresh)
     local_clusters = onprem_utils.check_and_get_local_clusters(

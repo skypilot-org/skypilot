@@ -83,7 +83,6 @@ initialization_commands: []
 setup_commands:
   # Create ~/.ssh/config file in case the file does not exist in the custom image.
   # Make sure python3 & pip3 are available on this image.
-  # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
   # We set auto_activate_base to be false for pre-installed conda.
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration

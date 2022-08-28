@@ -72,10 +72,10 @@ _HEAD_IP_MAX_ATTEMPTS = 5
 _WORKER_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
-    f'{colorama.Fore.RED}Failed to terminate '
+    f'\n{colorama.Fore.RED}Failed to terminate '
     '{cluster_name}. {extra_reason}'
     'If you want to ignore this error and remove the cluster '
-    'from from Sky\'s status table, use `sky down --purge`.'
+    'from the status table, use `sky down --purge`.'
     f'{colorama.Style.RESET_ALL}\n'
     '**** STDOUT ****\n'
     '{stdout}\n'

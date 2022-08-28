@@ -20,11 +20,11 @@ You can read more about interactive nodes :ref:`here <interactive-nodes>`.
 
 The above command will automatically log in to the cluster once the cluster is provisioned (or re-use an existing one).
 
-On the VM, you can run the following command to start a Jupyter session:
+Inside the VM, you can run the following commands to start a Jupyter session:
 
 .. code-block:: bash
 
-   # Start a Jupyter notebook
+   pip install jupyter
    jupyter notebook
 
 In your local browser, you should now be able to access :code:`localhost:8888` and see the following screen:
@@ -44,6 +44,8 @@ You can verify that this notebook is running on the GPU-backed instance using :c
 .. image:: ../images/jupyter-gpu.png
   :width: 100%
   :alt: nvidia-smi in notebook
+
+The GPU node is a normal SkyPilot cluster, so you can use the usual CLI commands on it.  For example, run ``sky down/stop`` to terminate or stop it, and ``sky exec`` to execute a task.
 
 Notebooks in SkyPilot tasks
 ---------------------------
