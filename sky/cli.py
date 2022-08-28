@@ -122,7 +122,8 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
         if len(glob_storage) == 0:
             click.echo(f'Storage {storage_object} not found.')
         else:
-            click.echo(f'Deleting {len(glob_storage)} storage objects.')
+            plural = 's' if len(glob_storage) > 1 else ''
+            click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
 
