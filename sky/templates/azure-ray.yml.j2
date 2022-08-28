@@ -91,7 +91,7 @@ setup_commands:
   # Create ~/.ssh/config file in case the file does not exist in the image.
   # Make sure python3 & pip3 are available on this image.
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
-  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid error when the number of running ray jobs increase.
+  # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
