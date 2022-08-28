@@ -401,6 +401,8 @@ class RayCodeGen:
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
+                sys.stdout.flush()
+                sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
@@ -2066,8 +2068,8 @@ class CloudVmRayBackend(backends.Backend):
         else:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} '
-                '--no-wait -- '
+                f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+                '--no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
