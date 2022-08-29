@@ -847,8 +847,7 @@ def _fill_in_launchable_resources(
                     'enabled. Run `sky check` to enable access to it, '
                     'or change the cloud requirement.')
         elif resources.is_launchable():
-            if (isinstance(resources.cloud, clouds.GCP) and
-                    resources.accelerators is not None):
+            if isinstance(resources.cloud, clouds.GCP):
                 clouds.GCP.check_host_accelerator_compatibility(
                     resources.instance_type, resources.accelerators,
                     resources.zone)
