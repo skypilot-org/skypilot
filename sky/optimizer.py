@@ -17,7 +17,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.utils import env_options
 from sky.utils import ux_utils
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
@@ -643,13 +643,23 @@ class Optimizer:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
+            cloud = resources.cloud
+            vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
+            if vcpus is None:
+                vcpus = '-'
+            elif vcpus.is_integer():
+                vcpus = str(int(vcpus))
+            else:
+                vcpus = f'{vcpus:.1f}'
             return [
-                str(resources.cloud), resources.instance_type + spot,
-                str(accelerators)
+                str(cloud),
+                resources.instance_type + spot,
+                vcpus,
+                str(accelerators),
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS']
+        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]

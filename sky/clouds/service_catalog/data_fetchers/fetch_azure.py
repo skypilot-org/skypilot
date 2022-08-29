@@ -97,6 +97,7 @@ def get_gpu_name(family: str) -> str:
         'standardNCPromoFamily': 'K80',
         'StandardNCASv3_T4Family': 'T4',
         'standardNDSv2Family': 'V100-32GB',
+        'StandardNCADSA100v4Family': 'A100-80GB',
         'standardNDAMSv4_A100Family': 'A100-80GB',
         'StandardNDASv4_A100Family': 'A100',
         'standardNVFamily': 'M60',
@@ -104,6 +105,8 @@ def get_gpu_name(family: str) -> str:
         'standardNVSv3Family': 'M60',
         'standardNVPromoFamily': 'M60',
         'standardNVSv4Family': 'Radeon MI25',
+        'standardNDSFamily': 'P40',
+        'StandardNVADSA10v5Family': 'A10',
     }
     # NP-series offer Xilinx U250 FPGAs which are not GPUs,
     # so we do not include them here.
@@ -117,6 +120,7 @@ def get_all_regions_instance_types_df():
         get_all_regions_pricing_df.remote(),
         get_sku_df.remote(),
     ])
+    df.drop_duplicates(inplace=True)
     print(f'Processing dataframes')
 
     def get_price(row):
@@ -150,9 +154,10 @@ def get_all_regions_instance_types_df():
             return np.nan
         return spot_pricing_rows.iloc[0]['unitPrice']
 
-    def get_capabilities(row) -> Tuple[str, float]:
+    def get_capabilities(row):
         gpu_name = None
         gpu_count = np.nan
+        vcpus = np.nan
         memory_gb = np.nan
         caps = row['capabilities']
         for item in caps:
@@ -160,17 +165,20 @@ def get_all_regions_instance_types_df():
                 gpu_name = get_gpu_name(row['family'])
                 if gpu_name is not None:
                     gpu_count = item['value']
+            elif item['name'] == 'vCPUs':
+                vcpus = float(item['value'])
             elif item['name'] == 'MemoryGB':
                 memory_gb = item['value']
-        return gpu_name, gpu_count, memory_gb
+        return gpu_name, gpu_count, vcpus, memory_gb
 
     def get_additional_columns(row):
-        gpu_name, gpu_count, memory_gb = get_capabilities(row)
+        gpu_name, gpu_count, vcpus, memory_gb = get_capabilities(row)
         return pd.Series({
             'Price': get_price(row),
             'SpotPrice': get_spot_price(row),
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
+            'vCPUs': vcpus,
             'MemoryGiB': memory_gb,
             'GpuInfo': gpu_name,
         })

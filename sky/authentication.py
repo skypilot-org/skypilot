@@ -11,12 +11,14 @@ import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
-from Crypto.PublicKey import RSA
 
 from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 logger = sky_logging.init_logger(__name__)
 
@@ -29,6 +31,9 @@ MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 
 GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
+# Do not place the backup under the gcloud config directory, as ray
+# autoscaler can overwrite that directory on the remote nodes.
+GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 
 def generate_rsa_key_pair():
@@ -90,6 +95,7 @@ def get_or_generate_keys(private_key_path: str, public_key_path: str):
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_aws_authentication(config):
+    from Crypto.PublicKey import RSA  # pylint: disable=import-outside-toplevel
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
     if private_key_path is None:
@@ -145,9 +151,37 @@ def setup_aws_authentication(config):
     return config
 
 
+# Reference:
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
+def _wait_for_compute_global_operation(project_name, operation_name, compute):
+    """Poll for global compute operation until finished."""
+    logger.debug('wait_for_compute_global_operation: '
+                 'Waiting for operation {} to finish...'.format(operation_name))
+    max_polls = 10
+    poll_interval = 5
+    for _ in range(max_polls):
+        result = compute.globalOperations().get(
+            project=project_name,
+            operation=operation_name,
+        ).execute()
+        if 'error' in result:
+            raise Exception(result['error'])
+
+        if result['status'] == 'DONE':
+            logger.debug('wait_for_compute_global_operation: '
+                         'Operation done.')
+            break
+        time.sleep(poll_interval)
+    return result
+
+
 # Snippets of code inspired from
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
+# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
+# avoid duplicated codes.
+# Retry for the GCP as sometimes there will be connection reset by peer error.
+@common_utils.retry
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
@@ -170,18 +204,36 @@ def setup_gcp_authentication(config):
     project_oslogin = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
+
     if project_oslogin.lower() == 'true':
         # project.
         logger.info(
             f'OS Login is enabled for GCP project {project_id}. Running '
             'additional authentication steps.')
+        # Read the account information from the credential file, since the user
+        # should be set according the account, when the oslogin is enabled.
         config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
-        if not os.path.exists(config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'GCP authentication failed, as the oslogin is enabled but '
-                    f'the file {config_path} is not found.')
-        with open(config_path, 'r') as infile:
+        sky_backup_config_path = os.path.expanduser(
+            GCP_CONFIGURE_SKY_BACKUP_PATH)
+        if not os.path.exists(sky_backup_config_path):
+            if not os.path.exists(config_path):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'GCP authentication failed, as the oslogin is enabled '
+                        f'but the file {config_path} is not found.')
+
+            # Create a backup of the config_default file in the same folder (the
+            # folder will be uploaded by `sky launch`), as the original file can
+            # be modified on the remote cluster by ray causing failure of
+            # launching GCP cluster on a remote cluster.
+            subprocess.run(f'cp {config_path} {sky_backup_config_path}',
+                           shell=True,
+                           check=True)
+        new_file_mounts = config.get('file_mounts', {})
+        new_file_mounts[
+            GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
+        config['file_mounts'] = new_file_mounts
+        with open(sky_backup_config_path, 'r') as infile:
             for line in infile:
                 if line.startswith('account'):
                     account = line.split('=')[1].strip()
@@ -193,6 +245,10 @@ def setup_gcp_authentication(config):
                         f'but the file {config_path} does not contain the '
                         'account information.')
         config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+
+        # Generating ssh key if it does not exist
+        get_or_generate_keys(private_key_path, public_key_path)
+
         # Add ssh key to GCP with oslogin
         subprocess.run(
             'gcloud compute os-login ssh-keys add '
@@ -255,12 +311,15 @@ def setup_gcp_authentication(config):
             metadata.append({'key': 'ssh-keys', 'value': new_ssh_key})
         else:
             ssh_key_index = ssh_key_index[0]
-            ssh_dict = metadata[ssh_key_index]
-            ssh_dict['value'] += '\n' + new_ssh_key
-            compute.projects().setCommonInstanceMetadata(
-                project=project['name'],
-                body=project['commonInstanceMetadata']).execute()
-            time.sleep(5)
+            metadata[ssh_key_index]['value'] += '\n' + new_ssh_key
+
+        project['commonInstanceMetadata']['items'] = metadata
+
+        operation = compute.projects().setCommonInstanceMetadata(
+            project=project['name'],
+            body=project['commonInstanceMetadata']).execute()
+        _wait_for_compute_global_operation(project['name'], operation['name'],
+                                           compute)
     return config
 
 

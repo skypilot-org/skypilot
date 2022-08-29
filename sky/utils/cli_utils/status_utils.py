@@ -1,6 +1,5 @@
-"""Utilities for `sky status`."""
-from typing import Callable, List
-
+"""Utilities for sky status."""
+from typing import Any, Callable, Dict, List
 import click
 import colorama
 
@@ -8,7 +7,7 @@ from sky import backends
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils
-from sky.skylet.utils import log_utils
+from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
 
@@ -33,10 +32,9 @@ class StatusColumn:
         return val
 
 
-def show_status_table(show_all: bool = False, refresh: bool = False):
+def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
     """Compute cluster table values and display."""
     # TODO(zhwu): Update the information for auto-stop clusters.
-    cluster_records = backend_utils.get_clusters(show_all, refresh)
 
     status_columns = [
         StatusColumn('NAME', _get_name),
@@ -45,13 +43,13 @@ def show_status_table(show_all: bool = False, refresh: bool = False):
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
+        StatusColumn('ZONE', _get_zone, show_by_default=False),
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
         StatusColumn('STATUS', _get_status),
-        StatusColumn('DURATION', _get_duration, show_by_default=False),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False)
     ]
 
     columns = []
@@ -183,8 +181,6 @@ _get_launched = (lambda cluster_status: log_utils.readable_time_duration(
 _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
 _get_status = (lambda cluster_status: cluster_status['status'].value)
-_get_duration = (lambda cluster_status: log_utils.readable_time_duration(
-    cluster_status['launched_at']))
 _get_command = (lambda cluster_status: cluster_status['last_use'])
 
 
@@ -202,6 +198,13 @@ def _get_resources(cluster_status):
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
+
+
+def _get_zone(cluster_status):
+    zone_str = cluster_status['handle'].launched_resources.zone
+    if zone_str is None:
+        zone_str = '-'
+    return zone_str
 
 
 def _get_autostop(cluster_status):

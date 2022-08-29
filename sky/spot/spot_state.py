@@ -53,6 +53,7 @@ class SpotStatus(enum.Enum):
     STARTING = 'STARTING'
     RUNNING = 'RUNNING'
     RECOVERING = 'RECOVERING'
+    # Terminal statuses
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
     FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'

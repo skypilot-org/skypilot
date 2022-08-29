@@ -5,26 +5,35 @@ Install SkyPilot using pip:
 
 .. code-block:: console
 
-  $ # SkyPilot requires python >= 3.6 and < 3.10.
-  $ git clone ssh://git@github.com/skypilot-org/skypilot.git
-  $ cd skypilot
-
+  $ # SkyPilot requires python >= 3.6.
   $ # Recommended: use a new conda env to avoid package conflicts.
-  $ conda create -n sky python=3.7
+  $ conda create -y -n sky python=3.7
   $ conda activate sky
 
-  $ pip install ".[all]"
-  $ # To install AWS dependencies only:
-  $ # pip install ".[aws]"
+  $ # Choose an extra (default: [aws])
+  $ pip install skypilot
+  $ # pip install "skypilot[gcp]"
+  $ # pip install "skypilot[azure]"
+  $ # pip install "skypilot[all]"
+
 
 SkyPilot currently supports three major cloud providers: AWS, GCP, and Azure.  If you
 only have access to certain clouds, use any combination of
-:code:`".[aws,azure,gcp]"` (e.g., :code:`".[aws,gcp]"`) to reduce the
+:code:`"[aws,azure,gcp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
+
+You may also install SkyPilot from source.
+
+.. code-block:: console
+
+  $ git clone https://github.com/skypilot-org/skypilot.git
+  $ cd skypilot
+  $ pip install ".[all]"
+
 
 .. note::
 
-    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio` prior to installing SkyPilot.
+    For Macs, macOS >= 10.15 is required to install SkyPilot. Apple Silicon-based devices (e.g. Apple M1) must run :code:`conda install grpcio=1.43.0` prior to installing SkyPilot.
 
 .. note::
 

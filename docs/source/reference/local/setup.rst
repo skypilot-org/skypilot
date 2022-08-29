@@ -14,18 +14,16 @@ For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.h
 Installing SkyPilot dependencies
 -----------------------------------
 
-SkyPilot On-prem requires :code:`python3`, :code:`ray==1.10.0`, and :code:`sky` to be setup on all local nodes and globally available to all users.
+SkyPilot On-prem requires :code:`python3`, :code:`ray==1.13.0`, and :code:`sky` to be setup on all local nodes and globally available to all users.
 
 To install Ray and SkyPilot for all users, run the following commands on all local nodes:
 
 .. code-block:: console
 
-   $ sudo -H pip3 install ray[default]==1.10.0
+   $ sudo -H pip3 install ray[default]==1.13.0
 
-   $ # SkyPilot requires python >= 3.6 and < 3.10.
-   $ git clone ssh://git@github.com/skypilot-org/skypilot.git
-   $ cd skypilot
-   $ sudo -H pip3 install -e .
+   $ # SkyPilot requires python >= 3.6.
+   $ sudo -H pip3 install skypilot
 
 
 Launching SkyPilot services
@@ -107,7 +105,7 @@ The console should display a list of healthy nodes the size of the local cluster
 Publishing cluster YAML
 ---------------------------
 
-Under the hood, :code:`sky admin deploy` automatically stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows the same structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
+Under the hood, :code:`sky admin deploy` automatically stores a public **distributable** cluster YAML in :code:`~/.sky/local/my-cluster.yaml`. This cluster YAML follows a similar structure as that of the private cluster YAML, with admin authentication replaced with a placeholder value (for regular users to fill in):
 
 .. code-block:: yaml
 
@@ -119,5 +117,8 @@ Under the hood, :code:`sky admin deploy` automatically stores a public **distrib
     auth:
       ssh_user: PLACEHOLDER
       ssh_private_key: PLACEHOLDER
+
+    # Path to the python binary to be used by SkyPilot. Must be the same on all nodes and executable by all users.
+    python: /usr/bin/python3
 
 The distributable cluster YAML can be published on the company's website or sent privately between users. Regular users store this yaml in :code:`~/.sky/local/`, and replace :code:`PLACEHOLDER` with their credentials.

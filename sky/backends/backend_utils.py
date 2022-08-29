@@ -8,9 +8,9 @@ import getpass
 import json
 import os
 import pathlib
-import random
 import re
 import subprocess
+import tempfile
 import textwrap
 import threading
 import time
@@ -22,6 +22,7 @@ import colorama
 import filelock
 import jinja2
 import jsonschema
+from packaging import version
 import psutil
 import requests
 from requests import adapters
@@ -30,13 +31,13 @@ from ray.autoscaler._private import commands as ray_commands
 from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
-import yaml
 
 import sky
 from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
+from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -63,7 +64,6 @@ SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_REMOTE_RAY_VERSION = '1.10.0'
 SKY_REMOTE_PATH = '~/.sky/sky_wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
@@ -105,7 +105,15 @@ SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
-CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
+# Remote dir that holds our runtime files.
+_REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
+
+def is_ip(s: str) -> bool:
+    """Returns whether this string matches IP_ADDR_REGEX."""
+    return len(re.findall(IP_ADDR_REGEX, s)) == 1
 
 
 def fill_template(template_name: str,
@@ -131,11 +139,98 @@ def fill_template(template_name: str,
     # Add yaml file path to the template variables.
     variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
     variables['sky_ray_yaml_local_path'] = output_path
+    # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
+
+
+def _optimize_file_mounts(yaml_path: str) -> None:
+    """Optimize file mounts in the given ray yaml file.
+
+    Runtime files handling:
+    List of runtime files to be uploaded to cluster:
+      - yaml config (for autostopping)
+      - wheel
+      - credentials
+    Format is {dst: src}.
+    """
+    yaml_config = common_utils.read_yaml(yaml_path)
+
+    file_mounts = yaml_config.get('file_mounts', {})
+    # Remove the file mounts added by the newline.
+    if '' in file_mounts:
+        assert file_mounts[''] == '', file_mounts['']
+        file_mounts.pop('')
+
+    # Putting these in file_mounts hurts provisioning speed, as each file
+    # opens/closes an SSH connection.  Instead, we:
+    #  - cp locally them into a directory
+    #  - upload that directory as a file mount (1 connection)
+    #  - use a remote command to move all runtime files to their right places.
+
+    # Local tmp dir holding runtime files.
+    local_runtime_files_dir = tempfile.mkdtemp()
+    new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
+
+    # (For remote) Build a command that copies runtime files to their right
+    # destinations.
+    # NOTE: we copy rather than move, because when launching >1 node, head node
+    # is fully set up first, and if moving then head node's files would already
+    # move out of _REMOTE_RUNTIME_FILES_DIR, which would cause setting up
+    # workers (from the head's files) to fail.  An alternative is softlink
+    # (then we need to make sure the usage of runtime files follow links).
+    commands = []
+    basenames = set()
+    for dst, src in file_mounts.items():
+        src_basename = os.path.basename(src)
+        dst_basename = os.path.basename(dst)
+        dst_parent_dir = os.path.dirname(dst)
+
+        # Validate by asserts here as these files are added by our backend.
+        # Our runtime files (wheel, yaml, credentials) do not have backslashes.
+        assert not src.endswith('/'), src
+        assert not dst.endswith('/'), dst
+        assert src_basename not in basenames, (
+            f'Duplicated src basename: {src_basename}; mounts: {file_mounts}')
+        basenames.add(src_basename)
+        # Our runtime files (wheel, yaml, credentials) are not relative paths.
+        assert dst_parent_dir, f'Found relative destination path: {dst}'
+
+        mkdir_parent = f'mkdir -p {dst_parent_dir}'
+        if os.path.isdir(os.path.expanduser(src)):
+            # Special case for directories. If the dst already exists as a folder,
+            # directly copy the folder will create a subfolder under the dst.
+            mkdir_parent = f'mkdir -p {dst}'
+            src_basename = f'{src_basename}/*'
+        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+              f'{dst_parent_dir}/{dst_basename}')
+        fragment = f'({mkdir_parent} && {mv})'
+        commands.append(fragment)
+    postprocess_runtime_files_command = ' && '.join(commands)
+
+    setup_commands = yaml_config.get('setup_commands', [])
+    if setup_commands:
+        setup_commands[
+            0] = f'{postprocess_runtime_files_command}; {setup_commands[0]}'
+    else:
+        setup_commands = [postprocess_runtime_files_command]
+
+    yaml_config['file_mounts'] = new_file_mounts
+    yaml_config['setup_commands'] = setup_commands
+
+    # (For local) Move all runtime files, including the just-written yaml, to
+    # local_runtime_files_dir/.
+    all_local_sources = ' '.join(
+        local_src for local_src in file_mounts.values())
+    # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
+    subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/',
+                   shell=True,
+                   check=True)
+
+    common_utils.dump_yaml(yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -148,8 +243,9 @@ def path_size_megabytes(path: str) -> int:
             str(resolved_path / command_runner.GIT_EXCLUDE))
     rsync_output = str(
         subprocess.check_output(
-            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} {command_runner.RSYNC_FILTER_OPTION}'
-            f' {git_exclude_filter} --dry-run {path}',
+            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+            f'{command_runner.RSYNC_FILTER_OPTION} '
+            f'{git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
@@ -602,6 +698,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
+
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -623,12 +720,13 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # GCP only.
                 'gcp_project_id': gcp_project_id,
                 # Ray version.
-                'ray_version': SKY_REMOTE_RAY_VERSION,
+                'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                'sky_version': str(version.parse(sky.__version__)),
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
@@ -637,12 +735,19 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     (None if auth_config is None else auth_config['ssh_user']),
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
-            }))
+            }),
+    )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    # Delay the optimization of the config until the authentication files is added.
+    if not isinstance(cloud, clouds.Local):
+        # Only optimize the file mounts for public clouds now, as local has not
+        # been fully tested yet.
+        _optimize_file_mounts(yaml_path)
+
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
@@ -678,8 +783,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-    with open(cluster_config_file, 'r') as f:
-        config = yaml.safe_load(f)
+    config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
     if isinstance(cloud, clouds.AWS):
         config = auth.setup_aws_authentication(config)
@@ -799,9 +903,9 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out: waited for workers to be provisioned '
-                    f'for more than {nodes_launching_progress_timeout} seconds.'
-                )
+                    'Timed out: waited for more than '
+                    f'{nodes_launching_progress_timeout} seconds for new '
+                    'workers to be provisioned, but no progress.')
                 return False  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
@@ -876,9 +980,10 @@ def parallel_data_transfer_to_nodes(
         if run_rsync:
             # TODO(zhwu): Optimize for large amount of files.
             # zip / transfer/ unzip
-            runner.rsync_up(
+            runner.rsync(
                 source=source,
                 target=target,
+                up=True,
                 log_path=log_path,
                 stream_logs=stream_logs,
             )
@@ -925,7 +1030,7 @@ def generate_cluster_name():
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
-    backoff = Backoff(initial_backoff=5, max_backoff_factor=5)
+    backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
             out = subprocess_utils.run(
@@ -949,7 +1054,8 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
                  handle: Optional[backends.Backend.ResourceHandle] = None,
-                 head_ip_max_attempts: int = 1) -> List[str]:
+                 head_ip_max_attempts: int = 1,
+                 worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
@@ -968,28 +1074,39 @@ def get_node_ips(cluster_yaml: str,
             exceptions.FetchIPError.Reason.HEAD) from e
     head_ip = [head_ip]
     if expected_num_nodes > 1:
-        try:
-            proc = subprocess_utils.run(f'ray get-worker-ips {cluster_yaml}',
-                                        stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE)
-            out = proc.stdout.decode()
+        backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
+
+        for retry_cnt in range(worker_ip_max_attempts):
+            try:
+                proc = subprocess_utils.run(
+                    f'ray get-worker-ips {cluster_yaml}',
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE)
+                out = proc.stdout.decode()
+            except subprocess.CalledProcessError as e:
+                if retry_cnt == worker_ip_max_attempts - 1:
+                    raise exceptions.FetchIPError(
+                        exceptions.FetchIPError.Reason.WORKER) from e
+                # Retry if the ssh is not ready for the workers yet.
+                backoff_time = backoff.current_backoff()
+                logger.debug('Retrying to get worker ip '
+                             f'[{retry_cnt}/{worker_ip_max_attempts}] in '
+                             f'{backoff_time} seconds.')
+                time.sleep(backoff_time)
+        worker_ips = re.findall(IP_ADDR_REGEX, out)
+        # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
+        # Workaround: List of IPs are shown in Stderr
+        cluster_name = os.path.basename(cluster_yaml).split('.')[0]
+        if ((handle is not None and hasattr(handle, 'local_handle') and
+             handle.local_handle is not None) or
+                onprem_utils.check_if_local_cloud(cluster_name)):
+            out = proc.stderr.decode()
             worker_ips = re.findall(IP_ADDR_REGEX, out)
-            # Ray Autoscaler On-prem Bug: ray-get-worker-ips outputs nothing!
-            # Workaround: List of IPs are shown in Stderr
-            cluster_name = os.path.basename(cluster_yaml).split('.')[0]
-            if ((handle is not None and hasattr(handle, 'local_handle') and
-                 handle.local_handle is not None) or
-                    onprem_utils.check_if_local_cloud(cluster_name)):
-                out = proc.stderr.decode()
-                worker_ips = re.findall(IP_ADDR_REGEX, out)
-                # Remove head ip from worker ip list.
-                for i, ip in enumerate(worker_ips):
-                    if ip == head_ip[0]:
-                        del worker_ips[i]
-                        break
-        except subprocess.CalledProcessError as e:
-            raise exceptions.FetchIPError(
-                exceptions.FetchIPError.Reason.WORKER) from e
+            # Remove head ip from worker ip list.
+            for i, ip in enumerate(worker_ips):
+                if ip == head_ip[0]:
+                    del worker_ips[i]
+                    break
         if len(worker_ips) != expected_num_nodes - 1:
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
     else:
@@ -1061,7 +1178,7 @@ def _process_cli_query(
                  f'{stdout}\n'
                  '**** STDERR ****\n'
                  f'{stderr}')
-    if (cloud == str(sky.Azure()) and returncode == 2 and
+    if (cloud == str(clouds.Azure()) and returncode == 2 and
             'argument --ids: expected at least one argument' in stderr):
         # Azure CLI has a returncode 2 when the cluster is not found, as
         # --ids <empty> is passed to the query command. In that case, the
@@ -1085,7 +1202,7 @@ def _process_cli_query(
 
 
 @contextlib.contextmanager
-def subpress_output():
+def suppress_output():
     """Suppress stdout and stderr."""
     with open(os.devnull, 'w') as devnull:
         with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
@@ -1102,9 +1219,9 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_caches')
         return set(ray_launch_hashes)
-    with subpress_output():
+    with suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    # Adopted from https://github.com/ray-project/ray/blob/ray-1.10.0/python/ray/autoscaler/_private/node_launcher.py#L46-L54
+    # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']
@@ -1116,7 +1233,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
-        with subpress_output():
+        with suppress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
         launch_hashes.add(current_hash)
@@ -1673,33 +1790,6 @@ def stop_handler(signum, frame):
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
-
-
-class Backoff:
-    """Exponential backoff with jittering."""
-    MULTIPLIER = 1.6
-    JITTER = 0.4
-
-    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
-        self._initial = True
-        self._backoff = None
-        self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff_factor * self._inital_backoff
-
-    # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
-    # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
-
-    def current_backoff(self) -> float:
-        """Backs off once and returns the current backoff in seconds."""
-        if self._initial:
-            self._initial = False
-            self._backoff = min(self._inital_backoff, self._max_backoff)
-        else:
-            self._backoff = min(self._backoff * self.MULTIPLIER,
-                                self._max_backoff)
-        self._backoff += random.uniform(-self.JITTER * self._backoff,
-                                        self.JITTER * self._backoff)
-        return self._backoff
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):

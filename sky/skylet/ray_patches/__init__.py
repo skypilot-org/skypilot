@@ -10,13 +10,24 @@ This script applies patches by running the following
 
 To get original versions, go to the Ray branch with version:
 
-  sky.backends.backend_utils.SKY_REMOTE_RAY_VERSION
+  sky.constants.SKY_REMOTE_RAY_VERSION
 
-Example:
-- https://raw.githubusercontent.com/ray-project/ray/releases/1.10.0/python/ray/worker.py
+Example workflow:
+
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/1.13.0/python/ray/autoscaler/_private/command_runner.py
+  >> cp command_runner.py command_runner.py.1
+
+  >> # Make some edits to command_runner.py.1...
+
+  >> diff command_runner.py command_runner.py.1 >command_runner.py.patch
+
+  >> # Inspect command_runner.py.patch.
+  >> # Edit this file to include command_runner.py.patch.
 """
 import os
 import subprocess
+
+from sky import constants
 
 
 def _to_absolute(pwd_file):
@@ -26,7 +37,8 @@ def _to_absolute(pwd_file):
 def _run_patch(target_file, patch_file):
     """Applies a patch if it has not been applied already."""
     # .orig is the original file that is not patched.
-    orig_file = os.path.abspath(target_file + '.orig')
+    orig_file = os.path.abspath(
+        f'{target_file}-v{constants.SKY_REMOTE_RAY_VERSION}.orig')
     script = f"""\
     which patch >/dev/null 2>&1 || sudo yum install -y patch || true
     which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
@@ -44,15 +56,25 @@ def patch() -> None:
     # Patch the buggy ray files. This should only be called
     # from an isolated python process, because once imported
     # the python module would persist in the memory.
-    from ray._private import metrics_agent
-    _run_patch(metrics_agent.__file__, _to_absolute('metrics_agent.py.patch'))
+
+    from ray._private import log_monitor
+    _run_patch(log_monitor.__file__, _to_absolute('log_monitor.py.patch'))
 
     from ray import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
-    from ray.autoscaler._private import resource_demand_scheduler
-    _run_patch(resource_demand_scheduler.__file__,
-               _to_absolute('resource_demand_scheduler.py.patch'))
+    from ray.dashboard.modules.job import cli
+    _run_patch(cli.__file__, _to_absolute('cli.py.patch'))
+
+    from ray.dashboard.modules.job import job_manager
+    _run_patch(job_manager.__file__, _to_absolute('job_manager.py.patch'))
 
     from ray.autoscaler._private import autoscaler
     _run_patch(autoscaler.__file__, _to_absolute('autoscaler.py.patch'))
+
+    from ray.autoscaler._private import command_runner
+    _run_patch(command_runner.__file__, _to_absolute('command_runner.py.patch'))
+
+    from ray.autoscaler._private import resource_demand_scheduler
+    _run_patch(resource_demand_scheduler.__file__,
+               _to_absolute('resource_demand_scheduler.py.patch'))

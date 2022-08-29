@@ -4,6 +4,7 @@ import enum
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
 SIGTSTP_CODE = 146
+RSYNC_FILE_NOT_FOUND_CODE = 23
 
 
 class ResourcesUnavailableError(Exception):
@@ -35,6 +36,16 @@ class CommandError(Exception):
         message = (f'Command {command} failed with return code {returncode}.'
                    f'\n{error_msg}')
         super().__init__(message)
+
+
+class ClusterNotUpError(Exception):
+    """Raised when a cluster is not up."""
+    pass
+
+
+class NotSupportedError(Exception):
+    """Raised when a feature is not supported."""
+    pass
 
 
 class StorageError(Exception):
@@ -110,4 +121,9 @@ class NetworkError(Exception):
 
 class ClusterStatusFetchingError(Exception):
     """Raised when fetching the cluster status fails."""
+    pass
+
+
+class SpotUserCancelledError(Exception):
+    """Raised when a spot user cancels the job."""
     pass

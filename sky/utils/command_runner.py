@@ -75,7 +75,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
             # sky.launch().
             'ControlMaster': 'auto',
             'ControlPath': f'{_ssh_control_path(ssh_control_name)}/%C',
-            'ControlPersist': '120s',
+            'ControlPersist': '300s',
         })
     ssh_key_option = [
         '-i',
@@ -114,7 +114,7 @@ class SSHCommandRunner:
         Example Usage:
             runner = SSHCommandRunner(ip, ssh_user, ssh_private_key)
             runner.run('ls -l', mode=SshMode.NON_INTERACTIVE)
-            runner.rsync_up(source, target)
+            runner.rsync(source, target, up=True)
 
         Args:
             ip: The IP address of the remote machine.
@@ -261,16 +261,29 @@ class SSHCommandRunner:
                                     executable=executable,
                                     **kwargs)
 
-    def rsync_up(
+    def rsync(
         self,
         source: str,
         target: str,
         *,
+        up: bool,
         # Advanced options.
         log_path: str = os.devnull,
         stream_logs: bool = True,
-    ) -> Union[int, Tuple[int, str, str]]:
-        """TODO(zhwu)"""
+    ) -> None:
+        """Uses 'rsync' to sync 'source' to 'target'.
+
+        Args:
+            source: The source path.
+            target: The target path.
+            up: The direction of the sync, True for local to cluster, False
+              for cluster to local.
+            log_path: Redirect stdout/stderr to the log_path.
+            stream_logs: Stream logs to the stdout/stderr.
+
+        Raises:
+            exceptions.CommandError: rsync command failed.
+        """
         # Build command.
         # TODO(zhwu): This will print a per-file progress bar (with -P),
         # shooting a lot of messages to the output. --info=progress2 is used
@@ -291,16 +304,28 @@ class SSHCommandRunner:
         ssh_options = ' '.join(
             ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
-        rsync_command.extend([
-            source,
-            f'{self.ssh_user}@{self.ip}:{target}',
-        ])
+        if up:
+            rsync_command.extend([
+                source,
+                f'{self.ssh_user}@{self.ip}:{target}',
+            ])
+        else:
+            rsync_command.extend([
+                f'{self.ssh_user}@{self.ip}:{source}',
+                target,
+            ])
         command = ' '.join(rsync_command)
 
-        returncode = log_lib.run_with_log(command,
-                                          log_path=log_path,
-                                          stream_logs=stream_logs,
-                                          shell=True)
+        returncode, _, stderr = log_lib.run_with_log(command,
+                                                     log_path=log_path,
+                                                     stream_logs=stream_logs,
+                                                     shell=True,
+                                                     require_outputs=True)
+
+        direction = 'up' if up else 'down'
         subprocess_utils.handle_returncode(
-            returncode, command, f'Failed to rsync up {source} -> {target}, '
-            f'see {log_path} for details.')
+            returncode,
+            command,
+            f'Failed to rsync {direction}: {source} -> {target}',
+            stderr=stderr,
+            stream_logs=stream_logs)

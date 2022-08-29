@@ -1,4 +1,4 @@
-"""Sky logging utils."""
+"""Logging utils."""
 import enum
 from typing import List, Optional
 
@@ -84,6 +84,8 @@ def readable_time_duration(start: Optional[int],
     # start < 0 means that the starting time is not specified yet.
     # It is only used in spot_utils.show_jobs() for job duration calculation.
     if start is None or start < 0:
+        return '-'
+    if end == start == 0:
         return '-'
     if end is not None:
         end = pendulum.from_timestamp(end)

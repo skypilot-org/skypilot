@@ -1,7 +1,7 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
 import subprocess
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, Union
 
 import colorama
 
@@ -52,7 +52,7 @@ def run_in_parallel(func: Callable, args: List[Any]) -> List[Any]:
 
 def handle_returncode(returncode: int,
                       command: str,
-                      error_msg: str,
+                      error_msg: Union[str, Callable[[], str]],
                       stderr: Optional[str] = None,
                       stream_logs: bool = True) -> None:
     """Handle the returncode of a command.
@@ -67,6 +67,9 @@ def handle_returncode(returncode: int,
     if returncode != 0:
         if stderr is not None:
             echo(stderr)
+
+        if callable(error_msg):
+            error_msg = error_msg()
         format_err_msg = (
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         with ux_utils.print_exception_no_traceback():

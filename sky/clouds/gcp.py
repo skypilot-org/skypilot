@@ -27,8 +27,7 @@ _CREDENTIAL_FILES = [
     'legacy_credentials',
 ]
 
-_IMAGE_ID_PREFIX = (
-    'projects/deeplearning-platform-release/global/images/family/')
+_IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
 
 def _run_output(cmd):
@@ -46,6 +45,7 @@ class GCP(clouds.Cloud):
 
     _REPR = 'GCP'
     _regions: List[clouds.Region] = []
+    _zones: List[clouds.Zone] = []
 
     #### Regions/Zones ####
 
@@ -116,6 +116,15 @@ class GCP(clouds.Cloud):
             for zone in region.zones:
                 yield (region, [zone])
 
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://cloud.google.com/compute/docs/metadata/querying-metadata
+        command_str = (
+            'curl -s http://metadata.google.internal/computeMetadata/v1/instance/zone'  # pylint: disable=line-too-long
+            ' -H "Metadata-Flavor: Google" | awk -F/ \'{print $4}\'')
+        return command_str
+
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
@@ -171,7 +180,7 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu'
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
 
         r = resources
         # Find GPU spec, if any.
@@ -206,8 +215,12 @@ class GCP(clouds.Cloud):
                 # https://cloud.google.com/compute/docs/gpus
                 resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
                 resources_vars['gpu_count'] = acc_count
-                # CUDA driver version 470.103.01, CUDA Library 11.3
-                image_id = _IMAGE_ID_PREFIX + 'common-cu113'
+                if acc == 'K80':
+                    # CUDA driver version 470.57.02, CUDA Library 11.4
+                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
+                else:
+                    # CUDA driver version 510.47.03, CUDA Library 11.6
+                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220806'
 
         if resources.image_id is not None:
             image_id = resources.image_id
@@ -264,6 +277,14 @@ class GCP(clouds.Cloud):
         # hence return none here.
         return None
 
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='gcp')
+
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
@@ -318,8 +339,16 @@ class GCP(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
-    def region_exists(self, region: str) -> bool:
-        return service_catalog.region_exists(region, 'gcp')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region, zone, clouds='gcp')
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

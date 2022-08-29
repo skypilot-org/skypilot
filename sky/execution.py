@@ -13,18 +13,25 @@ Current task launcher:
   - ray exec + each task's commands
 """
 import enum
+import tempfile
 import os
 import time
 from typing import Any, List, Optional
 
+import colorama
+
 import sky
 from sky import backends
+from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.data import data_utils
+from sky.data import storage
 from sky.usage import usage_lib
+from sky.utils import common_utils
 from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -32,6 +39,44 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 OptimizeTarget = optimizer.OptimizeTarget
+_MAX_SPOT_JOB_LENGTH = 10
+
+# Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
+# instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
+# this.
+_ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
+Expected a sky.Dag but received a string.
+
+If you meant to run a command, make it a Task's run command and wrap as a Dag:
+
+  def to_dag(command, gpu=None):
+      with sky.Dag() as dag:
+          sky.Task(run=command).set_resources(
+              sky.Resources(accelerators=gpu))
+      return dag
+
+The command can then be run as:
+
+  sky.exec(to_dag(cmd), cluster_name=..., ...)
+  # Or use {'V100': 1}, 'V100:0.5', etc.
+  sky.exec(to_dag(cmd, gpu='V100'), cluster_name=..., ...)
+
+  sky.launch(to_dag(cmd), ...)
+
+  sky.spot_launch(to_dag(cmd), ...)
+""".strip()
+
+
+def _type_check_dag(dag):
+    """Raises TypeError if 'dag' is not a 'sky.Dag'."""
+    # Not suppressing stacktrace: when calling this via API user may want to
+    # see their own program in the stacktrace. Our CLI impl would not trigger
+    # these errors.
+    if isinstance(dag, str):
+        raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
+    elif not isinstance(dag, sky.Dag):
+        raise TypeError('Expected a sky.Dag but received argument of type: '
+                        f'{type(dag)}')
 
 
 class Stage(enum.Enum):
@@ -90,6 +135,7 @@ def _execute(
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
     """
+    _type_check_dag(dag)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -184,7 +230,8 @@ def _execute(
             # For spot controller task, it requires a while to have the
             # managed spot status shown in the status table.
             time.sleep(0.5)
-            subprocess_utils.run('sky spot status', env=env)
+            subprocess_utils.run(
+                f'sky spot status | head -n {_MAX_SPOT_JOB_LENGTH}')
         else:
             subprocess_utils.run('sky status', env=env)
         print()
@@ -195,20 +242,42 @@ def _execute(
 @usage_lib.entrypoint
 def launch(
     dag: sky.Dag,
+    cluster_name: Optional[str] = None,
+    retry_until_up: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
     teardown: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    retry_until_up: bool = False,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
-    cluster_name: Optional[str] = None,
     detach_run: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-    is_spot_controller_task: bool = False,
-) -> None:
-    if not is_spot_controller_task:
-        backend_utils.check_cluster_name_not_reserved(
-            cluster_name, operation_str='sky.launch')
+):
+    """Launch a sky.DAG (rerun setup if cluster exists).
+
+    Args:
+        dag: sky.DAG to launch.
+        cluster_name: name of the cluster to create/reuse.  If None,
+            auto-generate a name.
+        retry_until_up: whether to retry launching the cluster until it is
+            up.
+        idle_minutes_to_autostop: if provided, the cluster will be auto-stop
+            after this many minutes of idleness.
+
+    Examples:
+        >>> import sky
+        >>> with sky.Dag() as dag:
+        >>>     task = sky.Task(run='echo hello SkyPilot')
+        >>>     task.set_resources(
+        ...             sky.Resources(
+        ...                 cloud=sky.AWS(),
+        ...                 accelerators='V100:4'
+        ...             )
+        ...     )
+        >>> sky.launch(dag, cluster_name='my-cluster')
+
+    """
+    backend_utils.check_cluster_name_not_reserved(cluster_name,
+                                                  operation_str='sky.launch')
     _execute(
         dag=dag,
         dryrun=dryrun,
@@ -234,7 +303,7 @@ def exec(  # pylint: disable=redefined-builtin
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
-) -> None:
+):
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
@@ -259,3 +328,138 @@ def exec(  # pylint: disable=redefined-builtin
              ],
              cluster_name=cluster_name,
              detach_run=detach_run)
+
+
+def spot_launch(
+    dag: sky.Dag,
+    name: Optional[str] = None,
+    stream_logs: bool = True,
+    detach_run: bool = False,
+    retry_until_up: bool = False,
+):
+    """Launch a managed spot job.
+
+    Please refer to the sky.cli.spot_launch for the document.
+
+    Args:
+        dag: DAG to launch.
+        name: Name of the spot job.
+        detach_run: Whether to detach the run.
+
+    Raises:
+        ValueError: cluster does not exist.
+        sky.exceptions.NotSupportedError: the feature is not supported.
+    """
+    if name is None:
+        name = backend_utils.generate_cluster_name()
+
+    _type_check_dag(dag)
+    assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
+                                 dag)
+    task = dag.tasks[0]
+    assert len(task.resources) == 1, task
+    resources = list(task.resources)[0]
+
+    change_default_value = dict()
+    if not resources.use_spot_specified:
+        logger.info('Field use_spot not specified; defaulting to True.')
+        change_default_value['use_spot'] = True
+    if resources.spot_recovery is None:
+        logger.info('No spot recovery strategy specified; defaulting to '
+                    f'{spot.SPOT_DEFAULT_STRATEGY}.')
+        change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
+
+    new_resources = resources.copy(**change_default_value)
+    task.set_resources({new_resources})
+
+    if task.run is None:
+        print(f'{colorama.Fore.GREEN}'
+              'Skipping the managed spot task as the run section is not set.'
+              f'{colorama.Style.RESET_ALL}')
+        return
+
+    # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
+    # following validations.
+    # Check the file mounts in the task.
+    # Disallow all local file mounts (copy mounts).
+    if task.workdir is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Workdir is currently not allowed for managed spot jobs.\n'
+                'Hint: use Storage to auto-upload the workdir to a cloud '
+                'bucket.')
+    copy_mounts = task.get_local_to_remote_file_mounts()
+    if copy_mounts:
+        local_sources = '\t' + '\n\t'.join(
+            src for _, src in copy_mounts.items())
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                'Local file mounts are currently not allowed for managed spot '
+                f'jobs.\nFound local source paths:\n{local_sources}\nHint: use '
+                'Storage to auto-upload local files to a cloud bucket.')
+
+    # Copy the local source to a bucket. The task will not be executed locally,
+    # so we need to copy the files to the bucket manually here before sending to
+    # the remote spot controller.
+    with backend_utils.suppress_output():
+        task.add_storage_mounts()
+
+    # Replace the source field that is local path in all storage_mounts with
+    # bucket URI and remove the name field.
+    for storage_obj in task.storage_mounts.values():
+        if (storage_obj.source is not None and
+                not data_utils.is_cloud_store_url(storage_obj.source)):
+            # Need to replace the local path with bucket URI, and remove the
+            # name field, so that the storage mount can work on the spot
+            # controller.
+            store_types = list(storage_obj.stores.keys())
+            assert len(store_types) == 1, (
+                'We only support one store type for now.', storage_obj.stores)
+            store_type = store_types[0]
+            if store_type == storage.StoreType.S3:
+                storage_obj.source = f's3://{storage_obj.name}'
+            elif store_type == storage.StoreType.GCS:
+                storage_obj.source = f'gs://{storage_obj.name}'
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        f'Unsupported store type: {store_type}')
+            storage_obj.name = None
+            storage_obj.force_delete = True
+
+    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
+                                     mode='w') as f:
+        task_config = task.to_yaml_config()
+        common_utils.dump_yaml(f.name, task_config)
+
+        controller_name = spot.SPOT_CONTROLLER_NAME
+        yaml_path = backend_utils.fill_template(
+            spot.SPOT_CONTROLLER_TEMPLATE, {
+                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+                'user_yaml_path': f.name,
+                'spot_controller': controller_name,
+                'cluster_name': name,
+                'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
+                'is_dev': env_options.Options.IS_DEVELOPER.get(),
+                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+                'logging_user_hash': common_utils.get_user_hash(),
+                'retry_until_up': retry_until_up,
+            },
+            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
+        with sky.Dag() as spot_dag:
+            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task.spot_task = task
+            assert len(controller_task.resources) == 1
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching managed spot job {name} from spot controller...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Launching spot controller...')
+        _execute(
+            dag=spot_dag,
+            stream_logs=stream_logs,
+            cluster_name=controller_name,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=spot.
+            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            retry_until_up=True,
+        )
