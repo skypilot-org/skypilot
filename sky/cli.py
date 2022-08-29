@@ -114,6 +114,20 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     return list(set(glob_clusters))
 
 
+def _get_glob_storages(storages: List[str]) -> List[str]:
+    """Returns a list of storages that match the glob pattern."""
+    glob_storages = []
+    for storage_object in storages:
+        glob_storage = global_user_state.get_glob_storage_name(storage_object)
+        if len(glob_storage) == 0:
+            click.echo(f'Storage {storage_object} not found.')
+        else:
+            plural = 's' if len(glob_storage) > 1 else ''
+            click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
+        glob_storages.extend(glob_storage)
+    return list(set(glob_storages))
+
+
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
                            message: str) -> bool:
     """Raises warning if the cluster name is a local cluster."""
@@ -2115,6 +2129,9 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         # Delete two storage objects.
         sky storage delete imagenet cifar10
         \b
+        # Delete all storage objects matching glob pattern 'imagenet*'.
+        sky storage delete "imagenet*"
+        \b
         # Delete all storage objects.
         sky storage delete -a
     """
@@ -2124,6 +2141,9 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
         names = [s['name'] for s in storages]
+    else:
+        names = _get_glob_storages(names)
+
     for name in names:
         sky.storage_delete(name)
 
