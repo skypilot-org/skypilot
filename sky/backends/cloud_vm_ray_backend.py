@@ -173,7 +173,10 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
-            ray.init(address = 'ray://localhost:10001', namespace='__sky__{job_id}__', log_to_driver=True)
+            # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than 
+            # 'ray://localhost:10001', or 'ray://127.0.0.1:10001'. Otherwise, it will
+            # trigger a bug of ray job failed to get the placement group in ray 2.0.0.
+            ray.init(address='auto', namespace='__sky__{job_id}__', log_to_driver=True)
 
             run_fn = None
             futures = []"""),

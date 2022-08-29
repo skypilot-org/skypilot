@@ -274,23 +274,6 @@ def test_logs():
 
 
 # ---------- Job Queue. ----------
-def test_job_queue():
-    name = _get_cluster_name()
-    test = Test(
-        'job_queue',
-        [
-            f'sky launch -y -c {name} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky logs {name} 2',
-            f'sky queue {name}',
-        ],
-        f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
 def test_n_node_job_queue():
     name = _get_cluster_name()
     test = Test(
@@ -303,6 +286,21 @@ def test_n_node_job_queue():
             f'sky cancel {name} 1',
             f'sky logs {name} 2',
             f'sky queue {name}',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+def test_large_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'job_queue_large',
+        [
+            f'sky launch -y -c {name} --cloud gcp ""',
+            f'for i in {{1..100}}; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'sky cancel repr 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
+            'sleep 20',
+            f'sky queue {name} | grep -v grep | grep RUNNING | wc -l | grep 16',
         ],
         f'sky down -y {name}',
     )
