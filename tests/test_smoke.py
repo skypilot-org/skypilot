@@ -319,7 +319,8 @@ def test_large_job_queue():
             f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 20',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
-            f'sky queue {name} | grep -v grep | grep RUNNING | wc -l | grep 16',
+            # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
+            f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
         ],
         f'sky down -y {name}',
     )
