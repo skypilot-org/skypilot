@@ -324,9 +324,12 @@ def check_host_accelerator_compatibility(instance_type: str,
 
     if acc_name.startswith('tpu-'):
         if instance_type != 'TPU-VM' and not instance_type.startswith('n1-'):
-            raise exceptions.ResourcesMismatchError(
-                'TPUs can be only used with N1 machines. Please refer to: '
-                'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # pylint: disable=line-too-long
+            # TODO(woosuk): Check max vcpus and memory for each TPU type.
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'TPU Nodes can be only used with N1 machines. '
+                    'Please refer to: '
+                    'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # pylint: disable=line-too-long
         return
 
     # Treat A100 as a special case.
