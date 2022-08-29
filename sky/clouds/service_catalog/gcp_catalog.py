@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from sky import exceptions
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
@@ -311,7 +312,7 @@ def check_host_accelerator_compatibility(instance_type: str,
             # NOTE: While it is allowed to use A2 machines as CPU-only nodes,
             # we exclude this case as it is uncommon and undesirable.
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
+                raise exceptions.ResourcesMismatchError(
                     'A2 instance types should be used with A100 GPUs. '
                     'Either use other instance types or specify the '
                     'accelerators as A100.')
@@ -323,7 +324,7 @@ def check_host_accelerator_compatibility(instance_type: str,
 
     if acc_name.startswith('tpu-'):
         if instance_type != 'TPU-VM' and not instance_type.startswith('n1-'):
-            raise ValueError(
+            raise exceptions.ResourcesMismatchError(
                 'TPUs can be only used with N1 machines. Please refer to: '
                 'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # pylint: disable=line-too-long
         return
@@ -334,13 +335,13 @@ def check_host_accelerator_compatibility(instance_type: str,
         a100_instance_type = _A100_INSTANCE_TYPES[acc_count]
         if not instance_type.startswith('a2-'):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
+                raise exceptions.ResourcesMismatchError(
                     f'A100 GPUs cannot be attached to {instance_type}. '
                     f'Use {a100_instance_type} instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
         if instance_type != a100_instance_type:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
+                raise exceptions.ResourcesMismatchError(
                     f'A100:{acc_count} cannot be attached to {instance_type}. '
                     f'Use {a100_instance_type} instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
@@ -350,7 +351,7 @@ def check_host_accelerator_compatibility(instance_type: str,
     # Refer to: https://cloud.google.com/compute/docs/machine-types#gpus
     if not instance_type.startswith('n1-'):
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.ResourcesMismatchError(
                 f'{acc_name} GPUs cannot be attached to {instance_type}. '
                 'Use N1 instance types instead. Please refer to: '
                 'https://cloud.google.com/compute/docs/machine-types#gpus')
@@ -358,8 +359,9 @@ def check_host_accelerator_compatibility(instance_type: str,
     # Check maximum vCPUs and memory.
     if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{acc_name} is not available in GCP. '
-                             'See \'sky show-gpus --cloud gcp\'')
+            raise exceptions.ResourcesUnavailableError(
+                f'{acc_name} is not available in GCP. '
+                'See \'sky show-gpus --cloud gcp\'')
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
     if acc_name == 'K80' and acc_count == 8:
         if zone in ['asia-east1-a', 'us-east1-d']:
@@ -376,13 +378,13 @@ def check_host_accelerator_compatibility(instance_type: str,
 
     if num_cpus > max_cpus:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.ResourcesMismatchError(
                 f'{acc_name}:{acc_count} cannot be attached to '
                 f'{instance_type}. The maximum number of vCPUs is {max_cpus}. '
                 'Please refer to: https://cloud.google.com/compute/docs/gpus')
     if memory > max_memory:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.ResourcesMismatchError(
                 f'{acc_name}:{acc_count} cannot be attached to '
                 f'{instance_type}. The maximum CPU memory is {max_memory} GB. '
                 'Please refer to: https://cloud.google.com/compute/docs/gpus')
