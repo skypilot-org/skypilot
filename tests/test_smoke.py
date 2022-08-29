@@ -135,6 +135,9 @@ def test_minimal():
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Ensure the raylet process has the correct file descriptor limit.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -404,6 +407,24 @@ def test_tpu_vm():
     run_one_test(test)
 
 
+# ---------- TPU VM Pod. ----------
+# Mark slow because it's expensive to run.
+@pytest.mark.slow
+def test_tpu_vm_pod():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
 # ---------- Simple apps. ----------
 def test_multi_hostname():
     name = _get_cluster_name()
@@ -446,11 +467,13 @@ def test_gcp_start_stop():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sleep 20',
             f'sky start -y {name}',
             f'sky exec {name} examples/gcp_start_stop.yaml',
-            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -466,10 +489,12 @@ def test_azure_start_stop():
             f'sky launch -y -c {name} examples/azure_start_stop.yaml',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky start -y {name}',
             f'sky exec {name} examples/azure_start_stop.yaml',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
