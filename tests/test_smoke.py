@@ -389,6 +389,24 @@ def test_tpu_vm():
     run_one_test(test)
 
 
+# ---------- TPU VM Pod. ----------
+# Mark slow because it's expensive to run.
+@pytest.mark.slow
+def test_tpu_vm_pod():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
 # ---------- Simple apps. ----------
 def test_multi_hostname():
     name = _get_cluster_name()
