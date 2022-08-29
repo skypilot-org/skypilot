@@ -145,10 +145,18 @@ class RayCodeGen:
 
     def add_prologue(self,
                      job_id: int,
-                     spot_task: Optional['task_lib.Task'] = None) -> None:
+                     spot_task: Optional['task_lib.Task'] = None,
+                     is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
+        # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
+        # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
+        # Otherwise, it will a bug of ray job failed to get the placement group
+        # in ray <= 2.0.0.
+        # TODO(mluo): Check why 'auto' not working with on-prem cluster and whether
+        # the placement group issue also occurs in on-prem cluster.
+        ray_address = 'ray://localhost:10001' if is_local else 'auto'
         self._code = [
             textwrap.dedent(f"""\
             import getpass
@@ -173,10 +181,7 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
-            # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than 
-            # 'ray://localhost:10001', or 'ray://127.0.0.1:10001'. Otherwise, it will
-            # trigger a bug of ray job failed to get the placement group in ray 2.0.0.
-            ray.init(address='auto', namespace='__sky__{job_id}__', log_to_driver=True)
+            ray.init(address={ray_address!r}, namespace='__sky__{job_id}__', log_to_driver=True)
 
             run_fn = None
             futures = []"""),
@@ -2834,7 +2839,10 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id, spot_task=task.spot_task)
+        is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
+        codegen.add_prologue(job_id,
+                             spot_task=task.spot_task,
+                             is_local=is_local)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2871,7 +2879,10 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id, spot_task=task.spot_task)
+        is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
+        codegen.add_prologue(job_id,
+                             spot_task=task.spot_task,
+                             is_local=is_local)
         codegen.add_gang_scheduling_placement_group(task.num_nodes,
                                                     accelerator_dict)
 
