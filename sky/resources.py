@@ -301,43 +301,48 @@ class Resources:
 
     def _try_validate_accelerators(self) -> None:
         """Try-validates accelerators against the instance type."""
-        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
-            # GCP attaches accelerators to VMs, so no need for this check.
-            acc_requested = self.accelerators
-            if acc_requested is None:
-                return
-            acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
-                    self._instance_type))
-            if not Resources(accelerators=acc_requested).less_demanding_than(
-                    Resources(accelerators=acc_from_instance_type)):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Infeasible resource demands found:\n'
-                        f'  Instance type requested: {self._instance_type}\n'
-                        f'  Accelerators for {self._instance_type}: '
-                        f'{acc_from_instance_type}\n'
-                        f'  Accelerators requested: {acc_requested}\n'
-                        f'To fix: either only specify instance_type, or change '
-                        'the accelerators field to be consistent.')
+        acc_requested = self.accelerators
+        if acc_requested is None:
+            return
+
+        if self.is_launchable():
+            if isinstance(self.cloud, clouds.GCP):
+                clouds.GCP.check_host_accelerator_compatibility(
+                    self.instance_type, acc_requested, self.zone)
+            else:
+                acc_from_instance_type = (
+                    self.cloud.get_accelerators_from_instance_type(
+                        self._instance_type))
+                if not Resources(
+                        accelerators=acc_requested).less_demanding_than(
+                            Resources(accelerators=acc_from_instance_type)):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'Infeasible resource demands found:\n'
+                            '  Instance type requested: '
+                            f'{self._instance_type}\n'
+                            f'  Accelerators for {self._instance_type}: '
+                            f'{acc_from_instance_type}\n'
+                            f'  Accelerators requested: {acc_requested}\n'
+                            f'To fix: either only specify instance_type, or '
+                            'change the accelerators field to be consistent.')
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
 
         # Validate whether accelerator is available in specified region/zone.
-        if self.accelerators is not None:
-            acc, acc_count = list(self.accelerators.items())[0]
-            if self.region is not None or self.zone is not None:
-                if not self._cloud.accelerator_in_region_or_zone(
-                        acc, acc_count, self.region, self.zone):
-                    error_str = (f'Accelerator "{acc}" is not available in '
-                                 '"{}" region/zone.')
-                    if self.zone:
-                        error_str = error_str.format(self.zone)
-                    else:
-                        error_str = error_str.format(self.region)
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(error_str)
+        acc, acc_count = list(acc_requested.items())[0]
+        if self.region is not None or self.zone is not None:
+            if not self._cloud.accelerator_in_region_or_zone(
+                    acc, acc_count, self.region, self.zone):
+                error_str = (f'Accelerator "{acc}" is not available in '
+                             '"{}" region/zone.')
+                if self.zone:
+                    error_str = error_str.format(self.zone)
+                else:
+                    error_str = error_str.format(self.region)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(error_str)
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:

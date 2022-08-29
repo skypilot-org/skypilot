@@ -321,10 +321,12 @@ def check_host_accelerator_compatibility(instance_type: str,
     assert len(acc) == 1, acc
     acc_name, acc_count = acc[0]
 
-    if 'tpu' in acc_name.lower():
-        # TODO(woosuk): Add validation for TPUs.
+    if acc_name.startswith('tpu-'):
+        if instance_type != 'TPU-VM' and not instance_type.startswith('n1-'):
+            raise ValueError(
+                'TPUs can be only used with N1 machines. Please refer to: '
+                'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # pylint: disable=line-too-long
         return
-    acc_name = acc_name.upper()
 
     # Treat A100 as a special case.
     if acc_name == 'A100':
@@ -356,7 +358,8 @@ def check_host_accelerator_compatibility(instance_type: str,
     # Check maximum vCPUs and memory.
     if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'{acc_name} is not supported by GCP.')
+            raise ValueError(f'{acc_name} is not available in GCP. '
+                             'See \'sky show-gpus --cloud gcp\'')
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
     if acc_name == 'K80' and acc_count == 8:
         if zone in ['asia-east1-a', 'us-east1-d']:
@@ -367,9 +370,8 @@ def check_host_accelerator_compatibility(instance_type: str,
             max_memory = 208
 
     # vCPU counts and memory sizes of N1 machines.
-    # TODO(woosuk): Query vCPU counts from the GCP catalog.
-    num_cpus = int(instance_type.split('-')[2])
     df = _df[_df['InstanceType'] == instance_type]
+    num_cpus = df['vCPUs'].iloc[0]
     memory = df['MemoryGiB'].iloc[0]
 
     if num_cpus > max_cpus:
