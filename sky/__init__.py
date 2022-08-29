@@ -1,6 +1,11 @@
 """The SkyPilot package."""
 import os
 
+# Replaced with the current commit when building the wheels.
+__commit__ = '{{SKYPILOT_COMMIT_SHA}}'
+__version__ = '1.0.0-dev0'
+__root_dir__ = os.path.dirname(os.path.abspath(__file__))
+
 # Keep this order to avoid cyclic imports
 from sky import backends
 from sky import benchmark
@@ -15,9 +20,8 @@ from sky.data import Storage, StoreType
 from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
 from sky.core import (status, start, stop, down, autostop, queue, cancel,
-                      spot_status, spot_cancel, storage_ls, storage_delete)
-
-__root_dir__ = os.path.dirname(os.path.abspath(__file__))
+                      tail_logs, download_logs, job_status, spot_status,
+                      spot_cancel, storage_ls, storage_delete)
 
 # Aliases.
 AWS = clouds.AWS
@@ -27,6 +31,7 @@ Local = clouds.Local
 optimize = Optimizer.optimize
 
 __all__ = [
+    '__version__',
     'AWS',
     'Azure',
     'GCP',
@@ -45,18 +50,26 @@ __all__ = [
     'Dag',
     'Task',
     'Resources',
+    # execution APIs
     'launch',
     'exec',
     'spot_launch',
+    # core APIs
     'status',
     'start',
     'stop',
     'down',
     'autostop',
+    # core APIs Job Management
     'queue',
     'cancel',
+    'tail_logs',
+    'download_logs',
+    'job_status',
+    # core APIs Spot Job Management
     'spot_status',
     'spot_cancel',
+    # core APIs Storage Management
     'storage_ls',
     'storage_delete',
 ]

@@ -2,6 +2,7 @@
 import os
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+import difflib
 import requests
 import pandas as pd
 
@@ -26,15 +27,17 @@ class InstanceTypeInfo(NamedTuple):
       type. E.g. `p3.2xlarge`.
     - accelerator_name: Canonical name of the accelerator. E.g. `V100`.
     - accelerator_count: Number of accelerators offered by this instance type.
+    - cpu_count: Number of vCPUs offered by this instance type.
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
     """
     cloud: str
-    instance_type: str
+    instance_type: Optional[str]
     accelerator_name: str
     accelerator_count: int
-    memory: float
+    cpu_count: Optional[float]
+    memory: Optional[float]
     price: float
     spot_price: float
 
@@ -51,7 +54,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
-    cloud = filename.split('.csv')[0]
+    cloud = cloud_lib.CLOUD_REGISTRY.from_str(filename.split('.csv')[0])
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -66,6 +69,8 @@ def read_catalog(filename: str) -> pd.DataFrame:
         # Save the catalog to a local file.
         with open(catalog_path, 'w') as f:
             f.write(r.text)
+        logger.info(f'A new {cloud} catalog has been downloaded to '
+                    f'{catalog_path}')
 
     try:
         df = pd.read_csv(catalog_path)
@@ -94,8 +99,43 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
-def region_exists_impl(df: pd.DataFrame, region: str) -> bool:
-    return region in df['Region'].unique()
+def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
+                              zone: Optional[str]):
+    """Validates whether region and zone exist in the catalog."""
+
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+        candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
+        candidate_loc = sorted(candidate_loc)
+        candidate_strs = ''
+        if len(candidate_loc) > 0:
+            candidate_strs = ', '.join(candidate_loc)
+            candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
+        return candidate_strs
+
+    if region is not None:
+        all_regions = df['Region'].unique()
+        if region not in all_regions:
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid region {region!r}')
+                error_msg += _get_candidate_str(region, all_regions)
+                raise ValueError(error_msg)
+
+    if zone is not None:
+        all_zones = df['AvailabilityZone'].unique()
+        if zone not in all_zones:
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid zone {zone!r}')
+                error_msg += _get_candidate_str(zone, all_zones)
+                raise ValueError(error_msg)
+
+    if region is not None and zone is not None:
+        if zone not in df[df['Region'] == region]['AvailabilityZone'].unique():
+            with ux_utils.print_exception_no_traceback():
+                error_msg = (f'Invalid zone {zone!r} for region {region!r}')
+                error_msg += _get_candidate_str(
+                    zone,
+                    df[df['Region'] == region]['AvailabilityZone'].unique())
+                raise ValueError(error_msg)
 
 
 def get_hourly_cost_impl(
@@ -117,6 +157,23 @@ def get_hourly_cost_impl(
 
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
+
+
+def get_vcpus_from_instance_type_impl(
+    df: pd.DataFrame,
+    instance_type: str,
+) -> Optional[float]:
+    df = _get_instance_type(df, instance_type, None)
+    if len(df) == 0:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No instance type {instance_type} found.')
+    assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
+                                        f'of the instance type {instance_type}.'
+                                        f'\n{df}')
+    vcpus = df['vCPUs'].iloc[0]
+    if pd.isna(vcpus):
+        return None
+    return float(vcpus)
 
 
 def get_accelerators_from_instance_type_impl(
@@ -169,6 +226,7 @@ def list_accelerators_impl(
     df: pd.DataFrame,
     gpus_only: bool,
     name_filter: Optional[str],
+    case_sensitive: bool = True,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
 
@@ -181,18 +239,26 @@ def list_accelerators_impl(
     if gpus_only:
         df = df[~pd.isna(df['GpuInfo'])]
     df = df[[
-        'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB',
-        'Price', 'SpotPrice'
+        'InstanceType',
+        'AcceleratorName',
+        'AcceleratorCount',
+        'vCPUs',
+        'MemoryGiB',
+        'Price',
+        'SpotPrice',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
-        df = df[df['AcceleratorName'].str.contains(name_filter, regex=True)]
+        df = df[df['AcceleratorName'].str.contains(name_filter,
+                                                   case=case_sensitive,
+                                                   regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     grouped = df.groupby('AcceleratorName')
 
     def make_list_from_df(rows):
         # Only keep the lowest prices across regions.
         rows = rows.groupby([
-            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'MemoryGiB'
+            'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs',
+            'MemoryGiB'
         ],
                             dropna=False).aggregate(min).reset_index()
         ret = rows.apply(
@@ -201,13 +267,15 @@ def list_accelerators_impl(
                 row['InstanceType'],
                 row['AcceleratorName'],
                 row['AcceleratorCount'],
+                row['vCPUs'],
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
             ),
             axis='columns',
         ).tolist()
-        ret.sort(key=lambda info: (info.accelerator_count, info.memory))
+        ret.sort(key=lambda info: (info.accelerator_count, info.cpu_count
+                                   if info.cpu_count is not None else 0))
         return ret
 
     return {k: make_list_from_df(v) for k, v in grouped}
@@ -225,3 +293,35 @@ def get_region_zones(df: pd.DataFrame,
         for region in regions:
             region.set_zones(zones_in_region[region.name])
     return regions
+
+
+def _accelerator_in_region(df: pd.DataFrame, acc_name: str, acc_count: int,
+                           region: str) -> bool:
+    """Returns True if the accelerator is in the region."""
+    return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AcceleratorCount'] == acc_count) &
+                  (df['Region'] == region)]) > 0
+
+
+def _accelerator_in_zone(df: pd.DataFrame, acc_name: str, acc_count: int,
+                         zone: str) -> bool:
+    """Returns True if the accelerator is in the zone."""
+    return len(df[(df['AcceleratorName'] == acc_name) &
+                  (df['AcceleratorCount'] == acc_count) &
+                  (df['AvailabilityZone'] == zone)]) > 0
+
+
+def accelerator_in_region_or_zone_impl(
+    df: pd.DataFrame,
+    accelerator_name: str,
+    acc_count: int,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+) -> bool:
+    """Returns True if the accelerator is in the region or zone."""
+    assert region is not None or zone is not None, (
+        'Both region and zone are None.')
+    if zone is None:
+        return _accelerator_in_region(df, accelerator_name, acc_count, region)
+    else:
+        return _accelerator_in_zone(df, accelerator_name, acc_count, zone)

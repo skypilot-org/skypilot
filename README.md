@@ -1,23 +1,29 @@
 <p align="center">
-  <img src="docs/source/images/SkyPilot-logo-wide.png" alt="SkyPilot" width=55%/>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-dark-1k.png">
+    <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/skypilot-wide-light-1k.png" width=55%>
+  </picture>
 </p>
 
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
 [![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
 
-SkyPilot is a framework for easily running machine learning[^1] workloads on any cloud through a unified interface. No knowledge of cloud offerings is required or expected – you simply define the workload and its resource requirements, and SkyPilot will automatically execute it on AWS, Google Cloud Platform or Microsoft Azure.
+SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
-[^1]: SkyPilot is primarily targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
+Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
 
-### Key features
+_Ease of use & productivity_
 * **Run existing projects on the cloud** with zero code changes
-* **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
-* **Minimize costs** by leveraging spot instances and automatically stopping idle clusters
-* **Automatic recovery from spot instance failures**
-* **Automatic fail-over** to find resources across regions and clouds
+* **Easily manage jobs** across multiple clusters
+* **Automatic fail-over** to find scarce resources (GPUs) across regions and clouds
 * **Store datasets on the cloud** and access them like you would on a local file system 
-* **Easily manage job queues** across multiple clusters
+* **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
 
+_Cost saving_
+* Run jobs on **spot instances** with **automatic recovery** from preemptions
+* Hands-free cluster management: **automatically stopping idle clusters**
+* One-click use of **TPUs**, for high-performance, cost-effective training
+* Automatically benchmark and find the cheapest hardware for your job
 
 ## Getting Started
 You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
@@ -27,10 +33,12 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 ## Example SkyPilot Task
 
-Tasks in SkyPilot are specified as a YAML file containing the resource requirements, data to be synced, setup commands and the task commands. Here is an example.
+A SkyPilot task is specified as a YAML file containing the resource requirements, data to be synced, setup commands, and the task commands. 
+
+Once written in a YAML, the task can be launched on any available cloud. Example:
 
 ```yaml
-# my-task.yaml
+# my_task.yaml
 resources:
   # 1x NVIDIA V100 GPU
   accelerators: V100:1
@@ -40,33 +48,47 @@ num_nodes: 1
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.
-workdir: .
+workdir: ~/torch_examples
 
 # Commands to be run before executing the job
 # Typical use: pip install -r requirements.txt, git clone, etc.
 setup: |
-  echo "Running setup."
+  pip install torch torchvision
 
 # Commands to run as a job
 # Typical use: make use of resources, such as running training.
 run: |
-  echo "Hello, SkyPilot!"
-  conda env list
+  cd mnist
+  python main.py --epochs 1
 ```
 
-This task can be launched on the cloud with the `sky launch` command.
+Prepare the workdir by cloning locally:
 ```bash
-$ sky launch my-task.yaml
+git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
-SkyPilot will perform multiple functions for you:
+
+Launch with `sky launch`:
+```bash
+sky launch my_task.yaml
+```
+SkyPilot will perform multiple actions for you:
 1. Find the lowest priced VM instance type across different clouds
 2. Provision the VM
 3. Copy the local contents of `workdir` to the VM
 4. Run the task's `setup` commands to prepare the VM for running the task 
 5. Run the task's `run` commands
 
-<!---- TODO(romilb): Example GIF goes here ---->
-Please refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to use SkyPilot.
+<p align="center">
+  <img src="https://i.imgur.com/TgamzZ2.gif" alt="SkyPilot Demo"/>
+</p>
+
+
+See [**`examples`**](./examples) for more YAMLs that run popular ML frameworks on the cloud with one command (PyTorch/Distributed PyTorch, TensorFlow/Distributed TensorFlow, HuggingFace, JAX, Flax, Docker).  
+
+Besides YAML, SkyPilot offers a corresponding [Python API](https://github.com/skypilot-org/skypilot/blob/master/sky/core.py) for more advanced programmatic use.
+
+Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to get started with SkyPilot.
+
 
 ## Issues, feature requests and questions
 We are excited to hear your feedback! SkyPilot has two channels for engaging with the community - [GitHub Issues](https://github.com/skypilot-org/skypilot/issues) and [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
@@ -75,3 +97,6 @@ We are excited to hear your feedback! SkyPilot has two channels for engaging wit
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
+
+<!-- Footnote -->
+[^1]: SkyPilot is currently targeted at machine learning workloads, but it can also support many general workloads. We're excited to hear about your use case and would love to hear more about how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!

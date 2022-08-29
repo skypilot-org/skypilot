@@ -112,6 +112,13 @@ def get_hourly_cost(
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
+def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+    # The number of vCPUs provided with a TPU VM is not officially documented.
+    if instance_type == 'TPU-VM':
+        return None
+    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+
+
 def get_instance_type_for_accelerator(
         acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
@@ -151,8 +158,16 @@ def get_instance_type_for_accelerator(
     return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
-def region_exists(region: str) -> bool:
-    return common.region_exists_impl(_df, region)
+def validate_region_zone(region: Optional[str], zone: Optional[str]):
+    return common.validate_region_zone_impl(_df, region, zone)
+
+
+def accelerator_in_region_or_zone(acc_name: str,
+                                  acc_count: int,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> bool:
+    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+                                                     region, zone)
 
 
 def get_region_zones_for_instance_type(instance_type: str,
@@ -203,9 +218,11 @@ def get_accelerator_hourly_cost(accelerator: str,
 def list_accelerators(
     gpus_only: bool,
     name_filter: Optional[str] = None,
+    case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
+                                            case_sensitive)
 
     a100_infos = results.get('A100', None)
     if a100_infos is None:
@@ -216,9 +233,10 @@ def list_accelerators(
     # Thus, we can show their exact cost including the host VM prices.
     new_infos = []
     for info in a100_infos:
-        assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
         a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
         df = _df[_df['InstanceType'] == a100_host_vm_type]
+        cpu_count = df['vCPUs'].iloc[0]
         memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
                                                a100_host_vm_type,
@@ -231,6 +249,7 @@ def list_accelerators(
         new_infos.append(
             info._replace(
                 instance_type=a100_host_vm_type,
+                cpu_count=cpu_count,
                 memory=memory,
                 # total cost = VM instance + GPU.
                 price=info.price + vm_price,

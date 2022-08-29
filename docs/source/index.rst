@@ -1,17 +1,29 @@
-SkyPilot
-===================================
+SkyPilot Documentation
+=========================
 
-SkyPilot is a framework for easily running machine learning projects on any cloud through a unified interface.
+.. figure:: ./images/skypilot-wide-light-1k.png
+  :width: 60%
+  :align: center
+  :alt: SkyPilot
 
-Key features:
+SkyPilot is a framework for easily running machine learning workloads on any cloud.
 
-- **Run existing projects on the cloud with zero code changes**
-- **Easily provision VMs** across multiple cloud platforms (AWS, Azure or GCP)
-- **Easily manage multiple clusters** to handle different projects
-- **Quick access** to cloud instances for development
+Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
+
+*Ease of use & productivity*
+
+- **Run existing projects on the cloud** with zero code changes
+- **Easily manage jobs** across multiple clusters
+- **Automatic fail-over** to find scarce resources (GPUs) across regions and clouds
 - **Store datasets on the cloud** and access them like you would on a local file system
-- **No cloud lock-in** -- seamlessly run your code across cloud providers
+- **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
 
+*Cost saving*
+
+- Run jobs on **spot instances** with **automatic recovery** from preemptions
+- Hands-free cluster management: **automatically stopping idle clusters**
+- One-click use of **TPUs**, for high-performance, cost-effective training
+- Automatically benchmark and find the cheapest hardware for your job
 
 .. toctree::
    :maxdepth: 1
@@ -41,6 +53,8 @@ Key features:
    reference/job-queue
    reference/auto-stop
    examples/spot-jobs
+   reference/benchmark/index
+   reference/tpu
 
 .. toctree::
    :maxdepth: 1

@@ -4,7 +4,6 @@ import enum
 import click
 import contextlib
 import datetime
-import hashlib
 import inspect
 import json
 import os
@@ -16,6 +15,7 @@ import uuid
 
 import requests
 
+import sky
 from sky import sky_logging
 from sky.usage import constants
 from sky.utils import common_utils
@@ -43,13 +43,12 @@ def _get_current_timestamp_ns() -> int:
     return int(datetime.datetime.now(datetime.timezone.utc).timestamp() * 1e9)
 
 
-def get_logging_user_hash():
-    """Returns a unique user-machine specific hash as a user id."""
+def _get_user_hash():
+    """Returns a unique user-machine specific hash as a user id for logging."""
     user_id = os.getenv(constants.USAGE_USER_ENV)
     if user_id and len(user_id) == 8:
         return user_id
-    hash_str = common_utils.user_and_hostname_hash()
-    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    return common_utils.get_user_hash()
 
 
 class MessageType(enum.Enum):
@@ -88,8 +87,9 @@ class UsageMessageToReport(MessageToReport):
     def __init__(self) -> None:
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
-        self.user: str = get_logging_user_hash()
+        self.user: str = _get_user_hash()
         self.run_id: str = _get_logging_run_id()
+        self.sky_version: str = sky.__version__
 
         # Entry
         self.cmd: str = common_utils.get_pretty_entry_point()
@@ -106,6 +106,8 @@ class UsageMessageToReport(MessageToReport):
         self.cloud: Optional[str] = None  # update_cluster_resources
         #: The final region of the cluster.
         self.region: Optional[str] = None  # update_cluster_resources
+        #: The final zone of the cluster.
+        self.zone: Optional[str] = None  # update_cluster_resources
         #: The final instance_type of the cluster.
         self.instance_type: Optional[str] = None  # update_cluster_resources
         #: The final accelerators the cluster.
@@ -138,6 +140,8 @@ class UsageMessageToReport(MessageToReport):
         self.task_cloud: Optional[str] = None  # update_actual_task
         #: Requested region
         self.task_region: Optional[str] = None  # update_actual_task
+        #: Requested zone
+        self.task_zone: Optional[str] = None  # update_actual_task
         #: Requested instance_type
         self.task_instance_type: Optional[str] = None  # update_actual_task
         #: Requested accelerators
@@ -187,6 +191,7 @@ class UsageMessageToReport(MessageToReport):
 
             self.task_cloud = str(resources.cloud)
             self.task_region = resources.region
+            self.task_zone = resources.zone
             self.task_instance_type = resources.instance_type
             self.task_use_spot = resources.use_spot
             # Update accelerators.
@@ -217,6 +222,7 @@ class UsageMessageToReport(MessageToReport):
                                  resources: 'resources_lib.Resources'):
         self.cloud = str(resources.cloud)
         self.region = resources.region
+        self.zone = resources.zone
         self.instance_type = resources.instance_type
         self.use_spot = resources.use_spot
 

@@ -43,13 +43,13 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
                      _get_resources,
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
+        StatusColumn('ZONE', _get_zone, show_by_default=False),
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
         StatusColumn('STATUS', _get_status),
-        StatusColumn('DURATION', _get_duration, show_by_default=False),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False)
     ]
 
     columns = []
@@ -181,8 +181,6 @@ _get_launched = (lambda cluster_status: log_utils.readable_time_duration(
 _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
 _get_status = (lambda cluster_status: cluster_status['status'].value)
-_get_duration = (lambda cluster_status: log_utils.readable_time_duration(
-    cluster_status['launched_at']))
 _get_command = (lambda cluster_status: cluster_status['last_use'])
 
 
@@ -200,6 +198,13 @@ def _get_resources(cluster_status):
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
     return resources_str
+
+
+def _get_zone(cluster_status):
+    zone_str = cluster_status['handle'].launched_resources.zone
+    if zone_str is None:
+        zone_str = '-'
+    return zone_str
 
 
 def _get_autostop(cluster_status):

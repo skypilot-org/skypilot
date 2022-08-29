@@ -120,6 +120,7 @@ def get_all_regions_instance_types_df():
         get_all_regions_pricing_df.remote(),
         get_sku_df.remote(),
     ])
+    df.drop_duplicates(inplace=True)
     print(f'Processing dataframes')
 
     def get_price(row):
@@ -153,9 +154,10 @@ def get_all_regions_instance_types_df():
             return np.nan
         return spot_pricing_rows.iloc[0]['unitPrice']
 
-    def get_capabilities(row) -> Tuple[str, float]:
+    def get_capabilities(row):
         gpu_name = None
         gpu_count = np.nan
+        vcpus = np.nan
         memory_gb = np.nan
         caps = row['capabilities']
         for item in caps:
@@ -163,17 +165,20 @@ def get_all_regions_instance_types_df():
                 gpu_name = get_gpu_name(row['family'])
                 if gpu_name is not None:
                     gpu_count = item['value']
+            elif item['name'] == 'vCPUs':
+                vcpus = float(item['value'])
             elif item['name'] == 'MemoryGB':
                 memory_gb = item['value']
-        return gpu_name, gpu_count, memory_gb
+        return gpu_name, gpu_count, vcpus, memory_gb
 
     def get_additional_columns(row):
-        gpu_name, gpu_count, memory_gb = get_capabilities(row)
+        gpu_name, gpu_count, vcpus, memory_gb = get_capabilities(row)
         return pd.Series({
             'Price': get_price(row),
             'SpotPrice': get_spot_price(row),
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
+            'vCPUs': vcpus,
             'MemoryGiB': memory_gb,
             'GpuInfo': gpu_name,
         })

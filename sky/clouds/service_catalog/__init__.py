@@ -50,6 +50,7 @@ def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
     clouds: CloudFilter = None,
+    case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
     """List the names of all accelerators offered by Sky.
 
@@ -57,7 +58,7 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter)
+                                  name_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret = collections.defaultdict(list)
@@ -97,9 +98,24 @@ def instance_type_exists(instance_type: str,
     return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
 
-def region_exists(region_name: str, clouds: CloudFilter = None) -> bool:
-    """Returns the region by name."""
-    return _map_clouds_catalog(clouds, 'region_exists', region_name)
+def validate_region_zone(region_name: Optional[str],
+                         zone_name: Optional[str],
+                         clouds: CloudFilter = None) -> bool:
+    """Returns the zone by name."""
+    return _map_clouds_catalog(clouds, 'validate_region_zone', region_name,
+                               zone_name)
+
+
+def accelerator_in_region_or_zone(
+    acc_name: str,
+    acc_count: int,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
+    clouds: CloudFilter = None,
+) -> bool:
+    """Returns True if the accelerator is in the region or zone."""
+    return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
+                               acc_name, acc_count, region, zone)
 
 
 def get_region_zones_for_instance_type(
@@ -118,6 +134,13 @@ def get_hourly_cost(instance_type: str,
     """Returns the cost, or the cheapest cost among all zones for spot."""
     return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
                                use_spot)
+
+
+def get_vcpus_from_instance_type(instance_type: str,
+                                 clouds: CloudFilter = None) -> Optional[float]:
+    """Returns the number of virtual CPUs from a instance type."""
+    return _map_clouds_catalog(clouds, 'get_vcpus_from_instance_type',
+                               instance_type)
 
 
 def get_accelerators_from_instance_type(
@@ -174,7 +197,12 @@ def get_common_gpus() -> List[str]:
 
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
-    return ['tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v3-8']
+    # TODO(wei-lin): refactor below hard-coded list.
+    return [
+        'tpu-v2-8', 'tpu-v2-32', 'tpu-v2-128', 'tpu-v2-256', 'tpu-v2-512',
+        'tpu-v3-8', 'tpu-v3-32', 'tpu-v3-64', 'tpu-v3-128', 'tpu-v3-256',
+        'tpu-v3-512', 'tpu-v3-1024', 'tpu-v3-2048'
+    ]
 
 
 __all__ = [

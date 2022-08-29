@@ -56,10 +56,10 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-How to edit or update the pricing information used by SkyPilot? (Advanced Use Case)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+(Advanced) How to edit or update the regions or pricing information used by SkyPilot?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-SkyPilot stores pricing information for different cloud resource types in CSV files known as service catalogs.
+SkyPilot stores regions and pricing information for different cloud resource types in CSV files known as "service catalogs".
 These catalogs are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
 Check out your schema version by running the following command:
 

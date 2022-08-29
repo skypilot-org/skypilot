@@ -120,6 +120,16 @@ class AWS(clouds.Cloud):
         assert region_name in amis, region_name
         return amis[region_name]
 
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
+        command_str = (
+            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            ' | python3 -u -c "import sys, json; '
+            'print(json.load(sys.stdin)[\'availabilityZone\'])"')
+        return command_str
+
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
@@ -175,6 +185,14 @@ class AWS(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
+
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='aws')
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
@@ -273,7 +291,7 @@ class AWS(clouds.Cloud):
             return False, (
                 'AWS CLI is not installed properly.'
                 ' Run the following commands under sky folder:'
-                # TODO(zhwu): after we publish sky to pypi,
+                # TODO(zhwu): after we publish sky to PyPI,
                 # change this to `pip install sky[aws]`
                 '\n     $ pip install .[aws]'
                 '\n   Credentials may also need to be set.' + help_str)
@@ -309,5 +327,13 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def region_exists(self, region: str) -> bool:
-        return service_catalog.region_exists(region, 'aws')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region, zone, clouds='aws')
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'aws')
