@@ -313,7 +313,7 @@ def test_large_job_queue():
         'job_queue_large',
         [
             f'sky launch -y -c {name} --cloud gcp ""',
-            f'for i in {{1..100}}; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'for i in `seq 1 100`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
             f'sky cancel repr 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 20',
             f'sky queue {name} | grep -v grep | grep RUNNING | wc -l | grep 16',
