@@ -274,6 +274,22 @@ def test_logs():
 
 
 # ---------- Job Queue. ----------
+def test_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'job_queue',
+        [
+            f'sky launch -y -c {name} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -d examples/job_queue/job.yaml',
+            f'sky exec {name} -d examples/job_queue/job.yaml',
+            f'sky logs {name} 2',
+            f'sky queue {name}',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
 def test_n_node_job_queue():
     name = _get_cluster_name()
     test = Test(
