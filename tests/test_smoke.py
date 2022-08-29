@@ -290,6 +290,7 @@ def test_job_queue():
     )
     run_one_test(test)
 
+
 def test_n_node_job_queue():
     name = _get_cluster_name()
     test = Test(
@@ -306,6 +307,7 @@ def test_n_node_job_queue():
         f'sky down -y {name}',
     )
     run_one_test(test)
+
 
 def test_large_job_queue():
     name = _get_cluster_name()
