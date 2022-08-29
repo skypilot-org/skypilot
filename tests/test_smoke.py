@@ -135,6 +135,9 @@ def test_minimal():
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Ensure the raylet process has the correct file descriptor limit.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -386,6 +389,24 @@ def test_tpu_vm():
     run_one_test(test)
 
 
+# ---------- TPU VM Pod. ----------
+# Mark slow because it's expensive to run.
+@pytest.mark.slow
+def test_tpu_vm_pod():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
 # ---------- Simple apps. ----------
 def test_multi_hostname():
     name = _get_cluster_name()
@@ -428,11 +449,13 @@ def test_gcp_start_stop():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/gcp_start_stop.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sleep 20',
             f'sky start -y {name}',
             f'sky exec {name} examples/gcp_start_stop.yaml',
-            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 4 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
     )
@@ -448,10 +471,12 @@ def test_azure_start_stop():
             f'sky launch -y -c {name} examples/azure_start_stop.yaml',
             f'sky exec {name} examples/azure_start_stop.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',  # Ensure the raylet process has the correct file descriptor limit.
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
             f'sky start -y {name}',
             f'sky exec {name} examples/azure_start_stop.yaml',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # 30 mins
@@ -854,6 +879,7 @@ class TestStorageWithCredentials:
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
+         ('s3://digitalcorpora', storage_lib.StoreType.S3),
          ('gs://gcp-public-data-sentinel-2', storage_lib.StoreType.GCS)],
         indirect=['tmp_public_storage_obj'])
     def test_public_bucket(self, tmp_public_storage_obj, store_type):
@@ -864,6 +890,61 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object exists in the output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.parametrize('nonexist_bucket_url',
+                             ['s3://{random_name}', 'gs://{random_name}'])
+    def test_nonexistent_bucket(self, nonexist_bucket_url):
+        # Attempts to create fetch a stroage with a non-existent source.
+        # Generate a random bucket name and verify it doesn't exist:
+        retry_count = 0
+        while True:
+            nonexist_bucket_name = str(uuid.uuid4())
+            if nonexist_bucket_url.startswith('s3'):
+                command = [
+                    'aws', 's3api', 'head-bucket', '--bucket',
+                    nonexist_bucket_name
+                ]
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('gs'):
+                command = [
+                    'gsutil', 'ls',
+                    nonexist_bucket_url.format(random_name=nonexist_bucket_name)
+                ]
+                expected_output = 'BucketNotFoundException'
+            else:
+                raise ValueError('Unsupported bucket type '
+                                 f'{nonexist_bucket_url}')
+
+            # Check if bucket exists using the cli:
+            try:
+                out = subprocess.check_output(command, stderr=subprocess.STDOUT)
+            except subprocess.CalledProcessError as e:
+                out = e.output
+            out = out.decode('utf-8')
+            if expected_output in out:
+                break
+            else:
+                retry_count += 1
+                if retry_count > 3:
+                    raise RuntimeError('Unable to find a nonexistent bucket '
+                                       'to use. This is higly unlikely - '
+                                       'check if the tests are correct.')
+
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match='Attempted to connect to a non-existent bucket'):
+            storage_obj = storage_lib.Storage(source=nonexist_bucket_url.format(
+                random_name=nonexist_bucket_name))
+
+    @pytest.mark.parametrize('private_bucket',
+                             [f's3://imagenet', f'gs://imagenet'])
+    def test_private_bucket(self, private_bucket):
+        # Attempts to access private buckets not belonging to the user.
+        # These buckets are known to be private, but may need to be updated if
+        # they are removed by their owners.
+        with pytest.raises(sky.exceptions.StorageBucketGetError,
+                           match='the bucket name is taken'):
+            storage_obj = storage_lib.Storage(source=private_bucket)
 
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name):
