@@ -312,6 +312,24 @@ def test_n_node_job_queue():
     run_one_test(test)
 
 
+def test_large_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'large_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud gcp ""',
+            f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
+            'sleep 20',
+            # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
+            # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
+            f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
     name = _get_cluster_name()
