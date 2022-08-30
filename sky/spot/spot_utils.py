@@ -284,15 +284,16 @@ def dump_spot_job_queue() -> str:
         job['status'] = job['status'].value
 
         cluster_name = generate_spot_cluster_name(job['job_name'],
-                                                    job['job_id'])
+                                                  job['job_id'])
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         if handle is not None:
-            job['cluster_resources'] = f'{handle.launched_nodes}x {handle.launched_resources}'
+            job['cluster_resources'] = (
+                f'{handle.launched_nodes}x {handle.launched_resources}')
             job['region'] = handle.launched_resources.region
         else:
             job['cluster_resources'] = '-'
             job['region'] = '-'
-            
+
     return json.dumps(jobs, indent=2)
 
 
@@ -375,7 +376,7 @@ class SpotCodeGen:
     @classmethod
     def get_job_table(cls) -> str:
         code = [
-            f'job_table = spot_utils.dump_spot_job_queue()',
+            'job_table = spot_utils.dump_spot_job_queue()',
             'print(job_table, flush=True)',
         ]
         return cls._build(code)
