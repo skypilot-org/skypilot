@@ -1,7 +1,6 @@
 """Modules for managed spot clusters."""
 import pathlib
 
-from sky import clouds
 from sky.spot.constants import (
     SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
     SPOT_CONTROLLER_TEMPLATE,

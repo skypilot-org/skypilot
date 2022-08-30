@@ -54,7 +54,8 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
     elif isinstance(cloud, clouds.GCP):
         return StoreType.GCS
     elif isinstance(cloud, clouds.Azure):
-        return StoreType.AZURE
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Azure is not supported yet.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')
@@ -66,9 +67,11 @@ def get_store_prefix(storetype: StoreType) -> str:
     elif storetype == StoreType.GCS:
         return 'gs://'
     elif storetype == StoreType.AZURE:
-        return 'azure://'
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Azure is not supported yet.')
     else:
-        raise ValueError(f'Unknown storetype: {storetype}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
 
 
 def _get_storetype_from_store(store: 'Storage') -> StoreType:
