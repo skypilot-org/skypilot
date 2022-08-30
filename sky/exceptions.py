@@ -122,3 +122,8 @@ class NetworkError(Exception):
 class ClusterStatusFetchingError(Exception):
     """Raised when fetching the cluster status fails."""
     pass
+
+
+class SpotUserCancelledError(Exception):
+    """Raised when a spot user cancels the job."""
+    pass

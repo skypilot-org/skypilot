@@ -141,6 +141,12 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_vcpus_from_instance_type(cls,
+                                     instance_type: str) -> Optional[float]:
+        """Returns the number of virtual CPUs that the instance type offers."""
+        raise NotImplementedError
+
+    @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
@@ -149,9 +155,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str, int]] = None
-                                 ) -> str:
+    def get_default_instance_type(cls) -> str:
         raise NotImplementedError
 
     @classmethod

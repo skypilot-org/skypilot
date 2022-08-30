@@ -180,7 +180,7 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu'
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
 
         r = resources
         # Find GPU spec, if any.
@@ -276,6 +276,14 @@ class GCP(clouds.Cloud):
         # GCP handles accelerators separately from regular instance types,
         # hence return none here.
         return None
+
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='gcp')
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""

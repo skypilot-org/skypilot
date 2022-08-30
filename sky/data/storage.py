@@ -879,21 +879,18 @@ class S3Store(AbstractStore):
             # This line does not error out if the bucket is an external public
             # bucket or if it is a user's bucket that is publicly
             # accessible.
-            self.client.get_public_access_block(Bucket=self.name)
+            self.client.head_bucket(Bucket=self.name)
             return bucket, False
         except aws.client_exception() as e:
             error_code = e.response['Error']['Code']
             # AccessDenied error for buckets that are private and not owned by
             # user.
-            if error_code == 'AccessDenied':
+            if error_code == '403':
                 command = f'aws s3 ls {self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
                             name=self.name, command=command)) from e
-            # Try private bucket case.
-            if data_utils.verify_s3_bucket(self.name):
-                return bucket, False
 
         if self.source is not None and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
