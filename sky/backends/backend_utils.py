@@ -699,6 +699,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
 
+    sky_wheel_hash = os.path.basename(local_wheel_path)
+    sky_remote_path = os.path.join(SKY_REMOTE_PATH, sky_wheel_hash)
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -724,9 +726,10 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 # Cloud credentials for cloud storage.
                 'credentials': credentials,
                 # Sky remote utils.
-                'sky_remote_path': SKY_REMOTE_PATH,
+                'sky_remote_path': sky_remote_path,
                 'sky_local_path': str(local_wheel_path),
                 'sky_version': str(version.parse(sky.__version__)),
+                'sky_wheel_hash': sky_wheel_hash,
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
