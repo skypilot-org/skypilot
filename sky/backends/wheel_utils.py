@@ -5,7 +5,7 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
-from typing import Optional
+from typing import Optional, Tuple
 
 import filelock
 from packaging import version
@@ -83,7 +83,7 @@ def _build_sky_wheel() -> pathlib.Path:
     return WHEEL_DIR.absolute()
 
 
-def build_sky_wheel() -> pathlib.Path:
+def build_sky_wheel() -> Tuple[pathlib.Path, str]:
     """Build a wheel for Sky, or reuse a cached wheel.
 
     Caller is responsible for removing the wheel.
@@ -130,4 +130,4 @@ def build_sky_wheel() -> pathlib.Path:
         temp_wheel_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(latest_wheel_path, temp_wheel_dir)
 
-    return temp_wheel_dir.absolute()
+    return temp_wheel_dir.absolute(), hash_of_latest_wheel
