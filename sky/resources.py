@@ -314,17 +314,19 @@ class Resources:
                 acc_from_instance_type = (
                     self.cloud.get_accelerators_from_instance_type(
                         self._instance_type))
-                if not Resources(accelerators=acc_requested).less_demanding_than(
-                        Resources(accelerators=acc_from_instance_type)):
+                if not Resources(
+                        accelerators=acc_requested).less_demanding_than(
+                            Resources(accelerators=acc_from_instance_type)):
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
                             'Infeasible resource demands found:\n'
-                            f'  Instance type requested: {self._instance_type}\n'
+                            '  Instance type requested: '
+                            f'{self._instance_type}\n'
                             f'  Accelerators for {self._instance_type}: '
                             f'{acc_from_instance_type}\n'
                             f'  Accelerators requested: {acc_requested}\n'
-                            f'To fix: either only specify instance_type, or change '
-                            'the accelerators field to be consistent.')
+                            f'To fix: either only specify instance_type, or '
+                            'change the accelerators field to be consistent.')
                 # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
                 # because e.g., the instance may have 4 GPUs, while the task
                 # specifies to use 1 GPU.
@@ -335,7 +337,7 @@ class Resources:
             if not self._cloud.accelerator_in_region_or_zone(
                     acc, acc_count, self.region, self.zone):
                 error_str = (f'Accelerator "{acc}" is not available in '
-                                '"{}" region/zone.')
+                             '"{}" region/zone.')
                 if self.zone:
                     error_str = error_str.format(self.zone)
                 else:

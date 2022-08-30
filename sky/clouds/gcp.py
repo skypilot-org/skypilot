@@ -377,8 +377,7 @@ class GCP(clouds.Cloud):
 
     @staticmethod
     def check_host_accelerator_compatibility(
-            instance_type: str,
-            accelerators: Optional[Dict[str, int]]) -> None:
+            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
         service_catalog.check_host_accelerator_compatibility(
             instance_type, accelerators, 'gcp')
 

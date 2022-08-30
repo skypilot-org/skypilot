@@ -303,11 +303,11 @@ def get_region_zones_for_accelerators(
     return common.get_region_zones(df, use_spot)
 
 
-def check_host_accelerator_compatibility(instance_type: str,
-                                         accelerators: Optional[Dict[str, int]]) -> None:
+def check_host_accelerator_compatibility(
+        instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
     """Check if the instance type is compatible with the accelerators.
-    
-    This function ensures that TPUs and GPUs except A100 are attached to N1 machines,
+
+    This function ensures that TPUs and GPUs except A100 are attached to N1,
     and A100 are attached to A2 machines.
     """
     if accelerators is None:
@@ -366,7 +366,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
                                          accelerators: Dict[str, int],
                                          zone: Optional[str] = None) -> None:
     """Check if the accelerators can be attached to the host.
-    
+
     This function checks the max CPU count and memory of the host that
     the accelerator can be attached to.
     """
@@ -376,7 +376,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
 
     if acc_name.startswith('tpu-'):
         # TODO(woosuk): Check max vcpus and memory for each TPU type.
-        assert instance_type == 'TPU-VM' or instance_type.startswith('n1-'), instance_type
+        assert instance_type == 'TPU-VM' or instance_type.startswith('n1-')
         return
 
     if acc_name == 'A100':
