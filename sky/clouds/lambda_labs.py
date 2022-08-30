@@ -79,7 +79,11 @@ class Lambda(clouds.Cloud):
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
-        return {}
+        del zones
+        return {
+            'instance_type': resources.instance_type,
+            'region': region.name,
+        }
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):

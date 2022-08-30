@@ -76,6 +76,7 @@ install_requires = [
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
     'grpcio<=1.43.0',
+    'lambda-cli',
     'packaging',
     # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
     # fix.

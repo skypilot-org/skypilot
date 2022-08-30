@@ -9,95 +9,25 @@ idle_timeout_minutes: 60
 provider:
   # We use a custom node provider for GCP to support instance stop and reuse.
   type: external  # type: gcp
-  module: sky.skylet.providers.gcp.GCPNodeProvider
+  module: sky.skylet.providers.lambda_labs.LambdaNodeProvider
   region: {{region}}
-  availability_zone: {{zones}}
-  # Keep (otherwise cannot reuse when re-provisioning).
-  # teardown(terminate=True) will override this.
-  cache_stopped_nodes: True
-  # The GCP project ID.
-  project_id: {{gcp_project_id}}
-{%- if tpu_vm %}
-  _has_tpus: True
-{%- endif %}
+  resource_group: {{resource_group}}
 
 auth:
-  ssh_user: gcpuser
+  ssh_user: ubuntu
 
 available_node_types:
   ray_head_default:
     resources: {}
     node_config:
-{%- if tpu_vm %}
-      acceleratorType: {{tpu_type}}
-      runtimeVersion: {{runtime_version}}
-  {%- if use_spot %}
-      schedulingConfig:
-        preemptible: true
-  {%- endif %}
-{%- else %}
-      machineType: {{instance_type}}
-      disks:
-        - boot: true
-          autoDelete: true
-          type: PERSISTENT
-          initializeParams:
-            diskSizeGb: {{disk_size}}
-            # See https://cloud.google.com/deep-learning-vm/docs/images
-            sourceImage: {{image_id}}
-  {%- if gpu is not none %}
-      guestAccelerators:
-        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
-          acceleratorCount: {{gpu_count}}
-      metadata:
-        items:
-          - key: install-nvidia-driver
-            value: "True"
-  {%- endif %}
-      scheduling:
-  {%- if use_spot %}
-        - preemptible: true
-  {%- endif %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-{%- endif %}
+      InstanceType: {{instance_type}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
-  {%- if tpu_vm %}
-      acceleratorType: {{tpu_type}}
-      runtimeVersion: {{runtime_version}}
-    {%- if use_spot %}
-      schedulingConfig:
-        preemptible: true
-    {%- endif %}
-  {%- else %}
-      machineType: {{instance_type}}
-      disks:
-        - boot: true
-          autoDelete: true
-          type: PERSISTENT
-          initializeParams:
-            diskSizeGb: {{disk_size}}
-            # See https://cloud.google.com/deep-learning-vm/docs/images
-            sourceImage: {{image_id}}
-    {%- if gpu is not none %}
-      guestAccelerators:
-        - acceleratorType: projects/{{gcp_project_id}}/zones/{{zones}}/acceleratorTypes/{{gpu}}
-          acceleratorCount: {{gpu_count}}
-      metadata:
-        items:
-          - key: install-nvidia-driver
-            value: "True"
-    {%- endif %}
-      scheduling:
-    {%- if use_spot %}
-        - preemptible: true
-    {%- endif %}
-        - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
-  {%- endif %}
+      InstanceType: {{instance_type}}
 {%- endif %}
 
 head_node_type: ray_head_default
