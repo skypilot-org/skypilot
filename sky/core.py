@@ -451,6 +451,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
                 'duration': (float) duration in seconds,
                 'retry_count': int Number of retries,
                 'status': sky.JobStatus status of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
             }
         ]
     Raises:
