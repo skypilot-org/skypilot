@@ -363,13 +363,16 @@ def check_host_accelerator_compatibility(
 
 
 def check_accelerator_attachable_to_host(instance_type: str,
-                                         accelerators: Dict[str, int],
+                                         accelerators: Optional[Dict[str, int]],
                                          zone: Optional[str] = None) -> None:
     """Check if the accelerators can be attached to the host.
 
     This function checks the max CPU count and memory of the host that
-    the accelerator can be attached to.
+    the accelerators can be attached to.
     """
+    if accelerators is None:
+        return
+
     acc = list(accelerators.items())
     assert len(acc) == 1, acc
     acc_name, acc_count = acc[0]
