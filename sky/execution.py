@@ -464,11 +464,11 @@ def spot_launch(
                 raise ValueError(
                     'Failed to translate file mounts, due to the default '
                     f'destination {spot.constants.SPOT_FM_REMOTE_TMP_DIR} '
-                    'is taken.')
+                    'being taken.')
         sources = list(src_to_file_id.keys())
         sources_str = '\n\t'.join(sources)
         logger.info(
-            f'Sources with file will be synced to cloud storage {bucket_name}:'
+            f'Source files in file_mounts will be synced to cloud storage {bucket_name}:'
             f'\n\t{sources_str}')
     task.update_storage_mounts(new_storage_mounts)
 
@@ -476,12 +476,12 @@ def spot_launch(
     # Copy the local source to a bucket. The task will not be executed locally,
     # so we need to copy the files to the bucket manually here before sending to
     # the remote spot controller.
-    logger.info(f'{colorama.Fore.YELLOW}Uploading storage from sources...'
+    logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
                 f'{colorama.Style.RESET_ALL} See sky storage ls')
     task.add_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
-    #  /origin-dst: s3://spot-fm-file-only-bucket-name/file-0
+    #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
     new_file_mounts = dict()
     for dst, src in copy_mounts_with_file_in_src.items():
         storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
