@@ -23,7 +23,7 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def regions(cls):
-        cls._regions = [clouds.Region('us-tx-1')]
+        cls._regions = [clouds.Region('us-tx-1'), clouds.Region('us-az-1')]
         return cls._regions
 
     @classmethod
@@ -74,6 +74,10 @@ class Lambda(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='lambda')
+
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        return None
 
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',

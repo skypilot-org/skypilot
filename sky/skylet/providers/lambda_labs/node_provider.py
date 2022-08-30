@@ -1,19 +1,10 @@
-import json
 import logging
-from pathlib import Path
 from threading import RLock
-from uuid import uuid4
 
 from lambda_labs import Lambda, Metadata
 
 from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_NODE_NAME,
-    TAG_RAY_NODE_KIND,
-    TAG_RAY_LAUNCH_CONFIG,
-    TAG_RAY_USER_NODE_TYPE,
-)
+from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from sky.skylet.providers.lambda_labs.config import bootstrap_lambda
 
 VM_NAME_MAX_LEN = 64
@@ -47,11 +38,12 @@ class LambdaNodeProvider(NodeProvider):
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
-        self.resource_group = self.provider_config["resource_group"]
+        self.resource_group = self.provider_config['resource_group']
 
         # Assumes `lambda auth` has already been run.
         self.lambda_client = Lambda(cli=False)
         # TODO: consider keeping this metadata in ~/.sky since this gets synced
+        # this is only used for tags
         self.local_metadata = Metadata()
 
         # cache node objects
@@ -74,18 +66,18 @@ class LambdaNodeProvider(NodeProvider):
             if node['public_key']['name'] == self.resource_group
         ]
         nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
-        self.cached_nodes = {node["id"]: node for node in nodes}
+        self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
 
     def _extract_metadata(self, vm):
-        metadata = {"id": vm['id'], "status": vm['state'], "tags": {}}
+        metadata = {'id': vm['id'], 'status': vm['state'], 'tags': {}}
         instance_info = self.local_metadata[vm['id']]
         if instance_info is not None:
             metadata['tags'] = instance_info['tags']
         ipv4 = vm['ipv4']
-        metadata["external_ip"] = ipv4
-        metadata["internal_ip"] = ipv4
-
+        metadata['external_ip'] = ipv4
+        metadata['internal_ip'] = ipv4
+        metadata['is_terminated'] = vm['is_terminated']
         return metadata
 
     def non_terminated_nodes(self, tag_filters):
@@ -101,34 +93,34 @@ class LambdaNodeProvider(NodeProvider):
             ["node-1", "node-2"]
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, v in nodes.items() if not v["is_termianted"]]
+        return [k for k, v in nodes.items() if not v['is_terminated']]
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
         # always get current status
         node = self._get_node(node_id=node_id)
-        return node["status"] == "running"
+        return node['status'] == 'running'
 
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
         # always get current status
         node = self._get_node(node_id=node_id)
-        return node["status"].startswith("deallocat")
+        return node is None or node['is_terminated']
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
-        return self._get_cached_node(node_id=node_id)["tags"]
+        return self._get_cached_node(node_id=node_id)['tags']
 
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
-        ip = (self._get_cached_node(node_id=node_id)["external_ip"] or
-              self._get_node(node_id=node_id)["external_ip"])
+        ip = (self._get_cached_node(node_id=node_id)['external_ip'] or
+              self._get_node(node_id=node_id)['external_ip'])
         return ip
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
-        ip = (self._get_cached_node(node_id=node_id)["internal_ip"] or
-              self._get_node(node_id=node_id)["internal_ip"])
+        ip = (self._get_cached_node(node_id=node_id)['internal_ip'] or
+              self._get_node(node_id=node_id)['internal_ip'])
         return ip
 
     def create_node(self, node_config, tags, count):
@@ -154,81 +146,48 @@ class LambdaNodeProvider(NodeProvider):
 
     def _create_node(self, node_config, tags, count):
         """Creates a number of nodes within the namespace."""
+        del count  # unused
 
         # get the tags
-        config_tags = node_config.get("tags", {}).copy()
+        config_tags = node_config.get('tags', {}).copy()
         config_tags.update(tags)
         config_tags[TAG_RAY_CLUSTER_NAME] = self.cluster_name
 
         # create the node
-        ttype = node_config["InstanceType"]
+        ttype = node_config['InstanceType']
         key = node_config['lambda_parameters']['key_id']
-        vm_list = self.lambda_client.up(instance_type=ttype, key=key)
-
+        region = self.provider_config['region']
+        vm_resp = self.lambda_client.up(instance_type=ttype,
+                                        key=key,
+                                        region=region)
+        vm_list = vm_resp.get('data', [])
         vm_list = [
             vm for vm in vm_list
             if vm['public_key']['name'] == self.resource_group
         ]
+        # TODO: make this logic cleaner and work for count > 1
         assert len(vm_list) == 1, len(vm_list)
-        vm_id = list(vm_list.keys())[0]
-        self.local_metadata[vm_id] = {"tags": config_tags}
+        vm_id = vm_list[0]['id']
+        self.local_metadata[vm_id] = {'tags': config_tags}
 
     @synchronized
     def set_node_tags(self, node_id, tags):
         """Sets the tag values (string dict) for the specified node."""
-        node_tags = self._get_cached_node(node_id)["tags"]
+        node_tags = self._get_cached_node(node_id)['tags']
         node_tags.update(tags)
-        update = get_azure_sdk_function(
-            client=self.compute_client.virtual_machines, function_name="update")
-        update(
-            resource_group_name=self.provider_config["resource_group"],
-            vm_name=node_id,
-            parameters={"tags": node_tags},
-        )
-        self.cached_nodes[node_id]["tags"] = node_tags
+        self.local_metadata[node_id] = {"tags": node_tags}
 
     def terminate_node(self, node_id):
         """Terminates the specified node. This will delete the VM and
         associated resources (NIC, IP, Storage) for the specified node."""
 
-        resource_group = self.provider_config["resource_group"]
-        try:
-            # get metadata for node
-            metadata = self._get_node(node_id)
-        except KeyError:
-            # node no longer exists
-            return
-
-        vm = self.compute_client.virtual_machines.get(
-            resource_group_name=resource_group, vm_name=node_id)
-        disks = {d.name for d in vm.storage_profile.data_disks}
-        disks.add(vm.storage_profile.os_disk.name)
-
-        try:
-            # delete machine, must wait for this to complete
-            delete = get_azure_sdk_function(
-                client=self.compute_client.virtual_machines,
-                function_name="delete")
-            delete(resource_group_name=resource_group, vm_name=node_id).wait()
-        except Exception as e:
-            logger.warning("Failed to delete VM: {}".format(e))
-
-        try:
-            # delete nic
-            delete = get_azure_sdk_function(
-                client=self.network_client.network_interfaces,
-                function_name="delete",
-            )
-            delete(
-                resource_group_name=resource_group,
-                network_interface_name=metadata["nic_name"],
-            )
-        except Exception as e:
-            logger.warning("Failed to delete nic: {}".format(e))
+        self.lambda_client.rm(node_id)
+        self.local_metadata[node_id] = None
+        # TODO: delete the SSH key
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
-        return self.cached_nodes[node_id]
+        return self.cached_nodes.get(node_id, None)
 
     def _get_cached_node(self, node_id):
         if node_id in self.cached_nodes:

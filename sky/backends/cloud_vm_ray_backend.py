@@ -626,8 +626,7 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if ('Exception Details:' in s.strip() or 'InvalidTemplateDeployment'
-                in s.strip() or '(ReadOnlyDisabledSubscription)' in s.strip())
+            if 'LambdaError:' in s.strip()
         ]
         if not errors:
             logger.info('====== stdout ======')
@@ -643,11 +642,7 @@ class RetryingVmProvisioner(object):
         logger.warning(f'Got error(s) in {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
-            for r in sky.Azure.regions():
-                self._blocked_regions.add(r.name)
-        else:
-            self._blocked_regions.add(region.name)
+        self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_local_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
