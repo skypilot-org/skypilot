@@ -302,34 +302,34 @@ class Resources:
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
         acc_requested = self.accelerators
+        if (isinstance(self.cloud, clouds.GCP) and
+                self.instance_type is not None):
+            # Do this check even if acc_requested is None.
+            clouds.GCP.check_host_accelerator_compatibility(
+                self.instance_type, acc_requested)
+
         if acc_requested is None:
             return
 
-        if self.is_launchable():
-            if isinstance(self.cloud, clouds.GCP):
-                clouds.GCP.check_host_accelerator_compatibility(
-                    self.instance_type, acc_requested)
-            else:
-                # GCP attaches accelerators to VMs, so no need for this check.
-                acc_from_instance_type = (
-                    self.cloud.get_accelerators_from_instance_type(
-                        self._instance_type))
-                if not Resources(
-                        accelerators=acc_requested).less_demanding_than(
-                            Resources(accelerators=acc_from_instance_type)):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'Infeasible resource demands found:\n'
-                            '  Instance type requested: '
-                            f'{self._instance_type}\n'
-                            f'  Accelerators for {self._instance_type}: '
-                            f'{acc_from_instance_type}\n'
-                            f'  Accelerators requested: {acc_requested}\n'
-                            f'To fix: either only specify instance_type, or '
-                            'change the accelerators field to be consistent.')
-                # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
-                # because e.g., the instance may have 4 GPUs, while the task
-                # specifies to use 1 GPU.
+        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
+            # GCP attaches accelerators to VMs, so no need for this check.
+            acc_from_instance_type = (
+                self.cloud.get_accelerators_from_instance_type(
+                    self._instance_type))
+            if not Resources(accelerators=acc_requested).less_demanding_than(
+                    Resources(accelerators=acc_from_instance_type)):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Infeasible resource demands found:\n'
+                        f'  Instance type requested: {self._instance_type}\n'
+                        f'  Accelerators for {self._instance_type}: '
+                        f'{acc_from_instance_type}\n'
+                        f'  Accelerators requested: {acc_requested}\n'
+                        f'To fix: either only specify instance_type, or change '
+                        'the accelerators field to be consistent.')
+            # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
+            # because e.g., the instance may have 4 GPUs, while the task
+            # specifies to use 1 GPU.
 
         # Validate whether accelerator is available in specified region/zone.
         acc, acc_count = list(acc_requested.items())[0]
