@@ -702,8 +702,8 @@ class RetryingVmProvisioner(object):
                 region, zones, stdout, stderr)
 
         if isinstance(cloud, clouds.Lambda):
-            return self._update_blocklist_on_lambda_error(region, zones, stdout,
-                                                        stderr)
+            return self._update_blocklist_on_lambda_error(
+                region, zones, stdout, stderr)
 
         if isinstance(cloud, clouds.Local):
             return self._update_blocklist_on_local_error(

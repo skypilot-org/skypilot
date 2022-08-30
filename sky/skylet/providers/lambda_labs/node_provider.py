@@ -16,7 +16,6 @@ from ray.autoscaler.tags import (
 )
 from sky.skylet.providers.lambda_labs.config import bootstrap_lambda
 
-
 VM_NAME_MAX_LEN = 64
 VM_NAME_UUID_LEN = 8
 
@@ -24,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def synchronized(f):
+
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -59,6 +59,7 @@ class LambdaNodeProvider(NodeProvider):
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters):
+
         def match_tags(vm):
             vm_info = self.local_metadata[vm['id']]
             tags = {} if vm_info is None else vm_info['tags']
@@ -68,15 +69,16 @@ class LambdaNodeProvider(NodeProvider):
             return True
 
         vms = self.lambda_client.ls().get('data', [])
-        vms = [node for node in vms if node['public_key']['name'] == self.resource_group]
+        vms = [
+            node for node in vms
+            if node['public_key']['name'] == self.resource_group
+        ]
         nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
         self.cached_nodes = {node["id"]: node for node in nodes}
         return self.cached_nodes
 
     def _extract_metadata(self, vm):
-        metadata = {"id": vm['id'],
-                    "status": vm['state'],
-                    "tags": {}}
+        metadata = {"id": vm['id'], "status": vm['state'], "tags": {}}
         instance_info = self.local_metadata[vm['id']]
         if instance_info is not None:
             metadata['tags'] = instance_info['tags']
@@ -119,18 +121,14 @@ class LambdaNodeProvider(NodeProvider):
 
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
-        ip = (
-            self._get_cached_node(node_id=node_id)["external_ip"]
-            or self._get_node(node_id=node_id)["external_ip"]
-        )
+        ip = (self._get_cached_node(node_id=node_id)["external_ip"] or
+              self._get_node(node_id=node_id)["external_ip"])
         return ip
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
-        ip = (
-            self._get_cached_node(node_id=node_id)["internal_ip"]
-            or self._get_node(node_id=node_id)["internal_ip"]
-        )
+        ip = (self._get_cached_node(node_id=node_id)["internal_ip"] or
+              self._get_node(node_id=node_id)["internal_ip"])
         return ip
 
     def create_node(self, node_config, tags, count):
@@ -145,7 +143,8 @@ class LambdaNodeProvider(NodeProvider):
                 break
         if not resource_group_exists:
             public_key = node_config['lambda_parameters']['publicKey']
-            key_entry = self.lambda_client.key_add(public_key, name=self.resource_group)
+            key_entry = self.lambda_client.key_add(public_key,
+                                                   name=self.resource_group)
             lambda_key_id = key_entry['id']
 
         node_config['lambda_parameters']['key_id'] = lambda_key_id
@@ -166,7 +165,10 @@ class LambdaNodeProvider(NodeProvider):
         key = node_config['lambda_parameters']['key_id']
         vm_list = self.lambda_client.up(instance_type=ttype, key=key)
 
-        vm_list = [vm for vm in vm_list if vm['public_key']['name'] == self.resource_group]
+        vm_list = [
+            vm for vm in vm_list
+            if vm['public_key']['name'] == self.resource_group
+        ]
         assert len(vm_list) == 1, len(vm_list)
         vm_id = list(vm_list.keys())[0]
         self.local_metadata[vm_id] = {"tags": config_tags}
@@ -177,8 +179,7 @@ class LambdaNodeProvider(NodeProvider):
         node_tags = self._get_cached_node(node_id)["tags"]
         node_tags.update(tags)
         update = get_azure_sdk_function(
-            client=self.compute_client.virtual_machines, function_name="update"
-        )
+            client=self.compute_client.virtual_machines, function_name="update")
         update(
             resource_group_name=self.provider_config["resource_group"],
             vm_name=node_id,
@@ -199,16 +200,15 @@ class LambdaNodeProvider(NodeProvider):
             return
 
         vm = self.compute_client.virtual_machines.get(
-            resource_group_name=resource_group, vm_name=node_id
-        )
+            resource_group_name=resource_group, vm_name=node_id)
         disks = {d.name for d in vm.storage_profile.data_disks}
         disks.add(vm.storage_profile.os_disk.name)
 
         try:
             # delete machine, must wait for this to complete
             delete = get_azure_sdk_function(
-                client=self.compute_client.virtual_machines, function_name="delete"
-            )
+                client=self.compute_client.virtual_machines,
+                function_name="delete")
             delete(resource_group_name=resource_group, vm_name=node_id).wait()
         except Exception as e:
             logger.warning("Failed to delete VM: {}".format(e))

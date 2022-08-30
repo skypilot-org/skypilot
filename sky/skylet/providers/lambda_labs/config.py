@@ -38,8 +38,7 @@ def _configure_key_pair(config):
 
     for node_type in config["available_node_types"].values():
         key_parameters = node_type["node_config"].setdefault(
-            "lambda_parameters", {}
-        )
+            "lambda_parameters", {})
         key_parameters["adminUsername"] = ssh_user
         key_parameters["publicKey"] = public_key
 
