@@ -304,9 +304,12 @@ def get_region_zones_for_accelerators(
 
 
 def check_host_accelerator_compatibility(instance_type: str,
-                                         accelerators: Optional[Dict[str, int]],
-                                         zone: Optional[str] = None) -> None:
-    """Check if the instance type is compatible with the accelerators."""
+                                         accelerators: Optional[Dict[str, int]]) -> None:
+    """Check if the instance type is compatible with the accelerators.
+    
+    This function ensures that TPUs and GPUs except A100 are attached to N1 machines,
+    and A100 are attached to A2 machines.
+    """
     if accelerators is None:
         if instance_type.startswith('a2-'):
             # NOTE: While it is allowed to use A2 machines as CPU-only nodes,
@@ -320,11 +323,17 @@ def check_host_accelerator_compatibility(instance_type: str,
 
     acc = list(accelerators.items())
     assert len(acc) == 1, acc
-    acc_name, acc_count = acc[0]
+    acc_name, _ = acc[0]
+
+    # Check if the accelerator is supported by GCP.
+    if not list_accelerators(gpus_only=False, name_filter=acc_name):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesUnavailableError(
+                f'{acc_name} is not available in GCP. '
+                'See \'sky show-gpus --cloud gcp\'')
 
     if acc_name.startswith('tpu-'):
         if instance_type != 'TPU-VM' and not instance_type.startswith('n1-'):
-            # TODO(woosuk): Check max vcpus and memory for each TPU type.
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     'TPU Nodes can be only used with N1 machines. '
@@ -335,18 +344,11 @@ def check_host_accelerator_compatibility(instance_type: str,
     # Treat A100 as a special case.
     if acc_name == 'A100':
         # A100 must be attached to A2 instance type.
-        a100_instance_type = _A100_INSTANCE_TYPES[acc_count]
         if not instance_type.startswith('a2-'):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesMismatchError(
                     f'A100 GPUs cannot be attached to {instance_type}. '
-                    f'Use {a100_instance_type} instead. Please refer to '
-                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
-        if instance_type != a100_instance_type:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesMismatchError(
-                    f'A100:{acc_count} cannot be attached to {instance_type}. '
-                    f'Use {a100_instance_type} instead. Please refer to '
+                    f'Use A2 machines instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
         return
 
@@ -359,12 +361,44 @@ def check_host_accelerator_compatibility(instance_type: str,
                 'Use N1 instance types instead. Please refer to: '
                 'https://cloud.google.com/compute/docs/machine-types#gpus')
 
-    # Check maximum vCPUs and memory.
-    if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
+
+def check_accelerator_attachable_to_host(instance_type: str,
+                                         accelerators: Dict[str, int],
+                                         zone: Optional[str] = None) -> None:
+    """Check if the accelerators can be attached to the host.
+    
+    This function checks the max CPU count and memory of the host that
+    the accelerator can be attached to.
+    """
+    acc = list(accelerators.items())
+    assert len(acc) == 1, acc
+    acc_name, acc_count = acc[0]
+
+    if acc_name.startswith('tpu-'):
+        # TODO(woosuk): Check max vcpus and memory for each TPU type.
+        assert instance_type == 'TPU-VM' or instance_type.startswith('n1-'), instance_type
+        return
+
+    if acc_name == 'A100':
+        valid_counts = list(_A100_INSTANCE_TYPES.keys())
+    else:
+        valid_counts = list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name].keys())
+    if acc_count not in valid_counts:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ResourcesUnavailableError(
-                f'{acc_name} is not available in GCP. '
-                'See \'sky show-gpus --cloud gcp\'')
+            raise exceptions.ResourcesMismatchError(
+                f'{acc_name}:{acc_count} is not launchable on GCP. '
+                f'Valid accelerator counts are {valid_counts}.')
+
+    if acc_name == 'A100':
+        a100_instance_type = _A100_INSTANCE_TYPES[acc_count]
+        if instance_type != a100_instance_type:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'A100:{acc_count} cannot be attached to {instance_type}. '
+                    f'Use {a100_instance_type} instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
+
+    # Check maximum vCPUs and memory.
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
     if acc_name == 'K80' and acc_count == 8:
         if zone in ['asia-east1-a', 'us-east1-d']:

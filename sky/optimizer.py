@@ -847,10 +847,6 @@ def _fill_in_launchable_resources(
                     'enabled. Run `sky check` to enable access to it, '
                     'or change the cloud requirement.')
         elif resources.is_launchable():
-            if isinstance(resources.cloud, clouds.GCP):
-                clouds.GCP.check_host_accelerator_compatibility(
-                    resources.instance_type, resources.accelerators,
-                    resources.zone)
             launchable[resources] = [resources]
         else:
             clouds_list = [resources.cloud
@@ -886,5 +882,10 @@ def _fill_in_launchable_resources(
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)
+
+        for r in launchable[resources]:
+            if isinstance(r.cloud, clouds.GCP):
+                clouds.GCP.check_accelerator_attachable_to_host(
+                    r.instance_type, r.accelerators, r.zone)
 
     return launchable, cloud_candidates
