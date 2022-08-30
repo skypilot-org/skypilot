@@ -101,19 +101,20 @@ class StrategyExecutor:
         """Terminate the spot cluster."""
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
+        if handle is None:
+            return
         retry_cnt = 0
-        while retry_cnt < max_retry:
-            retry_cnt += 1
-            if handle is not None:
-                try:
-                    self.backend.teardown(handle, terminate=True)
-                    return
-                except Exception as e:
-                    logger.error(
-                        f'Failed to terminate the spot cluster {self.cluster_name}.'
-                        f' Error: {e}')
-                    
-                        
+        while True:
+            try:
+                self.backend.teardown(handle, terminate=True)
+                return
+            except Exception as e:  # pylint: disable=broad-except
+                retry_cnt += 1
+                if retry_cnt >= max_retry:
+                    raise RuntimeError('Failed to terminate the spot cluster '
+                                       f'{self.cluster_name}.') from e
+                logger.error('Failed to terminate the spot cluster '
+                             f'{self.cluster_name}. Retrying.')
 
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch().
