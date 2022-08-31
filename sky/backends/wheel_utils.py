@@ -1,4 +1,13 @@
-"""Utils for building sky pip wheels."""
+"""Utils for building sky pip wheels.
+
+This module is used for building the wheel for SkyPilot under `~/.sky/wheels`,
+and the wheel will be used for installing the SkyPilot on the cluster nodes.
+
+The generated folder is like:
+    ~/.sky/wheels/<hash_of_wheel>/sky-<version>-py3-none-any.whl
+
+Whenever a new wheel is built, the old ones will be removed.
+"""
 import hashlib
 import os
 import pathlib
@@ -23,16 +32,18 @@ SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 
 # NOTE: keep the same as setup.py's setuptools.setup(name=..., ...).
 _PACKAGE_WHEEL_NAME = 'skypilot'
-
-
-def _get_latest_wheel_and_cleanup() -> pathlib.Path:
-    wheel_name = (f'**/{_PACKAGE_WHEEL_NAME}-'
+_WHEEL_PATTERN = (f'{_PACKAGE_WHEEL_NAME}-'
                   f'{version.parse(sky.__version__)}-*.whl')
+
+
+def _get_latest_wheel_and_remove_all_others() -> pathlib.Path:
+    wheel_name = (f'**/{_WHEEL_PATTERN}')
     try:
         latest_wheel = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
     except ValueError:
-        raise FileNotFoundError(f'Could not find built SkyPilot wheels '
-                                f'under {WHEEL_DIR!r}') from None
+        raise FileNotFoundError(
+            'Could not find built SkyPilot wheels with glob pattern '
+            f'{wheel_name} under {WHEEL_DIR!r}') from None
 
     latest_wheel_dir_name = latest_wheel.parent
     # Cleanup older wheels.
@@ -45,8 +56,8 @@ def _get_latest_wheel_and_cleanup() -> pathlib.Path:
     return latest_wheel
 
 
-def clean_up_wheel_dir():
-    """Clean up the wheel directory.
+def get_latest_wheel_and_remove_all_others() -> pathlib.Path:
+    """Get the latest wheel and remove all others.
 
     This function will be called during `ray up` to clean up the wheel, it
     acquires the wheel lock to prevent concurrent wheel operations, by other
@@ -54,7 +65,7 @@ def clean_up_wheel_dir():
     """
     try:
         with filelock.FileLock(_WHEEL_LOCK_PATH, timeout=5):  # pylint: disable=E0110
-            _get_latest_wheel_and_cleanup()
+            return _get_latest_wheel_and_remove_all_others()
     except FileNotFoundError as e:
         logger.error(str(e))
     except filelock.Timeout:
@@ -62,7 +73,7 @@ def clean_up_wheel_dir():
 
 
 def _build_sky_wheel():
-    """Build a wheel for Sky."""
+    """Build a wheel for SkyPilot."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         # prepare files
         tmp_dir = pathlib.Path(tmp_dir)
@@ -86,12 +97,15 @@ def _build_sky_wheel():
                            stderr=subprocess.PIPE,
                            check=True)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError('Fail to build pip wheel for Sky. '
+            raise RuntimeError('Fail to build pip wheel for SkyPilot. '
                                f'Error message: {e.stderr.decode()}') from e
 
-        wheel_name = (f'{_PACKAGE_WHEEL_NAME}-'
-                      f'{version.parse(sky.__version__)}-*.whl')
-        wheel_path = next(tmp_dir.glob(wheel_name))
+        try:
+            wheel_path = next(tmp_dir.glob(_WHEEL_PATTERN))
+        except StopIteration:
+            raise RuntimeError(
+                f'Fail to build pip wheel for SkyPilot under {tmp_dir}. '
+                'No wheel file is generated.') from None
 
         # Use a unique temporary dir per wheel hash, because there may be many
         # concurrent 'sky launch' happening.  The path should be stable if the
@@ -102,11 +116,11 @@ def _build_sky_wheel():
 
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(wheel_path, wheel_dir)
+        shutil.move(str(wheel_path), wheel_dir)
 
 
 def build_sky_wheel() -> Tuple[pathlib.Path, str]:
-    """Build a wheel for Sky, or reuse a cached wheel.
+    """Build a wheel for SkyPilot, or reuse a cached wheel.
 
     Caller is responsible for removing the wheel.
 
@@ -141,7 +155,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
-        latest_wheel = _get_latest_wheel_and_cleanup()
+        latest_wheel = _get_latest_wheel_and_remove_all_others()
 
         wheel_hash = latest_wheel.parent.name
 
