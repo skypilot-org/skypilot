@@ -25,13 +25,11 @@ SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 _PACKAGE_WHEEL_NAME = 'skypilot'
 
 
-    
 def _get_latest_wheel_and_cleanup() -> pathlib.Path:
     wheel_name = (f'**/{_PACKAGE_WHEEL_NAME}-'
                   f'{version.parse(sky.__version__)}-*.whl')
     try:
-        latest_wheel = max(WHEEL_DIR.glob(wheel_name),
-                                key=os.path.getctime)
+        latest_wheel = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError(f'Could not find built SkyPilot wheels '
                                 f'under {WHEEL_DIR!r}') from None
@@ -49,7 +47,7 @@ def _get_latest_wheel_and_cleanup() -> pathlib.Path:
 
 def clean_up_wheel_dir():
     """Clean up the wheel directory.
-    
+
     This function will be called during `ray up` to clean up the wheel, it
     acquires the wheel lock to prevent concurrent wheel operations, by other
     `ray up` or `sky launch`.
@@ -61,6 +59,7 @@ def clean_up_wheel_dir():
         logger.error(str(e))
     except filelock.Timeout:
         logger.warning('Failed to clean up wheel directory')
+
 
 def _build_sky_wheel():
     """Build a wheel for Sky."""
