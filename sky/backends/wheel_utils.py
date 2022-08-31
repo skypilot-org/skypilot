@@ -37,50 +37,59 @@ def cleanup_wheels_dir(wheel_dir: pathlib.Path,
 
 
 def _get_latest_built_wheel() -> pathlib.Path:
-    wheel_name = (f'{_PACKAGE_WHEEL_NAME}-'
-                  f'{version.parse(sky.__version__)}-*.whl')
+    wheel_name = (f'**/{_PACKAGE_WHEEL_NAME}-'
+                    f'{version.parse(sky.__version__)}-*.whl')
     try:
-        latest_wheel = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
+        latest_wheel_path = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
     except ValueError:
         raise FileNotFoundError(
-            f'Could not find built SkyPilot wheels {wheel_name!r} '
+            f'Could not find built SkyPilot wheels '
             f'under {WHEEL_DIR!r}') from None
-    return latest_wheel
+    return latest_wheel_path
 
 
-def _build_sky_wheel() -> pathlib.Path:
+def _build_sky_wheel():
     """Build a wheel for Sky."""
-    # prepare files
-    if (WHEEL_DIR / 'sky').exists():
-        # This may because the last wheel build was interrupted,
-        # so the symlink file doesn't get cleaned.
-        (WHEEL_DIR / 'sky').unlink()
-    (WHEEL_DIR / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
-    setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
-    for f in setup_files_dir.iterdir():
-        if f.is_file():
-            shutil.copy(str(f), str(WHEEL_DIR))
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        # prepare files
+        tmp_dir = pathlib.Path(tmp_dir)
+        (tmp_dir / 'sky').symlink_to(SKY_PACKAGE_PATH, target_is_directory=True)
+        setup_files_dir = SKY_PACKAGE_PATH / 'setup_files'
+        for f in setup_files_dir.iterdir():
+            if f.is_file():
+                shutil.copy(str(f), str(tmp_dir))
 
-    # It is important to normalize the path, otherwise 'pip wheel' would
-    # treat the directory as a file and generate an empty wheel.
-    norm_path = str(WHEEL_DIR) + os.sep
-    try:
-        # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
-        # of the output.
-        subprocess.run([
-            'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
-            str(WHEEL_DIR)
-        ],
-                       stdout=subprocess.DEVNULL,
-                       stderr=subprocess.PIPE,
-                       check=True)
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError('Fail to build pip wheel for Sky. '
-                           f'Error message: {e.stderr.decode()}') from e
+        # It is important to normalize the path, otherwise 'pip wheel' would
+        # treat the directory as a file and generate an empty wheel.
+        norm_path = str(tmp_dir) + os.sep
+        try:
+            # TODO(suquark): For python>=3.7, 'subprocess.run' supports capture
+            # of the output.
+            subprocess.run([
+                'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
+                str(tmp_dir)
+            ],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
+                        check=True)
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError('Fail to build pip wheel for Sky. '
+                            f'Error message: {e.stderr.decode()}') from e
 
-    latest_wheel = _get_latest_built_wheel()
-    cleanup_wheels_dir(WHEEL_DIR, latest_wheel)
-    return WHEEL_DIR.absolute()
+        wheel_name = (f'{_PACKAGE_WHEEL_NAME}-'
+                  f'{version.parse(sky.__version__)}-*.whl')
+        wheel_path = next(tmp_dir.glob(wheel_name))
+
+        # Use a unique temporary dir per wheel hash, because there may be many
+        # concurrent 'sky launch' happening.  The path should be stable if the
+        # wheel content hash doesn't change.
+        with open(wheel_path, 'rb') as f:
+            contents = f.read()
+        hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
+
+        wheel_dir = WHEEL_DIR / hash_of_latest_wheel
+        wheel_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(wheel_path, wheel_dir)
 
 
 def build_sky_wheel() -> Tuple[pathlib.Path, str]:
@@ -119,17 +128,16 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
-        latest_wheel_path = _get_latest_built_wheel()
+        latest_wheel = _get_latest_built_wheel()
+        wheel_hash = latest_wheel.parent.name
+        cleanup_wheels_dir(WHEEL_DIR, latest_wheel.parent)
 
         # Use a unique temporary dir per wheel hash, because there may be many
         # concurrent 'sky launch' happening.  The path should be stable if the
         # wheel content hash doesn't change.
-        with open(latest_wheel_path, 'rb') as f:
-            contents = f.read()
-        hash_of_latest_wheel = hashlib.md5(contents).hexdigest()
         temp_wheel_dir = pathlib.Path(
-            tempfile.gettempdir()) / hash_of_latest_wheel
+            tempfile.gettempdir()) / wheel_hash
         temp_wheel_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy(latest_wheel_path, temp_wheel_dir)
+        shutil.copy(latest_wheel, temp_wheel_dir)
 
-    return temp_wheel_dir.absolute(), hash_of_latest_wheel
+    return temp_wheel_dir.absolute(), wheel_hash
