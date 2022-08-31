@@ -453,6 +453,7 @@ class Resources:
 
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
+
         Returns True if they are the same, False if not.
         """
         if (self.cloud is None) != (other.cloud is None):
@@ -510,6 +511,7 @@ class Resources:
                             other: Union[List['Resources'], 'Resources'],
                             requested_num_nodes: int = 1) -> bool:
         """Returns whether this resources is less demanding than the other.
+
         Args:
             other: Resources of the launched cluster. If the cluster is
               heterogeneous, it is represented as a list of Resource objects.
