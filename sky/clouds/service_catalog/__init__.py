@@ -131,12 +131,17 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str],
                     zone: Optional[str],
                     use_spot: bool,
-                    clouds: CloudFilter = None):
-    """Returns the price of a VM instance in the given region and zone.
+                    clouds: CloudFilter = None) -> float:
+    """Returns the hourly price of a VM instance in the given region and zone.
 
-    If region is None, return the cheapest price among all regions.
-    If zone is None, return the cheapest price among all the zones in the given
-    region.
+    * If (region, zone) == (None, None), return the cheapest hourly price among
+    all regions and zones.
+    * If (region, zone) == (str, None), return the cheapest hourly price among
+    all the zones in the given region.
+    * If (region, zone) == (None, str), return the hourly price of the instance
+    type in the zone.
+    * If (region, zone) == (str, str), zone must be in the region, and the
+    function returns the hourly price of the instance type in the zone.
     """
     return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
                                zone, use_spot)
@@ -181,11 +186,16 @@ def get_accelerator_hourly_cost(
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> float:
-    """Returns the price of the accelerators in the given region and zone.
+    """Returns the hourly price of the accelerator in the given region and zone.
 
-    If region is None, return the cheapest price among all regions.
-    If zone is None, return the cheapest price among all the zones in the given
-    region.
+    * If (region, zone) == (None, None), return the cheapest hourly price among
+    all regions and zones.
+    * If (region, zone) == (str, None), return the cheapest hourly price among
+    all the zones in the given region.
+    * If (region, zone) == (None, str), return the hourly price of the
+    accelerator in the zone.
+    * If (region, zone) == (str, str), zone must be in the region, and the
+    function returns the hourly price of the accelerator in the zone.
     """
     return _map_clouds_catalog(clouds,
                                'get_accelerator_hourly_cost',
