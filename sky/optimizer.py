@@ -885,6 +885,7 @@ def _fill_in_launchable_resources(
 
         for r in launchable[resources]:
             if isinstance(r.cloud, clouds.GCP):
+                # Check if the host VM satisfies the max vCPU and memory limits.
                 clouds.GCP.check_accelerator_attachable_to_host(
                     r.instance_type, r.accelerators, r.zone)
 

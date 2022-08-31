@@ -308,7 +308,7 @@ def check_host_accelerator_compatibility(
     """Check if the instance type is compatible with the accelerators.
 
     This function ensures that TPUs and GPUs except A100 are attached to N1,
-    and A100 are attached to A2 machines.
+    and A100 GPUs are attached to A2 machines.
     """
     if accelerators is None:
         if instance_type.startswith('a2-'):
@@ -390,7 +390,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ResourcesMismatchError(
                 f'{acc_name}:{acc_count} is not launchable on GCP. '
-                f'Valid accelerator counts are {valid_counts}.')
+                f'The valid {acc_name} counts are {valid_counts}.')
 
     if acc_name == 'A100':
         a100_instance_type = _A100_INSTANCE_TYPES[acc_count]

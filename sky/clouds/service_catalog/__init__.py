@@ -191,7 +191,11 @@ def get_region_zones_for_accelerators(
 def check_host_accelerator_compatibility(instance_type: str,
                                          accelerators: Optional[Dict[str, int]],
                                          clouds: CloudFilter = None) -> None:
-    """GCP only: Check if host VM type is compatible with the accelerators."""
+    """GCP only: Check if host VM type is compatible with the accelerators.
+
+    That is, this function ensures that TPUs and GPUs except A100 are attached
+    to N1, and A100 GPUs are attached to A2 machines.
+    """
     _map_clouds_catalog(clouds, 'check_host_accelerator_compatibility',
                         instance_type, accelerators)
 
@@ -200,7 +204,11 @@ def check_accelerator_attachable_to_host(instance_type: str,
                                          accelerators: Optional[Dict[str, int]],
                                          zone: Optional[str] = None,
                                          clouds: CloudFilter = None) -> None:
-    """GCP only: Check if the accelerators can be attached to the host VM."""
+    """GCP only: Check if the accelerators can be attached to the host VM.
+
+    Specifically, this function checks the max CPU count and memory of the host
+    that the accelerators can be attached to.
+    """
     _map_clouds_catalog(clouds, 'check_accelerator_attachable_to_host',
                         instance_type, accelerators, zone)
 
