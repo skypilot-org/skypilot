@@ -662,6 +662,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          cluster_config_template: str,
                          cluster_name: str,
                          local_wheel_path: pathlib.Path,
+                         wheel_hash: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          auth_config: Optional[Dict[str, str]] = None,
@@ -727,6 +728,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 'sky_version': str(version.parse(sky.__version__)),
+                'sky_wheel_hash': wheel_hash,
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
@@ -1057,6 +1059,16 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
+
+    # When ray up launches TPU VM Pod, Pod workers (except for the head)
+    # won't be connected to Ray cluster. Thus "ray get-worker-ips"
+    # won't work and we need to query the node IPs with gcloud as
+    # implmented in _get_tpu_vm_pod_ips.
+    ray_config = common_utils.read_yaml(cluster_yaml)
+    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
+    if use_tpu_vm:
+        return _get_tpu_vm_pod_ips(ray_config)
+
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
             handle.head_ip is not None):
@@ -1115,6 +1127,37 @@ def get_node_ips(cluster_yaml: str,
 
 
 @timeline.event
+def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
+    """Returns the IPs of all TPU VM Pod workers using gcloud."""
+
+    cluster_name = ray_config['cluster_name']
+    zone = ray_config['provider']['availability_zone']
+    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
+                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                 f'--zone={zone} --format=value\\(name\\)')
+    tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
+                 f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                 '(networkEndpoints.accessConfig.externalIp)"')
+
+    rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+                                                 '/dev/null',
+                                                 shell=True,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
+    if rcode != 0:
+        failure_massage = ('Failed to run gcloud to get TPU VM Pod IPs.\n'
+                           '**** STDOUT ****\n'
+                           '{stdout}\n'
+                           '**** STDERR ****\n'
+                           '{stderr}')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                failure_massage.format(stdout=stdout, stderr=stderr))
+    all_ips = re.findall(IP_ADDR_REGEX, stdout)
+    return all_ips
+
+
+@timeline.event
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
@@ -1135,6 +1178,87 @@ def get_head_ip(
     else:
         head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
+
+
+def run_command_and_handle_ssh_failure(
+        runner: command_runner.SSHCommandRunner,
+        command: str,
+        failure_message: Optional[str] = None) -> str:
+    """Runs command remotely and returns output with proper error handling."""
+    rc, stdout, stderr = runner.run(command,
+                                    require_outputs=True,
+                                    stream_logs=False)
+    if rc == 255:
+        # SSH failed
+        raise RuntimeError(
+            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
+            f'to {runner.ip} failed. This is most likely due to incorrect '
+            'credentials or incorrect permissions for the key file. Check '
+            'your credentials and try again.')
+    subprocess_utils.handle_returncode(rc,
+                                       command,
+                                       failure_message,
+                                       stderr=stderr)
+    return stdout
+
+
+def do_filemounts_and_setup_on_local_workers(
+        cluster_config_file: str,
+        worker_ips: List[str] = None,
+        extra_setup_cmds: List[str] = None):
+    """Completes filemounting and setup on worker nodes.
+
+    Syncs filemounts and runs setup on worker nodes for a local cluster. This
+    is a workaround for a Ray Autoscaler bug where `ray up` does not perform
+    filemounting or setup for local cluster worker nodes.
+    """
+    config = common_utils.read_yaml(cluster_config_file)
+
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    if worker_ips is None:
+        worker_ips = config['provider']['worker_ips']
+    file_mounts = config['file_mounts']
+
+    setup_cmds = config['setup_commands']
+    if extra_setup_cmds is not None:
+        setup_cmds += extra_setup_cmds
+    setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
+
+    worker_runners = command_runner.SSHCommandRunner.make_runner_list(
+        worker_ips, *ssh_credentials)
+
+    # Uploads setup script to the worker node
+    with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+        f.write(setup_script)
+        f.flush()
+        setup_sh_path = f.name
+        setup_file = os.path.basename(setup_sh_path)
+        file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
+
+        # Ray Autoscaler Bug: Filemounting + Ray Setup
+        # does not happen on workers.
+        def _setup_local_worker(runner: command_runner.SSHCommandRunner):
+            for dst, src in file_mounts.items():
+                mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
+                run_command_and_handle_ssh_failure(
+                    runner,
+                    mkdir_dst,
+                    failure_message=f'Failed to run {mkdir_dst} on remote.')
+                if os.path.isdir(src):
+                    src = os.path.join(src, '')
+                runner.rsync(source=src, target=dst, up=True, stream_logs=False)
+
+            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+            rc, stdout, _ = runner.run(setup_cmd,
+                                       stream_logs=False,
+                                       require_outputs=True)
+            subprocess_utils.handle_returncode(
+                rc,
+                setup_cmd,
+                'Failed to setup Ray autoscaler commands on remote.',
+                stderr=stdout)
+
+        subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
 
 
 def check_network_connection():
@@ -1399,6 +1523,10 @@ def _update_cluster_status_no_lock(
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        # This happens to a stopped TPU VM as we use gcloud to query the IP.
+        if len(ips) == 0:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
             # Check the ray cluster status. We have to check it for single node
             # case, since the get_node_ips() does not require ray cluster to be

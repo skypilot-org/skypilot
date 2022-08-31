@@ -282,6 +282,18 @@ def dump_spot_job_queue() -> str:
             job_duration = 0
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
+
+        cluster_name = generate_spot_cluster_name(job['job_name'],
+                                                  job['job_id'])
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        if handle is not None:
+            job['cluster_resources'] = (
+                f'{handle.launched_nodes}x {handle.launched_resources}')
+            job['region'] = handle.launched_resources.region
+        else:
+            job['cluster_resources'] = '-'
+            job['region'] = '-'
+
     return json.dumps(jobs, indent=2)
 
 
@@ -336,17 +348,10 @@ def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
             if started != '-':
                 started += ago_suffix
             values.append(started)
-            cluster_name = generate_spot_cluster_name(job['job_name'],
-                                                      job['job_id'])
-            handle = global_user_state.get_handle_from_cluster_name(
-                cluster_name)
-            if handle is None:
-                values.extend(['-', '-'])
-            else:
-                values.extend([
-                    f'{handle.launched_nodes}x {handle.launched_resources}',
-                    handle.launched_resources.region
-                ])
+            values.extend([
+                job['cluster_resources'],
+                job['region'],
+            ])
         job_table.add_row(values)
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())

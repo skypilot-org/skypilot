@@ -312,6 +312,24 @@ def test_n_node_job_queue():
     run_one_test(test)
 
 
+def test_large_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'large_job_queue',
+        [
+            f'sky launch -y -c {name} --cloud gcp ""',
+            f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
+            'sleep 20',
+            # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
+            # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
+            f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Submitting multiple tasks to the same cluster. ----------
 def test_multi_echo():
     name = _get_cluster_name()
@@ -382,6 +400,24 @@ def test_tpu_vm():
             f'sky exec {name} examples/tpu/tpuvm_mnist.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
+        ],
+        f'sky down -y {name}',
+        timeout=30 * 60,  # can take 30 mins
+    )
+    run_one_test(test)
+
+
+# ---------- TPU VM Pod. ----------
+# Mark slow because it's expensive to run.
+@pytest.mark.slow
+def test_tpu_vm_pod():
+    name = _get_cluster_name()
+    test = Test(
+        'tpu_pod',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky logs {name} 1',  # Ensure the job finished.
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
         timeout=30 * 60,  # can take 30 mins
