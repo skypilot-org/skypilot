@@ -5,48 +5,62 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
-from typing import Optional, Tuple
+from typing import Tuple
 
 import filelock
 from packaging import version
 
 import sky
+from sky import sky_logging
 from sky.backends import backend_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # Local wheel path is same as the remote path.
 WHEEL_DIR = pathlib.Path(os.path.expanduser(backend_utils.SKY_REMOTE_PATH))
+_WHEEL_LOCK_PATH = WHEEL_DIR.parent / '.wheels_lock'
 SKY_PACKAGE_PATH = pathlib.Path(sky.__file__).parent.parent / 'sky'
 
 # NOTE: keep the same as setup.py's setuptools.setup(name=..., ...).
 _PACKAGE_WHEEL_NAME = 'skypilot'
 
 
-def cleanup_wheels_dir(wheel_dir: pathlib.Path,
-                       latest_wheel: Optional[pathlib.Path] = None) -> None:
-    if latest_wheel is None:
-        # Remove the entire dir.
-        shutil.rmtree(wheel_dir, ignore_errors=True)
-        return
+    
+def _get_latest_wheel_and_cleanup() -> pathlib.Path:
+    wheel_name = (f'**/{_PACKAGE_WHEEL_NAME}-'
+                  f'{version.parse(sky.__version__)}-*.whl')
+    try:
+        latest_wheel = max(WHEEL_DIR.glob(wheel_name),
+                                key=os.path.getctime)
+    except ValueError:
+        raise FileNotFoundError(f'Could not find built SkyPilot wheels '
+                                f'under {WHEEL_DIR!r}') from None
+
+    latest_wheel_dir_name = latest_wheel.parent
     # Cleanup older wheels.
-    for f in wheel_dir.iterdir():
-        if f != latest_wheel:
+    for f in WHEEL_DIR.iterdir():
+        if f != latest_wheel_dir_name:
             if f.is_dir() and not f.is_symlink():
                 shutil.rmtree(f, ignore_errors=True)
             else:
                 f.unlink()
+    return latest_wheel
 
 
-def _get_latest_built_wheel() -> pathlib.Path:
-    wheel_name = (f'**/{_PACKAGE_WHEEL_NAME}-'
-                    f'{version.parse(sky.__version__)}-*.whl')
+def clean_up_wheel_dir():
+    """Clean up the wheel directory.
+    
+    This function will be called during `ray up` to clean up the wheel, it
+    acquires the wheel lock to prevent concurrent wheel operations, by other
+    `ray up` or `sky launch`.
+    """
     try:
-        latest_wheel_path = max(WHEEL_DIR.glob(wheel_name), key=os.path.getctime)
-    except ValueError:
-        raise FileNotFoundError(
-            f'Could not find built SkyPilot wheels '
-            f'under {WHEEL_DIR!r}') from None
-    return latest_wheel_path
-
+        with filelock.FileLock(_WHEEL_LOCK_PATH, timeout=5):  # pylint: disable=E0110
+            _get_latest_wheel_and_cleanup()
+    except FileNotFoundError as e:
+        logger.error(str(e))
+    except filelock.Timeout:
+        logger.warning('Failed to clean up wheel directory')
 
 def _build_sky_wheel():
     """Build a wheel for Sky."""
@@ -69,15 +83,15 @@ def _build_sky_wheel():
                 'pip3', 'wheel', '--no-deps', norm_path, '--wheel-dir',
                 str(tmp_dir)
             ],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.PIPE,
-                        check=True)
+                           stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE,
+                           check=True)
         except subprocess.CalledProcessError as e:
             raise RuntimeError('Fail to build pip wheel for Sky. '
-                            f'Error message: {e.stderr.decode()}') from e
+                               f'Error message: {e.stderr.decode()}') from e
 
         wheel_name = (f'{_PACKAGE_WHEEL_NAME}-'
-                  f'{version.parse(sky.__version__)}-*.whl')
+                      f'{version.parse(sky.__version__)}-*.whl')
         wheel_path = next(tmp_dir.glob(wheel_name))
 
         # Use a unique temporary dir per wheel hash, because there may be many
@@ -115,7 +129,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
     # to guarantee inherent consistency.
-    with filelock.FileLock(WHEEL_DIR.parent / '.wheels_lock'):  # pylint: disable=E0110
+    with filelock.FileLock(_WHEEL_LOCK_PATH):  # pylint: disable=E0110
         # This implements a classic "compare, update and clone" consistency
         # protocol. "compare, update and clone" has to be atomic to avoid
         # race conditions.
@@ -128,15 +142,14 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             _build_sky_wheel()
 
-        latest_wheel = _get_latest_built_wheel()
+        latest_wheel = _get_latest_wheel_and_cleanup()
+
         wheel_hash = latest_wheel.parent.name
-        cleanup_wheels_dir(WHEEL_DIR, latest_wheel.parent)
 
         # Use a unique temporary dir per wheel hash, because there may be many
         # concurrent 'sky launch' happening.  The path should be stable if the
         # wheel content hash doesn't change.
-        temp_wheel_dir = pathlib.Path(
-            tempfile.gettempdir()) / wheel_hash
+        temp_wheel_dir = pathlib.Path(tempfile.gettempdir()) / wheel_hash
         temp_wheel_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy(latest_wheel, temp_wheel_dir)
 
