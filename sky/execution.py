@@ -179,7 +179,7 @@ def _execute(
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
-        task.add_storage_mounts()
+        task.sync_storage_mounts()
 
     try:
         if stages is None or Stage.PROVISION in stages:
@@ -364,11 +364,8 @@ def spot_launch(
 
     change_default_value = dict()
     if not resources.use_spot_specified:
-        logger.info('Field use_spot not specified; defaulting to True.')
         change_default_value['use_spot'] = True
     if resources.spot_recovery is None:
-        logger.info('No spot recovery strategy specified; defaulting to '
-                    f'{spot.SPOT_DEFAULT_STRATEGY}.')
         change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
     new_resources = resources.copy(**change_default_value)
@@ -386,8 +383,8 @@ def spot_launch(
     run_id = common_utils.get_run_id()[:8]
 
     # Step 1: Translate the workdir SkyPilot storage.
-    logger.info(f'{colorama.Fore.YELLOW}Translating local file_mounts '
-                f'to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+    logger.info(f'{colorama.Fore.YELLOW}Translating file_mounts with local '
+    f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
     new_storage_mounts = dict()
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
@@ -402,7 +399,7 @@ def spot_launch(
                 'persistent': False,
                 'mode': 'COPY',
             })
-        # Check of the existance of the workdir in file_mounts is done in
+        # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
         logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
                     f'{bucket_name!r}.')
@@ -478,7 +475,7 @@ def spot_launch(
     # the remote spot controller.
     logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
                 f'{colorama.Style.RESET_ALL} See sky storage ls')
-    task.add_storage_mounts()
+    task.sync_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
@@ -492,7 +489,7 @@ def spot_launch(
         new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
     task.update_file_mounts(new_file_mounts)
 
-    # Step 5: Replace the source field that is local path in all storage_mounts
+    # Step 6: Replace the source field that is local path in all storage_mounts
     # with bucket URI and remove the name field.
     for storage_obj in task.storage_mounts.values():
         if (storage_obj.source is not None and

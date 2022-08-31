@@ -492,7 +492,7 @@ class Task:
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
 
-    def add_storage_mounts(self) -> None:
+    def sync_storage_mounts(self) -> None:
         """Adds storage mounts to the Task."""
         # TODO(zhwu, romilb): The optimizer should look at the source and
         #  destination to figure out the right stores to use. For now, we
@@ -621,8 +621,9 @@ class Task:
                     self.workdir is not None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Cannot mount to {constants.SKY_REMOTE_WORKDIR!r} '
-                        'when workdir is set.')
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir.')
 
         self.file_mounts = file_mounts
         return self

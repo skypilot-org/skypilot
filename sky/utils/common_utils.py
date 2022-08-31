@@ -20,7 +20,12 @@ _run_id = None
 
 
 def get_run_id():
-    """Returns a unique run id for each run of the program."""
+    """Returns a unique run id for each 'run'.
+
+    A run is defined as the lifetime of a process that has imported `sky`
+    and has called its CLI or programmatic APIs. For example, two successive
+    `sky launch` are two runs.
+    """
     global _run_id
     if _run_id is None:
         _run_id = str(uuid.uuid4())
