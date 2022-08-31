@@ -89,8 +89,10 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
     Caller is responsible for removing the wheel.
 
     Returns:
-        A temporary path to a directory holding the wheel; path is guaranteed
-        unique per wheel content hash.
+        A tuple of (wheel path, wheel hash):
+        - wheel_path: A temporary path to a directory holding the wheel; path
+        is guaranteed unique per wheel content hash.
+        - wheel_hash: The wheel content hash.
     """
 
     def _get_latest_modification_time(path: pathlib.Path) -> float:
