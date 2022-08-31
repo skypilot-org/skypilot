@@ -106,7 +106,6 @@ def get_hourly_cost(
     zone: Optional[str],
     use_spot: bool = False,
 ) -> float:
-    """Returns the price of a VM instance in the given region and zone."""
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
@@ -205,7 +204,6 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 region: Optional[str] = None,
                                 zone: Optional[str] = None,
                                 use_spot: bool = False) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
     if zone is not None:

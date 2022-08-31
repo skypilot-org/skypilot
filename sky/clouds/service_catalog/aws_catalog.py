@@ -31,7 +31,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None,
                     use_spot: bool = False) -> float:
-    """Returns the price of a VM instance in the given region and zone."""
     return common.get_hourly_cost_impl(_df, instance_type, region, zone,
                                        use_spot)
 

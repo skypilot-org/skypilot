@@ -36,7 +36,6 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     zone: Optional[str] = None,
                     use_spot: bool = False) -> float:
-    """Returns the price of a VM instance in the given region and zone."""
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
     return common.get_hourly_cost_impl(_df, instance_type, region, zone,
