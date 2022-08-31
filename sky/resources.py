@@ -44,7 +44,7 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 5
+    _VERSION = 6
 
     def __init__(
         self,
