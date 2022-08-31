@@ -5,7 +5,7 @@ Requesting Quota Increase
 
 
 Most cloud providers enforce a quota policy to limit the number of VM instances that can exist in a given region.
-Users may encourter `QuotaExceeded` or `VcpuLimitExceeded` errors during resources provisioning, especially for high end GPUs such as V100/A100.
+Users may encounter `QuotaExceeded` or `VcpuLimitExceeded` errors during resources provisioning, especially for high end GPUs such as V100/A100.
 To check or increase your quota limits, please follow the below instructions.
 After submitting the request, it will usually take a few days for the support team to review.
 To increase chances of being approved, you may respond their inquiry emails on how the requested resources will be used your projects.
