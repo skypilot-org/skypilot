@@ -16,6 +16,12 @@ from sky import sky_logging
 logger = sky_logging.init_logger(__name__)
 
 
+def get_user_hash():
+    """Returns a unique user-machine specific hash as a user id."""
+    hash_str = user_and_hostname_hash()
+    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+
+
 class Backoff:
     """Exponential backoff with jittering."""
     MULTIPLIER = 1.6

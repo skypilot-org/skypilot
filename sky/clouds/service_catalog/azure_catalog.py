@@ -43,6 +43,10 @@ def get_hourly_cost(instance_type: str,
                                        use_spot)
 
 
+def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
+
+
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
@@ -82,8 +86,10 @@ def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
     return gen_version
 
 
-def list_accelerators(
-        gpus_only: bool,
-        name_filter: Optional[str]) -> Dict[str, List[common.InstanceTypeInfo]]:
+def list_accelerators(gpus_only: bool,
+                      name_filter: Optional[str],
+                      case_sensitive: bool = True
+                     ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
-    return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter)
+    return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
+                                         case_sensitive)

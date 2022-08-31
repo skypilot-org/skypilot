@@ -15,6 +15,7 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.skylet import job_lib
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
 
@@ -112,6 +113,12 @@ def stop(cluster_name: str, purge: bool = False):
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
+        # Reference:
+        # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
+        raise exceptions.NotSupportedError(
+            f'Stopping cluster {cluster_name!r} with TPU VM Pod '
+            'is not supported.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     if (isinstance(backend, backends.CloudVmRayBackend) and
@@ -137,7 +144,7 @@ def down(cluster_name: str, purge: bool = False):
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+    if (cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES and not purge):
         raise exceptions.NotSupportedError(
             f'Tearing down sky reserved cluster {cluster_name!r} '
             f'is not supported.')
@@ -172,6 +179,12 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
      handle) = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
+    if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
+        # Reference:
+        # https://cloud.google.com/tpu/docs/managing-tpus-tpu-vm#stopping_a_with_gcloud  # pylint: disable=line-too-long
+        raise exceptions.NotSupportedError(
+            f'{operation} cluster {cluster_name!r} with TPU VM Pod '
+            'is not supported.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
@@ -202,6 +215,11 @@ def _check_cluster_available(cluster_name: str,
     """Check if the cluster is available."""
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
+    if handle is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
+                f'exist.{colorama.Style.RESET_ALL} skipped.')
     backend = backend_utils.get_backend_from_handle(handle)
     if isinstance(backend, backends.LocalDockerBackend):
         # LocalDockerBackend does not support job queues
@@ -433,6 +451,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
                 'duration': (float) duration in seconds,
                 'retry_count': int Number of retries,
                 'status': sky.JobStatus status of the job,
+                'cluster_resources': (str) resources of the cluster,
+                'region': (str) region of the cluster,
             }
         ]
     Raises:
@@ -539,11 +559,15 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    _, handle = _is_spot_controller_up(
+    controller_status, handle = _is_spot_controller_up(
         'Please restart the spot controller with '
-        '`sky start sky-spot-controller -i 5`.')
+        f'`sky start {spot.SPOT_CONTROLLER_NAME} -i 5`.')
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('All jobs finished.')
+        msg = 'All jobs finished.'
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg = ''
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(msg)
 
     if name is not None and job_id is not None:
         raise ValueError('Cannot specify both name and job_id.')

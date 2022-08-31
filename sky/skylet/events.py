@@ -53,7 +53,7 @@ class SkyletEvent:
 
 class JobUpdateEvent(SkyletEvent):
     """Skylet event for updating job status."""
-    EVENT_INTERVAL_SECONDS = 20
+    EVENT_INTERVAL_SECONDS = 300
 
     # Only update status of the jobs after this many seconds of job submission,
     # to avoid race condition with `ray job` to make sure it job has been

@@ -646,15 +646,24 @@ class Optimizer:
             region_or_zone = resources.region
             if resources.zone is not None:
                 region_or_zone = resources.zone
+            cloud = resources.cloud
+            vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
+            if vcpus is None:
+                vcpus = '-'
+            elif vcpus.is_integer():
+                vcpus = str(int(vcpus))
+            else:
+                vcpus = f'{vcpus:.1f}'
             return [
-                str(resources.cloud),
+                str(cloud),
                 resources.instance_type + spot,
+                vcpus,
                 str(accelerators),
                 region_or_zone,
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS', 'REGION (ZONE)']
+        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS','REGION (ZONE)']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]

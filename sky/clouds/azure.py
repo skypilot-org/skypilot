@@ -87,10 +87,7 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str, int]] = None
-                                 ) -> str:
-        del accelerators
+    def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
         return 'Standard_D8_v4'
 
@@ -168,6 +165,14 @@ class Azure(clouds.Cloud):
     ) -> Optional[Dict[str, int]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='azure')
+
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='azure')
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -274,11 +279,11 @@ class Azure(clouds.Cloud):
             output = _run_output('az account show --output=json')
         except subprocess.CalledProcessError:
             return False, (
-                'Azure CLI returned error. Run the following commands '
-                'under sky folder:'
-                # TODO(zhwu): after we publish sky to PyPI, change this to
-                # `pip install sky[azure]`
-                '\n      $ pip install .[azure]'
+                'Azure CLI returned error. Run the following commands:'
+                '\n      $ pip install skypilot[azure]  # if installed from '
+                'PyPI'
+                '\n    Or:'
+                '\n      $ pip install .[azure]  # if installed from source'
                 '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return something like:
         #   {"id": ..., "user": ...}

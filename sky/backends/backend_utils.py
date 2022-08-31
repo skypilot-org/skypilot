@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import subprocess
+import tempfile
 import textwrap
 import threading
 import time
@@ -30,7 +31,6 @@ from ray.autoscaler._private import commands as ray_commands
 from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
-import yaml
 
 import sky
 from sky import authentication as auth
@@ -105,7 +105,15 @@ SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
-CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 10
+CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
+
+# Remote dir that holds our runtime files.
+_REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
+
+
+def is_ip(s: str) -> bool:
+    """Returns whether this string matches IP_ADDR_REGEX."""
+    return len(re.findall(IP_ADDR_REGEX, s)) == 1
 
 
 def fill_template(template_name: str,
@@ -131,11 +139,98 @@ def fill_template(template_name: str,
     # Add yaml file path to the template variables.
     variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
     variables['sky_ray_yaml_local_path'] = output_path
+    # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
     with open(output_path, 'w') as fout:
         fout.write(content)
     return output_path
+
+
+def _optimize_file_mounts(yaml_path: str) -> None:
+    """Optimize file mounts in the given ray yaml file.
+
+    Runtime files handling:
+    List of runtime files to be uploaded to cluster:
+      - yaml config (for autostopping)
+      - wheel
+      - credentials
+    Format is {dst: src}.
+    """
+    yaml_config = common_utils.read_yaml(yaml_path)
+
+    file_mounts = yaml_config.get('file_mounts', {})
+    # Remove the file mounts added by the newline.
+    if '' in file_mounts:
+        assert file_mounts[''] == '', file_mounts['']
+        file_mounts.pop('')
+
+    # Putting these in file_mounts hurts provisioning speed, as each file
+    # opens/closes an SSH connection.  Instead, we:
+    #  - cp locally them into a directory
+    #  - upload that directory as a file mount (1 connection)
+    #  - use a remote command to move all runtime files to their right places.
+
+    # Local tmp dir holding runtime files.
+    local_runtime_files_dir = tempfile.mkdtemp()
+    new_file_mounts = {_REMOTE_RUNTIME_FILES_DIR: local_runtime_files_dir}
+
+    # (For remote) Build a command that copies runtime files to their right
+    # destinations.
+    # NOTE: we copy rather than move, because when launching >1 node, head node
+    # is fully set up first, and if moving then head node's files would already
+    # move out of _REMOTE_RUNTIME_FILES_DIR, which would cause setting up
+    # workers (from the head's files) to fail.  An alternative is softlink
+    # (then we need to make sure the usage of runtime files follow links).
+    commands = []
+    basenames = set()
+    for dst, src in file_mounts.items():
+        src_basename = os.path.basename(src)
+        dst_basename = os.path.basename(dst)
+        dst_parent_dir = os.path.dirname(dst)
+
+        # Validate by asserts here as these files are added by our backend.
+        # Our runtime files (wheel, yaml, credentials) do not have backslashes.
+        assert not src.endswith('/'), src
+        assert not dst.endswith('/'), dst
+        assert src_basename not in basenames, (
+            f'Duplicated src basename: {src_basename}; mounts: {file_mounts}')
+        basenames.add(src_basename)
+        # Our runtime files (wheel, yaml, credentials) are not relative paths.
+        assert dst_parent_dir, f'Found relative destination path: {dst}'
+
+        mkdir_parent = f'mkdir -p {dst_parent_dir}'
+        if os.path.isdir(os.path.expanduser(src)):
+            # Special case for directories. If the dst already exists as a folder,
+            # directly copy the folder will create a subfolder under the dst.
+            mkdir_parent = f'mkdir -p {dst}'
+            src_basename = f'{src_basename}/*'
+        mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
+              f'{dst_parent_dir}/{dst_basename}')
+        fragment = f'({mkdir_parent} && {mv})'
+        commands.append(fragment)
+    postprocess_runtime_files_command = ' && '.join(commands)
+
+    setup_commands = yaml_config.get('setup_commands', [])
+    if setup_commands:
+        setup_commands[
+            0] = f'{postprocess_runtime_files_command}; {setup_commands[0]}'
+    else:
+        setup_commands = [postprocess_runtime_files_command]
+
+    yaml_config['file_mounts'] = new_file_mounts
+    yaml_config['setup_commands'] = setup_commands
+
+    # (For local) Move all runtime files, including the just-written yaml, to
+    # local_runtime_files_dir/.
+    all_local_sources = ' '.join(
+        local_src for local_src in file_mounts.values())
+    # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
+    subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/',
+                   shell=True,
+                   check=True)
+
+    common_utils.dump_yaml(yaml_path, yaml_config)
 
 
 def path_size_megabytes(path: str) -> int:
@@ -148,8 +243,9 @@ def path_size_megabytes(path: str) -> int:
             str(resolved_path / command_runner.GIT_EXCLUDE))
     rsync_output = str(
         subprocess.check_output(
-            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} {command_runner.RSYNC_FILTER_OPTION}'
-            f' {git_exclude_filter} --dry-run {path}',
+            f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
+            f'{command_runner.RSYNC_FILTER_OPTION} '
+            f'{git_exclude_filter} --dry-run {path}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
@@ -566,6 +662,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          cluster_config_template: str,
                          cluster_name: str,
                          local_wheel_path: pathlib.Path,
+                         wheel_hash: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          auth_config: Optional[Dict[str, str]] = None,
@@ -602,6 +699,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
+
     yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -630,6 +728,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 'sky_version': str(version.parse(sky.__version__)),
+                'sky_wheel_hash': wheel_hash,
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
@@ -638,12 +737,19 @@ def write_cluster_config(to_provision: 'resources.Resources',
                     (None if auth_config is None else auth_config['ssh_user']),
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
-            }))
+            }),
+    )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
     _add_auth_to_cluster_config(cloud, yaml_path)
+    # Delay the optimization of the config until the authentication files is added.
+    if not isinstance(cloud, clouds.Local):
+        # Only optimize the file mounts for public clouds now, as local has not
+        # been fully tested yet.
+        _optimize_file_mounts(yaml_path)
+
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
     if (resources_vars.get('tpu_type') is not None and
@@ -679,8 +785,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
 
     This function's output removes comments included in the jinja2 template.
     """
-    with open(cluster_config_file, 'r') as f:
-        config = yaml.safe_load(f)
+    config = common_utils.read_yaml(cluster_config_file)
     # Check the availability of the cloud type.
     if isinstance(cloud, clouds.AWS):
         config = auth.setup_aws_authentication(config)
@@ -800,9 +905,9 @@ def wait_until_ray_cluster_ready(
                   nodes_so_far != num_nodes):
                 worker_status.stop()
                 logger.error(
-                    'Timed out: waited for workers to be provisioned '
-                    f'for more than {nodes_launching_progress_timeout} seconds.'
-                )
+                    'Timed out: waited for more than '
+                    f'{nodes_launching_progress_timeout} seconds for new '
+                    'workers to be provisioned, but no progress.')
                 return False  # failed
 
             if '(no pending nodes)' in output and '(no failures)' in output:
@@ -954,6 +1059,16 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
+
+    # When ray up launches TPU VM Pod, Pod workers (except for the head)
+    # won't be connected to Ray cluster. Thus "ray get-worker-ips"
+    # won't work and we need to query the node IPs with gcloud as
+    # implmented in _get_tpu_vm_pod_ips.
+    ray_config = common_utils.read_yaml(cluster_yaml)
+    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
+    if use_tpu_vm:
+        return _get_tpu_vm_pod_ips(ray_config)
+
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
             handle.head_ip is not None):
@@ -1012,6 +1127,37 @@ def get_node_ips(cluster_yaml: str,
 
 
 @timeline.event
+def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
+    """Returns the IPs of all TPU VM Pod workers using gcloud."""
+
+    cluster_name = ray_config['cluster_name']
+    zone = ray_config['provider']['availability_zone']
+    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
+                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                 f'--zone={zone} --format=value\\(name\\)')
+    tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
+                 f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                 '(networkEndpoints.accessConfig.externalIp)"')
+
+    rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+                                                 '/dev/null',
+                                                 shell=True,
+                                                 stream_logs=False,
+                                                 require_outputs=True)
+    if rcode != 0:
+        failure_massage = ('Failed to run gcloud to get TPU VM Pod IPs.\n'
+                           '**** STDOUT ****\n'
+                           '{stdout}\n'
+                           '**** STDERR ****\n'
+                           '{stderr}')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                failure_massage.format(stdout=stdout, stderr=stderr))
+    all_ips = re.findall(IP_ADDR_REGEX, stdout)
+    return all_ips
+
+
+@timeline.event
 def get_head_ip(
     handle: backends.Backend.ResourceHandle,
     use_cached_head_ip: bool = True,
@@ -1032,6 +1178,87 @@ def get_head_ip(
     else:
         head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
+
+
+def run_command_and_handle_ssh_failure(
+        runner: command_runner.SSHCommandRunner,
+        command: str,
+        failure_message: Optional[str] = None) -> str:
+    """Runs command remotely and returns output with proper error handling."""
+    rc, stdout, stderr = runner.run(command,
+                                    require_outputs=True,
+                                    stream_logs=False)
+    if rc == 255:
+        # SSH failed
+        raise RuntimeError(
+            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
+            f'to {runner.ip} failed. This is most likely due to incorrect '
+            'credentials or incorrect permissions for the key file. Check '
+            'your credentials and try again.')
+    subprocess_utils.handle_returncode(rc,
+                                       command,
+                                       failure_message,
+                                       stderr=stderr)
+    return stdout
+
+
+def do_filemounts_and_setup_on_local_workers(
+        cluster_config_file: str,
+        worker_ips: List[str] = None,
+        extra_setup_cmds: List[str] = None):
+    """Completes filemounting and setup on worker nodes.
+
+    Syncs filemounts and runs setup on worker nodes for a local cluster. This
+    is a workaround for a Ray Autoscaler bug where `ray up` does not perform
+    filemounting or setup for local cluster worker nodes.
+    """
+    config = common_utils.read_yaml(cluster_config_file)
+
+    ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
+    if worker_ips is None:
+        worker_ips = config['provider']['worker_ips']
+    file_mounts = config['file_mounts']
+
+    setup_cmds = config['setup_commands']
+    if extra_setup_cmds is not None:
+        setup_cmds += extra_setup_cmds
+    setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
+
+    worker_runners = command_runner.SSHCommandRunner.make_runner_list(
+        worker_ips, *ssh_credentials)
+
+    # Uploads setup script to the worker node
+    with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+        f.write(setup_script)
+        f.flush()
+        setup_sh_path = f.name
+        setup_file = os.path.basename(setup_sh_path)
+        file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
+
+        # Ray Autoscaler Bug: Filemounting + Ray Setup
+        # does not happen on workers.
+        def _setup_local_worker(runner: command_runner.SSHCommandRunner):
+            for dst, src in file_mounts.items():
+                mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
+                run_command_and_handle_ssh_failure(
+                    runner,
+                    mkdir_dst,
+                    failure_message=f'Failed to run {mkdir_dst} on remote.')
+                if os.path.isdir(src):
+                    src = os.path.join(src, '')
+                runner.rsync(source=src, target=dst, up=True, stream_logs=False)
+
+            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+            rc, stdout, _ = runner.run(setup_cmd,
+                                       stream_logs=False,
+                                       require_outputs=True)
+            subprocess_utils.handle_returncode(
+                rc,
+                setup_cmd,
+                'Failed to setup Ray autoscaler commands on remote.',
+                stderr=stdout)
+
+        subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
 
 
 def check_network_connection():
@@ -1296,6 +1523,10 @@ def _update_cluster_status_no_lock(
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
         ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        # This happens to a stopped TPU VM as we use gcloud to query the IP.
+        if len(ips) == 0:
+            raise exceptions.FetchIPError(
+                reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
             # Check the ray cluster status. We have to check it for single node
             # case, since the get_node_ips() does not require ray cluster to be

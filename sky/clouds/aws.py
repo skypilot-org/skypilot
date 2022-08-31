@@ -195,6 +195,14 @@ class AWS(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
 
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='aws')
+
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
