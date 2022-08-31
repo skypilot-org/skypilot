@@ -193,7 +193,7 @@ def check_host_accelerator_compatibility(instance_type: str,
                                          clouds: CloudFilter = None) -> None:
     """GCP only: Check if host VM type is compatible with the accelerators.
 
-    This function is invoked whenever a Resources object is created. 
+    This function is invoked whenever a Resources object is created.
     This function ensures that TPUs and GPUs (except A100) are attached to N1,
     and A100 GPUs are attached to A2 machines. However, it does NOT check
     the maximum vCPU count and maximum memory limits for the accelerators
