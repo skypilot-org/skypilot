@@ -62,17 +62,20 @@ def generate_random_dag(
             num_candidates = random.randint(1, max_num_candidate_resources)
             candidate_instance_types = random.choices(ALL_INSTANCE_TYPES,
                                                       k=num_candidates)
-            op.set_resources({
-                sky.Resources(
+
+            candidate_resources = set()
+            for candidate in candidate_instance_types:
+                instance_type = candidate.instance_type
+                if pd.isna(instance_type):
+                    instance_type = GCP_DEFAULT_INSTANCE_TYPE
+                resources = sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
-                    instance_type=candidate.instance_type \
-                        if not pd.isna(candidate.instance_type) \
-                        else GCP_DEFAULT_INSTANCE_TYPE,
+                    instance_type=instance_type,
                     accelerators={
-                        candidate.accelerator_name: candidate.accelerator_count},
-                )
-                for candidate in candidate_instance_types
-            })
+                        candidate.accelerator_name: candidate.accelerator_count
+                    })
+                candidate_resources.add(resources)
+            op.set_resources(candidate_resources)
     return dag
 
 

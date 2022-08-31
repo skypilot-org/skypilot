@@ -374,3 +374,17 @@ class GCP(clouds.Cloud):
         project_id = gcp_credentials.get('quota_project_id',
                                          None) or gcp_credentials['project_id']
         return project_id
+
+    @staticmethod
+    def check_host_accelerator_compatibility(
+            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
+        service_catalog.check_host_accelerator_compatibility(
+            instance_type, accelerators, 'gcp')
+
+    @staticmethod
+    def check_accelerator_attachable_to_host(
+            instance_type: str,
+            accelerators: Optional[Dict[str, int]],
+            zone: Optional[str] = None) -> None:
+        service_catalog.check_accelerator_attachable_to_host(
+            instance_type, accelerators, zone, 'gcp')
