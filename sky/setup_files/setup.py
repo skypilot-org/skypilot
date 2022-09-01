@@ -85,6 +85,8 @@ install_requires = [
     'pulp',
 ]
 
+# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
+# packages dependencies are changed.
 extras_require = {
     'aws': [
         'awscli',

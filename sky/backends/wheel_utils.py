@@ -1,4 +1,4 @@
-"""Utils for building sky pip wheels.
+"""Utils for building pip wheels.
 
 This module is used for building the wheel for SkyPilot under `~/.sky/wheels`,
 and the wheel will be used for installing the SkyPilot on the cluster nodes.
