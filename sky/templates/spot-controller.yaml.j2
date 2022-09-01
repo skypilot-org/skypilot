@@ -17,21 +17,21 @@ setup: |
   # Install cli dependencies
   # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
   # TODO(zhwu): Keep the dependencies align with the ones in setup.py
-  (pip list | grep boto3 2>&1 > /dev/null && \
-   pip list | grep google-api-python-client 2>&1 > /dev/null) || \
+  (pip list | grep boto3 > /dev/null 2>&1 && \
+   pip list | grep google-api-python-client > /dev/null 2>&1 ) || \
    pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
 
   # We do not install azure dependencies for now since our subscription does not support spot instances.
-  # pip list | grep azure-cli 2>&1 > /dev/null || \
+  # pip list | grep azure-cli > /dev/null 2>&1 || \
   #  pip3 install azure-cli==2.31.0 azure-core
 
-  gcloud --version 2>&1 > /dev/null || \
+  gcloud --help > /dev/null 2>&1 || \
   (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \
     tar xzf google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \
     mv google-cloud-sdk ~/ && \
-    ~/google-cloud-sdk/install.sh -q 2>&1 > /dev/null && \
-    source ~/google-cloud-sdk/path.bash.inc 2>&1 > /dev/null && \
-    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc)
+    ~/google-cloud-sdk/install.sh -q > /dev/null 2>&1 && \
+    source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \
+    echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc)
 
 run: |
   python -u -m sky.spot.controller \
