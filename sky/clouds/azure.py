@@ -39,8 +39,8 @@ class Azure(clouds.Cloud):
     _regions: List[clouds.Region] = []
 
     def instance_type_to_hourly_cost(self,
-                                     instance_type,
-                                     use_spot,
+                                     instance_type: str,
+                                     use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
@@ -50,8 +50,8 @@ class Azure(clouds.Cloud):
                                                clouds='azure')
 
     def accelerators_to_hourly_cost(self,
-                                    accelerators,
-                                    use_spot,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         del accelerators, use_spot, region, zone  # unused

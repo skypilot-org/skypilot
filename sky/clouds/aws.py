@@ -144,8 +144,8 @@ class AWS(clouds.Cloud):
                                                clouds='aws')
 
     def accelerators_to_hourly_cost(self,
-                                    accelerators,
-                                    use_spot,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         del accelerators, use_spot, region, zone  # unused

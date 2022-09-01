@@ -128,8 +128,8 @@ class GCP(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self,
-                                     instance_type,
-                                     use_spot,
+                                     instance_type: str,
+                                     use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
@@ -139,7 +139,7 @@ class GCP(clouds.Cloud):
                                                clouds='gcp')
 
     def accelerators_to_hourly_cost(self,
-                                    accelerators,
+                                    accelerators: Dict[str, int],
                                     use_spot: bool,
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
