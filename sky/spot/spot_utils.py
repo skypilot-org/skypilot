@@ -72,7 +72,10 @@ def update_spot_job_status(job_id: Optional[int] = None):
     """Update spot job status if the controller failed abnormally.
 
     Check the status of the controller. If it is not running, it must be
-    exited abnormally, and we should set the job status to FAILED.
+    exited abnormally, and we should set the job status to FAILED_CONTROLLER.
+    `end_at` will be set to the current timestamp for the job when above
+    happens, which could be not accurate based on the frequency this function
+    is called.
     """
     if job_id is None:
         job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
@@ -115,8 +118,6 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     subprocess_utils.handle_returncode(returncode, code,
                                        'Failed to get job time.',
                                        stdout + stderr)
-    if 'None' in stdout:
-        return -1
     return float(stdout)
 
 
@@ -284,13 +285,11 @@ def dump_spot_job_queue() -> str:
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
-        elif job_start_at > 0 and end_at > 0:
+        elif job_start_at > 0:
             job_duration = end_at - job_start_at
         else:
             # When job_start_at <= 0, that means the last_recovered_at is not
             # set yet, i.e. the job is not started.
-            # When end_at <= 0, that means there is some problem fetching the
-            # end_at time, so we use 0.
             job_duration = 0
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
