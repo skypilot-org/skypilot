@@ -53,8 +53,6 @@ def _get_latest_wheel_and_remove_all_others() -> pathlib.Path:
         if f != latest_wheel_dir_name:
             if f.is_dir() and not f.is_symlink():
                 shutil.rmtree(f, ignore_errors=True)
-            else:
-                f.unlink()
     return latest_wheel
 
 
