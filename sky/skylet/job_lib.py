@@ -55,7 +55,7 @@ def create_table(cursor, conn):
         submitted_at FLOAT,
         status TEXT,
         run_timestamp TEXT CANDIDATE KEY,
-        start_at FLOAT)""")
+        start_at FLOAT DEFAULT -1)""")
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
