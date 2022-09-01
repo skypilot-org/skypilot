@@ -56,22 +56,6 @@ def _get_latest_wheel_and_remove_all_others() -> pathlib.Path:
     return latest_wheel
 
 
-def get_latest_wheel_and_remove_all_others() -> pathlib.Path:
-    """Get the latest wheel and remove all others.
-
-    This function will be called during `ray up` to clean up the wheel, it
-    acquires the wheel lock to prevent concurrent wheel operations, by other
-    `ray up` or `sky launch`.
-    """
-    try:
-        with filelock.FileLock(_WHEEL_LOCK_PATH, timeout=5):  # pylint: disable=E0110
-            return _get_latest_wheel_and_remove_all_others()
-    except FileNotFoundError as e:
-        logger.error(str(e))
-    except filelock.Timeout:
-        logger.warning('Failed to clean up wheel directory')
-
-
 def _build_sky_wheel():
     """Build a wheel for SkyPilot."""
     with tempfile.TemporaryDirectory() as tmp_dir:
