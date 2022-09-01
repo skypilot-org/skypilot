@@ -7,6 +7,8 @@ The generated folder is like:
     ~/.sky/wheels/<hash_of_wheel>/sky-<version>-py3-none-any.whl
 
 Whenever a new wheel is built, the old ones will be removed.
+
+The ray up yaml templates under sky/templates depend on the naming of the wheel.
 """
 import hashlib
 import os

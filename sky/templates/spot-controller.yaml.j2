@@ -30,6 +30,7 @@ setup: |
     tar xzf google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q 2>&1 > /dev/null && \
+    source ~/google-cloud-sdk/path.bash.inc 2>&1 > /dev/null && \
     echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc)
 
 run: |
