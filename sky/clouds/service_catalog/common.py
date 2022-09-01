@@ -150,7 +150,7 @@ def get_hourly_cost_impl(
     use_spot: bool = False,
 ) -> float:
     """Returns the hourly price of a VM instance in the given region and zone.
-    
+
     Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
     """
     df = _get_instance_type(df, instance_type, region, zone)
