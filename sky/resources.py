@@ -261,7 +261,7 @@ class Resources:
         self._zone = zone
 
     def get_valid_region_zones(self) -> List[Tuple[clouds.Region, clouds.Zone]]:
-        """Returns a list of valid (region, zones) tuples for the resources."""
+        """Returns a list of (region, zones) that can provision this Resources."""
         assert self.is_launchable()
 
         if isinstance(self._cloud, clouds.GCP):
@@ -270,7 +270,7 @@ class Resources:
                     accelerators=self.accelerators, use_spot=self._use_spot))
 
             # GCP provision loop yields 1 zone per request.
-            # For consistency with other clouds, we group the zones with the
+            # For consistency with other clouds, we group the zones in the
             # same region.
             region_zones = []
             regions = set()
@@ -322,16 +322,6 @@ class Resources:
                 f'Cloud is not specified, using {valid_clouds[0]} '
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
-
-        # Validate instance type against the region.
-        if not isinstance(self._cloud, clouds.GCP) and self._region is not None:
-            region_zones = self.get_valid_region_zones()
-            regions = {region.name for region, _ in region_zones}
-            if self._region not in regions:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Invalid region {self._region!r} '
-                        f'for instance type {self._instance_type!r}.')
 
     def _try_validate_accelerators(self) -> None:
         """Try-validates accelerators against the instance type and region."""
