@@ -446,13 +446,14 @@ class RetryingVmProvisioner(object):
         colorama.init()
 
     def _in_blocklist(self, cloud, region, zones):
+        return False
         if region.name in self._blocked_regions:
             return True
         # We do not keep track of zones in Azure and Local,
         # as both clouds do not have zones.
         if isinstance(cloud, (clouds.Azure, clouds.Local)):
             return False
-        assert zones, (cloud, region, zones)
+        # assert zones, (cloud, region, zones)
         for zone in zones:
             if zone.name not in self._blocked_zones:
                 return False

@@ -190,8 +190,12 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
         cluster_config_file)
     worker_ips = config['provider']['worker_ips']
     file_mounts = config['file_mounts']
+    head_ip = config['provider']['head_ip']
 
     setup_cmds = config['setup_commands']
+    # setup_cmds.append(
+    #     f'ray stop; ray start --disable-usage-stats --address={head_ip}:6379 --object-manager-port=8076'
+    # )
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -222,6 +226,10 @@ def do_filemounts_and_setup_on_local_workers(cluster_config_file: str):
             rc, stdout, _ = runner.run(setup_cmd,
                                        stream_logs=False,
                                        require_outputs=True)
+
+            runner.run(
+                f'ray stop; ray start --disable-usage-stats --address={head_ip}:6379 --object-manager-port=8076',
+                stream_logs=False)
             subprocess_utils.handle_returncode(
                 rc,
                 setup_cmd,
