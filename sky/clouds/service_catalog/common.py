@@ -93,7 +93,7 @@ def _get_instance_type(
     if region is not None:
         idx &= df['Region'] == region
     if zone is not None:
-        # For Azure instances, zone must be None.
+        # NOTE: For Azure instances, zone must be None.
         idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
@@ -149,23 +149,33 @@ def get_hourly_cost_impl(
     zone: Optional[str],
     use_spot: bool = False,
 ) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+    """Returns the hourly price of a VM instance in the given region and zone.
+    
+    Refer to get_hourly_cost in service_catalog/__init__.py for the docstring.
+    """
     df = _get_instance_type(df, instance_type, region, zone)
-    assert pd.isnull(
-        df['Price'].iloc[0]) is False, (f'Missing price for "{instance_type}, '
-                                        f'Spot: {use_spot}" in the catalog.')
-    if zone is not None:
-        assert region is not None, 'Region must be specified if zone is.'
+    if df.empty:
+        if zone is None:
+            if region is None:
+                region_or_zone = 'all regions'
+            else:
+                region_or_zone = f'region {region!r}'
+        else:
+            region_or_zone = f'zone {zone!r}'
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Instance type {instance_type!r} not found '
+                             f'in {region_or_zone}.')
 
+    # If the zone is specified, only one instance type should be returned.
+    assert zone is None or len(df) == 1, df
     if use_spot:
         price_str = 'SpotPrice'
-        assert zone is None or len(set(df[price_str])) == 1, df
     else:
         price_str = 'Price'
+        # For on-demand instances, the price is the same across all zones.
         assert region is None or len(set(df[price_str])) == 1, df
 
     cheapest_idx = df[price_str].idxmin()
-
     cheapest = df.loc[cheapest_idx]
     return cheapest[price_str]
 
@@ -232,11 +242,11 @@ def get_instance_type_for_accelerator_impl(
 
     if region is not None:
         result = result[result['Region'] == region]
-        if zone is not None:
-            # For Azure regions, zone must be None.
-            result = result[result['AvailabilityZone'] == zone]
-        if len(result) == 0:
-            return ([], [])
+    if zone is not None:
+        # NOTE: For Azure regions, zone must be None.
+        result = result[result['AvailabilityZone'] == zone]
+    if len(result) == 0:
+        return ([], [])
 
     # Current strategy: choose the cheapest instance
     price_str = 'SpotPrice' if use_spot else 'Price'

@@ -206,8 +206,6 @@ def get_accelerator_hourly_cost(accelerator: str,
                                 use_spot: bool = False) -> float:
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
-    if zone is not None:
-        assert region is not None, 'Region must be specified if zone is.'
     if region is None:
         for tpu_region in _TPU_REGIONS:
             df = _get_accelerator(_df, accelerator, count, tpu_region)
