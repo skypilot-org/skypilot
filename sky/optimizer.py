@@ -877,6 +877,11 @@ def _fill_in_launchable_resources(
         elif resources.is_launchable():
             launchable[resources] = _generate_launchables_with_region_zones(
                 resources)
+            if isinstance(resources.cloud, clouds.GCP):
+                # Check if the host VM satisfies the max vCPU and memory limits.
+                for r in launchable[resources]:
+                    clouds.GCP.check_accelerator_attachable_to_host(
+                        r.instance_type, r.accelerators, r.zone)
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds

@@ -267,6 +267,7 @@ class Resources:
         if isinstance(self._cloud, clouds.GCP):
             gcp_region_zones = list(
                 self._cloud.region_zones_provision_loop(
+                    instance_type=self._instance_type,
                     accelerators=self.accelerators, use_spot=self._use_spot))
 
             # GCP provision loop yields 1 zone per request.
@@ -281,7 +282,7 @@ class Resources:
         else:
             region_zones = list(
                 self._cloud.region_zones_provision_loop(
-                    instance_type=self._instance_type, use_spot=self._use_spot))
+                    instance_type=self._instance_type, accelerators=self.accelerators, use_spot=self._use_spot))
         return region_zones
 
     def _try_validate_instance_type(self) -> None:
@@ -323,12 +324,30 @@ class Resources:
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
 
+        # FIXME
+        # Validate instance type against the region.
+        if self._region is not None:
+            region_zones = self.get_valid_region_zones()
+            regions = {region.name for region, _ in region_zones}
+            if self._region not in regions:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Invalid region {self._region!r} '
+                        f'for instance type {self._instance_type!r}.')
+
     def _try_validate_accelerators(self) -> None:
-        """Try-validates accelerators against the instance type and region."""
-        if not self.is_launchable():
+        """Validate accelerators against the instance type and region/zone."""
+        acc_requested = self.accelerators
+        if (isinstance(self.cloud, clouds.GCP) and
+                self.instance_type is not None):
+            # Do this check even if acc_requested is None.
+            clouds.GCP.check_host_accelerator_compatibility(
+                self.instance_type, acc_requested)
+
+        if acc_requested is None:
             return
 
-        if not isinstance(self.cloud, clouds.GCP):
+        if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
             acc_requested = self.accelerators
             if acc_requested is None:
@@ -350,18 +369,6 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
-        else:
-            # Validate accelerators against the region.
-            # For AWS and Azure, validating the instance type against the region
-            # is sufficient.
-            if self._region is not None:
-                region_zones = self.get_valid_region_zones()
-                regions = {region.name for region, _ in region_zones}
-                if self._region not in regions:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'Invalid region {self._region!r} '
-                            f'for accelerators {self.accelerators}.')
 
         # Validate whether accelerator is available in specified region/zone.
         if self.accelerators is not None:
