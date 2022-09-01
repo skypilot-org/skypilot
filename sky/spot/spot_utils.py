@@ -69,9 +69,9 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
 
 
 def update_spot_job_status(job_id: Optional[int] = None):
-    """Update spot job status if the controller failed abnormally.
+    """Update spot job status if the controller job failed abnormally.
 
-    Check the status of the controller. If it is not running, it must be
+    Check the status of the controller job. If it is not running, it must have
     exited abnormally, and we should set the job status to FAILED_CONTROLLER.
     `end_at` will be set to the current timestamp for the job when above
     happens, which could be not accurate based on the frequency this function
@@ -81,29 +81,34 @@ def update_spot_job_status(job_id: Optional[int] = None):
         job_ids = spot_state.get_nonterminal_job_ids_by_name(None)
     else:
         job_ids = [job_id]
-    for job in job_ids:
-        controller_status = job_lib.get_status(job)
+    for job_id_ in job_ids:
+        controller_status = job_lib.get_status(job_id_)
         if controller_status.is_terminal():
-            logger.error(f'Controller for job {job} have exited abnormally. '
+            logger.error(f'Controller for job {job_id_} has exited abnormally. '
                          'Setting the job status to FAILED_CONTROLLER.')
-            task_name = spot_state.get_task_name_by_job_id(job)
+            task_name = spot_state.get_task_name_by_job_id(job_id_)
 
             # Tear down the abnormal spot cluster to avoid resource leakage.
-            cluster_name = generate_spot_cluster_name(task_name, job)
+            cluster_name = generate_spot_cluster_name(task_name, job_id_)
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
             if handle is not None:
                 backend = backend_utils.get_backend_from_handle(handle)
-                try:
-                    backend.teardown(handle, terminate=True)
-                except RuntimeError:
-                    logger.error('Failed to tear down the spot cluster '
-                                 f'{cluster_name!r}.')
+                max_retry = 3
+                for retry_cnt in range(max_retry):
+                    try:
+                        backend.teardown(handle, terminate=True)
+                        break
+                    except RuntimeError:
+                        logger.error('Failed to tear down the spot cluster '
+                                     f'{cluster_name!r}. Retrying '
+                                     f'[{retry_cnt}/{max_retry}].')
 
-            # The controller process for this job is not running: it must
+            # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
-            spot_state.set_failed(job, spot_state.SpotStatus.FAILED_CONTROLLER)
+            spot_state.set_failed(job_id_,
+                                  spot_state.SpotStatus.FAILED_CONTROLLER)
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
