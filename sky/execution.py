@@ -256,35 +256,36 @@ def _launch_chain(dag: sky.Dag,
     dag = copy.deepcopy(dag)
     tasks = list(dag.get_sorted_tasks())
     store_type = None
-    output_path = None
+    output_store_path = None
     for i, task in enumerate(tasks):
         logger.info(f'==== Task {i+1} / {len(tasks)}: {task.name} ====')
         task_cluster_name = f'{cluster_name}-{i}-{task.name.replace("_", "-")}'
-        input_path = task.get_inputs()
+        input_store_path = task.get_inputs()
 
-        if input_path.startswith('CLOUD://'):
+        if input_store_path.startswith('CLOUD://'):
             assert store_type is not None, (i, task)
-            input_path = input_path.replace('CLOUD://',
+            input_store_path = input_store_path.replace('CLOUD://',
                                             store_type.value + '://')
-            if output_path != input_path:
+            if output_store_path != input_store_path:
                 raise ValueError(
-                    f'Ambiguous inputs {input_path} can only be used when a'
+                    f'Ambiguous inputs {input_store_path} can only be used when a'
                     'previous task has the outputs with the same name '
-                    f'{output_path}.')
+                    f'{output_vm_path}.')
 
-        task_input_path = f'~/.sky/task-inputs-{i}'
-        output_path = f'~/.sky/task-outputs-{i}'
+        input_vm_path = f'~/.sky/task-inputs-{i}'
+        output_vm_path = f'~/.sky/task-outputs-{i}'
 
-        file_mounts_from_inputs = {task_input_path: input_path}
-        logger.info(f'Implied input path: {input_path}')
+        file_mounts_from_inputs = {input_vm_path: input_store_path}
+        logger.info(f'Implied input path: {input_store_path}')
         task.update_file_mounts(file_mounts_from_inputs)
+        task.setup += '\n' + f'mkdir -p {output_vm_path}'
 
         if task.setup is not None:
-            task.setup = task.setup.replace('INPUTS[0]', task_input_path)
-            task.setup = task.setup.replace('OUTPUTS[0]', output_path)
+            task.setup = task.setup.replace('INPUTS[0]', input_vm_path)
+            task.setup = task.setup.replace('OUTPUTS[0]', output_vm_path)
         if task.run is not None:
-            task.run = task.run.replace('INPUTS[0]', task_input_path)
-            task.run = task.run.replace('OUTPUTS[0]', output_path)
+            task.run = task.run.replace('INPUTS[0]', input_vm_path)
+            task.run = task.run.replace('OUTPUTS[0]', output_vm_path)
 
         task.set_resources(task.best_resources)
 
@@ -305,7 +306,7 @@ def _launch_chain(dag: sky.Dag,
             sky_storage_codegen = (
                 'import sky; storage = sky.Storage('
                 f'name={output_storage_name!r},'
-                f' source={output_path!r}); storage.add_store('
+                f' source={output_vm_path!r}); storage.add_store('
                 f'sky.StorageType({store_type.value!r}));')
 
             upload_code_gen = textwrap.dedent(f"""\
