@@ -1,0 +1,35 @@
+
+# Steps to run this example:
+#
+# (1) Run sky launch -c stable-diffusion stable_diffusion_docker.yaml
+#
+# (2) Run ssh -L 7860:localhost:7860 stable-diffusion
+#
+# (3) Open http://localhost:7860/ in browser.
+#
+# (4) Type in text prompt and click "Generate" (avoid exceeding 900x900 for image resolution for GPU Memory)
+
+
+resources:
+  cloud: azure
+  accelerators: V100:1
+
+file_mounts:
+  /stable_diffusion: ./docker/stable_diffusion
+
+setup: |
+  sudo rm -r stable-diffusion-webui-docker
+  git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
+  sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
+  cd stable-diffusion-webui-docker
+  git reset --hard 0d8b7d4ac8f9ba99e041ca332547eab9d65e6360
+  wget https://www.googleapis.com/storage/v1/b/aai-blog-files/o/sd-v1-4.ckpt?alt=media -P models
+  mv models/'sd-v1-4.ckpt?alt=media' models/model.ckpt
+  rm build/Dockerfile
+  cp /stable_diffusion/Dockerfile build/
+  docker-compose build
+
+run: |
+  cd stable-diffusion-webui-docker
+  docker-compose up --build
