@@ -142,6 +142,21 @@ class StrategyExecutor:
                 # code.
                 logger.info(
                     f'Failed to launch the spot cluster with error: {e}')
+                if max_retry is not None and retry_cnt >= max_retry:
+                    # Retry forever if max_retry is None.
+                    if raise_on_failure:
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.ResourcesUnavailableError(
+                                'Failed to launch the spot cluster after '
+                                f'{max_retry} retries.') from e
+                    else:
+                        return None
+                gap_seconds = backoff.current_backoff()
+                logger.info(
+                    f'Retrying to launch the spot cluster in {gap_seconds:.1f} '
+                    'seconds.')
+                time.sleep(gap_seconds)
+                continue
 
             cluster_status, _ = backend_utils.refresh_cluster_status_handle(
                 self.cluster_name, force_refresh=True)
@@ -161,20 +176,6 @@ class StrategyExecutor:
                                                            get_end_time=False)
                 return launch_time
 
-            if max_retry is not None and retry_cnt >= max_retry:
-                # Retry forever if max_retry is None.
-                if raise_on_failure:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(
-                            'Failed to launch the spot cluster after '
-                            f'{max_retry} retries.')
-                else:
-                    return None
-            gap_seconds = backoff.current_backoff()
-            logger.info(
-                f'Retrying to launch the spot cluster in {gap_seconds:.1f} '
-                'seconds.')
-            time.sleep(gap_seconds)
 
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
