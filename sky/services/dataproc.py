@@ -66,8 +66,8 @@ def provision_cluster(cluster_name,
         for idx in range(0, num_nodes - 1):
             ip = subprocess.check_output([
                 'gcloud', 'compute', 'instances', 'describe',
-                f'{cluster_name}-w{idx}', '--format',
-                'get(networkInterfaces[0].networkIP)'
+                f'{cluster_name}-w-{idx}', '--format',
+                'get(networkInterfaces[0].accessConfigs.natIP)'
             ]).strip().decode("utf-8")
             ips.append(ip)
     return ips

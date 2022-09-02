@@ -151,6 +151,7 @@ class RayCodeGen:
                      job_id: int,
                      spot_task: Optional['task_lib.Task'] = None,
                      is_local: bool = False) -> None:
+        is_local = False
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
@@ -1143,7 +1144,6 @@ class RetryingVmProvisioner(object):
         # waits for all workers; turn it into real gang scheduling.
         # FIXME: refactor code path to remove use of stream_logs
         del stream_logs
-        print(cluster_already_exists)
         style = colorama.Style
 
         def ray_up():
@@ -1182,8 +1182,6 @@ class RetryingVmProvisioner(object):
 
         if service:
             yaml_config = common_utils.read_yaml(cluster_config_file)
-            print(yaml_config)
-            print(cluster_already_exists)
             if service['type'] == 'data-analytics':
                 if isinstance(to_provision_cloud, clouds.AWS):
                     ips = emr.provision_cluster(
@@ -1204,6 +1202,8 @@ class RetryingVmProvisioner(object):
                     yaml_config['provider']['worker_ips'] = ips[1:]
                 else:
                     del yaml_config['provider']['worker_ips']
+                print(yaml_config)
+                print(cluster_already_exists)
                 common_utils.dump_yaml(cluster_config_file, yaml_config)
 
         if isinstance(to_provision_cloud, clouds.Local):
@@ -1284,6 +1284,18 @@ class RetryingVmProvisioner(object):
                         f'{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
 
+        if service:
+            head_ip = yaml_config['provider']['head_ip']
+            ssh_user = yaml_config['auth']['ssh_user']
+            ssh_key = yaml_config['auth']['ssh_private_key']
+            ssh_credentials = (ssh_user, ssh_key, 'what')
+            head_runner = command_runner.SSHCommandRunner(
+                head_ip, *ssh_credentials)
+            head_runner.run(
+                'ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076',
+                stream_logs=True,
+                require_outputs=False)
+
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.
@@ -1301,18 +1313,6 @@ class RetryingVmProvisioner(object):
         provision_str = 'Successfully provisioned or found existing head VM.'
         if isinstance(to_provision_cloud, clouds.Local):
             provision_str = 'Successfully connected to head node.'
-
-        if service:
-            head_ip = yaml_config['provider']['head_ip']
-            ssh_user = yaml_config['auth']['ssh_user']
-            ssh_key = yaml_config['auth']['ssh_private_key']
-            ssh_credentials = (ssh_user, ssh_key, 'what')
-            head_runner = command_runner.SSHCommandRunner(
-                head_ip, *ssh_credentials)
-            head_runner.run(
-                'ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076',
-                stream_logs=True,
-                require_outputs=False)
 
         logger.info(f'{style.BRIGHT}{provision_str} '
                     f'Waiting for workers.{style.RESET_ALL}')
