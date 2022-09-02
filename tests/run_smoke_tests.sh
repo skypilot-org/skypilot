@@ -13,7 +13,9 @@ if [ -z "$test" ]
 then
     test_spec=tests/test_smoke.py
 else
-    test_spec=tests/test_smoke.py::"$test"
+    for t in "$@"; do
+        test_spec="$test_spec tests/test_smoke.py::${t}"
+    done
 fi
 
 pytest -s -n 16 -q --tb=short --disable-warnings "$test_spec"

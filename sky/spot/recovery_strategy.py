@@ -177,7 +177,6 @@ class StrategyExecutor:
                 return launch_time
 
 
-
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
     """Failover strategy: wait in same region and failover after timout."""
 
