@@ -32,6 +32,7 @@ JOB_STATUS_CHECK_GAP_SECONDS = 20
 
 # Controller checks if its job has started every this many seconds.
 JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 5
+MAX_JOB_CHECKING_RETRY = 50
 
 _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 

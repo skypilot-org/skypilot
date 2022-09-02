@@ -158,23 +158,41 @@ class StrategyExecutor:
                 time.sleep(gap_seconds)
                 continue
 
-            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-                self.cluster_name, force_refresh=True)
-            if cluster_status == global_user_state.ClusterStatus.UP:
+            status = None
+            retry_launch = False
+            job_checking_retry_cnt = 0
+            while (status is None or status in [
+                    job_lib.JobStatus.INIT,
+                    job_lib.JobStatus.PENDING,
+            ]) and job_checking_retry_cnt < spot_utils.MAX_JOB_CHECKING_RETRY:
+                job_checking_retry_cnt += 1
+                cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+                    self.cluster_name, force_refresh=True)
+                if cluster_status != global_user_state.ClusterStatus.UP:
+                    # The cluster can be preempted before the job is launched.
+                    # In this case, we will terminate the cluster and retry
+                    # the launch.
+                    retry_launch = True
+                    break
                 # Wait the job to be started
                 status = spot_utils.get_job_status(self.backend,
                                                    self.cluster_name)
-                while (status is None or status in [
-                        job_lib.JobStatus.INIT,
-                        job_lib.JobStatus.PENDING,
-                ]):
-                    time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-                    status = spot_utils.get_job_status(self.backend,
-                                                       self.cluster_name)
-                launch_time = spot_utils.get_job_timestamp(self.backend,
-                                                           self.cluster_name,
-                                                           get_end_time=False)
-                return launch_time
+                time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
+                status = spot_utils.get_job_status(self.backend,
+                                                   self.cluster_name)
+            if retry_launch:
+                self.terminate_cluster()
+                gap_seconds = backoff.current_backoff()
+                logger.info(
+                    'Failed to check the job status, probably due to the '
+                    'preemption or job submission process failure. Retrying '
+                    f'to launch the cluster in {gap_seconds:.1f} seconds.')
+                time.sleep(gap_seconds)
+                continue
+            launch_time = spot_utils.get_job_timestamp(self.backend,
+                                                       self.cluster_name,
+                                                       get_end_time=False)
+            return launch_time
 
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
