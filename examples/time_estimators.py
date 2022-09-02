@@ -8,6 +8,8 @@ def resnet50_estimate_runtime(resources):
     """A simple runtime model for Resnet50."""
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD, 3 for fwd+bwd.
     flops_for_one_image = 3.8 * (10**9) * 2 * 3
+    utilization = 1/4
+    logger.debug(f'****** trying {utilization} util for all')
 
     def _v100(num_v100s):
         # Adds communication overheads per step (in seconds).
@@ -29,25 +31,20 @@ def resnet50_estimate_runtime(resources):
         utilized_flops = 27 * (10**12)
 
         # print('****** trying 1/3 util for v100')
-        utilized_flops = 120 * (10**12) / 3
+        # mixed precision
+        utilized_flops = 120 * (10**12) * utilization
 
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops \
           + communication_slack
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
         return estimated_run_time_seconds
 
+    assert resources.cloud is not None, resources
     if isinstance(resources.cloud, sky.AWS):
-        instance = resources.instance_type
-        if instance == 'p3.2xlarge':
-            num_v100s = 1
-        elif instance == 'p3.8xlarge':
-            num_v100s = 4
-        elif instance == 'p3.16xlarge':
-            num_v100s = 8
-        else:
-            assert False, 'Not supported: {}'.format(resources)
+        accelerators = resources.accelerators
+        assert 'V100' in accelerators, accelerators
+        num_v100s = accelerators['V100']
         return _v100(num_v100s)
-
     elif isinstance(resources.cloud, sky.GCP):
         accelerators = resources.accelerators
         if accelerators is None:
@@ -62,16 +59,17 @@ def resnet50_estimate_runtime(resources):
 
         assert acc == 'tpu-v3-8', resources
         tpu_v3_8_flops = 420 * (10**12)
-        known_resnet50_utilization = 0.445  # From actual profiling.
+        # known_resnet50_utilization = 0.445  # From actual profiling.
+        known_resnet50_utilization = 0.377  # From actual profiling with the new keras model.
 
         # GPU - fixed to 1/3 util
         # TPU
-        #  - 1/4 util: doesn't work
-        #  - 1/3 util: works
-        #  - 1/2 util: works
+        #  - 1/4 util: works
+        #  - 1/3 util: doesn't works
+        #  - 1/2 util: doesn't works
 
         # print('*** trying hand written util for TPU')
-        known_resnet50_utilization = 1 / 3
+        known_resnet50_utilization = utilization
 
         max_per_device_batch_size = 1024
         total_steps = 112590  # 112590 steps, 1024 BS = 90 epochs.
@@ -91,17 +89,19 @@ def resnet50_estimate_runtime(resources):
 def resnet50_infer_estimate_runtime(resources):
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD.
     flops_for_one_image = 3.8 * (10**9) * 2
-    num_images = 0.1 * 1e6  # TODO: vary this.
-    num_images = 1e6  # TODO: vary this.
-    num_images = 70 * 1e6  # TODO: vary this.
+    # num_images = 0.1 * 1e6  # TODO: vary this.
+    # num_images = 1e6  # TODO: vary this.
+    num_images = 1e8  # TODO: vary this.
+    # num_images = 70 * 1e6  # TODO: vary this.
 
     instance = resources.instance_type
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
+    utilization = 1/5
+    logger.debug(f'****** trying {utilization} util for all')
 
     if instance == 'p3.2xlarge':
         # 120 TFLOPS TensorCore.
-        logger.debug('****** trying 1/3 util for v100')
-        utilized_flops = 120 * (10**12) / 3
+        utilized_flops = 120 * (10**12) * utilization
 
         # # Max bs to keep p99 < 15ms.
         # max_per_device_batch_size = 8
@@ -127,8 +127,12 @@ def resnet50_infer_estimate_runtime(resources):
         # operations per second) of performance [assume 16, as it casts to
         # bfloat16 by default).
         # TODO: also assume 1/3 utilization
-        utilized_flops = 128 * (10**12) / 3
+        utilized_flops = 128 * (10**12) * utilization
         # TODO: this ignores offline vs. online.  It's a huge batch.
+        estimated_run_time_seconds = \
+            flops_for_one_image * num_images / utilized_flops
+    elif isinstance(resources.cloud, sky.GCP) and 'tpu-v3-8' in resources.accelerators:
+        utilized_flops = 420 * (10**12) * utilization
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
     elif resources.accelerators is not None:
@@ -137,7 +141,7 @@ def resnet50_infer_estimate_runtime(resources):
             break
         assert acc == 'T4' and acc_count == 1, resources
         # T4 GPU: 65 TFLOPS fp16
-        utilized_flops = 65 * (10**12) / 3
+        utilized_flops = 65 * (10**12) * utilization
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
     else:
@@ -147,3 +151,29 @@ def resnet50_infer_estimate_runtime(resources):
     #     num_images, flops_for_one_image * num_images))
 
     return estimated_run_time_seconds
+
+
+def bert_base_finetune_estimate_runtime(resources):
+    """A simple runtime model for Resnet50."""
+    # TODO(zhwu): fix the estimator based on flops
+    acc, acc_num = list(resources.accelerators.items())[0]
+    if acc == 'V100':
+        assert acc_num == 4, resources
+        assert isinstance(resources.cloud, sky.Azure), resources
+        return 12.9 * 3600
+    elif acc == 'tpu-v3-8':
+        return 4 * 3600
+    else:
+        raise ValueError(f'Resources not supported {resources}')
+
+
+def bert_base_infer_estimate_runtime(resources):
+    acc, acc_num = list(resources.accelerators.items())[0]
+    if acc == 'T4':
+        assert acc_num == 1, resources
+        assert isinstance(resources.cloud, sky.Azure), resources
+        return 1.8 * 3600
+    elif acc == 'Inferentia':
+        return 1.1 * 3600
+    else:
+        raise ValueError(f'Resources not supported {resources}')

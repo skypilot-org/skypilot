@@ -82,6 +82,7 @@ class Task:
         workdir: Optional[str] = None,
         num_nodes: Optional[int] = None,
         # Advanced:
+        inputs_outputs_on_bucket: bool = False,
         docker_image: Optional[str] = None,
     ):
         """Initializes a Task.
@@ -140,6 +141,8 @@ class Task:
         # Only set when 'self' is a spot controller task: 'self.spot_task' is
         # the underlying managed spot task (Task object).
         self.spot_task = None
+
+        self.inputs_outputs_on_bucket = inputs_outputs_on_bucket
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
@@ -696,6 +699,8 @@ class Task:
         return d
 
     def __rshift__(self, b):
+        if b is None:
+            raise ValueError('Cannot add an edge to None')
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):

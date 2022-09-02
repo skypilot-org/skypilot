@@ -4,7 +4,7 @@ Usage:
 
    >> sky.launch(planned_dag)
 
-Current resource privisioners:
+Current resource provisioners:
 
   - Ray autoscaler
 
@@ -17,12 +17,15 @@ import enum
 import getpass
 import tempfile
 import os
+import subprocess
+import textwrap
 from typing import Any, List, Optional
 
 import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -269,6 +272,169 @@ def _execute(
         print('\x1b[?25h', end='')  # Show cursor.
 
 
+def _launch_chain(dag: sky.Dag,
+                  cluster_name: Optional[str] = None,
+                  retry_until_up: bool = False,
+                  dryrun: bool = False,
+                  teardown: bool = False,
+                  stream_logs: bool = True,
+                  backend: Optional[backends.Backend] = None,
+                  optimize_target: OptimizeTarget = OptimizeTarget.COST):
+    """Launches a chain of tasks."""
+
+    if cluster_name is None:
+        cluster_name = backend_utils.generate_cluster_name()
+    sky.optimize(dag, minimize=optimize_target)
+    dag = copy.deepcopy(dag)
+    tasks = list(dag.get_sorted_tasks())
+    store_type = None
+    output_store_path = None
+    for i, task in enumerate(tasks):
+        logger.info(f'==== Task {i+1} / {len(tasks)}: {task.name} ====')
+        task_cluster_name = f'{cluster_name}-{i}-{task.name.replace("_", "-")}'
+        input_store_path = task.get_inputs()
+
+        inputs_outputs_on_bucket = task.inputs_outputs_on_bucket
+
+        if input_store_path is not None:
+            if input_store_path.startswith('CLOUD://'):
+                assert store_type is not None, (i, task)
+                input_store_path = input_store_path.replace(
+                    'CLOUD://',
+                    store_type.value.lower() + '://')
+                if output_store_path != input_store_path:
+                    raise ValueError(
+                        f'Ambiguous inputs {input_store_path} can only be '
+                        'used when a previous task has the outputs with the '
+                        f'same name {output_vm_path}.')
+
+            if inputs_outputs_on_bucket:
+                store_str = input_store_path.split('://')[0]
+                if store_str == 's3':
+                    # TODO(zhwu): if training on AWS, need fix.
+                    input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
+                    logger.info(f'transfer data from {input_store_path} to '
+                                f'{input_vm_path}')
+                    # Using the multi-region gs bucket, which will be free for
+                    # data egressing to another GCP service within US.
+                    # https://cloud.google.com/storage/pricing#multi-regions
+                    # pylint: disable=line-too-long
+                    subprocess.run(f'gsutil mb {input_vm_path} || true',
+                                   shell=True,
+                                   check=True)
+                    if not dryrun:
+                        input_storage_name = storage.get_storage_name_from_uri(
+                            input_store_path)
+                        input_storage_name_gcs = storage.get_storage_name_from_uri(
+                            input_vm_path)
+                        sky.data.data_transfer.s3_to_gcs(
+                            input_storage_name, input_storage_name_gcs)
+                    # pylint: disable=pointless-string-statement
+                    """ # pylint: disable=line-too-long
+
+                    transfer_command = [
+                        f'gsutil mb {input_vm_path} || true',
+                        # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
+                    ]
+
+                    input_storage_name = storage.get_storage_name_from_uri(input_store_path)
+                    input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
+                    sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
+                    """
+                elif store_str == 'gs':
+                    input_vm_path = input_store_path
+                else:
+                    raise NotImplementedError
+            else:
+                input_vm_path = f'~/.sky/task-inputs-{i}'
+                file_mounts_from_inputs = {input_vm_path: input_store_path}
+                task.update_file_mounts(file_mounts_from_inputs)
+            logger.info(f'Implied input path: {input_vm_path}')
+
+            if task.setup is not None:
+                task.setup = task.setup.replace('INPUTS[0]', input_vm_path)
+            if task.run is not None:
+                task.run = task.run.replace('INPUTS[0]', input_vm_path)
+
+        task.set_resources(task.best_resources)
+
+        cloud = task.best_resources.cloud
+
+        output_store_path = copy.copy(task.get_outputs())
+        if output_store_path is not None:
+            output_storage_name = storage.get_storage_name_from_uri(
+                output_store_path)
+            if inputs_outputs_on_bucket:
+                output_vm_path = f'gs://{output_storage_name}'
+                # Use multi-region bucket by not specifying the location
+                create_bucket_cmd = (f'gsutil mb {output_vm_path} || true')
+                subprocess.run(create_bucket_cmd, shell=True, check=True)
+            else:
+                output_vm_path = f'~/.sky/task-outputs-{i}'
+
+            if task.setup is not None:
+                task.setup = task.setup.replace('OUTPUTS[0]', output_vm_path)
+            if task.run is not None:
+                task.run = task.run.replace('OUTPUTS[0]', output_vm_path)
+
+            if not output_store_path.startswith('CLOUD://'):
+                store_type = storage.StoreType(
+                    output_store_path.partition('://')[0])
+            elif isinstance(cloud, clouds.Azure):
+                # If the cloud is Azure, send to the bucket on the next cloud,
+                # as object store is not supported for Azure in our code yet.
+                next_cloud = tasks[i + 1].best_resources.cloud
+                if isinstance(next_cloud, clouds.Azure):
+                    store_type = storage.StoreType.GCS
+                else:
+                    store_type = storage.StoreType.from_cloud(next_cloud)
+            else:
+                store_type = storage.StoreType.from_cloud(cloud)
+
+            output_store_path = (
+                f'{store_type.value.lower()}://{output_storage_name}')
+            logger.info(f'Implied output path: {output_store_path}')
+
+            # Upload current outputs to the cloud storage of current cloud
+            if not inputs_outputs_on_bucket:
+                sky_storage_codegen = (
+                    'import sky; storage = sky.Storage('
+                    f'name={output_storage_name!r},'
+                    f' source={output_vm_path!r}); storage.add_store('
+                    f'sky.StoreType({store_type.value!r}));')
+
+                upload_code_gen = textwrap.dedent(f"""\
+                    echo Uploading the outputs to the bucket
+                    conda deactivate
+                    {clouds.gcp.GCLOUD_INSTALLATION_COMMAND}
+                    pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
+                    python -u -c {sky_storage_codegen!r}
+                    echo Uploaded.
+                    """)
+                task.run = task.run + '\n' + upload_code_gen
+
+                if task.setup is None:
+                    task.setup = ''
+                task.setup += '\n' + f'mkdir -p {output_vm_path}'
+        # print(task.to_yaml_config())
+        with sky.Dag() as task_dag:
+            task_dag.add(task)
+
+        launch(task_dag,
+               cluster_name=task_cluster_name,
+               stream_logs=stream_logs,
+               backend=backend,
+               dryrun=dryrun,
+               retry_until_up=retry_until_up)
+
+        if not dryrun and teardown:
+            logger.info(f'Terminate {task_cluster_name}.')
+            with subprocess.Popen(f'sky down -y {task_cluster_name}',
+                                  shell=True) as proc:
+                if i == len(tasks) - 1:
+                    proc.wait()
+
+
 @timeline.event
 @usage_lib.entrypoint
 def launch(
@@ -330,6 +496,23 @@ def launch(
     """
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
+    if not dag.is_chain():
+        raise ValueError('dag must be a chain')
+
+    if len(dag.tasks) != 1:
+        logger.warning(
+            '`launch_chain` is still experimental and subject to change in the '
+            'future. Dag should be a chain of tasks.')
+        _launch_chain(dag=dag,
+                      cluster_name=cluster_name,
+                      retry_until_up=retry_until_up,
+                      dryrun=dryrun,
+                      teardown=teardown,
+                      stream_logs=stream_logs,
+                      backend=backend,
+                      optimize_target=optimize_target)
+        return
+
     _execute(
         dag=dag,
         dryrun=dryrun,

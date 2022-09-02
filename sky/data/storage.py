@@ -1,6 +1,7 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
+import shutil
 import subprocess
 import time
 from typing import Any, Dict, Optional, Tuple, Union
@@ -10,6 +11,7 @@ from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
+from sky import clouds
 from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -40,9 +42,37 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
 
 
 class StoreType(enum.Enum):
+    """Enum for the different types of stores."""
     S3 = 'S3'
-    GCS = 'GCS'
-    AZURE = 'AZURE'
+    GCS = 'GS'
+    AZURE = 'Azure'
+
+    @classmethod
+    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
+        if isinstance(cloud, clouds.AWS):
+            return StoreType.S3
+        if isinstance(cloud, clouds.GCP):
+            return StoreType.GCS
+        if isinstance(cloud, clouds.Azure):
+            return StoreType.AZURE
+
+        raise ValueError(f'Unsupported cloud: {cloud}')
+
+    @classmethod
+    def from_store(cls, store: 'Storage') -> 'StoreType':
+        if isinstance(store, S3Store):
+            return StoreType.S3
+        elif isinstance(store, GcsStore):
+            return StoreType.GCS
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {store}')
+
+
+def get_storage_name_from_uri(uri: str) -> str:
+    """Get the storage name from a URI."""
+    storage_name = uri.split('://')[1]
+    return storage_name
 
 
 class StorageMode(enum.Enum):
@@ -312,11 +342,11 @@ class Storage(object):
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             self.sky_stores[storetype] = store.get_metadata()
 
         def remove_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
@@ -618,7 +648,7 @@ class Storage(object):
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
-        store_type = _get_storetype_from_store(store)
+        store_type = StoreType.from_store(store)
         self.stores[store_type] = store
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:
@@ -1043,7 +1073,18 @@ class GcsStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
-        self.client = gcp.storage_client()
+        # Need explicitly export the credential file path in the environment
+        # variable according to the doc
+        # https://cloud.google.com/storage/docs/reference/libraries#setting_up_authentication # pylint: disable=line-too-long
+        from google import auth  # pylint: disable=import-outside-toplevel
+        credentials, project_id = auth.default()
+        if project_id is None:
+            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH,
+                        clouds.gcp.GCP_CONFIGURE_PATH)
+            credentials, project_id = auth.default()
+            assert project_id is not None
+        self.client = gcp.storage_client(project=project_id,
+                                         credentials=credentials)
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -1084,6 +1125,11 @@ class GcsStore(AbstractStore):
 
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
+        from google import auth  # pylint: disable=import-outside-toplevel
+        _, project_id = auth.default()
+        if project_id is None:
+            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH,
+                        clouds.gcp.GCP_CONFIGURE_PATH)
         source = os.path.abspath(os.path.expanduser(self.source))
         # TODO(zhwu): Speed up the upload process by providing a list of files
         # so that we can utilize the parallelism.

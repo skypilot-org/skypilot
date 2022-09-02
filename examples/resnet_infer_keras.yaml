@@ -1,0 +1,95 @@
+name: resnet-app
+
+resources:
+    cloud: aws
+    accelerators:
+        V100: 1
+
+
+file_mounts: {
+    ~/model/saved_weights.h5: gs://skypilot-pipeline-model/saved_weights.h5
+}
+
+setup: |
+    use_tpu=0
+    [ -z "$TPU_NAME" ] && echo 'export use_tpu=0' >> ~/.bashrc || echo 'export use_tpu=1' >> ~/.bashrc
+
+    use_gpu=0
+    nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc) || echo 'export use_gpu=0' >> ~/.bashrc
+
+    use_inf=0
+    neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
+
+    source ~/.bashrc
+    . $(conda info --base)/etc/profile.d/conda.sh
+
+    pip install --upgrade pip
+
+    git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
+    cd codebase
+    conda activate resnet
+
+    if [ $? -eq 0 ]; then
+        echo "conda env exists"
+    else
+        if [ "$use_gpu" -eq 1 ]; then
+            conda create -n resnet python=3.7 -y
+            conda activate resnet
+            conda install cudatoolkit=11.0 -y
+            pip install pyyaml
+            pip install tensorflow==2.5.0 pyyaml pillow pandas
+            pip install protobuf==3.20
+        fi
+        if [ "$use_tpu" -eq 1 ]; then
+            conda create -n resnet python=3.7 -y
+            conda activate resnet
+            pip install tensorflow==2.5.0 pyyaml cloud-tpu-client pillow pandas
+            pip install protobuf==3.20
+        fi
+        if [ "$use_inf" -eq 1 ]; then
+            # Install OS headers
+            sudo snap install linux-headers-$(uname -r) -y
+
+            # Install Neuron Driver
+            sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
+            conda activate aws_neuron_tensorflow2_p37
+            pip install tensorflow==1.15.5 tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4"
+        fi
+    fi
+
+run: |
+    cd codebase/resnet50_tpu
+    git pull
+    conda activate resnet
+    
+    if [ "$use_gpu" -eq 1 ]; then
+        for bs in 8 16 32 64 128 256 512; do
+            export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
+            OMP_NUM_THREADS=8 python3 -u resnet50.py \
+            --tpu=gpu \
+            --mode=infer \
+            --precision=float16 \
+            --model_dir=$HOME/model \
+            --num_cores=1 \
+            --infer_images=1000000 \
+            --per_core_batch_size=$bs \
+            --amp --xla --loss_scale=128 \
+            2>&1 | tee run-realData-gpu-float16-$bs.log
+        done
+    fi
+    if [ "$use_tpu" -eq 1 ]; then
+        # for bs in 1 2 4 8 16 32; do
+        for bs in 512; do
+        OMP_NUM_THREADS=8 python3 -u resnet50.py \
+          --mode=infer \
+          --num_cores=8 \
+          --per_core_batch_size=$bs \
+          --precision=bfloat16 \
+          --tpu=$TPU_NAME \
+          --model_dir=$HOME/model \
+          2>&1 | tee run-realData-float16-$bs.log
+          done
+    fi
+    if [ "$use_inf" -eq 1 ]; then
+        exit 1
+    fi

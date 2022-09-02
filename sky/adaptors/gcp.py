@@ -39,12 +39,12 @@ def build(service_name: str, version: str, *args, **kwargs):
 
 
 @import_package
-def storage_client():
+def storage_client(*args, **kwargs):
     """Helper method that connects to GCS Storage Client for
     GCS Bucket
     """
     from google.cloud import storage
-    return storage.Client()
+    return storage.Client(*args, **kwargs)
 
 
 @import_package
