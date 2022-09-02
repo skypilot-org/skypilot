@@ -307,7 +307,7 @@ def _launch_chain(dag: sky.Dag,
                 'import sky; storage = sky.Storage('
                 f'name={output_storage_name!r},'
                 f' source={output_vm_path!r}); storage.add_store('
-                f'sky.StorageType({store_type.value!r}));')
+                f'sky.StoreType({store_type.value!r}));')
 
             upload_code_gen = textwrap.dedent(f"""\
                 pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
