@@ -55,7 +55,7 @@ def create_table(cursor, conn):
         submitted_at FLOAT,
         status TEXT,
         run_timestamp TEXT CANDIDATE KEY,
-        start_at FLOAT)""")
+        start_at FLOAT DEFAULT -1)""")
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
@@ -72,7 +72,8 @@ class JobStatus(enum.Enum):
     """Job status"""
     # 3 in-flux states: each can transition to any state below it.
     # The `job_id` has been generated, but the generated ray program has
-    # not started yet.
+    # not started yet. skylet can transit the state from INIT to FAILED
+    # directly, if the ray program fails to start.
     INIT = 'INIT'
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked

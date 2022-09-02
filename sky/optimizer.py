@@ -864,6 +864,11 @@ def _fill_in_launchable_resources(
                     'enabled. Run `sky check` to enable access to it, '
                     'or change the cloud requirement.')
         elif resources.is_launchable():
+            if isinstance(resources.cloud, clouds.GCP):
+                # Check if the host VM satisfies the max vCPU and memory limits.
+                clouds.GCP.check_accelerator_attachable_to_host(
+                    resources.instance_type, resources.accelerators,
+                    resources.zone)
             launchable[resources] = [resources]
         else:
             clouds_list = [resources.cloud

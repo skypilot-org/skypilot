@@ -255,7 +255,7 @@ class Resources:
                     'Cloud must be specified together with region/zone.')
 
         # Validate whether region and zone exist in the catalog.
-        #self._cloud.validate_region_zone(region, zone)
+        self._cloud.validate_region_zone(region, zone)
 
         self._region = region
         self._zone = zone
@@ -301,11 +301,18 @@ class Resources:
 
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
+        acc_requested = self.accelerators
+        if (isinstance(self.cloud, clouds.GCP) and
+                self.instance_type is not None):
+            # Do this check even if acc_requested is None.
+            clouds.GCP.check_host_accelerator_compatibility(
+                self.instance_type, acc_requested)
+
+        if acc_requested is None:
+            return
+
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
-            acc_requested = self.accelerators
-            if acc_requested is None:
-                return
             acc_from_instance_type = (
                 self.cloud.get_accelerators_from_instance_type(
                     self._instance_type))
@@ -325,19 +332,18 @@ class Resources:
             # specifies to use 1 GPU.
 
         # Validate whether accelerator is available in specified region/zone.
-        if self.accelerators is not None:
-            acc, acc_count = list(self.accelerators.items())[0]
-            if self.region is not None or self.zone is not None:
-                if not self._cloud.accelerator_in_region_or_zone(
-                        acc, acc_count, self.region, self.zone):
-                    error_str = (f'Accelerator "{acc}" is not available in '
-                                 '"{}" region/zone.')
-                    if self.zone:
-                        error_str = error_str.format(self.zone)
-                    else:
-                        error_str = error_str.format(self.region)
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(error_str)
+        acc, acc_count = list(acc_requested.items())[0]
+        if self.region is not None or self.zone is not None:
+            if not self._cloud.accelerator_in_region_or_zone(
+                    acc, acc_count, self.region, self.zone):
+                error_str = (f'Accelerator "{acc}" is not available in '
+                             '"{}" region/zone.')
+                if self.zone:
+                    error_str = error_str.format(self.zone)
+                else:
+                    error_str = error_str.format(self.region)
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(error_str)
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:

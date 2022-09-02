@@ -361,6 +361,13 @@ def get_handle_from_storage_name(storage_name: str):
         return pickle.loads(handle)
 
 
+def get_glob_storage_name(storage_name: str) -> List[str]:
+    assert storage_name is not None, 'storage_name cannot be None'
+    rows = _DB.cursor.execute('SELECT name FROM storage WHERE name GLOB (?)',
+                              (storage_name,))
+    return [row[0] for row in rows]
+
+
 def get_storage() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from storage')
     records = []
