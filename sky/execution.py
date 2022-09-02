@@ -278,7 +278,7 @@ def _launch_chain(dag: sky.Dag,
         file_mounts_from_inputs = {input_vm_path: input_store_path}
         logger.info(f'Implied input path: {input_store_path}')
         task.update_file_mounts(file_mounts_from_inputs)
-        task.setup += '\n' + f'mkdir -p {output_vm_path}'
+
 
         if task.setup is not None:
             task.setup = task.setup.replace('INPUTS[0]', input_vm_path)
@@ -293,6 +293,10 @@ def _launch_chain(dag: sky.Dag,
         store_type = storage.StoreType.from_cloud(cloud)
 
         output_store_path = copy.copy(task.get_outputs())
+        if output_store_path is not None:
+            if task.setup is None:
+                task.setup = ''
+            task.setup += '\n' + f'mkdir -p {output_vm_path}'
         if output_store_path is not None:
             output_storage_name = storage.get_storage_name_from_uri(
                 output_store_path)
