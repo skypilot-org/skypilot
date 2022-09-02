@@ -295,17 +295,11 @@ def _launch_chain(dag: sky.Dag,
         if output_store_path is not None:
             output_storage_name = storage.get_storage_name_from_uri(
                 output_store_path)
-            if output_store_path.startswith('CLOUD://'):
-                # Upload to the current cloud store, if the cloud is not
-                # specified.
-                output_store_path = output_store_path.replace(
-                    'CLOUD://', f'{store_type.value}://')
-            else:
-                store_type = storage.StoreType(
-                    output_store_path.partition('://')[0])
+            if not output_store_path.startswith('CLOUD://'):
+                store_type = storage.StoreType(output_store_path.partition('://')[0])
 
-            output_path = f'{store_type.value}://{output_storage_name}'
-            logger.info(f'Implied output path: {output_path}')
+            output_store_path = f'{store_type.value}://{output_storage_name}'
+            logger.info(f'Implied output path: {output_store_path}')
 
             # Upload current outputs to the cloud storage of current cloud
             sky_storage_codegen = (
@@ -332,7 +326,7 @@ def _launch_chain(dag: sky.Dag,
 
         if not dryrun:
             logger.info(f'Terminate {task_cluster_name}.')
-            with subprocess.Popen(f'sky down {task_cluster_name}',
+            with subprocess.Popen(f'sky down -y {task_cluster_name}',
                                   shell=True) as proc:
                 if i == len(tasks) - 1:
                     proc.wait()

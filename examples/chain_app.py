@@ -20,19 +20,16 @@ import sky
 
 import time_estimators
 
+MOCK = True
 
-def make_application():
-    """A simple application: train_op -> infer_op."""
-
-    with sky.Dag() as dag:
-        # Train.
-        train_op = sky.Task('train_op',
-                            setup=textwrap.dedent("""\
+TRAIN_SETUP = textwrap.dedent("""\
                 git clone https://github.com/concretevitamin/tpu || true
                 cd tpu
-                git checkout 9459fee
+                nvidia-smi
+                if [ $? -eq 0 ]; then
+                    git checkout 9459fee
+                fi
 
-                . $(conda info --base)/etc/profile.d/conda.sh
                 pip install --upgrade pip
 
                 conda activate resnet
@@ -51,8 +48,10 @@ def make_application():
                     cd INPUTS[0]
                     tar xzvf sky-imagenet.tar.gz
                 fi
-                """),
-                            run=textwrap.dedent("""\
+                """) if not MOCK else "echo 'MOCK TRAIN_SETUP'"
+
+TRAIN_RUN = textwrap.dedent(
+    """\
                 cd tpu
                 conda activate resnet
 
@@ -63,10 +62,19 @@ def make_application():
                     --data_dir=INPUTS[0]/datasets/ILSVRC2012/imagenet/ \
                     --model_dir=OUTPUTS[0] \
                     --amp --xla --loss_scale=128
-                """))
+                """
+) if not MOCK else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
+
+
+def make_application():
+    """A simple application: train_op -> infer_op."""
+
+    with sky.Dag() as dag:
+        # Train.
+        train_op = sky.Task('train_op', setup=TRAIN_SETUP, run=TRAIN_RUN)
 
         train_op.set_inputs(
-            's3://sky-imagenet-tar',
+            's3://sky-imagenet-tar' if not MOCK else 's3://sky-example-test',
             estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
@@ -77,10 +85,13 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_op.set_resources({
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            sky.Resources(sky.AWS(), 'p3.2xlarge',
+                          disk_size=400),  # 1 V100, EC2.
+            sky.Resources(sky.AWS(), 'p3.8xlarge',
+                          disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+                          disk_size=400),
         })
 
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
@@ -112,6 +123,4 @@ def make_application():
 
 
 dag = make_application()
-sky.optimize(dag, minimize=sky.OptimizeTarget.COST)
-# sky.optimize(dag, minimize=sky.OptimizeTarget.TIME)
-sky.launch(dag)
+sky.launch(dag, cluster_name='test-chain-app')
