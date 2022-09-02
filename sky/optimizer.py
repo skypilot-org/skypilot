@@ -747,12 +747,11 @@ class Optimizer:
         The optimal mapping should consider the egress cost/time so that
         the total estimated cost/time of the DAG becomes the minimum.
         """
-        import networkx as nx  # pylint: disable=import-outside-toplevel
         # TODO: The output of this function is useful. Should generate a
         # text plan and print to both console and a log file.
 
         graph = dag.get_graph()
-        topo_order = list(nx.topological_sort(graph))
+        topo_order = list(dag.get_sorted_tasks())
 
         node_to_cost_map, node_to_candidate_map = \
             Optimizer._estimate_nodes_cost_or_time(

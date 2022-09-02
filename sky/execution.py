@@ -4,7 +4,7 @@ Usage:
 
    >> sky.launch(planned_dag)
 
-Current resource privisioners:
+Current resource provisioners:
 
   - Ray autoscaler
 
@@ -12,9 +12,12 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
+import copy
 import enum
 import tempfile
 import os
+import subprocess
+import textwrap
 import time
 from typing import Any, List, Optional
 
@@ -238,6 +241,103 @@ def _execute(
         print('\x1b[?25h', end='')  # Show cursor.
 
 
+def _launch_chain(dag: sky.Dag,
+                  cluster_name: Optional[str] = None,
+                  retry_until_up: bool = False,
+                  dryrun: bool = False,
+                  stream_logs: bool = True,
+                  backend: Optional[backends.Backend] = None,
+                  optimize_target: OptimizeTarget = OptimizeTarget.COST):
+    """Launches a chain of tasks."""
+
+    if cluster_name is None:
+        cluster_name = backend_utils.generate_cluster_name()
+    sky.optimize(dag, minimize=optimize_target)
+    dag = copy.deepcopy(dag)
+    tasks = list(dag.get_sorted_tasks())
+    store_type = None
+    output_path = None
+    for i, task in enumerate(tasks):
+        logger.info(f'==== Task {i+1} / {len(tasks)}: {task.name} ====')
+        task_cluster_name = f'{cluster_name}-{i}-{task.name.replace("_", "-")}'
+        input_path = task.get_inputs()
+
+        if input_path.startswith('CLOUD://'):
+            assert store_type is not None, (i, task)
+            input_path = input_path.replace('CLOUD://',
+                                            store_type.value + '://')
+            if output_path != input_path:
+                raise ValueError(
+                    f'Ambiguous inputs {input_path} can only be used when a'
+                    'previous task has the outputs with the same name '
+                    f'{output_path}.')
+
+        task_input_path = f'~/.sky/task-inputs-{i}'
+        output_path = f'~/.sky/task-outputs-{i}'
+
+        file_mounts_from_inputs = {task_input_path: input_path}
+        logger.info(f'Implied input path: {input_path}')
+        task.update_file_mounts(file_mounts_from_inputs)
+
+        if task.setup is not None:
+            task.setup = task.setup.replace('INPUTS[0]', task_input_path)
+            task.setup = task.setup.replace('OUTPUTS[0]', output_path)
+        if task.run is not None:
+            task.run = task.run.replace('INPUTS[0]', task_input_path)
+            task.run = task.run.replace('OUTPUTS[0]', output_path)
+
+        task.set_resources(task.best_resources)
+
+        cloud = task.best_resources.cloud
+        store_type = storage.StoreType.from_cloud(cloud)
+
+        output_store_path = copy.copy(task.get_outputs())
+        if output_store_path is not None:
+            output_storage_name = storage.get_storage_name_from_uri(
+                output_store_path)
+            if output_store_path.startswith('CLOUD://'):
+                # Upload to the current cloud store, if the cloud is not
+                # specified.
+                output_store_path = output_store_path.replace(
+                    'CLOUD://', f'{store_type.value}://')
+            else:
+                store_type = storage.StoreType(
+                    output_store_path.partition('://')[0])
+
+            output_path = f'{store_type.value}://{output_storage_name}'
+            logger.info(f'Implied output path: {output_path}')
+
+            # Upload current outputs to the cloud storage of current cloud
+            sky_storage_codegen = (
+                'import sky; storage = sky.Storage('
+                f'name={output_storage_name!r},'
+                f' source={output_path!r}); storage.add_store('
+                f'sky.StorageType({store_type.value!r}));')
+
+            upload_code_gen = textwrap.dedent(f"""\
+                pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
+                python3 -u -c {sky_storage_codegen!r}
+                """)
+            task.run = task.run + '\n' + upload_code_gen
+
+        with sky.Dag() as task_dag:
+            task_dag.add(task)
+
+        launch(task_dag,
+               cluster_name=task_cluster_name,
+               stream_logs=stream_logs,
+               backend=backend,
+               dryrun=dryrun,
+               retry_until_up=retry_until_up)
+
+        if not dryrun:
+            logger.info(f'Terminate {task_cluster_name}.')
+            with subprocess.Popen(f'sky down {task_cluster_name}',
+                                  shell=True) as proc:
+                if i == len(tasks) - 1:
+                    proc.wait()
+
+
 @timeline.event
 @usage_lib.entrypoint
 def launch(
@@ -278,6 +378,22 @@ def launch(
     """
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
+    if not dag.is_chain():
+        raise ValueError('dag must be a chain')
+
+    if len(dag.tasks) != 1:
+        logger.warning(
+            '`launch_chain` is still experimental and subject to change in the '
+            'future. Dag should be a chain of tasks.')
+        _launch_chain(dag=dag,
+                      cluster_name=cluster_name,
+                      retry_until_up=retry_until_up,
+                      dryrun=dryrun,
+                      stream_logs=stream_logs,
+                      backend=backend,
+                      optimize_target=optimize_target)
+        return
+
     _execute(
         dag=dag,
         dryrun=dryrun,

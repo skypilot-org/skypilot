@@ -48,6 +48,10 @@ class Dag:
     def get_graph(self):
         return self.graph
 
+    def get_sorted_tasks(self):
+        import networkx as nx  # pylint: disable=import-outside-toplevel
+        return nx.topological_sort(self.graph)
+
     def is_chain(self) -> bool:
         # NOTE: this method assumes that the graph has no cycle.
         is_chain = True

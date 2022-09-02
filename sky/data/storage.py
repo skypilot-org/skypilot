@@ -9,6 +9,7 @@ import urllib.parse
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
+from sky import clouds
 from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
@@ -35,24 +36,42 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
 
 
 class StoreType(enum.Enum):
-    S3 = 'S3'
-    GCS = 'GCS'
-    AZURE = 'AZURE'
+    """Enum for the different types of stores."""
+    S3 = 's3'
+    GCS = 'gs'
+    AZURE = 'Azure'
+
+    @classmethod
+    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
+        if isinstance(cloud, clouds.AWS):
+            return StoreType.S3
+        if isinstance(cloud, clouds.GCP):
+            return StoreType.GCS
+        if isinstance(cloud, clouds.Azure):
+            return StoreType.AZURE
+
+        raise ValueError(f'Unsupported cloud: {cloud}')
+
+    @classmethod
+    def from_store(cls, store: 'Storage') -> 'StoreType':
+        if isinstance(store, S3Store):
+            return StoreType.S3
+        elif isinstance(store, GcsStore):
+            return StoreType.GCS
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {store}')
+
+
+def get_storage_name_from_uri(uri: str) -> str:
+    """Get the storage name from a URI."""
+    storage_name = uri.split('://')[1]
+    return storage_name
 
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
-
-
-def _get_storetype_from_store(store: 'Storage') -> StoreType:
-    if isinstance(store, S3Store):
-        return StoreType.S3
-    elif isinstance(store, GcsStore):
-        return StoreType.GCS
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {store}')
 
 
 class AbstractStore:
@@ -281,11 +300,11 @@ class Storage(object):
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             self.sky_stores[storetype] = store.get_metadata()
 
         def remove_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
@@ -576,7 +595,7 @@ class Storage(object):
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
-        store_type = _get_storetype_from_store(store)
+        store_type = StoreType.from_store(store)
         self.stores[store_type] = store
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:

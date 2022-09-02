@@ -71,7 +71,7 @@ def resnet50_estimate_runtime(resources):
         #  - 1/2 util: works
 
         # print('*** trying hand written util for TPU')
-        known_resnet50_utilization = 1 / 3
+        # known_resnet50_utilization = 1 / 3
 
         max_per_device_batch_size = 1024
         total_steps = 112590  # 112590 steps, 1024 BS = 90 epochs.
