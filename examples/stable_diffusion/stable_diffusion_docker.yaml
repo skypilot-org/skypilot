@@ -1,21 +1,10 @@
-
-# Steps to run this example:
-#
-# (1) Run sky launch -c stable-diffusion stable_diffusion_docker.yaml
-#
-# (2) Run ssh -L 7860:localhost:7860 stable-diffusion
-#
-# (3) Open http://localhost:7860/ in browser.
-#
-# (4) Type in text prompt and click "Generate" (avoid exceeding 900x900 for image resolution for GPU Memory)
-
+# To launch a 1 GPU instance to run stable diffusion web tool.
 
 resources:
-  cloud: azure
   accelerators: V100:1
 
 file_mounts:
-  /stable_diffusion: ./docker/stable_diffusion
+  /stable_diffusion: .
 
 setup: |
   sudo rm -r stable-diffusion-webui-docker
@@ -32,4 +21,4 @@ setup: |
 
 run: |
   cd stable-diffusion-webui-docker
-  docker-compose up --build
+  docker-compose up

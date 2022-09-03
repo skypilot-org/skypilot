@@ -1,4 +1,6 @@
-# Note: this file is from https://github.com/AbdBarho/stable-diffusion-webui-docker/blob/master/build/Dockerfile 
+# Note: this file is modified from https://github.com/AbdBarho/stable-diffusion-webui-docker/blob/master/build/Dockerfile 
+# <<EOF heredoc was removed from RUN git clone https://github.com/hlky/sd-enable-textual-inversion.git line
+# This was to fix an error when the instance parses the Dockerfile.
 
 # syntax=docker/dockerfile:1
 
@@ -17,18 +19,6 @@ RUN apt-get update && apt install fonts-dejavu-core rsync -y && apt-get clean
 # instead, update the repo state in a later step
 RUN cd stable-diffusion && git pull && git reset --hard c5b2c86f1479dec75b0e92dd37f9357a68594bda && \
   conda env update --file environment.yaml --name base && conda clean -a -y
-
-# download dev UI version, update the sha below in case you want some other version
-# RUN <<EOF
-# git clone https://github.com/hlky/stable-diffusion-webui.git
-# cd stable-diffusion-webui
-# # map to this file: https://github.com/hlky/stable-diffusion-webui/blob/master/.github/sync.yml
-# git reset --hard 49e6178fd82ca736f9bbc621c6b12487c300e493
-# cp -t /stable-diffusion/scripts/ webui.py relauncher.py txt2img.yaml
-# cp -t /stable-diffusion/configs/webui webui.yaml
-# cp -t /stable-diffusion/frontend/ frontend/*
-# cd / && rm -rf stable-diffusion-webui
-# EOF
 
 # Textual-inversion:
 RUN git clone https://github.com/hlky/sd-enable-textual-inversion.git && \
