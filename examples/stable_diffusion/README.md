@@ -1,6 +1,3 @@
-
-Steps to run this example:
-
 ## Setup
 
 1. Install skypilot by following these [instructions](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)
