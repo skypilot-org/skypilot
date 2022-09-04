@@ -1334,20 +1334,23 @@ def suppress_output():
             yield
 
 
-def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
+def _ray_launch_hash_and_service_accounts(
+        cluster_name: str, ray_config: Dict[str, Any]) -> Tuple[Set[str], str]:
     """Returns a set of Ray launch config hashes, one per node type."""
     # Use the cached Ray launch hashes if they exist.
     metadata = global_user_state.get_cluster_metadata(cluster_name)
     assert metadata is not None, cluster_name
     ray_launch_hashes = metadata.get('ray_launch_hashes', None)
-    if ray_launch_hashes is not None:
-        logger.debug('Using cached launch_caches')
-        return set(ray_launch_hashes)
+    ray_service_account = ray_config.get('ray_service_account', None)
+    if ray_launch_hashes is not None and ray_service_account is not None:
+        logger.debug('Using cached launch_caches and service account.')
+        return set(ray_launch_hashes), ray_service_account
     with suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
+    ray_service_account = ray_config['head_node']['serviceAccounts'][0]['email']
     head_node_type = ray_config['head_node_type']
     for node_type, node_config in ray_config['available_node_types'].items():
         if node_type == head_node_type:
@@ -1363,8 +1366,9 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         launch_hashes.add(current_hash)
     # Cache the launch hashes for the cluster.
     metadata['ray_launch_hashes'] = list(launch_hashes)
+    metadata['ray_service_account'] = ray_service_account
     global_user_state.set_cluster_metadata(cluster_name, metadata)
-    return launch_hashes
+    return launch_hashes, ray_service_account
 
 
 def _query_status_aws(
@@ -1382,7 +1386,8 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    launch_hashes, _ = _ray_launch_hash_and_service_accounts(
+        cluster, ray_config)
     hash_filter_str = ','.join(launch_hashes)
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
@@ -1397,11 +1402,13 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    launch_hashes, ray_service_account = _ray_launch_hash_and_service_accounts(
+        cluster, ray_config)
     hash_filter_str = ' '.join(launch_hashes)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     zone = ray_config['provider'].get('availability_zone', '')
+
     if use_tpu_vm:
         # TPU VM's state definition is different from compute VM
         # https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#State # pylint: disable=line-too-long
@@ -1417,7 +1424,7 @@ def _query_status_gcp(
             'PREEMPTED': None,
         }
         check_gcp_cli_include_tpu_vm()
-        query_cmd = ('gcloud compute tpus tpu-vm list '
+        query_cmd = ('gcloud compute tpus tpu-vm list {account_option}'
                      f'--zone {zone} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
@@ -1435,14 +1442,29 @@ def _query_status_gcp(
             'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
             'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
         }
+
         # TODO(zhwu): The status of the TPU attached to the cluster should also be
         # checked, since TPUs are not part of the VMs.
-        query_cmd = ('gcloud compute instances list '
+        query_cmd = ('gcloud compute instances list {account_option} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
                      '--format="value(status)"')
-    status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
-                                     status_map)
+    try:
+        status_list = _process_cli_query('GCP', cluster,
+                                         query_cmd.format(account_option=''),
+                                         '\n', status_map)
+    except exceptions.ClusterStatusFetchingError as e:
+        if ('You do not currently have an active account selected.'
+                not in str(e)):
+            raise
+        logger.warning('No active GCP account found, falling back to service '
+                       'account.')
+        # If there is no account activated, we try our best to fix the issue
+        # by falling back to the ray's service account.
+        status_list = _process_cli_query(
+            'GCP', cluster,
+            query_cmd.format(account_option=f'--account {ray_service_account}'),
+            '\n', status_map)
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
@@ -1473,7 +1495,8 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-    launch_hashes = _ray_launch_hash(cluster, ray_config)
+    launch_hashes, _ = _ray_launch_hash_and_service_accounts(
+        cluster, ray_config)
     hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
