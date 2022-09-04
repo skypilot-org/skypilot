@@ -1462,9 +1462,13 @@ def _query_status_gcp(
         # If there is no account activated, we try our best to fix the issue
         # by falling back to the ray's service account.
         status_list = _process_cli_query(
-            'GCP', cluster,
-            query_cmd.format(account_option=f'--account {ray_service_account} '),
-            '\n', status_map)
+            'GCP',
+            cluster,
+            query_cmd.format(
+                account_option=f'--account {ray_service_account} '),
+            '\n',
+            status_map,
+        )
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
