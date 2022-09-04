@@ -1445,7 +1445,7 @@ def _query_status_gcp(
 
         # TODO(zhwu): The status of the TPU attached to the cluster should also be
         # checked, since TPUs are not part of the VMs.
-        query_cmd = ('gcloud compute instances list {account_option} '
+        query_cmd = ('gcloud compute instances list {account_option}'
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
                      '--format="value(status)"')
@@ -1463,7 +1463,7 @@ def _query_status_gcp(
         # by falling back to the ray's service account.
         status_list = _process_cli_query(
             'GCP', cluster,
-            query_cmd.format(account_option=f'--account {ray_service_account}'),
+            query_cmd.format(account_option=f'--account {ray_service_account} '),
             '\n', status_map)
 
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
