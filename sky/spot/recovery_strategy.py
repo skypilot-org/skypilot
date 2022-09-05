@@ -116,6 +116,17 @@ class StrategyExecutor:
                 logger.error('Failed to terminate the spot cluster '
                              f'{self.cluster_name}. Retrying.')
 
+    def _cancel_all_jobs(self):
+        handle = global_user_state.get_handle_from_cluster_name(
+            self.cluster_name)
+        try:
+            self.backend.cancel_jobs(handle, jobs=None)
+        except exceptions.CommandError:
+            # Ignore the failure as the cluster can be totally stopped, and the
+            # job canceling can get connection error.
+            logger.info('Ignoring the job cancellation failure; the spot '
+                        'cluster is likely completely stopped. Recovering.')
+
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch().
 
@@ -131,6 +142,8 @@ class StrategyExecutor:
             # Check the signal every time to be more responsive to user
             # signals, such as Cancel.
             self.signal_handler()
+            retry_launch = False
+            exception = None
             try:
                 usage_lib.messages.usage.set_internal()
                 sky.launch(self.dag,
@@ -142,30 +155,21 @@ class StrategyExecutor:
                 # code.
                 logger.info(
                     f'Failed to launch the spot cluster with error: {e}')
-                if max_retry is not None and retry_cnt >= max_retry:
-                    # Retry forever if max_retry is None.
-                    if raise_on_failure:
-                        with ux_utils.print_exception_no_traceback():
-                            raise exceptions.ResourcesUnavailableError(
-                                'Failed to launch the spot cluster after '
-                                f'{max_retry} retries.') from e
-                    else:
-                        return None
-                gap_seconds = backoff.current_backoff()
-                logger.info(
-                    f'Retrying to launch the spot cluster in {gap_seconds:.1f} '
-                    'seconds.')
-                time.sleep(gap_seconds)
-                continue
+                retry_launch = True
+                exception = e
 
             status = None
-            retry_launch = False
             job_checking_retry_cnt = 0
-            while (status is None or status in [
-                    job_lib.JobStatus.INIT,
-                    job_lib.JobStatus.PENDING,
-            ]) and job_checking_retry_cnt < spot_utils.MAX_JOB_CHECKING_RETRY:
+            # Check the job status until it is not in initialized status.
+            while True:
                 job_checking_retry_cnt += 1
+                if job_checking_retry_cnt >= spot_utils.MAX_JOB_CHECKING_RETRY:
+                    # Avoid the infinite loop, if any bug happens.
+                    retry_launch = True
+                    logger.info(
+                        'Failed to get the job status, due to unexpected '
+                        'job submission error.')
+                    break
                 cluster_status, _ = backend_utils.refresh_cluster_status_handle(
                     self.cluster_name, force_refresh=True)
                 if cluster_status != global_user_state.ClusterStatus.UP:
@@ -173,22 +177,40 @@ class StrategyExecutor:
                     # In this case, we will terminate the cluster and retry
                     # the launch.
                     retry_launch = True
+                    logger.info(
+                        'The cluster is preempted before the job starts.')
+                    break
+                # TODO(zhwu): The preemption can still happen right before this
+                # line, but it is very unlikely.
+                status = spot_utils.get_job_status(self.backend,
+                                                   self.cluster_name)
+                if status not in [
+                        None, job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING
+                ]:
+                    # The job has been transit into a non-initial status. We can
+                    # continue the logic.
                     break
                 # Wait the job to be started
-                status = spot_utils.get_job_status(self.backend,
-                                                   self.cluster_name)
                 time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
-                status = spot_utils.get_job_status(self.backend,
-                                                   self.cluster_name)
+
             if retry_launch:
-                self.terminate_cluster()
+                self._cancel_all_jobs()
+                if max_retry is not None and retry_cnt >= max_retry:
+                    # Retry forever if max_retry is None.
+                    if raise_on_failure:
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.ResourcesUnavailableError(
+                                'Failed to launch the spot cluster after '
+                                f'{max_retry} retries.') from exception
+                    else:
+                        return None
                 gap_seconds = backoff.current_backoff()
-                logger.info(
-                    'Failed to check the job status, probably due to the '
-                    'preemption or job submission process failure. Retrying '
-                    f'to launch the cluster in {gap_seconds:.1f} seconds.')
+                logger.info('Retrying to launch the spot cluster in '
+                            f'{gap_seconds:.1f} seconds.')
                 time.sleep(gap_seconds)
                 continue
+            # TODO(zhwu): The preemption can still happen right before this
+            # line, but it is very unlikely.
             launch_time = spot_utils.get_job_timestamp(self.backend,
                                                        self.cluster_name,
                                                        get_end_time=False)
@@ -208,19 +230,13 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         #    original user specification.
 
         # Step 1
-        handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
-        try:
-            self.backend.cancel_jobs(handle, jobs=None)
-        except exceptions.CommandError:
-            # Ignore the failure as the cluster can be totally stopped, and the
-            # job canceling can get connection error.
-            logger.info('Ignoring the job cancellation failure; the spot '
-                        'cluster is likely completely stopped. Recovering.')
+        self._cancel_all_jobs()
 
         # Retry the entire block until the cluster is up, so that the ratio of
         # the time spent in the current region and the time spent in the other
         # region is consistent during the retry.
+        handle = global_user_state.get_handle_from_cluster_name(
+            self.cluster_name)
         while True:
             # Add region constraint to the task, to retry on the same region
             # first.
