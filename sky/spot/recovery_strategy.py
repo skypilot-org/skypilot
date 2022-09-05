@@ -187,8 +187,8 @@ class StrategyExecutor:
                 if status not in [
                         None, job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING
                 ]:
-                    # The job has been transit into a non-initial status. We can
-                    # continue the logic.
+                    # The job has been transited into a non-initial status. We
+                    # can continue the logic.
                     break
                 # Wait the job to be started
                 time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
