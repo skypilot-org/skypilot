@@ -131,6 +131,9 @@ class StrategyExecutor:
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch().
 
+        The function will wait until the job starts running, but will leave the
+        handling for the preemption to the caller.
+
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
             raise_on_failure: Whether to raise an exception if the launch fails.
@@ -173,6 +176,7 @@ class StrategyExecutor:
                         'Failed to get the job status, due to unexpected '
                         'job submission error.')
                     break
+
                 try:
                     cluster_status, _ = (
                         backend_utils.refresh_cluster_status_handle(
@@ -187,12 +191,11 @@ class StrategyExecutor:
                     continue
                 if cluster_status != global_user_state.ClusterStatus.UP:
                     # The cluster can be preempted before the job is launched.
-                    # In this case, we will terminate the cluster and retry
-                    # the launch.
-                    retry_launch = True
-                    logger.info(
-                        'The cluster is preempted before the job starts.')
-                    break
+                    # In this case, we will leave the recovery to the caller.
+                    logger.info('The cluster is preempted before the job'
+                                'starts.')
+                    return None
+
                 try:
                     status = spot_utils.get_job_status(self.backend,
                                                        self.cluster_name)
@@ -206,40 +209,38 @@ class StrategyExecutor:
                     logger.info('Failed to get the job status (Unexpected '
                                 f'exception: {e}). Retrying.')
                     continue
+
                 if status not in (None, job_lib.JobStatus.INIT,
                                   job_lib.JobStatus.PENDING):
                     try:
                         launch_time = spot_utils.get_job_timestamp(
                             self.backend, self.cluster_name, get_end_time=False)
+                        return launch_time
                     except Exception as e:  # pylint: disable=broad-except
                         # If we failed to get the job timestamp, we will retry
                         # job checking loop.
                         logger.info('Failed to get the job start timestamp '
                                     f'(Unexpected Exception: {e}). Retrying.')
                         continue
-                    # The job has been transited into a non-initial status. We
-                    # can continue the logic.
-                    break
                 # Wait for the job to be started
                 time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
 
-            if retry_launch:
-                self._try_cancel_all_jobs()
-                if max_retry is not None and retry_cnt >= max_retry:
-                    # Retry forever if max_retry is None.
-                    if raise_on_failure:
-                        with ux_utils.print_exception_no_traceback():
-                            raise exceptions.ResourcesUnavailableError(
-                                'Failed to launch the spot cluster after '
-                                f'{max_retry} retries.') from exception
-                    else:
-                        return None
-                gap_seconds = backoff.current_backoff()
-                logger.info('Retrying to launch the spot cluster in '
-                            f'{gap_seconds:.1f} seconds.')
-                time.sleep(gap_seconds)
-                continue
-            return launch_time
+            assert retry_launch
+            self._try_cancel_all_jobs()
+            if max_retry is not None and retry_cnt >= max_retry:
+                # Retry forever if max_retry is None.
+                if raise_on_failure:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(
+                            'Failed to launch the spot cluster after '
+                            f'{max_retry} retries.') from exception
+                else:
+                    return None
+            gap_seconds = backoff.current_backoff()
+            logger.info('Retrying to launch the spot cluster in '
+                        f'{gap_seconds:.1f} seconds.')
+            time.sleep(gap_seconds)
+            continue
 
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
