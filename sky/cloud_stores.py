@@ -10,6 +10,7 @@ TODO:
 import subprocess
 import urllib.parse
 
+from sky.clouds import gcp
 from sky.data import data_utils
 from sky.adaptors import aws
 
@@ -93,17 +94,7 @@ class GcsCloudStorage(CloudStorage):
     # We use gsutil as a basic implementation.  One pro is that its -m
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
-    _GET_GSUTIL = [
-        # Skip if gsutil already exists.
-        'pushd /tmp &>/dev/null',
-        '(test -f ~/google-cloud-sdk/bin/gsutil || (wget --quiet '
-        'https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/'
-        'google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
-        'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
-        'mv google-cloud-sdk ~/ && '
-        '~/google-cloud-sdk/install.sh -q ))',
-        'popd &>/dev/null',
-    ]
+    _GET_GSUTIL = [gcp.GCLOUD_INSTALLATION_COMMAND]
 
     _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
 
@@ -112,7 +103,7 @@ class GcsCloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        commands = list(self._GET_GSUTIL)
+        commands = self._GET_GSUTIL
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
         p = subprocess.run(command,
@@ -142,14 +133,14 @@ class GcsCloudStorage(CloudStorage):
         """Downloads a directory using gsutil."""
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -r {source} {destination}')
-        all_commands = list(self._GET_GSUTIL)
+        all_commands = self._GET_GSUTIL
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
-        all_commands = list(self._GET_GSUTIL)
+        all_commands = self._GET_GSUTIL
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
