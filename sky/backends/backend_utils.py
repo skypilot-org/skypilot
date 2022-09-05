@@ -15,7 +15,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 
 import colorama
@@ -1334,23 +1334,20 @@ def suppress_output():
             yield
 
 
-def _ray_launch_hash_and_service_accounts(
-        cluster_name: str, ray_config: Dict[str, Any]) -> Tuple[Set[str], str]:
+def _ray_cluster_metadata(cluster_name: str,
+                          ray_config: Dict[str, Any]) -> Dict[str, Any]:
     """Returns a set of Ray launch config hashes, one per node type."""
     # Use the cached Ray launch hashes if they exist.
     metadata = global_user_state.get_cluster_metadata(cluster_name)
     assert metadata is not None, cluster_name
-    ray_launch_hashes = metadata.get('ray_launch_hashes', None)
-    ray_service_account = ray_config.get('ray_service_account', None)
-    if ray_launch_hashes is not None and ray_service_account is not None:
+    if 'ray_launch_hashes' in metadata and 'ray_service_account' in metadata:
         logger.debug('Using cached launch_caches and service account.')
-        return set(ray_launch_hashes), ray_service_account
+        return metadata
     with suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
-    ray_service_account = ray_config['head_node']['serviceAccounts'][0]['email']
     head_node_type = ray_config['head_node_type']
     for node_type, node_config in ray_config['available_node_types'].items():
         if node_type == head_node_type:
@@ -1366,9 +1363,13 @@ def _ray_launch_hash_and_service_accounts(
         launch_hashes.add(current_hash)
     # Cache the launch hashes for the cluster.
     metadata['ray_launch_hashes'] = list(launch_hashes)
+    metadata['ray_service_account'] = None
+    ray_service_account = ray_config['head_node'].get('serviceAccounts')
+    if ray_service_account is not None:
+        metadata['ray_service_account'] = ray_service_account[0]['email']
     metadata['ray_service_account'] = ray_service_account
     global_user_state.set_cluster_metadata(cluster_name, metadata)
-    return launch_hashes, ray_service_account
+    return metadata
 
 
 def _query_status_aws(
@@ -1386,8 +1387,8 @@ def _query_status_aws(
         'terminated': None,
     }
     region = ray_config['provider']['region']
-    launch_hashes, _ = _ray_launch_hash_and_service_accounts(
-        cluster, ray_config)
+    launch_hashes = _ray_cluster_metadata(cluster,
+                                          ray_config)['ray_launch_hashes']
     hash_filter_str = ','.join(launch_hashes)
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
@@ -1402,8 +1403,9 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    launch_hashes, ray_service_account = _ray_launch_hash_and_service_accounts(
-        cluster, ray_config)
+    metadata = _ray_cluster_metadata(cluster, ray_config)
+    launch_hashes, ray_service_account = metadata[
+        'ray_launch_hashes'], metadata['ray_service_account']
     hash_filter_str = ' '.join(launch_hashes)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
@@ -1499,8 +1501,8 @@ def _query_status_azure(
         'VM deallocating': global_user_state.ClusterStatus.STOPPED,
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
-    launch_hashes, _ = _ray_launch_hash_and_service_accounts(
-        cluster, ray_config)
+    launch_hashes = _ray_cluster_metadata(cluster,
+                                          ray_config)['ray_launch_hashes']
     hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
