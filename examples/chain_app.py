@@ -20,7 +20,7 @@ import sky
 
 import time_estimators
 
-MOCK = True
+MOCK = False
 
 TRAIN_SETUP = textwrap.dedent("""\
                 git clone https://github.com/concretevitamin/tpu || true
@@ -74,7 +74,7 @@ def make_application():
         train_op = sky.Task('train_op', setup=TRAIN_SETUP, run=TRAIN_RUN)
 
         train_op.set_inputs(
-            's3://sky-imagenet-tar' if not MOCK else 's3://sky-example-test',
+            's3://imagenet-bucket' if not MOCK else 's3://sky-example-test',
             estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
@@ -106,10 +106,10 @@ def make_application():
                             estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
-            sky.Resources(sky.AWS(), 'inf1.2xlarge'),
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),
-            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4'),
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4'),
+            sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
+            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
         })
 
         infer_op.set_time_estimator(
