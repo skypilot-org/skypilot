@@ -44,14 +44,10 @@ TRAIN_SETUP = textwrap.dedent("""\
                     pip install protobuf==3.20
                     cd models
                     pip install -e .
-
-                    cd INPUTS[0]
-                    tar xzvf sky-imagenet.tar.gz
                 fi
                 """) if not MOCK else "echo 'MOCK TRAIN_SETUP'"
 
-TRAIN_RUN = textwrap.dedent(
-    """\
+TRAIN_RUN = textwrap.dedent("""\
                 cd tpu
                 conda activate resnet
 
@@ -85,10 +81,10 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_op.set_resources({
-            sky.Resources(sky.AWS(), 'p3.2xlarge',
-                          disk_size=400),  # 1 V100, EC2.
-            sky.Resources(sky.AWS(), 'p3.8xlarge',
-                          disk_size=400),  # 4 V100s, EC2.
+            # sky.Resources(sky.AWS(), 'p3.2xlarge',
+            #               disk_size=400),  # 1 V100, EC2.
+            # sky.Resources(sky.AWS(), 'p3.8xlarge',
+            #               disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
             sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
                           disk_size=400),
@@ -97,27 +93,27 @@ def make_application():
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
-        infer_op = sky.Task('infer_op',
-                            run='echo "Infering on INPUTS[0]"; ls INPUTS[0]')
+        # infer_op = sky.Task('infer_op',
+        #                     run='echo "Infering on INPUTS[0]"; ls INPUTS[0]')
 
-        # Data dependency.
-        # FIXME: make the system know this is from train_op's outputs.
-        infer_op.set_inputs(train_op.get_outputs(),
-                            estimated_size_gigabytes=0.1)
+        # # Data dependency.
+        # # FIXME: make the system know this is from train_op's outputs.
+        # infer_op.set_inputs(train_op.get_outputs(),
+        #                     estimated_size_gigabytes=0.1)
 
-        infer_op.set_resources({
-            sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
-            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
-        })
+        # infer_op.set_resources({
+        #     sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
+        #     sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
+        #     sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+        #     sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+        # })
 
-        infer_op.set_time_estimator(
-            time_estimators.resnet50_infer_estimate_runtime)
+        # infer_op.set_time_estimator(
+        #     time_estimators.resnet50_infer_estimate_runtime)
 
-        # Chain the tasks (Airflow syntax).
-        # The dependency represents data flow.
-        train_op >> infer_op
+        # # Chain the tasks (Airflow syntax).
+        # # The dependency represents data flow.
+        # train_op >> infer_op
 
     return dag
 
