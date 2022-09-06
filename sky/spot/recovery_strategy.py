@@ -195,6 +195,8 @@ class StrategyExecutor:
                     # In this case, we will leave the recovery to the caller.
                     logger.info('The cluster is preempted before the job'
                                 'starts.')
+                    # TODO(zhwu): we should recover the preemption with the
+                    # recovery strategy instead of the current while loop.
                     is_preemption = True
                     retry_launch = True
                     break
