@@ -22,6 +22,8 @@ import time_estimators
 
 MOCK = False
 
+CLUSTER_NAME = 'test-chain-app'
+
 TRAIN_SETUP = textwrap.dedent("""\
                 git clone https://github.com/concretevitamin/tpu || true
                 cd tpu
@@ -47,19 +49,61 @@ TRAIN_SETUP = textwrap.dedent("""\
                 fi
                 """) if not MOCK else "echo 'MOCK TRAIN_SETUP'"
 
-TRAIN_RUN = textwrap.dedent("""\
+TRAIN_RUN = textwrap.dedent(f"""\
+                cd tpu
+                conda activate resnet
+                
+                nvidia-smi
+                if [ $? -eq 0 ]; then
+                    export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
+                    python -u models/official/resnet/resnet_main.py --use_tpu=False \\
+                        --mode=train --train_batch_size=256 --train_steps=250 \\
+                        --iterations_per_loop=125 \\
+                        --data_dir=INPUTS[0]/ \\
+                        --model_dir=OUTPUTS[0] \\
+                        --amp --xla --loss_scale=128
+                else
+                    python3 models/official/resnet/resnet_main.py \\
+                        --mode=train \\
+                        --tpu=$TPU_NAME \\
+                        --data_dir=INPUTS[0] \\
+                        --model_dir=OUTPUTS[0]/resnet-realImagenet \\
+                        --train_batch_size=1024 \\
+                        --iterations_per_loop=1251 \\
+                        --train_steps=112590 2>&1 | tee run-realData.log
+                fi
+                """
+) if not MOCK else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
+
+INFER_SETUP = TRAIN_SETUP
+
+INFER_RUN = textwrap.dedent(f"""\
                 cd tpu
                 conda activate resnet
 
-                export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
-                python -u models/official/resnet/resnet_main.py --use_tpu=False \
-                    --mode=train --train_batch_size=256 --train_steps=250 \
-                    --iterations_per_loop=125 \
-                    --data_dir=INPUTS[0]/datasets/ILSVRC2012/imagenet/ \
-                    --model_dir=OUTPUTS[0] \
-                    --amp --xla --loss_scale=128
-                """
-) if not MOCK else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
+                nvidia-smi
+                if [ $? -eq 0 ]; then
+                    python3 official/resnet/resnet_main.py \\
+                        --mode=eval \\
+                        --eval_batch_size=1000 \\
+                        --use_tpu=False \\
+                        --data_dir=INPUTS[0]/ \\
+                        --model_dir=OUTPUTS[0]/ \\
+                        --train_batch_size=1024 \\
+                        --iterations_per_loop=1251 \\
+                        --train_steps=112590 2>&1 | tee run-realData-eval.log
+                else
+                    python3 official/resnet/resnet_main.py \\
+                        --mode=eval \\
+                        --eval_batch_size=1000 \\
+                        --tpu=$TPU_NAME \\
+                        --data_dir=INPUTS[0]/ \\
+                        --model_dir=OUTPUTS[0]/ \\
+                        --train_batch_size=1024 \\
+                        --iterations_per_loop=1251 \\
+                        --train_steps=112590 2>&1 | tee run-realData-eval.log
+                fi
+""")
 
 
 def make_application():
@@ -119,4 +163,4 @@ def make_application():
 
 
 dag = make_application()
-sky.launch(dag, cluster_name='test-chain-app')
+sky.execution._launch_chain(dag, cluster_name=CLUSTER_NAME, retry_until_up=True)

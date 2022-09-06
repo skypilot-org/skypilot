@@ -329,12 +329,12 @@ def _launch_chain(dag: sky.Dag,
                dryrun=dryrun,
                retry_until_up=retry_until_up)
 
-        if not dryrun:
-            logger.info(f'Terminate {task_cluster_name}.')
-            with subprocess.Popen(f'sky down -y {task_cluster_name}',
-                                  shell=True) as proc:
-                if i == len(tasks) - 1:
-                    proc.wait()
+        # if not dryrun:
+        #     logger.info(f'Terminate {task_cluster_name}.')
+        #     with subprocess.Popen(f'sky down -y {task_cluster_name}',
+        #                           shell=True) as proc:
+        #         if i == len(tasks) - 1:
+        #             proc.wait()
 
 
 @timeline.event
