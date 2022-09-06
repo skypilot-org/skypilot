@@ -17,7 +17,7 @@ def import_package(func):
                 azure = _azure
             except ImportError:
                 raise ImportError('Fail to import dependencies for Azure.'
-                                  'See README for how to install it.') from None
+                                'Try pip install "skypilot[azure]"') from None
         return func(*args, **kwargs)
 
     return wrapper
