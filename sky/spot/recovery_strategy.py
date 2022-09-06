@@ -23,6 +23,10 @@ logger = sky_logging.init_logger(__name__)
 SPOT_STRATEGIES = dict()
 SPOT_DEFAULT_STRATEGY = None
 
+# Waiting time for job from INIT/PENDING to RUNNING
+# 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
+MAX_JOB_CHECKING_RETRY = 10
+
 
 class StrategyExecutor:
     """Handle each launching, recovery and termination of the spot clusters."""
@@ -147,7 +151,6 @@ class StrategyExecutor:
             # signals, such as Cancel.
             self.signal_handler()
             retry_launch = False
-            is_preemption = False
             exception = None
             try:
                 usage_lib.messages.usage.set_internal()
@@ -163,12 +166,13 @@ class StrategyExecutor:
                 retry_launch = True
                 exception = e
 
+            # At this point, a sky.launch() has succeeded. Cluster may be
+            # UP (no preemption since) or DOWN (newly preempted).
             status = None
             job_checking_retry_cnt = 0
-            # Check the job status until it is not in initialized status.
             while not retry_launch:
                 job_checking_retry_cnt += 1
-                if job_checking_retry_cnt >= spot_utils.MAX_JOB_CHECKING_RETRY:
+                if job_checking_retry_cnt >= MAX_JOB_CHECKING_RETRY:
                     # Avoid the infinite loop, if any bug happens.
                     retry_launch = True
                     # TODO(zhwu): log the unexpected error to usage collection
@@ -187,17 +191,16 @@ class StrategyExecutor:
                     # loop.
                     # TODO(zhwu): log the unexpected error to usage collection
                     # for future debugging.
-                    logger.info('Failed to get the refresh the cluster status '
-                                f'(Unexpected exception: {e}). Retrying.')
+                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                                'refresh the cluster status. Retrying.')
                     continue
                 if cluster_status != global_user_state.ClusterStatus.UP:
                     # The cluster can be preempted before the job is launched.
-                    # In this case, we will leave the recovery to the caller.
+                    # Break to let the retry launch kick in.
                     logger.info('The cluster is preempted before the job '
                                 'starts.')
                     # TODO(zhwu): we should recover the preemption with the
                     # recovery strategy instead of the current while loop.
-                    is_preemption = True
                     retry_launch = True
                     break
 
@@ -211,10 +214,11 @@ class StrategyExecutor:
                     # get_job_status, so it should not happen here.
                     # TODO(zhwu): log the unexpected error to usage collection
                     # for future debugging.
-                    logger.info('Failed to get the job status (Unexpected '
-                                f'exception: {e}). Retrying.')
+                    logger.info(f'Unexpected exception: {e}\nFailed to get the '
+                                'job status. Retrying.')
                     continue
 
+                # Check the job status until it is not in initialized status
                 if status not in (None, job_lib.JobStatus.INIT,
                                   job_lib.JobStatus.PENDING):
                     try:
@@ -224,17 +228,15 @@ class StrategyExecutor:
                     except Exception as e:  # pylint: disable=broad-except
                         # If we failed to get the job timestamp, we will retry
                         # job checking loop.
-                        logger.info('Failed to get the job start timestamp '
-                                    f'(Unexpected Exception: {e}). Retrying.')
+                        logger.info(f'Unexpected Exception: {e}\nFailed to get '
+                                    'the job start timestamp. Retrying.')
                         continue
                 # Wait for the job to be started
                 time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
 
             assert retry_launch
 
-            self._try_cancel_all_jobs()
-            if is_preemption:
-                self.terminate_cluster()
+            self.terminate_cluster()
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
@@ -248,7 +250,6 @@ class StrategyExecutor:
             logger.info('Retrying to launch the spot cluster in '
                         f'{gap_seconds:.1f} seconds.')
             time.sleep(gap_seconds)
-            continue
 
 
 class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
