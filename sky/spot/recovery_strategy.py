@@ -193,7 +193,7 @@ class StrategyExecutor:
                 if cluster_status != global_user_state.ClusterStatus.UP:
                     # The cluster can be preempted before the job is launched.
                     # In this case, we will leave the recovery to the caller.
-                    logger.info('The cluster is preempted before the job'
+                    logger.info('The cluster is preempted before the job '
                                 'starts.')
                     # TODO(zhwu): we should recover the preemption with the
                     # recovery strategy instead of the current while loop.
@@ -231,7 +231,7 @@ class StrategyExecutor:
                 time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
 
             assert retry_launch
-                
+
             self._try_cancel_all_jobs()
             if is_preemption:
                 self.terminate_cluster()
