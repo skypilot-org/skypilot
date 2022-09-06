@@ -21,7 +21,7 @@ def import_package(func):
                 botocore = _botocore
             except ImportError:
                 raise ImportError('Fail to import dependencies for AWS.'
-                                  'See README for how to install it.') from None
+                                  'Try pip install "skypilot[aws]"') from None
         return func(*args, **kwargs)
 
     return wrapper
