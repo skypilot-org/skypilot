@@ -99,13 +99,13 @@ class StrategyExecutor:
 
     def terminate_cluster(self, max_retry: int = 3) -> None:
         """Terminate the spot cluster."""
-        handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
-        if handle is None:
-            return
         retry_cnt = 0
         while True:
             try:
+                handle = global_user_state.get_handle_from_cluster_name(
+                    self.cluster_name)
+                if handle is None:
+                    return
                 self.backend.teardown(handle, terminate=True)
                 return
             except Exception as e:  # pylint: disable=broad-except
@@ -147,6 +147,7 @@ class StrategyExecutor:
             # signals, such as Cancel.
             self.signal_handler()
             retry_launch = False
+            is_preemption = False
             exception = None
             try:
                 usage_lib.messages.usage.set_internal()
@@ -194,7 +195,9 @@ class StrategyExecutor:
                     # In this case, we will leave the recovery to the caller.
                     logger.info('The cluster is preempted before the job'
                                 'starts.')
-                    return None
+                    is_preemption = True
+                    retry_launch = True
+                    break
 
                 try:
                     status = spot_utils.get_job_status(self.backend,
@@ -226,7 +229,10 @@ class StrategyExecutor:
                 time.sleep(spot_utils.JOB_STARTED_STATUS_CHECK_GAP_SECONDS)
 
             assert retry_launch
+                
             self._try_cancel_all_jobs()
+            if is_preemption:
+                self.terminate_cluster()
             if max_retry is not None and retry_cnt >= max_retry:
                 # Retry forever if max_retry is None.
                 if raise_on_failure:
