@@ -108,10 +108,11 @@ class AWS(clouds.Cloud):
                 assert region_name in amis, region_name
                 return amis[region_name]
             if acc_name == 'Inferentia':
-                # Deep Learning AMI
+                # Deep Learning AMI Fetched with:
                 # aws ec2 describe-images --region {region} --owners amazon \
-                # --filters 'Name=name,Values=Deep Learning AMI (Ubuntu 18.04) Version ??.?' 'Name=state,Values=available' \
-                # --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' \
+                # --filters 'Name=name,Values=Deep Learning AMI (Ubuntu 18.04) \
+                # Version ??.?' 'Name=state,Values=available' \
+                # --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId'\
                 # --output text
                 # Inferentia accelerator requires original deep learning AMI
                 amis = {
@@ -246,7 +247,8 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zones),
             'image_id': image_id,
-            'num_gpus': list(acc_dict.values())[0] if acc_dict is not None else 0
+            'num_gpus': list(acc_dict.values())[0]
+                        if acc_dict is not None else 0
         }
 
     def get_feasible_launchable_resources(self,

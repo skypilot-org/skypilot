@@ -138,7 +138,7 @@ INFER_RUN = textwrap.dedent(f"""\
                 if [ "$use_inf" -eq 1 ]; then
                     cd inferentia
                     conda activate aws_neuron_tensorflow2_p37
-                    mv INPUTS[0]/resnet-realImagenet ./keras-resnet50-tpu
+                    mv INPUTS[0]/resnet-realImagenet ./keras-resnet50
                     python compile.py
                     python inference.py
                 fi
@@ -169,7 +169,10 @@ def make_application():
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8', use_spot=True,
+            sky.Resources(sky.GCP(),
+                          'n1-standard-8',
+                          'tpu-v3-8',
+                          use_spot=True,
                           disk_size=400),
         }
         if not REAL_TRAIN:
@@ -179,16 +182,12 @@ def make_application():
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
-        infer_op = sky.Task('infer_op',
-                            setup=INFER_SETUP,
-                            run=INFER_RUN)
+        infer_op = sky.Task('infer_op', setup=INFER_SETUP, run=INFER_RUN)
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
-        infer_op.set_inputs(
-            # train_op.get_outputs(),
-            'gs://test-imagenet-bucket-skypilot/resnet-realImagenet',
-            estimated_size_gigabytes=0.1)
+        infer_op.set_inputs(train_op.get_outputs(),
+                            estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
@@ -202,7 +201,7 @@ def make_application():
 
         # # Chain the tasks (Airflow syntax).
         # # The dependency represents data flow.
-        # train_op >> infer_op
+        train_op >> infer_op
 
     return dag
 

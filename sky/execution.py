@@ -284,24 +284,29 @@ def _launch_chain(dag: sky.Dag,
                 input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
                 logger.info(
                     f'transfer data from {input_store_path} to {input_vm_path}')
-                # TODO: We need to decide the location of the bucket based on
-                # the TPU location
-                # transfer_command = [
-                #     f'gsutil mb -l us-central1 {input_vm_path}',
-                #     'pip install skyplane',
-                #     'skyplane init --disable-config-azure -y',
-                #     f'skyplane cp  {input_store_path} {input_vm_path}',
-                # ]
+                # TODO: Using the multi-region gs bucket, which will be free for
+                # data egressing to another GCP service within US
                 transfer_command = [
-                    f'gsutil mb -l us-central1 {input_vm_path} || true',
+                    f'gsutil mb {input_vm_path} || true',
                     # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
                 ]
+                # TODO(zhwu): fix this with faster data transfer
                 transfer_command = '; '.join(transfer_command)
                 print(transfer_command)
                 subprocess.run(transfer_command, shell=True, check=True)
-                # input_storage_name = storage.get_storage_name_from_uri(input_store_path)
-                # input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
-                # sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
+                # pylint: disable=pointless-string-statement
+                """ # pylint: disable=line-too-long
+                transfer_command = [
+                    f'gsutil mb -l us-central1 {input_vm_path}',
+                    'pip install skyplane',
+                    'skyplane init --disable-config-azure -y',
+                    f'skyplane cp  {input_store_path} {input_vm_path}',
+                ]
+
+                input_storage_name = storage.get_storage_name_from_uri(input_store_path)
+                input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
+                sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
+                """
             elif store_str == 'gs':
                 input_vm_path = input_store_path
             else:
@@ -328,7 +333,8 @@ def _launch_chain(dag: sky.Dag,
                 output_store_path)
             if inputs_outputs_on_bucket:
                 output_vm_path = f'gs://{output_storage_name}'
-                create_bucket_cmd = f'gsutil mb -l us-central1 {output_vm_path} || true'
+                create_bucket_cmd = ('gsutil mb -l us-central1 '
+                                     f'{output_vm_path} || true')
                 subprocess.run(create_bucket_cmd, shell=True, check=True)
             else:
                 output_vm_path = f'~/.sky/task-outputs-{i}'
