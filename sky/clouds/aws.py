@@ -108,9 +108,12 @@ class AWS(clouds.Cloud):
                 assert region_name in amis, region_name
                 return amis[region_name]
             if acc_name == 'Inferentia':
-                # Deep Learning AMI 
-                # aws ec2 describe-images --region {region} --owners amazon --filters 'Name=name,Values=Deep Learning AMI (Ubuntu 18.04) Version ??.?' 'Name=state,Values=available' --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' --output text
-                # inferentia accelerator requires this original deep learning AMI
+                # Deep Learning AMI
+                # aws ec2 describe-images --region {region} --owners amazon \
+                # --filters 'Name=name,Values=Deep Learning AMI (Ubuntu 18.04) Version ??.?' 'Name=state,Values=available' \
+                # --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' \
+                # --output text
+                # Inferentia accelerator requires original deep learning AMI
                 amis = {
                     'us-east-1': 'ami-008a77bad7b109354',
                     'us-east-2': 'ami-0ae37980d60476156',

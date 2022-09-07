@@ -18,4 +18,4 @@ for batch_size in [16]:
     # tfn.saved_model.compile(model_dir, compiled_model_dir, batch_size=batch_size, dynamic_batch_size=True, model_feed_dict = {'input_1': example_input})
     tfn.saved_model.compile(model_dir,
                             compiled_model_dir,
-                            batch_size=batch_size)
+                            model_feed_dict={'input': example_input})

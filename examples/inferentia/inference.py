@@ -59,7 +59,7 @@ for batch_size in batch_sizes:
 
     num_inferences = 25000  # MLPerf: Offline.
     num_inferences = int(1e6)  # MLPerf: Offline.
-    num_inferences = 50000 / USER_BATCH_SIZE # Imagenet eval size
+    num_inferences = 50000 / USER_BATCH_SIZE  # Imagenet eval size
     num_loops = num_inferences // USER_BATCH_SIZE
 
     # Durations for all batches.
@@ -70,8 +70,7 @@ for batch_size in batch_sizes:
     start = time.time()
     with futures.ThreadPoolExecutor(8) as exe:
         for i in range(num_loops):
-            fut = exe.submit(RunOneBatch, predictor_inferentia,
-                             model_feed_dict)
+            fut = exe.submit(RunOneBatch, predictor_inferentia, model_feed_dict)
             fut_list[i] = fut
         for i, fut in enumerate(fut_list):
             duration_ms[i] = fut.result()

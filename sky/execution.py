@@ -268,8 +268,8 @@ def _launch_chain(dag: sky.Dag,
                 'CLOUD://', store_type.value + '://')
             if output_store_path != input_store_path:
                 raise ValueError(
-                    f'Ambiguous inputs {input_store_path} can only be used when a'
-                    'previous task has the outputs with the same name '
+                    f'Ambiguous inputs {input_store_path} can only be used '
+                    'when a previous task has the outputs with the same name '
                     f'{output_vm_path}.')
 
         inputs_outputs_on_bucket = False
@@ -282,8 +282,10 @@ def _launch_chain(dag: sky.Dag,
             store_str = input_store_path.split('://')[0]
             if store_str == 's3':
                 input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
-                logger.info(f'transfer data from {input_store_path} to {input_vm_path}')
-                # TODO: We need to decide the location of the bucket based on the TPU location
+                logger.info(
+                    f'transfer data from {input_store_path} to {input_vm_path}')
+                # TODO: We need to decide the location of the bucket based on
+                # the TPU location
                 # transfer_command = [
                 #     f'gsutil mb -l us-central1 {input_vm_path}',
                 #     'pip install skyplane',
@@ -296,7 +298,7 @@ def _launch_chain(dag: sky.Dag,
                 ]
                 transfer_command = '; '.join(transfer_command)
                 print(transfer_command)
-                subprocess.run(transfer_command, shell=True)
+                subprocess.run(transfer_command, shell=True, check=True)
                 # input_storage_name = storage.get_storage_name_from_uri(input_store_path)
                 # input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
                 # sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
@@ -327,7 +329,7 @@ def _launch_chain(dag: sky.Dag,
             if inputs_outputs_on_bucket:
                 output_vm_path = f'gs://{output_storage_name}'
                 create_bucket_cmd = f'gsutil mb -l us-central1 {output_vm_path}'
-                subprocess.run(create_bucket_cmd, shell=True)
+                subprocess.run(create_bucket_cmd, shell=True, check=True)
             else:
                 output_vm_path = f'~/.sky/task-outputs-{i}'
 

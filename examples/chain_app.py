@@ -66,36 +66,35 @@ SETUP = textwrap.dedent("""\
             fi
             """)
 
-TRAIN_SETUP = SETUP if REAL_TRAIN  else "echo 'MOCK TRAIN_SETUP'"
+TRAIN_SETUP = SETUP if REAL_TRAIN else "echo 'MOCK TRAIN_SETUP'"
 
 TRAIN_RUN = textwrap.dedent(f"""\
-                cd tpu
-                conda activate resnet
-                
-                if [ "$use_gpu"="1" ]; then
-                    export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
-                    python -u models/official/resnet/resnet_main.py --use_tpu=False \\
-                        --mode=train --train_batch_size=256 --train_steps=250 \\
-                        --iterations_per_loop=125 \\
-                        --data_dir=INPUTS[0]/ \\
-                        --model_dir=OUTPUTS[0]/resnet-realImagenet \\
-                        --amp --xla --loss_scale=128
-                fi
-                if [ "$use_tpu"="1" ]; then
-                    python3 models/official/resnet/resnet_main.py \\
-                        --mode=train \\
-                        --tpu=$TPU_NAME \\
-                        --data_dir=INPUTS[0] \\
-                        --model_dir=OUTPUTS[0]/resnet-realImagenet \\
-                        --train_batch_size=1024 \\
-                        --iterations_per_loop=1251 \\
-                        --train_steps=112590 2>&1 | tee run-realData.log
-                fi
-                if [ "$use_inf"="1" ]; then
-                    exit 1
-                fi
-                """
-) if REAL_TRAIN else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
+    cd tpu
+    conda activate resnet
+    
+    if [ "$use_gpu"="1" ]; then
+        export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
+        python -u models/official/resnet/resnet_main.py --use_tpu=False \\
+            --mode=train --train_batch_size=256 --train_steps=250 \\
+            --iterations_per_loop=125 \\
+            --data_dir=INPUTS[0]/ \\
+            --model_dir=OUTPUTS[0]/resnet-realImagenet \\
+            --amp --xla --loss_scale=128
+    fi
+    if [ "$use_tpu"="1" ]; then
+        python3 models/official/resnet/resnet_main.py \\
+            --mode=train \\
+            --tpu=$TPU_NAME \\
+            --data_dir=INPUTS[0] \\
+            --model_dir=OUTPUTS[0]/resnet-realImagenet \\
+            --train_batch_size=1024 \\
+            --iterations_per_loop=1251 \\
+            --train_steps=112590 2>&1 | tee run-realData.log
+    fi
+    if [ "$use_inf"="1" ]; then
+        exit 1
+    fi
+    """) if REAL_TRAIN else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
 
 INFER_SETUP = SETUP if REAL_TEST else "echo 'MOCK INFER_SETUP'"
 
@@ -129,7 +128,7 @@ INFER_RUN = textwrap.dedent(f"""\
                     python compile.py
                     python inference.py
                 fi
-""")
+                """)
 
 
 def make_application():
@@ -175,7 +174,7 @@ def make_application():
         infer_op.set_inputs(
             # train_op.get_outputs(),
             'gs://test-imagenet-bucket-skypilot/resnet-realImagenet',
-                            estimated_size_gigabytes=0.1)
+            estimated_size_gigabytes=0.1)
 
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
