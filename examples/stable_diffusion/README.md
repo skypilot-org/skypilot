@@ -4,17 +4,17 @@
 
 2. Run: `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`.
 
-2. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml`.
+3. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml`.
 
-3. Run `ssh -L 7860:localhost:7860 stable-diffusion`.
+4. Run `ssh -L 7860:localhost:7860 stable-diffusion`.
 
-4. Open [`http://localhost:7860/`](http://localhost:7860/) in browser.
+5. Open [`http://localhost:7860/`](http://localhost:7860/) in browser.
 
-5. Type in text prompt and click "Generate".
+6. Type in text prompt and click "Generate".
 
-![Stable Diffusion Web Tool UI](stable_diffusion_ui.png)
+![Stable Diffusion Web Tool UI](assets/stable_diffusion_ui.png)
 
-6. Once you are done, run `sky down stable-diffusion` to terminate the VM.
+7. Once you are done, run `sky down stable-diffusion` to terminate the VM.
 
 
 ## Usage Tips
