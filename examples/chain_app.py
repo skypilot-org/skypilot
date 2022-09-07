@@ -26,14 +26,11 @@ REAL_TEST = True
 CLUSTER_NAME = 'test-chain-app'
 
 SETUP = textwrap.dedent("""\
-            git clone https://github.com/concretevitamin/tpu || true
-            cd tpu
-
             use_tpu=0
             [ "$TPU_NAME"!="" ] && (echo 'export use_tpu=1' >> ~/.bashrc) || echo 'export use_tpu=0' >> ~/.bashrc
 
             use_gpu=0
-            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc && git checkout 9459fee) || echo 'export use_gpu=0' >> ~/.bashrc
+            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc && ) || echo 'export use_gpu=0' >> ~/.bashrc
 
             use_inf=0
             neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
@@ -47,15 +44,28 @@ SETUP = textwrap.dedent("""\
             if [ $? -eq 0 ]; then
                 echo "conda env exists"
             else
-                if [ "$use_inf" -ne 1 ]; then
+                if [ "$use_gpu" -eq 1 ]; then
+                    git clone https://github.com/concretevitamin/tpu ./codebase || true
+                    cd ./codebase
+                    git checkout 9459fee
+
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
+                    conda install cudatoolkit=11.0 -y
                     pip install pyyaml
-                    [[ "$use_gpu" -eq 1 ]] && conda install cudatoolkit=11.0 -y
-                    [[ "$use_tpu" -eq 1 ]] && pip install cloud-tpu-client
-                    pip install tensorflow==2.5.0
+                    pip install tensorflow==2.5.0 pyyaml
                     pip install protobuf==3.20
-                else:
+                fi
+                if [ "$use_tpu" -eq 1 ]; then
+                    git clone git@github.com:skypilot-org/nsdi-2023.git ./codebase || true
+                    conda create -n resnet python=3.7 -y
+                    conda activate resnet
+                    pip install tensorflow==2.5.0 pyyaml cloud-tpu-client
+                    pip install protobuf==3.20
+                fi
+                if [ "$use_inf" -eq 1 ]; then
+                    git clone git@github.com:skypilot-org/nsdi-2023.git ./codebase || true
+
                     # Install OS headers
                     sudo snap install linux-headers-$(uname -r) -y
 
@@ -68,7 +78,7 @@ SETUP = textwrap.dedent("""\
 TRAIN_SETUP = SETUP if REAL_TRAIN else "echo 'MOCK TRAIN_SETUP'"
 
 TRAIN_RUN = textwrap.dedent(f"""\
-    cd tpu
+    cd codebase
     conda activate resnet
     
     if [ "$use_gpu" -eq 1 ]; then
@@ -82,15 +92,14 @@ TRAIN_RUN = textwrap.dedent(f"""\
             --amp --xla --loss_scale=128
     fi
     if [ "$use_tpu" -eq 1 ]; then
-        python3 models/official/resnet/resnet_main.py \\
-            --mode=train \\
-            --tpu=$TPU_NAME \\
-            --data_dir=INPUTS[0] \\
-            --model_dir=OUTPUTS[0]/resnet-realImagenet \\
-            --export_dir=OUTPUTS[0]/resnet-savedmodel \\
-            --train_batch_size=1024 \\
-            --iterations_per_loop=1 \\
-            --train_steps=1 2>&1 | tee run-realData.log
+        cd ml-pipeline/resnet50_tpu
+        python3 resnet50_tpu/resnet50.py \\
+          --tpu=$TPU_NAME \\
+          --data=gs://test-chain-app-0-train-op-inputs-0 \\
+          --use_bfloat16=False \\
+          --model_dir=gs://skypilot-pipeline-model/resnet-realImagenet \\
+          --num_epochs 1 \\
+          --steps_per_epoch 1 2>&1 | tee run-realData-float32.log
     fi
     if [ "$use_inf" -eq 1 ]; then
         exit 1
@@ -100,10 +109,10 @@ TRAIN_RUN = textwrap.dedent(f"""\
 INFER_SETUP = SETUP if REAL_TEST else "echo 'MOCK INFER_SETUP'"
 
 INFER_RUN = textwrap.dedent(f"""\
-                cd tpu
-                conda activate resnet
+                cd codebase
 
                 if [ $use_gpu -eq 1 ]; then
+                    conda activate resnet
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
                         --eval_batch_size=16 \\
@@ -115,6 +124,7 @@ INFER_RUN = textwrap.dedent(f"""\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
                 fi
                 if [ $use_tpu -eq 1 ]; then
+                    conda activate resnet
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
                         --eval_batch_size=16 \\
@@ -126,8 +136,9 @@ INFER_RUN = textwrap.dedent(f"""\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
                 fi
                 if [ $use_inf -eq 1 ]; then
+                    cd ml-pipeline/inferentia
                     conda activate aws_neuron_tensorflow2_p37
-                    cp -r INPUTS[0]/resnet-savedmodel ./resnet50
+                    mv INPUTS[0]/resnet-realImagenet ./keras-resnet50-tpu
                     python compile.py
                     python inference.py
                 fi
