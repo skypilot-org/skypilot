@@ -126,7 +126,7 @@ head_start_ray_commands:
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}};
+  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} --num-gpus={{num_gpus}};
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
 {%- else %}
 worker_start_ray_commands: []

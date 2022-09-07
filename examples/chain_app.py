@@ -20,7 +20,7 @@ import sky
 
 import time_estimators
 
-REAL_TRAIN = False
+REAL_TRAIN = True
 REAL_TEST = True
 
 CLUSTER_NAME = 'test-chain-app'
@@ -30,13 +30,15 @@ SETUP = textwrap.dedent("""\
             cd tpu
 
             use_tpu=0
-            [ "$TPU_NAME"!="" ] && use_tpu=1 && (echo 'export use_tpu=1' >> ~/.bashrc)
+            [ "$TPU_NAME"!="" ] && (echo 'export use_tpu=1' >> ~/.bashrc) || echo 'export use_tpu=0' >> ~/.bashrc
 
             use_gpu=0
-            nvidia-smi && use_gpu=1 && (echo 'export use_gpu=1' >> ~/.bashrc) && git checkout 9459fee
+            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc && git checkout 9459fee) || echo 'export use_gpu=0' >> ~/.bashrc
 
             use_inf=0
-            neuron-ls && use_inf=1 && (echo 'export use_inf=1' >> ~/.bashrc) 
+            neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
+
+            source ~/.bashrc
 
             pip install --upgrade pip
 
@@ -45,24 +47,21 @@ SETUP = textwrap.dedent("""\
             if [ $? -eq 0 ]; then
                 echo "conda env exists"
             else
-                if [ "$use_inf" != "1" ]; then
+                if [ "$use_inf" -ne 1 ]; then
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
-                    [ "$use_gpu"="1" ] && conda install cudatoolkit=11.0 -y
-                    [ "$use_tpu"="1" ] && pip install cloud-tpu-client
+                    pip install pyyaml
+                    [[ "$use_gpu" -eq 1 ]] && conda install cudatoolkit=11.0 -y
+                    [[ "$use_tpu" -eq 1 ]] && pip install cloud-tpu-client
                     pip install tensorflow==2.5.0
                     pip install protobuf==3.20
                 else:
                     # Install OS headers
-                    sudo apt-get install linux-headers-$(uname -r) -y
+                    sudo snap install linux-headers-$(uname -r) -y
 
                     # Install Neuron Driver
                     sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
-
-                    conda create -n resnet --clone aws_neuron_tensorflow_p36
                 fi
-                cd models
-                pip install -e .
             fi
             """)
 
@@ -72,26 +71,28 @@ TRAIN_RUN = textwrap.dedent(f"""\
     cd tpu
     conda activate resnet
     
-    if [ "$use_gpu"="1" ]; then
+    if [ "$use_gpu" -eq 1 ]; then
         export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
         python -u models/official/resnet/resnet_main.py --use_tpu=False \\
             --mode=train --train_batch_size=256 --train_steps=250 \\
             --iterations_per_loop=125 \\
             --data_dir=INPUTS[0]/ \\
             --model_dir=OUTPUTS[0]/resnet-realImagenet \\
+            --export_dir=OUTPUTS[0]/resnet-savedmodel \\
             --amp --xla --loss_scale=128
     fi
-    if [ "$use_tpu"="1" ]; then
+    if [ "$use_tpu" -eq 1 ]; then
         python3 models/official/resnet/resnet_main.py \\
             --mode=train \\
             --tpu=$TPU_NAME \\
             --data_dir=INPUTS[0] \\
             --model_dir=OUTPUTS[0]/resnet-realImagenet \\
+            --export_dir=OUTPUTS[0]/resnet-savedmodel \\
             --train_batch_size=1024 \\
-            --iterations_per_loop=1251 \\
-            --train_steps=112590 2>&1 | tee run-realData.log
+            --iterations_per_loop=1 \\
+            --train_steps=1 2>&1 | tee run-realData.log
     fi
-    if [ "$use_inf"="1" ]; then
+    if [ "$use_inf" -eq 1 ]; then
         exit 1
     fi
     """) if REAL_TRAIN else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
@@ -102,7 +103,7 @@ INFER_RUN = textwrap.dedent(f"""\
                 cd tpu
                 conda activate resnet
 
-                if [ "$use_gpu"="1" ]; then
+                if [ $use_gpu -eq 1 ]; then
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
                         --eval_batch_size=16 \\
@@ -113,7 +114,7 @@ INFER_RUN = textwrap.dedent(f"""\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
                 fi
-                if [ "$use_tpu"="1" ]; then
+                if [ $use_tpu -eq 1 ]; then
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
                         --eval_batch_size=16 \\
@@ -124,7 +125,9 @@ INFER_RUN = textwrap.dedent(f"""\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
                 fi
-                if [ "$use_inf"="1" ]; then
+                if [ $use_inf -eq 1 ]; then
+                    conda activate aws_neuron_tensorflow2_p37
+                    cp -r INPUTS[0]/resnet-savedmodel ./resnet50
                     python compile.py
                     python inference.py
                 fi
@@ -155,14 +158,14 @@ def make_application():
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8', use_spot=True,
                           disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))
         train_op.set_resources(train_resources)
 
-        # train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
+        train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
         infer_op = sky.Task('infer_op',

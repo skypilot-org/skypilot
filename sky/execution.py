@@ -293,8 +293,8 @@ def _launch_chain(dag: sky.Dag,
                 #     f'skyplane cp  {input_store_path} {input_vm_path}',
                 # ]
                 transfer_command = [
-                    f'gsutil mb -l us-central1 {input_vm_path}',
-                    f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
+                    f'gsutil mb -l us-central1 {input_vm_path} || true',
+                    # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
                 ]
                 transfer_command = '; '.join(transfer_command)
                 print(transfer_command)
@@ -328,7 +328,7 @@ def _launch_chain(dag: sky.Dag,
                 output_store_path)
             if inputs_outputs_on_bucket:
                 output_vm_path = f'gs://{output_storage_name}'
-                create_bucket_cmd = f'gsutil mb -l us-central1 {output_vm_path}'
+                create_bucket_cmd = f'gsutil mb -l us-central1 {output_vm_path} || true'
                 subprocess.run(create_bucket_cmd, shell=True, check=True)
             else:
                 output_vm_path = f'~/.sky/task-outputs-{i}'

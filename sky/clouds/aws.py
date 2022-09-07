@@ -246,6 +246,7 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zones),
             'image_id': image_id,
+            'num_gpus': list(acc_dict.values())[0] if acc_dict is not None else 0
         }
 
     def get_feasible_launchable_resources(self,
