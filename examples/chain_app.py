@@ -20,49 +20,68 @@ import sky
 
 import time_estimators
 
-MOCK = False
+REAL_TRAIN = False
+REAL_TEST = True
 
 CLUSTER_NAME = 'test-chain-app'
 
-TRAIN_SETUP = textwrap.dedent("""\
-                git clone https://github.com/concretevitamin/tpu || true
-                cd tpu
-                nvidia-smi
-                if [ $? -eq 0 ]; then
-                    git checkout 9459fee
-                fi
+SETUP = textwrap.dedent("""\
+            git clone https://github.com/concretevitamin/tpu || true
+            cd tpu
 
-                pip install --upgrade pip
+            use_tpu=0
+            [ "$TPU_NAME"!="" ] && use_tpu=1 && (echo 'export use_tpu=1' >> ~/.bashrc)
 
-                conda activate resnet
+            use_gpu=0
+            nvidia-smi && use_gpu=1 && (echo 'export use_gpu=1' >> ~/.bashrc) && git checkout 9459fee
 
-                if [ $? -eq 0 ]; then
-                    echo "conda env exists"
-                else
+            use_inf=0
+            neuron-ls && use_inf=1 && (echo 'export use_inf=1' >> ~/.bashrc) 
+
+            pip install --upgrade pip
+
+            conda activate resnet
+
+            if [ $? -eq 0 ]; then
+                echo "conda env exists"
+            else
+                if [ "$use_inf" != "1" ]; then
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
-                    conda install cudatoolkit=11.0 -y
-                    pip install tensorflow==2.4.0 pyyaml
+                    [ "$use_gpu"="1" ] && conda install cudatoolkit=11.0 -y
+                    [ "$use_tpu"="1" ] && pip install cloud-tpu-client
+                    pip install tensorflow==2.5.0
                     pip install protobuf==3.20
-                    cd models
-                    pip install -e .
+                else:
+                    # Install OS headers
+                    sudo apt-get install linux-headers-$(uname -r) -y
+
+                    # Install Neuron Driver
+                    sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
+
+                    conda create -n resnet --clone aws_neuron_tensorflow_p36
                 fi
-                """) if not MOCK else "echo 'MOCK TRAIN_SETUP'"
+                cd models
+                pip install -e .
+            fi
+            """)
+
+TRAIN_SETUP = SETUP if REAL_TRAIN  else "echo 'MOCK TRAIN_SETUP'"
 
 TRAIN_RUN = textwrap.dedent(f"""\
                 cd tpu
                 conda activate resnet
                 
-                nvidia-smi
-                if [ $? -eq 0 ]; then
+                if [ "$use_gpu"="1" ]; then
                     export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
                     python -u models/official/resnet/resnet_main.py --use_tpu=False \\
                         --mode=train --train_batch_size=256 --train_steps=250 \\
                         --iterations_per_loop=125 \\
                         --data_dir=INPUTS[0]/ \\
-                        --model_dir=OUTPUTS[0] \\
+                        --model_dir=OUTPUTS[0]/resnet-realImagenet \\
                         --amp --xla --loss_scale=128
-                else
+                fi
+                if [ "$use_tpu"="1" ]; then
                     python3 models/official/resnet/resnet_main.py \\
                         --mode=train \\
                         --tpu=$TPU_NAME \\
@@ -72,36 +91,43 @@ TRAIN_RUN = textwrap.dedent(f"""\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData.log
                 fi
+                if [ "$use_inf"="1" ]; then
+                    exit 1
+                fi
                 """
-) if not MOCK else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
+) if REAL_TRAIN else "echo 'MOCK TRAINING' | tee OUTPUTS[0]/model.pt"
 
-INFER_SETUP = TRAIN_SETUP
+INFER_SETUP = SETUP if REAL_TEST else "echo 'MOCK INFER_SETUP'"
 
 INFER_RUN = textwrap.dedent(f"""\
                 cd tpu
                 conda activate resnet
 
-                nvidia-smi
-                if [ $? -eq 0 ]; then
+                if [ "$use_gpu"="1" ]; then
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
-                        --eval_batch_size=1000 \\
+                        --eval_batch_size=16 \\
                         --use_tpu=False \\
-                        --data_dir=INPUTS[0]/ \\
-                        --model_dir=OUTPUTS[0]/ \\
+                        --data_dir=./kitten_small.jpg \\
+                        --model_dir=INPUTS[0]/resnet-realImagenet \\
                         --train_batch_size=1024 \\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
-                else
+                fi
+                if [ "$use_tpu"="1" ]; then
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
-                        --eval_batch_size=1000 \\
+                        --eval_batch_size=16 \\
                         --tpu=$TPU_NAME \\
-                        --data_dir=INPUTS[0]/ \\
-                        --model_dir=OUTPUTS[0]/ \\
+                        --data_dir=./kitten_small.jpg \\
+                        --model_dir=INPUTS[0]/resnet-realImagenet \\
                         --train_batch_size=1024 \\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
+                fi
+                if [ "$use_inf"="1" ]; then
+                    python compile.py
+                    python inference.py
                 fi
 """)
 
@@ -114,7 +140,7 @@ def make_application():
         train_op = sky.Task('train_op', setup=TRAIN_SETUP, run=TRAIN_RUN)
 
         train_op.set_inputs(
-            's3://imagenet-bucket' if not MOCK else 's3://sky-example-test',
+            's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
             estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
@@ -124,36 +150,42 @@ def make_application():
         train_op.set_outputs('CLOUD://skypilot-pipeline-model',
                              estimated_size_gigabytes=0.1)
 
-        train_op.set_resources({
-            # sky.Resources(sky.AWS(), 'p3.2xlarge',
-            #               disk_size=400),  # 1 V100, EC2.
-            # sky.Resources(sky.AWS(), 'p3.8xlarge',
-            #               disk_size=400),  # 4 V100s, EC2.
+        train_resources = {
+            sky.Resources(sky.AWS(), 'p3.2xlarge',
+                          disk_size=400),  # 1 V100, EC2.
+            sky.Resources(sky.AWS(), 'p3.8xlarge',
+                          disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
             sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
                           disk_size=400),
-        })
+        }
+        if not REAL_TRAIN:
+            train_resources.add(sky.Resources(sky.GCP(), disk_size=400))
+        train_op.set_resources(train_resources)
 
-        train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
+        # train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
-        # infer_op = sky.Task('infer_op',
-        #                     run='echo "Infering on INPUTS[0]"; ls INPUTS[0]')
+        infer_op = sky.Task('infer_op',
+                            setup=INFER_SETUP,
+                            run='echo "Infering on INPUTS[0]"; ls INPUTS[0]')
 
-        # # Data dependency.
-        # # FIXME: make the system know this is from train_op's outputs.
-        # infer_op.set_inputs(train_op.get_outputs(),
-        #                     estimated_size_gigabytes=0.1)
+        # Data dependency.
+        # FIXME: make the system know this is from train_op's outputs.
+        infer_op.set_inputs(
+            # train_op.get_outputs(),
+            'gs://test-imagenet-bucket-skypilot/resnet-realImagenet',
+                            estimated_size_gigabytes=0.1)
 
-        # infer_op.set_resources({
-        #     sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
-        #     sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-        #     sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-        #     sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
-        # })
+        infer_op.set_resources({
+            sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
+            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+        })
 
-        # infer_op.set_time_estimator(
-        #     time_estimators.resnet50_infer_estimate_runtime)
+        infer_op.set_time_estimator(
+            time_estimators.resnet50_infer_estimate_runtime)
 
         # # Chain the tasks (Airflow syntax).
         # # The dependency represents data flow.

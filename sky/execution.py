@@ -264,28 +264,56 @@ def _launch_chain(dag: sky.Dag,
 
         if input_store_path.startswith('CLOUD://'):
             assert store_type is not None, (i, task)
-            input_store_path = input_store_path.replace('CLOUD://',
-                                            store_type.value + '://')
+            input_store_path = input_store_path.replace(
+                'CLOUD://', store_type.value + '://')
             if output_store_path != input_store_path:
                 raise ValueError(
                     f'Ambiguous inputs {input_store_path} can only be used when a'
                     'previous task has the outputs with the same name '
                     f'{output_vm_path}.')
 
-        input_vm_path = f'~/.sky/task-inputs-{i}'
-        output_vm_path = f'~/.sky/task-outputs-{i}'
+        inputs_outputs_on_bucket = False
+        accelerators = task.best_resources.accelerators
+        acc = list(accelerators.keys())[0]
+        if 'tpu' in acc.lower():
+            inputs_outputs_on_bucket = True
 
-        file_mounts_from_inputs = {input_vm_path: input_store_path}
-        logger.info(f'Implied input path: {input_store_path}')
-        task.update_file_mounts(file_mounts_from_inputs)
-
+        if inputs_outputs_on_bucket:
+            store_str = input_store_path.split('://')[0]
+            if store_str == 's3':
+                input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
+                logger.info(f'transfer data from {input_store_path} to {input_vm_path}')
+                # TODO: We need to decide the location of the bucket based on the TPU location
+                # transfer_command = [
+                #     f'gsutil mb -l us-central1 {input_vm_path}',
+                #     'pip install skyplane',
+                #     'skyplane init --disable-config-azure -y',
+                #     f'skyplane cp  {input_store_path} {input_vm_path}',
+                # ]
+                transfer_command = [
+                    f'gsutil mb -l us-central1 {input_vm_path}',
+                    f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
+                ]
+                transfer_command = '; '.join(transfer_command)
+                print(transfer_command)
+                subprocess.run(transfer_command, shell=True)
+                # input_storage_name = storage.get_storage_name_from_uri(input_store_path)
+                # input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
+                # sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
+            elif store_str == 'gs':
+                input_vm_path = input_store_path
+            else:
+                raise NotImplementedError
+        else:
+            input_vm_path = f'~/.sky/task-inputs-{i}'
+            file_mounts_from_inputs = {input_vm_path: input_store_path}
+            task.update_file_mounts(file_mounts_from_inputs)
+        logger.info(f'Implied input path: {input_vm_path}')
 
         if task.setup is not None:
             task.setup = task.setup.replace('INPUTS[0]', input_vm_path)
-            task.setup = task.setup.replace('OUTPUTS[0]', output_vm_path)
         if task.run is not None:
             task.run = task.run.replace('INPUTS[0]', input_vm_path)
-            task.run = task.run.replace('OUTPUTS[0]', output_vm_path)
 
         task.set_resources(task.best_resources)
 
@@ -294,30 +322,45 @@ def _launch_chain(dag: sky.Dag,
 
         output_store_path = copy.copy(task.get_outputs())
         if output_store_path is not None:
-            if task.setup is None:
-                task.setup = ''
-            task.setup += '\n' + f'mkdir -p {output_vm_path}'
-        if output_store_path is not None:
             output_storage_name = storage.get_storage_name_from_uri(
                 output_store_path)
+            if inputs_outputs_on_bucket:
+                output_vm_path = f'gs://{output_storage_name}'
+                create_bucket_cmd = f'gsutil mb -l us-central1 {output_vm_path}'
+                subprocess.run(create_bucket_cmd, shell=True)
+            else:
+                output_vm_path = f'~/.sky/task-outputs-{i}'
+
+            if task.setup is not None:
+                task.setup = task.setup.replace('OUTPUTS[0]', output_vm_path)
+            if task.run is not None:
+                task.run = task.run.replace('OUTPUTS[0]', output_vm_path)
+
             if not output_store_path.startswith('CLOUD://'):
-                store_type = storage.StoreType(output_store_path.partition('://')[0])
+                store_type = storage.StoreType(
+                    output_store_path.partition('://')[0])
 
             output_store_path = f'{store_type.value}://{output_storage_name}'
             logger.info(f'Implied output path: {output_store_path}')
 
             # Upload current outputs to the cloud storage of current cloud
-            sky_storage_codegen = (
-                'import sky; storage = sky.Storage('
-                f'name={output_storage_name!r},'
-                f' source={output_vm_path!r}); storage.add_store('
-                f'sky.StoreType({store_type.value!r}));')
+            if not inputs_outputs_on_bucket:
+                sky_storage_codegen = (
+                    'import sky; storage = sky.Storage('
+                    f'name={output_storage_name!r},'
+                    f' source={output_vm_path!r}); storage.add_store('
+                    f'sky.StoreType({store_type.value!r}));')
 
-            upload_code_gen = textwrap.dedent(f"""\
-                pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
-                python3 -u -c {sky_storage_codegen!r}
-                """)
-            task.run = task.run + '\n' + upload_code_gen
+                upload_code_gen = textwrap.dedent(f"""\
+                    source ~/.bashrc
+                    pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
+                    python3 -u -c {sky_storage_codegen!r}
+                    """)
+                task.run = task.run + '\n' + upload_code_gen
+
+            if task.setup is None:
+                task.setup = ''
+            task.setup += '\n' + f'mkdir -p {output_vm_path}'
 
         with sky.Dag() as task_dag:
             task_dag.add(task)

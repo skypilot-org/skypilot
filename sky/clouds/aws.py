@@ -107,6 +107,19 @@ class AWS(clouds.Cloud):
                 }
                 assert region_name in amis, region_name
                 return amis[region_name]
+            if acc_name == 'Inferentia':
+                # Deep Learning AMI 
+                # aws ec2 describe-images --region {region} --owners amazon --filters 'Name=name,Values=Deep Learning AMI (Ubuntu 18.04) Version ??.?' 'Name=state,Values=available' --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' --output text
+                # inferentia accelerator requires this original deep learning AMI
+                amis = {
+                    'us-east-1': 'ami-008a77bad7b109354',
+                    'us-east-2': 'ami-0ae37980d60476156',
+                    # This AMI is 20210623 as aws does not provide a newer one.
+                    'us-west-1': 'ami-0b3e9bf6217f84af6',
+                    'us-west-2': 'ami-08c47b9efd307c86a',
+                }
+                assert region_name in amis, region_name
+                return amis[region_name]
         # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
         # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
         # Nvidia driver: 510.47.03, CUDA Version: 11.6
