@@ -30,7 +30,7 @@ SETUP = textwrap.dedent("""\
             [ "$TPU_NAME"!="" ] && (echo 'export use_tpu=1' >> ~/.bashrc) || echo 'export use_tpu=0' >> ~/.bashrc
 
             use_gpu=0
-            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc && ) || echo 'export use_gpu=0' >> ~/.bashrc
+            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc ) || echo 'export use_gpu=0' >> ~/.bashrc
 
             use_inf=0
             neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
