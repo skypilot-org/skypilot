@@ -284,8 +284,9 @@ def _launch_chain(dag: sky.Dag,
                 input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
                 logger.info(
                     f'transfer data from {input_store_path} to {input_vm_path}')
-                # TODO: Using the multi-region gs bucket, which will be free for
-                # data egressing to another GCP service within US
+                # Using the multi-region gs bucket, which will be free for
+                # data egressing to another GCP service within US.
+                # https://cloud.google.com/storage/pricing#multi-regions
                 transfer_command = [
                     f'gsutil mb {input_vm_path} || true',
                     # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
