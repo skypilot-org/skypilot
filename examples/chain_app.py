@@ -27,15 +27,16 @@ CLUSTER_NAME = 'test-chain-app'
 
 SETUP = textwrap.dedent("""\
             use_tpu=0
-            [ "$TPU_NAME"!="" ] && (echo 'export use_tpu=1' >> ~/.bashrc) || echo 'export use_tpu=0' >> ~/.bashrc
+            [ -z "$TPU_NAME" ] && echo 'export use_tpu=0' >> ~/.bashrc || echo 'export use_tpu=1' >> ~/.bashrc
 
             use_gpu=0
-            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc ) || echo 'export use_gpu=0' >> ~/.bashrc
+            nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc) || echo 'export use_gpu=0' >> ~/.bashrc
 
             use_inf=0
             neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
 
             source ~/.bashrc
+            . $(conda info --base)/etc/profile.d/conda.sh
 
             pip install --upgrade pip
 
@@ -57,14 +58,14 @@ SETUP = textwrap.dedent("""\
                     pip install protobuf==3.20
                 fi
                 if [ "$use_tpu" -eq 1 ]; then
-                    git clone git@github.com:skypilot-org/nsdi-2023.git ./codebase || true
+                    git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
                     pip install tensorflow==2.5.0 pyyaml cloud-tpu-client
                     pip install protobuf==3.20
                 fi
                 if [ "$use_inf" -eq 1 ]; then
-                    git clone git@github.com:skypilot-org/nsdi-2023.git ./codebase || true
+                    git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
 
                     # Install OS headers
                     sudo snap install linux-headers-$(uname -r) -y
@@ -92,7 +93,6 @@ TRAIN_RUN = textwrap.dedent(f"""\
             --amp --xla --loss_scale=128
     fi
     if [ "$use_tpu" -eq 1 ]; then
-        cd ml-pipeline/resnet50_tpu
         python3 resnet50_tpu/resnet50.py \\
           --tpu=$TPU_NAME \\
           --data=gs://test-chain-app-0-train-op-inputs-0 \\
@@ -111,7 +111,7 @@ INFER_SETUP = SETUP if REAL_TEST else "echo 'MOCK INFER_SETUP'"
 INFER_RUN = textwrap.dedent(f"""\
                 cd codebase
 
-                if [ $use_gpu -eq 1 ]; then
+                if [ "$use_gpu" -eq 1 ]; then
                     conda activate resnet
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
@@ -123,7 +123,7 @@ INFER_RUN = textwrap.dedent(f"""\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
                 fi
-                if [ $use_tpu -eq 1 ]; then
+                if [ "$use_tpu" -eq 1 ]; then
                     conda activate resnet
                     python3 official/resnet/resnet_main.py \\
                         --mode=eval \\
@@ -135,8 +135,8 @@ INFER_RUN = textwrap.dedent(f"""\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
                 fi
-                if [ $use_inf -eq 1 ]; then
-                    cd ml-pipeline/inferentia
+                if [ "$use_inf" -eq 1 ]; then
+                    cd inferentia
                     conda activate aws_neuron_tensorflow2_p37
                     mv INPUTS[0]/resnet-realImagenet ./keras-resnet50-tpu
                     python compile.py
@@ -181,7 +181,7 @@ def make_application():
         # Infer.
         infer_op = sky.Task('infer_op',
                             setup=INFER_SETUP,
-                            run='echo "Infering on INPUTS[0]"; ls INPUTS[0]')
+                            run=INFER_RUN)
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
