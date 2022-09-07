@@ -1,4 +1,4 @@
-# Note: this file is modified from https://github.com/AbdBarho/stable-diffusion-webui-docker/blob/master/build/Dockerfile 
+# Note: this file is adapted from https://github.com/AbdBarho/stable-diffusion-webui-docker/blob/master/build/Dockerfile 
 # <<EOF heredoc was removed from RUN git clone https://github.com/hlky/sd-enable-textual-inversion.git line
 # This was to fix an error when the instance parses the Dockerfile.
 

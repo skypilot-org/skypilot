@@ -1,4 +1,4 @@
-# To launch a 1 GPU instance to run stable diffusion web tool.
+#SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
 
 resources:
   accelerators: V100:1
