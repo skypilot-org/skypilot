@@ -11,6 +11,7 @@ from sky_callback.utils import CallbackLoader as _CallbackLoader
 SkyKerasCallback = _CallbackLoader.keras
 SkyLightningCallback = _CallbackLoader.pytorch_lightning
 SkyTransformersCallback = _CallbackLoader.transformers
+SkyTFEstimatorCallback = _CallbackLoader.tf_estimator
 
 __all__ = [
     # APIs
@@ -24,4 +25,5 @@ __all__ = [
     'SkyKerasCallback',
     'SkyLightningCallback',
     'SkyTransformersCallback',
+    'SkyTFEstimatorCallback',
 ]

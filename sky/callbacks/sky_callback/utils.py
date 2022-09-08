@@ -24,3 +24,9 @@ class CallbackLoader:
                      total_steps: Optional[int] = None):
         from sky_callback.integrations.transformers import SkyTransformersCallback
         return SkyTransformersCallback(log_dir=log_dir, total_steps=total_steps)
+
+    @staticmethod
+    def tf_estimator(log_dir: Optional[str] = None,
+                     total_steps: Optional[int] = None):
+        from sky_callback.integrations.tf_estimator import SkyTFEstimatorCallback
+        return SkyTFEstimatorCallback(log_dir=log_dir, total_steps=total_steps)
