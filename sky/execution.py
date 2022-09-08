@@ -245,6 +245,7 @@ def _launch_chain(dag: sky.Dag,
                   cluster_name: Optional[str] = None,
                   retry_until_up: bool = False,
                   dryrun: bool = False,
+                  teardown: bool = False,
                   stream_logs: bool = True,
                   backend: Optional[backends.Backend] = None,
                   optimize_target: OptimizeTarget = OptimizeTarget.COST):
@@ -381,12 +382,12 @@ def _launch_chain(dag: sky.Dag,
                dryrun=dryrun,
                retry_until_up=retry_until_up)
 
-        # if not dryrun:
-        #     logger.info(f'Terminate {task_cluster_name}.')
-        #     with subprocess.Popen(f'sky down -y {task_cluster_name}',
-        #                           shell=True) as proc:
-        #         if i == len(tasks) - 1:
-        #             proc.wait()
+        if not dryrun and teardown:
+            logger.info(f'Terminate {task_cluster_name}.')
+            with subprocess.Popen(f'sky down -y {task_cluster_name}',
+                                  shell=True) as proc:
+                if i == len(tasks) - 1:
+                    proc.wait()
 
 
 @timeline.event
@@ -440,6 +441,7 @@ def launch(
                       cluster_name=cluster_name,
                       retry_until_up=retry_until_up,
                       dryrun=dryrun,
+                      teardown=teardown,
                       stream_logs=stream_logs,
                       backend=backend,
                       optimize_target=optimize_target)

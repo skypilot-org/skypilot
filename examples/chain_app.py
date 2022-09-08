@@ -72,6 +72,8 @@ SETUP = textwrap.dedent("""\
 
                     # Install Neuron Driver
                     sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
+                    conda activate aws_neuron_tensorflow2_p37
+                    pip install tensorflow==1.15.5 tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4"
                 fi
             fi
             """)
@@ -96,10 +98,9 @@ TRAIN_RUN = textwrap.dedent(f"""\
         python3 resnet50_tpu/resnet50.py \\
           --tpu=$TPU_NAME \\
           --data=gs://test-chain-app-0-train-op-inputs-0 \\
-          --use_bfloat16=False \\
-          --model_dir=gs://skypilot-pipeline-model/resnet-realImagenet \\
-          --num_epochs 1 \\
-          --steps_per_epoch 1 2>&1 | tee run-realData-float32.log
+          --use_bfloat16=True \\
+          --model_dir=gs://skypilot-pipeline-model/resnet-realImagenet-float16 \\
+          2>&1 | tee run-realData-float16.log
     fi
     if [ "$use_inf" -eq 1 ]; then
         exit 1
@@ -130,7 +131,7 @@ INFER_RUN = textwrap.dedent(f"""\
                         --eval_batch_size=16 \\
                         --tpu=$TPU_NAME \\
                         --data_dir=./kitten_small.jpg \\
-                        --model_dir=INPUTS[0]/resnet-realImagenet \\
+                        --model_dir=INPUTS[0]/resnet-realImagenet-float16/saved_model \\
                         --train_batch_size=1024 \\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
@@ -138,7 +139,8 @@ INFER_RUN = textwrap.dedent(f"""\
                 if [ "$use_inf" -eq 1 ]; then
                     cd inferentia
                     conda activate aws_neuron_tensorflow2_p37
-                    mv INPUTS[0]/resnet-realImagenet ./keras-resnet50
+                    mv INPUTS[0]/resnet-realImagenet-float16/saved_weights.h5 ./saved_weights.h5
+
                     python compile.py
                     python inference.py
                 fi
@@ -183,7 +185,9 @@ def make_application():
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
-        infer_op.set_inputs(train_op.get_outputs(),
+        infer_op.set_inputs(
+            train_op.get_outputs(),
+            # "gs://skypilot-pipeline-model",
                             estimated_size_gigabytes=0.1)
 
         # NOTE(zhwu): Have to add use_spot here, since I only have spot quota
