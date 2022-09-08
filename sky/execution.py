@@ -298,7 +298,7 @@ def _launch_chain(dag: sky.Dag,
                 # pylint: disable=pointless-string-statement
                 """ # pylint: disable=line-too-long
                 transfer_command = [
-                    f'gsutil mb -l us-central1 {input_vm_path}',
+                    f'gsutil mb {input_vm_path}',
                     'pip install skyplane',
                     'skyplane init --disable-config-azure -y',
                     f'skyplane cp  {input_store_path} {input_vm_path}',
@@ -334,8 +334,8 @@ def _launch_chain(dag: sky.Dag,
                 output_store_path)
             if inputs_outputs_on_bucket:
                 output_vm_path = f'gs://{output_storage_name}'
-                create_bucket_cmd = ('gsutil mb -l us-central1 '
-                                     f'{output_vm_path} || true')
+                # Use multi-region bucket by not specifying the location
+                create_bucket_cmd = (f'gsutil mb {output_vm_path} || true')
                 subprocess.run(create_bucket_cmd, shell=True, check=True)
             else:
                 output_vm_path = f'~/.sky/task-outputs-{i}'

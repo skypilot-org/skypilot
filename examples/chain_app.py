@@ -172,7 +172,6 @@ def make_application():
             sky.Resources(sky.GCP(),
                           'n1-standard-8',
                           'tpu-v3-8',
-                          use_spot=True,
                           disk_size=400),
         }
         if not REAL_TRAIN:
@@ -189,6 +188,8 @@ def make_application():
         infer_op.set_inputs(train_op.get_outputs(),
                             estimated_size_gigabytes=0.1)
 
+        # NOTE(zhwu): Have to add use_spot here, since I only have spot quota
+        # for inf instances
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
             sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
