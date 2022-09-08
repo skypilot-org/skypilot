@@ -169,9 +169,7 @@ def make_application():
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(),
-                          'n1-standard-8',
-                          'tpu-v3-8',
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
                           disk_size=400),
         }
         if not REAL_TRAIN:
