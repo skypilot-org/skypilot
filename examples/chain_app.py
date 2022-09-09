@@ -23,7 +23,8 @@ import time_estimators
 REAL_TRAIN = True
 REAL_TEST = True
 
-CLUSTER_NAME = 'test-chain-app'
+# CLUSTER_NAME = 'test-chain-app'
+CLUSTER_NAME = 'profile-tpu'
 
 SETUP = textwrap.dedent("""\
             use_tpu=0
@@ -88,7 +89,8 @@ TRAIN_RUN = textwrap.dedent(f"""\
         --precision=float16 \\
         --model_dir=OUTPUTS[0]/resnet-realImagenet-gpu \\
         --num_epochs=5 \\
-        --num_cores=2 \\
+        --num_cores=1 \\
+        --per_core_batch_size=256 \\
         --amp --xla --loss_scale=128 \\
         2>&1 | tee run-realData-gpu-float16.log
     fi
@@ -157,7 +159,8 @@ def make_application():
                             inputs_outputs_on_bucket=True)
 
         train_op.set_inputs(
-            's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
+            'gs://test-chain-app-0-train-op-inputs-0',
+            # 's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
             estimated_size_gigabytes=90,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
@@ -168,15 +171,15 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            # sky.Resources(sky.AWS(), 'p3.2xlarge',
-            #               disk_size=400),  # 1 V100, EC2.
-            # sky.Resources(sky.AWS(), 'p3.8xlarge',
-            #               disk_size=400),  # 4 V100s, EC2.
+            sky.Resources(sky.AWS(), 'p3.2xlarge',
+                          disk_size=400),  # 1 V100, EC2.
+            sky.Resources(sky.AWS(), 'p3.8xlarge',
+                          disk_size=400),  # 4 V100s, EC2.
             sky.Resources(sky.GCP(), accelerators={'V100': 1},
                           disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
-            #               disk_size=400),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+                          disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))
