@@ -1,0 +1,36 @@
+name: ppo
+
+resources:
+  candidates:
+  - {accelerators: K80}
+  - {accelerators: M60}
+  - {accelerators: T4}
+  - {accelerators: A10G}
+  - {accelerators: V100}
+
+# The setup command.  Will be run under the working directory.
+setup: |
+  pip install --upgrade pip
+  git clone git@github.com:WoosukKwon/skypilot-experiments.git flax
+
+  conda activate flax
+  if [ $? -eq 0 ]; then
+    echo 'conda env exists'
+  else
+    conda create -n flax python=3.8 -y
+    conda activate flax
+    cd flax/examples/ppo
+    pip install -r requirements.txt
+    pip install --upgrade "jax[cuda]<=0.3.4" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html
+    pip install "protobuf<3.19.0"
+    conda install cudatoolkit==11.2.2 -y
+    conda install -c conda-forge cudnn -y
+    echo export LD_LIBRARY_PATH=/home/ubuntu/.conda/envs/flax/lib:$LD_LIBRARY_PATH >> ~/.bashrc
+
+    pip install "git+https://github.com/skypilot-org/skypilot.git#egg=sky-callback&subdirectory=sky/callbacks/"
+  fi
+# The command to run.  Will be run under the working directory.
+run: |
+  conda activate flax
+  cd flax/examples/ppo
+  python ppo_main.py

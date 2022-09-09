@@ -1,0 +1,60 @@
+name: resnet-app
+
+resources:
+  cloud: aws
+  accelerators:
+    V100: 1
+
+inputs: {
+  gs://cloud-tpu-test-dataset/fake_imagenet: 70,
+}
+
+outputs: {
+  resnet-model-dir: 0.1,
+}
+
+# file_mounts: {
+#   /tmp/fake_imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,
+# }
+
+setup: |
+  git clone git@github.com:WoosukKwon/skypilot-resnet.git || true
+  cd skypilot-resnet
+  git checkout gpu
+
+  . $(conda info --base)/etc/profile.d/conda.sh
+  pip install --upgrade pip
+
+  conda activate resnet
+
+  if [ $? -eq 0 ]; then
+    echo "conda env exists"
+  else
+    conda create -n resnet python=3.7 -y
+    conda activate resnet
+    conda install cudatoolkit=11.0 -y
+    pip install tensorflow==2.4.0 pyyaml
+    pip install protobuf==3.20
+    cd models
+    pip install -e .
+
+    cd ~/sky_workdir/
+    git clone git@github.com:skypilot-org/skypilot.git
+    cd skypilot
+    git checkout tfestimator-callback
+    cd sky/callbacks
+    pip install .
+  fi
+
+run: |
+  cd skypilot-resnet
+  . $(conda info --base)/etc/profile.d/conda.sh
+  conda activate resnet
+
+  export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
+  python -u models/official/resnet/resnet_main.py --use_tpu=False \
+      --mode=train --train_batch_size=256 --train_steps=250 \
+      --iterations_per_loop=125 \
+      --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+      --model_dir=resnet-model-dir \
+      --amp --xla --loss_scale=128
