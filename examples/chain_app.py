@@ -82,6 +82,7 @@ TRAIN_RUN = textwrap.dedent(f"""\
     conda activate resnet
     
     if [ "$use_gpu" -eq 1 ]; then
+        # num_cores=2 means the batch size is 256.
         export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \\
         python3 resnet50_tpu/resnet50.py \\
         --tpu=gpu \\
@@ -89,7 +90,7 @@ TRAIN_RUN = textwrap.dedent(f"""\
         --precision=float16 \\
         --model_dir=OUTPUTS[0]/resnet-realImagenet-gpu \\
         --num_epochs=5 \\
-        --num_cores=1 \\
+        --num_cores=2 \\
         --amp --xla --loss_scale=128 \\
         2>&1 | tee run-realData-gpu-float16.log
     fi
