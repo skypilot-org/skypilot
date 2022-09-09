@@ -296,7 +296,7 @@ def _launch_chain(dag: sky.Dag,
                 subprocess.run(transfer_command, shell=True, check=True)
                 # pylint: disable=pointless-string-statement
                 """ # pylint: disable=line-too-long
-                
+
                 transfer_command = [
                     f'gsutil mb {input_vm_path} || true',
                     # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',

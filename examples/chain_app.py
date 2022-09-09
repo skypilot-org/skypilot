@@ -48,8 +48,6 @@ SETUP = textwrap.dedent("""\
                 echo "conda env exists"
             else
                 if [ "$use_gpu" -eq 1 ]; then
-                    git checkout gpu_train
-
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
                     conda install cudatoolkit=11.0 -y
@@ -153,7 +151,10 @@ def make_application():
 
     with sky.Dag() as dag:
         # Train.
-        train_op = sky.Task('train_op', setup=TRAIN_SETUP, run=TRAIN_RUN, inputs_outputs_on_bucket=True)
+        train_op = sky.Task('train_op',
+                            setup=TRAIN_SETUP,
+                            run=TRAIN_RUN,
+                            inputs_outputs_on_bucket=True)
 
         train_op.set_inputs(
             's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
