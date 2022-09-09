@@ -100,8 +100,7 @@ TRAIN_RUN = textwrap.dedent(f"""\
           --data=INPUTS[0] \\
           --use_bfloat16=True \\
           --model_dir=OUTPUTS[0]/resnet-realImagenet-float16 \\
-          --num_epochs=1 \\
-          --steps_per_epoch=1 \\
+          --num_epochs=5 \\
           2>&1 | tee run-realData-float16.log
     fi
     if [ "$use_inf" -eq 1 ]; then
