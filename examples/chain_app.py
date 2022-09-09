@@ -186,9 +186,7 @@ def make_application():
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
-        infer_op.set_inputs(
-            train_op.get_outputs(),
-            # "gs://skypilot-pipeline-model",
+        infer_op.set_inputs(train_op.get_outputs(),
                             estimated_size_gigabytes=0.1)
 
         # NOTE(zhwu): Have to add use_spot here, since I only have spot quota
@@ -211,4 +209,7 @@ def make_application():
 
 
 dag = make_application()
-sky.execution._launch_chain(dag, cluster_name=CLUSTER_NAME, retry_until_up=True)
+sky.execution._launch_chain(dag,
+                            cluster_name=CLUSTER_NAME,
+                            retry_until_up=True,
+                            dryrun=True)

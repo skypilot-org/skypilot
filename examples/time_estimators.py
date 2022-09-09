@@ -62,7 +62,8 @@ def resnet50_estimate_runtime(resources):
 
         assert acc == 'tpu-v3-8', resources
         tpu_v3_8_flops = 420 * (10**12)
-        known_resnet50_utilization = 0.445  # From actual profiling.
+        # known_resnet50_utilization = 0.445  # From actual profiling.
+        known_resnet50_utilization = 0.377  # From actual profiling with the new keras model.
 
         # GPU - fixed to 1/3 util
         # TPU
