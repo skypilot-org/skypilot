@@ -97,9 +97,11 @@ TRAIN_RUN = textwrap.dedent(f"""\
     if [ "$use_tpu" -eq 1 ]; then
         python3 resnet50_tpu/resnet50.py \\
           --tpu=$TPU_NAME \\
-          --data=gs://test-chain-app-0-train-op-inputs-0 \\
+          --data=INPUTS[0] \\
           --use_bfloat16=True \\
-          --model_dir=gs://skypilot-pipeline-model/resnet-realImagenet-float16 \\
+          --model_dir=OUTPUTS[0]/resnet-realImagenet-float16 \\
+          --num_epochs=1 \\
+          --steps_per_epoch=1 \\
           2>&1 | tee run-realData-float16.log
     fi
     if [ "$use_inf" -eq 1 ]; then

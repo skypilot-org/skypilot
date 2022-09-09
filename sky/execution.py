@@ -368,9 +368,9 @@ def _launch_chain(dag: sky.Dag,
                     """)
                 task.run = task.run + '\n' + upload_code_gen
 
-            if task.setup is None:
-                task.setup = ''
-            task.setup += '\n' + f'mkdir -p {output_vm_path}'
+                if task.setup is None:
+                    task.setup = ''
+                task.setup += '\n' + f'mkdir -p {output_vm_path}'
 
         with sky.Dag() as task_dag:
             task_dag.add(task)
