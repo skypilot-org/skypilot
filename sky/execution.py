@@ -273,11 +273,7 @@ def _launch_chain(dag: sky.Dag,
                     'when a previous task has the outputs with the same name '
                     f'{output_vm_path}.')
 
-        inputs_outputs_on_bucket = False
-        accelerators = task.best_resources.accelerators
-        acc = list(accelerators.keys())[0]
-        if 'tpu' in acc.lower():
-            inputs_outputs_on_bucket = True
+        inputs_outputs_on_bucket = task.inputs_outputs_on_bucket
 
         if inputs_outputs_on_bucket:
             store_str = input_store_path.split('://')[0]
@@ -288,21 +284,22 @@ def _launch_chain(dag: sky.Dag,
                 # Using the multi-region gs bucket, which will be free for
                 # data egressing to another GCP service within US.
                 # https://cloud.google.com/storage/pricing#multi-regions
+                # TODO(zhwu): fix this with faster data transfer
                 transfer_command = [
                     f'gsutil mb {input_vm_path} || true',
-                    # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
+                    # 'pip install skyplane-nightly',
+                    # 'skyplane init --disable-config-azure -y',
+                    # f'skyplane sync -r -y {input_store_path} {input_vm_path}',
                 ]
-                # TODO(zhwu): fix this with faster data transfer
                 transfer_command = '; '.join(transfer_command)
                 print(transfer_command)
                 subprocess.run(transfer_command, shell=True, check=True)
                 # pylint: disable=pointless-string-statement
                 """ # pylint: disable=line-too-long
+                
                 transfer_command = [
-                    f'gsutil mb {input_vm_path}',
-                    'pip install skyplane',
-                    'skyplane init --disable-config-azure -y',
-                    f'skyplane cp  {input_store_path} {input_vm_path}',
+                    f'gsutil mb {input_vm_path} || true',
+                    # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
                 ]
 
                 input_storage_name = storage.get_storage_name_from_uri(input_store_path)
@@ -371,7 +368,7 @@ def _launch_chain(dag: sky.Dag,
                 if task.setup is None:
                     task.setup = ''
                 task.setup += '\n' + f'mkdir -p {output_vm_path}'
-
+        # print(task.to_yaml_config())
         with sky.Dag() as task_dag:
             task_dag.add(task)
 

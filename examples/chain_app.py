@@ -40,15 +40,15 @@ SETUP = textwrap.dedent("""\
 
             pip install --upgrade pip
 
+            git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
+            cd codebase
             conda activate resnet
 
             if [ $? -eq 0 ]; then
                 echo "conda env exists"
             else
                 if [ "$use_gpu" -eq 1 ]; then
-                    git clone https://github.com/concretevitamin/tpu ./codebase || true
-                    cd ./codebase
-                    git checkout 9459fee
+                    git checkout gpu_train
 
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
@@ -58,15 +58,12 @@ SETUP = textwrap.dedent("""\
                     pip install protobuf==3.20
                 fi
                 if [ "$use_tpu" -eq 1 ]; then
-                    git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
                     pip install tensorflow==2.5.0 pyyaml cloud-tpu-client
                     pip install protobuf==3.20
                 fi
                 if [ "$use_inf" -eq 1 ]; then
-                    git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
-
                     # Install OS headers
                     sudo snap install linux-headers-$(uname -r) -y
 
@@ -85,14 +82,16 @@ TRAIN_RUN = textwrap.dedent(f"""\
     conda activate resnet
     
     if [ "$use_gpu" -eq 1 ]; then
-        export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/'
-        python -u models/official/resnet/resnet_main.py --use_tpu=False \\
-            --mode=train --train_batch_size=256 --train_steps=250 \\
-            --iterations_per_loop=125 \\
-            --data_dir=INPUTS[0]/ \\
-            --model_dir=OUTPUTS[0]/resnet-realImagenet \\
-            --export_dir=OUTPUTS[0]/resnet-savedmodel \\
-            --amp --xla --loss_scale=128
+        export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \\
+        python3 resnet50_tpu/resnet50.py \\
+        --tpu=gpu \\
+        --data=INPUTS[0] \\
+        --precision=float16 \\
+        --model_dir=OUTPUTS[0]/resnet-realImagenet-gpu \\
+        --num_epochs=5 \\
+        --num_cores=1 \\
+        --amp --xla --loss_scale=128 \\
+        2>&1 | tee run-realData-gpu-float16.log
     fi
     if [ "$use_tpu" -eq 1 ]; then
         python3 resnet50_tpu/resnet50.py \\
@@ -120,7 +119,7 @@ INFER_RUN = textwrap.dedent(f"""\
                         --eval_batch_size=16 \\
                         --use_tpu=False \\
                         --data_dir=./kitten_small.jpg \\
-                        --model_dir=INPUTS[0]/resnet-realImagenet \\
+                        --model_dir=INPUTS[0]/resnet-realImagenet-gpu \\
                         --train_batch_size=1024 \\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
@@ -153,11 +152,11 @@ def make_application():
 
     with sky.Dag() as dag:
         # Train.
-        train_op = sky.Task('train_op', setup=TRAIN_SETUP, run=TRAIN_RUN)
+        train_op = sky.Task('train_op', setup=TRAIN_SETUP, run=TRAIN_RUN, inputs_outputs_on_bucket=True)
 
         train_op.set_inputs(
             's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
-            estimated_size_gigabytes=150,
+            estimated_size_gigabytes=90,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
         )
@@ -167,13 +166,15 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            sky.Resources(sky.AWS(), 'p3.2xlarge',
-                          disk_size=400),  # 1 V100, EC2.
-            sky.Resources(sky.AWS(), 'p3.8xlarge',
+            # sky.Resources(sky.AWS(), 'p3.2xlarge',
+            #               disk_size=400),  # 1 V100, EC2.
+            # sky.Resources(sky.AWS(), 'p3.8xlarge',
+            #               disk_size=400),  # 4 V100s, EC2.
+            sky.Resources(sky.GCP(), accelerators={'V100': 1},
                           disk_size=400),  # 4 V100s, EC2.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
-                          disk_size=400),
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+            #               disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))
@@ -212,4 +213,4 @@ dag = make_application()
 sky.execution._launch_chain(dag,
                             cluster_name=CLUSTER_NAME,
                             retry_until_up=True,
-                            dryrun=True)
+                            dryrun=False)
