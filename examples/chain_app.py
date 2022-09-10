@@ -23,8 +23,8 @@ import time_estimators
 REAL_TRAIN = True
 REAL_TEST = True
 
-# CLUSTER_NAME = 'test-chain-app'
-CLUSTER_NAME = 'profile-tpu'
+CLUSTER_NAME = 'test-chain-app'
+# CLUSTER_NAME = 'profile-tpu'
 
 SETUP = textwrap.dedent("""\
             use_tpu=0
@@ -159,8 +159,8 @@ def make_application():
                             inputs_outputs_on_bucket=True)
 
         train_op.set_inputs(
-            'gs://test-chain-app-0-train-op-inputs-0',
-            # 's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
+            # 'gs://test-chain-app-0-train-op-inputs-0',
+            's3://imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
             estimated_size_gigabytes=90,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
