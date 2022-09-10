@@ -351,7 +351,7 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
 
 
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
-                              value: Any):
+                              value: str):
     """A callback for installing shell completion for click."""
     del param  # Unused.
     if not value or ctx.resilient_parsing:
