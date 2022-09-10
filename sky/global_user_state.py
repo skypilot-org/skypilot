@@ -280,6 +280,16 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
+def get_cluster_names(starts_with: Optional[str]) -> List[str]:
+    if starts_with:
+        rows = _DB.cursor.execute(
+            'SELECT name FROM clusters WHERE name LIKE (?)',
+            (f'{starts_with}%',))
+    else:
+        rows = _DB.cursor.execute('SELECT name FROM clusters')
+    return [row[0] for row in rows]
+
+
 def get_enabled_clouds() -> List[clouds.Cloud]:
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_ENABLED_CLOUDS_KEY,))
