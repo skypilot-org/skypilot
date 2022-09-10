@@ -280,13 +280,9 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
-def get_cluster_names(starts_with: Optional[str]) -> List[str]:
-    if starts_with:
-        rows = _DB.cursor.execute(
-            'SELECT name FROM clusters WHERE name LIKE (?)',
-            (f'{starts_with}%',))
-    else:
-        rows = _DB.cursor.execute('SELECT name FROM clusters')
+def get_cluster_names(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
     return [row[0] for row in rows]
 
 
