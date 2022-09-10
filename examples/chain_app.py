@@ -81,15 +81,15 @@ TRAIN_RUN = textwrap.dedent(f"""\
     conda activate resnet
     
     if [ "$use_gpu" -eq 1 ]; then
-        # num_cores=2 means the batch size is 256.
+        num_gpus=`nvidia-smi --list-gpus | wc -l`
         export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \\
         python3 resnet50_tpu/resnet50.py \\
         --tpu=gpu \\
         --data=INPUTS[0] \\
         --precision=float16 \\
-        --model_dir=OUTPUTS[0]/resnet-realImagenet-gpu \\
+        --model_dir=OUTPUTS[0]/resnet-realImagenet-float16 \\
         --num_epochs=5 \\
-        --num_cores=1 \\
+        --num_cores=$num_gpus \\
         --per_core_batch_size=256 \\
         --amp --xla --loss_scale=128 \\
         2>&1 | tee run-realData-gpu-float16.log
@@ -120,7 +120,7 @@ INFER_RUN = textwrap.dedent(f"""\
                         --eval_batch_size=16 \\
                         --use_tpu=False \\
                         --data_dir=./kitten_small.jpg \\
-                        --model_dir=INPUTS[0]/resnet-realImagenet-gpu \\
+                        --model_dir=INPUTS[0]/resnet-realImagenet-float16 \\
                         --train_batch_size=1024 \\
                         --iterations_per_loop=1251 \\
                         --train_steps=112590 2>&1 | tee run-realData-eval.log
@@ -176,7 +176,9 @@ def make_application():
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
             sky.Resources(sky.GCP(), accelerators={'V100': 1},
-                          disk_size=400),  # 4 V100s, EC2.
+                          disk_size=400),  # 1 V100s, GCP.
+            sky.Resources(sky.GCP(), accelerators={'V100': 4},
+                          disk_size=400),  # 4 V100s, GCP.
             # Tuples mean all resources are required.
             sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
                           disk_size=400),
