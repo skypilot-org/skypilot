@@ -358,27 +358,30 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         return
 
     if value == 'bash':
-        cmd = '_SKY_COMPLETE=bash_source sky > ~/.sky-complete.bash &&'
-        cmd += 'echo "# For SkyPilot shell completion" >> ~/.bashrc &&'
-        cmd += 'echo ". ~/.sky-complete.bash\n" >> ~/.bashrc'
+        cmd = '_SKY_COMPLETE=bash_source sky > ~/.sky-complete.bash && \
+                echo "# For SkyPilot shell completion" >> ~/.bashrc && \
+                echo ". ~/.sky-complete.bash\n" >> ~/.bashrc'
+
     elif value == 'fish':
-        cmd = '_SKY_COMPLETE=fish_source sky > ~/.config/fish/completions/sky.fish'
+        cmd = '_SKY_COMPLETE=fish_source sky > \
+                ~/.config/fish/completions/sky.fish'
+
     elif value == 'zsh':
-        cmd = '_SKY_COMPLETE=zsh_source sky > ~/.sky-complete.zsh &&'
-        cmd += 'echo "# For SkyPilot shell completion" >> ~/.zshrc &&'
-        cmd += 'echo ". ~/.sky-complete.zsh\n" >> ~/.zshrc'
+        cmd = '_SKY_COMPLETE=zsh_source sky > ~/.sky-complete.zsh && \
+                echo "# For SkyPilot shell completion" >> ~/.zshrc && \
+                echo ". ~/.sky-complete.zsh\n" >> ~/.zshrc'
+
     else:
-        click.secho(f"Unsupported shell: {value}", fg="yellow")
+        click.secho(f'Unsupported shell: {value}', fg='yellow')
         ctx.exit()
 
-    click.secho(f"> {cmd}", fg="cyan")
     try:
         subprocess.run(cmd, shell=True, check=True)
-        click.secho(f"Shell completion installed for {value}", fg="green")
-        click.echo("Completion will take effect once you restart the terminal")
+        click.secho(f'Shell completion installed for {value}', fg='green')
+        click.echo('Completion will take effect once you restart the terminal')
     except subprocess.CalledProcessError as e:
-        click.secho(f"> Installation failed with code {e.returncode}",
-                    fg="yellow")
+        click.secho(f'> Installation failed with code {e.returncode}',
+                    fg='yellow')
     ctx.exit()
 
 
@@ -828,7 +831,7 @@ class _DocumentedCodeCommand(click.Command):
 
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
-              type=click.Choice(["bash", "zsh", "fish"]),
+              type=click.Choice(['bash', 'zsh', 'fish']),
               callback=_install_shell_completion,
               expose_value=False,
               is_eager=True,
