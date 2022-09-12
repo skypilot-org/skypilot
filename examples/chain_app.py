@@ -180,8 +180,8 @@ def make_application():
             sky.Resources(sky.GCP(), accelerators={'V100': 4},
                           disk_size=400),  # 4 V100s, GCP.
             # Tuples mean all resources are required.
-            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
-            #               disk_size=400),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+                          disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))
@@ -220,4 +220,4 @@ dag = make_application()
 sky.execution._launch_chain(dag,
                             cluster_name=CLUSTER_NAME,
                             retry_until_up=True,
-                            dryrun=False)
+                            dryrun=True)
