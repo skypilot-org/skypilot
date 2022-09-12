@@ -41,23 +41,22 @@ def make_application():
 
     with sky.Dag() as dag:
         # Preprocess.
-        proc_op = sky.Task('proc_op',
-                        setup=PROC_SETUP,
-                        run=PROC_RUN)
+        proc_op = sky.Task('proc_op', setup=PROC_SETUP, run=PROC_RUN)
         # input can be downloaded with wget, so no input need to be set
-        proc_op.set_outputs('CLOUD://skypilot-pii-annonymized-dataset', estimated_size_gigabytes=1)
+        proc_op.set_outputs('CLOUD://skypilot-pii-annonymized-dataset',
+                            estimated_size_gigabytes=1)
 
-        proc_resources = {
-            sky.Resources(sky.Azure(), 'Standard_DC8_v2')
-        }
+        proc_resources = {sky.Resources(sky.Azure(), 'Standard_DC8_v2')}
         proc_op.set_resources(proc_resources)
         proc_op.set_time_estimator(lambda _: 0.6)
 
         # Train.
-        train_op = sky.Task('train_op',
-                            setup=SETUP,
-                            run=TRAIN_RUN,)
-                            # inputs_outputs_on_bucket=True)
+        train_op = sky.Task(
+            'train_op',
+            setup=SETUP,
+            run=TRAIN_RUN,
+        )
+        # inputs_outputs_on_bucket=True)
 
         train_op.set_inputs(
             proc_op.get_outputs(),

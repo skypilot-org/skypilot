@@ -274,21 +274,21 @@ def _launch_chain(dag: sky.Dag,
                     'CLOUD://', store_type.value + '://')
                 if output_store_path != input_store_path:
                     raise ValueError(
-                        f'Ambiguous inputs {input_store_path} can only be used '
-                        'when a previous task has the outputs with the same name '
-                        f'{output_vm_path}.')
-
+                        f'Ambiguous inputs {input_store_path} can only be '
+                        'used when a previous task has the outputs with the '
+                        f'same name {output_vm_path}.')
 
             if inputs_outputs_on_bucket:
                 store_str = input_store_path.split('://')[0]
                 if store_str == 's3':
                     # TODO(zhwu): if training on AWS, need fix.
                     input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
-                    logger.info(
-                        f'transfer data from {input_store_path} to {input_vm_path}')
+                    logger.info(f'transfer data from {input_store_path} to '
+                                f'{input_vm_path}')
                     # Using the multi-region gs bucket, which will be free for
                     # data egressing to another GCP service within US.
                     # https://cloud.google.com/storage/pricing#multi-regions
+                    # pylint: disable=line-too-long
                     # TODO(zhwu): fix this with faster data transfer
                     transfer_command = [
                         f'gsutil mb {input_vm_path} || true',
@@ -353,11 +353,10 @@ def _launch_chain(dag: sky.Dag,
             elif isinstance(cloud, clouds.Azure):
                 # If the cloud is Azure, send to the bucket on the next cloud,
                 # as object store is not supported for Azure in our code yet.
-                next_cloud = tasks[i+1].best_resources.cloud
+                next_cloud = tasks[i + 1].best_resources.cloud
                 store_type = storage.StoreType.from_cloud(next_cloud)
             else:
                 store_type = storage.StoreType.from_cloud(cloud)
-
 
             output_store_path = f'{store_type.value}://{output_storage_name}'
             logger.info(f'Implied output path: {output_store_path}')

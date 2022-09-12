@@ -1,0 +1,89 @@
+name: resnet-app
+
+resources:
+    cloud: aws
+    accelerators:
+        V100: 1
+
+
+# file_mounts: {
+#     /tmp/imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,
+# }
+
+setup: |
+    use_tpu=0
+    [ -z "$TPU_NAME" ] && echo 'export use_tpu=0' >> ~/.bashrc || echo 'export use_tpu=1' >> ~/.bashrc
+
+    use_gpu=0
+    nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc) || echo 'export use_gpu=0' >> ~/.bashrc
+
+    use_inf=0
+    neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
+
+    source ~/.bashrc
+    . $(conda info --base)/etc/profile.d/conda.sh
+
+    pip install --upgrade pip
+
+    git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
+    cd codebase
+    conda activate resnet
+
+    if [ $? -eq 0 ]; then
+        echo "conda env exists"
+    else
+        if [ "$use_gpu" -eq 1 ]; then
+            conda create -n resnet python=3.7 -y
+            conda activate resnet
+            conda install cudatoolkit=11.0 -y
+            pip install pyyaml
+            pip install tensorflow==2.5.0 pyyaml
+            pip install protobuf==3.20
+        fi
+        if [ "$use_tpu" -eq 1 ]; then
+            conda create -n resnet python=3.7 -y
+            conda activate resnet
+            pip install tensorflow==2.5.0 pyyaml cloud-tpu-client
+            pip install protobuf==3.20
+        fi
+        if [ "$use_inf" -eq 1 ]; then
+            # Install OS headers
+            sudo snap install linux-headers-$(uname -r) -y
+
+            # Install Neuron Driver
+            sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
+            conda activate aws_neuron_tensorflow2_p37
+            pip install tensorflow==1.15.5 tensorflow-neuron==1.15.5.* neuron-cc "protobuf<4"
+        fi
+    fi
+
+run: |
+    cd codebase
+    conda activate resnet
+    
+    if [ "$use_gpu" -eq 1 ]; then
+        num_gpus=`nvidia-smi --list-gpus | wc -l`
+        export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
+        python3 resnet50_tpu/resnet50.py \
+        --tpu=gpu \
+        --data=/tmp/imagenet \
+        --precision=float16 \
+        --model_dir=/tmp \
+        --num_epochs=5 \
+        --num_cores=$num_gpus \
+        --per_core_batch_size=256 \
+        --amp --xla --loss_scale=128 \
+        2>&1 | tee run-realData-gpu-float16.log
+    fi
+    if [ "$use_tpu" -eq 1 ]; then
+        python3 resnet50_tpu/resnet50.py \
+          --tpu=$TPU_NAME \
+          --data=INPUTS[0] \
+          --use_bfloat16=True \
+          --model_dir=OUTPUTS[0]/resnet-realImagenet-float16 \
+          --num_epochs=5 \
+          2>&1 | tee run-realData-float16.log
+    fi
+    if [ "$use_inf" -eq 1 ]; then
+        exit 1
+    fi
