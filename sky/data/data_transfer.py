@@ -83,6 +83,8 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     operation = storagetransfer.transferJobs().run(jobName=response['name'], body={'projectId': project_id}).execute()
 
     logger.info(f'AWS -> GCS Transfer Job: {json.dumps(operation, indent=4)}')
+    logger.info('Waiting for the transfer to finish')
+    start = time.time()
     for _ in range(MAX_POLLS):
         result = (storagetransfer.transferOperations().get(name=operation['name']).execute())
         if "error" in result:
@@ -93,6 +95,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
             break
         logger.info('Waiting for the data transfer to be finished...')
         time.sleep(POLL_INTERVAL)
+    logger.info(f'Transfer finished in {time.time() - start}')
 
 
 
