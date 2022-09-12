@@ -37,8 +37,8 @@ _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
 
 class StoreType(enum.Enum):
     """Enum for the different types of stores."""
-    S3 = 's3'
-    GCS = 'gs'
+    S3 = 'S3'
+    GCS = 'GS'
     AZURE = 'Azure'
 
     @classmethod

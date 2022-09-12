@@ -1,3 +1,5 @@
+from absl import flags
+
 import tensorflow_datasets as tfds
 import tensorflow as tf
 import tensorflow_text as tf_text
@@ -9,10 +11,15 @@ tf.config.experimental_connect_to_cluster(tpu)
 tf.tpu.experimental.initialize_tpu_system(tpu)
 strategy = tf.distribute.experimental.TPUStrategy(tpu)
 
+flags.DEFINE_STRING('data_dir')
+FLAGS = flags.FLAGS
+
+
 ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
                               split='train[:5%]',
                               with_info=True,
-                              data_dir="gs://weilin-bert-test")
+                              download=False,
+                              data_dir=FLAGS.data_dir)
 
 MAX_SEQ_LEN = 512
 bert_tokenizer = tf_text.BertTokenizer(

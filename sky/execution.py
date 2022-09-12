@@ -271,7 +271,7 @@ def _launch_chain(dag: sky.Dag,
             if input_store_path.startswith('CLOUD://'):
                 assert store_type is not None, (i, task)
                 input_store_path = input_store_path.replace(
-                    'CLOUD://', store_type.value + '://')
+                    'CLOUD://', store_type.value.lower() + '://')
                 if output_store_path != input_store_path:
                     raise ValueError(
                         f'Ambiguous inputs {input_store_path} can only be '
@@ -289,16 +289,10 @@ def _launch_chain(dag: sky.Dag,
                     # data egressing to another GCP service within US.
                     # https://cloud.google.com/storage/pricing#multi-regions
                     # pylint: disable=line-too-long
-                    # TODO(zhwu): fix this with faster data transfer
-                    transfer_command = [
-                        f'gsutil mb {input_vm_path} || true',
-                        # 'pip install skyplane-nightly',
-                        # 'skyplane init --disable-config-azure -y',
-                        # f'skyplane sync -r -y {input_store_path} {input_vm_path}',
-                    ]
-                    transfer_command = '; '.join(transfer_command)
-                    print(transfer_command)
-                    subprocess.run(transfer_command, shell=True, check=True)
+                    subprocess.run(f'gsutil mb {input_vm_path} || true', shell=True, check=True)
+                    input_storage_name = storage.get_storage_name_from_uri(input_store_path)
+                    input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
+                    sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
                     # pylint: disable=pointless-string-statement
                     """ # pylint: disable=line-too-long
 
@@ -358,7 +352,7 @@ def _launch_chain(dag: sky.Dag,
             else:
                 store_type = storage.StoreType.from_cloud(cloud)
 
-            output_store_path = f'{store_type.value}://{output_storage_name}'
+            output_store_path = f'{store_type.value.lower()}://{output_storage_name}'
             logger.info(f'Implied output path: {output_store_path}')
 
             # Upload current outputs to the cloud storage of current cloud
@@ -370,9 +364,9 @@ def _launch_chain(dag: sky.Dag,
                     f'sky.StoreType({store_type.value!r}));')
 
                 upload_code_gen = textwrap.dedent(f"""\
-                    source ~/.bashrc
+                    conda deactivate
                     pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
-                    python3 -u -c {sky_storage_codegen!r}
+                    python -u -c {sky_storage_codegen!r}
                     """)
                 task.run = task.run + '\n' + upload_code_gen
 

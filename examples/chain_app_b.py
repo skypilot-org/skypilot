@@ -23,16 +23,41 @@ import time_estimators
 CLUSTER_NAME = 'test-chain-app-b'
 # CLUSTER_NAME = 'profile-tpu'
 
-SETUP = 'echo running setup'
+PROC_SETUP = """\
+conda activate tf
+if [ $? -eq 0 ]; then
+    echo conda env exists
+else
+    conda create -n tf python=3.7 -y
+    conda activate tf
+    pip install tensorflow==2.5.0 tensorflow-datasets
+    pip install protobuf==3.20
+fi
+"""
 
-PROC_SETUP = textwrap.dedent("""\
-        wget https://s3.amazonaws.com/amazon-reviews-pds/tsv/amazon_reviews_us_Books_v1_02.tsv.gz
-        tar xvzf amazon_reviews_us_Books_v1_02.tsv.gz
+PROC_RUN = textwrap.dedent("""\
+        conda activate tf
+        python -u << EOF
+        import tensorflow_datasets as tfds
+        tfds.load('amazon_us_reviews/Books_v1_02',
+                    split='train[:5%]',
+                    with_info=True,
+                    download=True,
+                    data_dir='OUTPUTS[0]')
+        EOF
+        echo Annonymizing dataset
+        ls OUTPUTS[0]
+        echo Done.
         """)
-PROC_RUN = 'echo processing; echo generated_data > OUTPUTS[0]/dataset.txt'
 
-TRAIN_RUN = 'cat INPUTS[0]/dataset.txt; echo training; echo trained_model > OUTPUTS[0]/model.txt'
+TRAIN_SETUP = 'pip install --upgrade pip && \
+            conda activate huggingface || \
+            (conda create -n huggingface python=3.8 -y && \
+            conda activate huggingface && \
+            pip install -r requirements.txt)'
+TRAIN_RUN = 'conda activate huggingface && python -u run_tpu.py --data_dir INPUTS[0]'
 
+INFER_SETUP = 'echo setup inference'
 INFER_RUN = 'cat INPUTS[0]/model.txt; echo inference DONE.'
 
 
@@ -53,8 +78,9 @@ def make_application():
         # Train.
         train_op = sky.Task(
             'train_op',
-            setup=SETUP,
+            setup=TRAIN_SETUP,
             run=TRAIN_RUN,
+            workdir='./examples/tpu/tpu_app_code'
         )
         # inputs_outputs_on_bucket=True)
 
@@ -81,7 +107,7 @@ def make_application():
         train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
         # Infer.
-        infer_op = sky.Task('infer_op', setup=SETUP, run=INFER_RUN)
+        infer_op = sky.Task('infer_op', setup=INFER_SETUP, run=INFER_RUN)
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
