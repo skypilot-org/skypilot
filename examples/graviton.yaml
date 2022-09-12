@@ -1,0 +1,10 @@
+name: graviton
+
+resources:
+  cloud: aws
+  instance_type: m6g.4xlarge
+  region: us-east-1
+  image_id: ami-070650c005cce4203
+
+run:
+  echo "hi graviton"
