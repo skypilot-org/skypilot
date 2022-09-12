@@ -30,6 +30,7 @@ _CREDENTIAL_FILES = [
 
 _IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
+# Need to be run with /bin/bash
 GCLOUD_INSTALLATION_COMMAND = textwrap.dedent("""\
     pushd /tmp &>/dev/null && \\
     gcloud --help > /dev/null 2>&1 || \\
@@ -38,8 +39,8 @@ GCLOUD_INSTALLATION_COMMAND = textwrap.dedent("""\
     rm -rf ~/google-cloud-sdk && \\
     mv google-cloud-sdk ~/ && \\
     ~/google-cloud-sdk/install.sh -q > /dev/null 2>&1 && \\
-    source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \\
     echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc) && \\
+    source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \\
     popd &>/dev/null""")
 
 
