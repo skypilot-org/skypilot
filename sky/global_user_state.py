@@ -374,6 +374,12 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+def get_storage_names(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM storage WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
+    return [row[0] for row in rows]
+
+
 def get_storage() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from storage')
     records = []

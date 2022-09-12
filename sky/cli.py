@@ -350,6 +350,13 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
     return global_user_state.get_cluster_names(incomplete)
 
 
+def _complete_storage_name(ctx: click.Context, param: click.Parameter,
+                           incomplete: str) -> List[str]:
+    """Handle shell completion for storage names."""
+    del ctx, param  # Unused.
+    return global_user_state.get_storage_names(incomplete)
+
+
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                               value: str):
     """A callback for installing shell completion for click."""
@@ -2186,7 +2193,11 @@ def storage_ls():
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
-@click.argument('names', required=False, type=str, nargs=-1)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_storage_name)
 @click.option('--all',
               '-a',
               default=False,
