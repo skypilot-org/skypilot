@@ -25,6 +25,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -263,68 +264,70 @@ def _launch_chain(dag: sky.Dag,
         task_cluster_name = f'{cluster_name}-{i}-{task.name.replace("_", "-")}'
         input_store_path = task.get_inputs()
 
-        if input_store_path.startswith('CLOUD://'):
-            assert store_type is not None, (i, task)
-            input_store_path = input_store_path.replace(
-                'CLOUD://', store_type.value + '://')
-            if output_store_path != input_store_path:
-                raise ValueError(
-                    f'Ambiguous inputs {input_store_path} can only be used '
-                    'when a previous task has the outputs with the same name '
-                    f'{output_vm_path}.')
-
         inputs_outputs_on_bucket = task.inputs_outputs_on_bucket
 
-        if inputs_outputs_on_bucket:
-            store_str = input_store_path.split('://')[0]
-            if store_str == 's3':
-                input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
-                logger.info(
-                    f'transfer data from {input_store_path} to {input_vm_path}')
-                # Using the multi-region gs bucket, which will be free for
-                # data egressing to another GCP service within US.
-                # https://cloud.google.com/storage/pricing#multi-regions
-                # TODO(zhwu): fix this with faster data transfer
-                transfer_command = [
-                    f'gsutil mb {input_vm_path} || true',
-                    # 'pip install skyplane-nightly',
-                    # 'skyplane init --disable-config-azure -y',
-                    # f'skyplane sync -r -y {input_store_path} {input_vm_path}',
-                ]
-                transfer_command = '; '.join(transfer_command)
-                print(transfer_command)
-                subprocess.run(transfer_command, shell=True, check=True)
-                # pylint: disable=pointless-string-statement
-                """ # pylint: disable=line-too-long
+        if input_store_path is not None:
+            if input_store_path.startswith('CLOUD://'):
+                assert store_type is not None, (i, task)
+                input_store_path = input_store_path.replace(
+                    'CLOUD://', store_type.value + '://')
+                if output_store_path != input_store_path:
+                    raise ValueError(
+                        f'Ambiguous inputs {input_store_path} can only be used '
+                        'when a previous task has the outputs with the same name '
+                        f'{output_vm_path}.')
 
-                transfer_command = [
-                    f'gsutil mb {input_vm_path} || true',
-                    # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
-                ]
 
-                input_storage_name = storage.get_storage_name_from_uri(input_store_path)
-                input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
-                sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
-                """
-            elif store_str == 'gs':
-                input_vm_path = input_store_path
+            if inputs_outputs_on_bucket:
+                store_str = input_store_path.split('://')[0]
+                if store_str == 's3':
+                    # TODO(zhwu): if training on AWS, need fix.
+                    input_vm_path = f'gs://{task_cluster_name}-inputs-{i}'
+                    logger.info(
+                        f'transfer data from {input_store_path} to {input_vm_path}')
+                    # Using the multi-region gs bucket, which will be free for
+                    # data egressing to another GCP service within US.
+                    # https://cloud.google.com/storage/pricing#multi-regions
+                    # TODO(zhwu): fix this with faster data transfer
+                    transfer_command = [
+                        f'gsutil mb {input_vm_path} || true',
+                        # 'pip install skyplane-nightly',
+                        # 'skyplane init --disable-config-azure -y',
+                        # f'skyplane sync -r -y {input_store_path} {input_vm_path}',
+                    ]
+                    transfer_command = '; '.join(transfer_command)
+                    print(transfer_command)
+                    subprocess.run(transfer_command, shell=True, check=True)
+                    # pylint: disable=pointless-string-statement
+                    """ # pylint: disable=line-too-long
+
+                    transfer_command = [
+                        f'gsutil mb {input_vm_path} || true',
+                        # f'gsutil -m rsync -r {input_store_path} {input_vm_path}',
+                    ]
+
+                    input_storage_name = storage.get_storage_name_from_uri(input_store_path)
+                    input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
+                    sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
+                    """
+                elif store_str == 'gs':
+                    input_vm_path = input_store_path
+                else:
+                    raise NotImplementedError
             else:
-                raise NotImplementedError
-        else:
-            input_vm_path = f'~/.sky/task-inputs-{i}'
-            file_mounts_from_inputs = {input_vm_path: input_store_path}
-            task.update_file_mounts(file_mounts_from_inputs)
-        logger.info(f'Implied input path: {input_vm_path}')
+                input_vm_path = f'~/.sky/task-inputs-{i}'
+                file_mounts_from_inputs = {input_vm_path: input_store_path}
+                task.update_file_mounts(file_mounts_from_inputs)
+            logger.info(f'Implied input path: {input_vm_path}')
 
-        if task.setup is not None:
-            task.setup = task.setup.replace('INPUTS[0]', input_vm_path)
-        if task.run is not None:
-            task.run = task.run.replace('INPUTS[0]', input_vm_path)
+            if task.setup is not None:
+                task.setup = task.setup.replace('INPUTS[0]', input_vm_path)
+            if task.run is not None:
+                task.run = task.run.replace('INPUTS[0]', input_vm_path)
 
         task.set_resources(task.best_resources)
 
         cloud = task.best_resources.cloud
-        store_type = storage.StoreType.from_cloud(cloud)
 
         output_store_path = copy.copy(task.get_outputs())
         if output_store_path is not None:
@@ -346,6 +349,14 @@ def _launch_chain(dag: sky.Dag,
             if not output_store_path.startswith('CLOUD://'):
                 store_type = storage.StoreType(
                     output_store_path.partition('://')[0])
+            elif isinstance(cloud, clouds.Azure):
+                # If the cloud is Azure, send to the bucket on the next cloud,
+                # as object store is not supported for Azure in our code yet.
+                next_cloud = tasks[i+1].best_resources.cloud
+                store_type = storage.StoreType.from_cloud(next_cloud)
+            else:
+                store_type = storage.StoreType.from_cloud(cloud)
+
 
             output_store_path = f'{store_type.value}://{output_storage_name}'
             logger.info(f'Implied output path: {output_store_path}')

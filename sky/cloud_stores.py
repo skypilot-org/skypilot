@@ -101,7 +101,9 @@ class GcsCloudStorage(CloudStorage):
         'google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
         'tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && '
         'mv google-cloud-sdk ~/ && '
-        '~/google-cloud-sdk/install.sh -q ))',
+        '~/google-cloud-sdk/install.sh -q && '
+        'echo \'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1\' >> ~/.bashrc))',
+        'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1',
         'popd &>/dev/null',
     ]
 
