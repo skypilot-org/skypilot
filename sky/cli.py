@@ -847,6 +847,7 @@ def cli():
               '-c',
               default=None,
               type=str,
+              shell_complete=_complete_cluster_name,
               help=_CLUSTER_FLAG_HELP)
 @click.option('--dryrun',
               default=False,
