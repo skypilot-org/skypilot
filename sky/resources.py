@@ -255,7 +255,7 @@ class Resources:
                     'Cloud must be specified together with region/zone.')
 
         # Validate whether region and zone exist in the catalog.
-        self._cloud.validate_region_zone(region, zone)
+        #self._cloud.validate_region_zone(region, zone)
 
         self._region = region
         self._zone = zone

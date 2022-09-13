@@ -8,7 +8,7 @@ from google.cloud import dataproc_v1
 
 def provision_cluster(cluster_name,
                       spark_version='3.2.1',
-                      instance_type='n1-standard-8',
+                      instance_type='n2-standard-16',
                       num_nodes=1,
                       region='us-central1',
                       skip_provision=False):

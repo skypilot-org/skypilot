@@ -5,7 +5,7 @@ import time
 
 def provision_cluster(cluster_name,
                       spark_version='3.2.1',
-                      instance_type='m5.xlarge',
+                      instance_type='c6g.4xlarge',
                       num_nodes=1,
                       region='us-east-2',
                       skip_provision=False):
@@ -25,7 +25,7 @@ def provision_cluster(cluster_name,
                     'EbsBlockDeviceConfigs': [{
                         'VolumeSpecification': {
                             'VolumeType': 'gp2',
-                            'SizeInGB': 100
+                            'SizeInGB': 256
                         },
                         'VolumesPerInstance': 1
                     },],
@@ -44,7 +44,7 @@ def provision_cluster(cluster_name,
                         'EbsBlockDeviceConfigs': [{
                             'VolumeSpecification': {
                                 'VolumeType': 'gp2',
-                                'SizeInGB': 100
+                                'SizeInGB': 256
                             },
                             'VolumesPerInstance': 1
                         },],

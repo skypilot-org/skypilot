@@ -30,9 +30,15 @@ setup_commands:
     (type -a pip | grep -q pip3) || echo 'alias pip=pip3' >> ~/.bashrc;
     echo 'export PATH=$PATH:~/.local/bin' >> ~/.bashrc;
   - pip3 install google-cloud-dataproc
-  - pip3 install -U ray[default]=={{ray_version}} && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+  - pip3 install -U ray[default]=={{ray_version}}
+  - mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
   - pip3 uninstall skypilot -y &> /dev/null; pip3 install {{sky_remote_path}}/skypilot-*.whl; sleep 5
   - python3 -c "from sky.skylet.ray_patches import patch; patch()";
+
+# For Graviton
+# - sudo yum update -y
+# - sudo DEBIAN_FRONTEND=noninteractive yum install gcc python3-devel -y;
+#   (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U https://ray-graviton.s3.amazonaws.com/ray-1.13.0-cp310-cp310-linux_aarch64.whl)
 
 head_setup_commands: []
 

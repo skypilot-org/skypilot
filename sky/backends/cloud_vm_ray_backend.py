@@ -1187,7 +1187,6 @@ class RetryingVmProvisioner(object):
                     ips = emr.provision_cluster(
                         yaml_config['cluster_name'],
                         spark_version=service['dependencies']['spark'],
-                        instance_type='m5.xlarge',
                         num_nodes=num_nodes,
                         skip_provision=cluster_already_exists)
                 elif isinstance(to_provision_cloud, clouds.GCP):
@@ -2481,7 +2480,7 @@ class CloudVmRayBackend(backends.Backend):
             handle.cluster_name, acquire_per_cluster_status_lock=False)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
-        if terminate and handle.service:
+        if terminate and hasattr(handle, 'service') and handle.service:
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
                 emr.terminate_cluster(handle.cluster_name)
             elif isinstance(handle.launched_resources.cloud, clouds.GCP):

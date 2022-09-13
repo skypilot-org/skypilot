@@ -1,0 +1,30 @@
+service:
+  type: data-analytics
+  dependencies:
+    spark: 3.2.1
+
+resources:
+  cloud: aws
+
+num_nodes: 3
+
+setup: |
+  cd ~/
+  source ~/.bashrc
+  (sudo yum -y install gcc make flex bison byacc git htop tmux) || (sudo apt-get -y install gcc make flex bison byacc git htop tmux)
+  git clone https://github.com/michaelzhiluo/spark-sql-perf.git
+  git clone https://github.com/databricks/tpcds-kit.git
+  cd tpcds-kit/tools
+  make OS=LINUX 
+
+run: |
+  cd ~/
+  mkdir -p ~/spark-warehouse/tpcds.db/
+  export LD_LIBRARY_PATH=/usr/lib/hadoop/lib/native:/usr/lib/hadoop-lzo/lib/native/
+  if [ $SKY_NODE_RANK == "0" ]
+  then
+    echo :quit | spark-shell --jars ~/spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar -i ~/spark-sql-perf/scripts/gendata.scala
+    echo :quit | spark-shell --jars ~/spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar --conf spark.sql.cbo.enabled=True --conf spark.sql.cbo.joinReorder.enabled=True -i ~/spark-sql-perf/scripts/run.scala
+  else
+    echo "Worker node"
+  fi
