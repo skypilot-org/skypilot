@@ -36,18 +36,12 @@ def resnet50_estimate_runtime(resources):
         estimated_run_time_seconds = estimated_step_time_seconds * total_steps
         return estimated_run_time_seconds
 
+    assert resources.cloud is not None, resources
     if isinstance(resources.cloud, sky.AWS):
-        instance = resources.instance_type
-        if instance == 'p3.2xlarge':
-            num_v100s = 1
-        elif instance == 'p3.8xlarge':
-            num_v100s = 4
-        elif instance == 'p3.16xlarge':
-            num_v100s = 8
-        else:
-            assert False, 'Not supported: {}'.format(resources)
+        accelerators = resources.accelerators
+        assert 'V100' in accelerators, accelerators
+        num_v100s = accelerators['V100']
         return _v100(num_v100s)
-
     elif isinstance(resources.cloud, sky.GCP):
         accelerators = resources.accelerators
         if accelerators is None:
@@ -148,3 +142,29 @@ def resnet50_infer_estimate_runtime(resources):
     #     num_images, flops_for_one_image * num_images))
 
     return estimated_run_time_seconds
+
+
+def bert_base_finetune_estimate_runtime(resources):
+    """A simple runtime model for Resnet50."""
+    # TODO(zhwu): fix the estimator based on flops
+    acc, acc_num = list(resources.accelerators.items())[0]
+    if acc == 'V100':
+        assert acc_num == 4, resources
+        assert isinstance(resources.cloud, sky.Azure), resources
+        return 12.9 * 3600
+    elif acc == 'tpu-v3-8':
+        return 4 * 3600
+    else:
+        raise ValueError(f'Resources not supported {resources}')
+
+
+def bert_base_infer_estimate_runtime(resources):
+    acc, acc_num = list(resources.accelerators.items())[0]
+    if acc == 'T4':
+        assert acc_num == 1, resources
+        assert isinstance(resources.cloud, sky.Azure), resources
+        return 1.8 * 3600
+    elif acc == 'Inferentia':
+        return 1.1 * 3600
+    else:
+        raise ValueError(f'Resources not supported {resources}')
