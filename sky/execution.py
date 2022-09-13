@@ -364,9 +364,12 @@ def _launch_chain(dag: sky.Dag,
                     f'sky.StoreType({store_type.value!r}));')
 
                 upload_code_gen = textwrap.dedent(f"""\
+                    echo Uploading the outputs to the bucket
                     conda deactivate
+                    {clouds.gcp.GCLOUD_INSTALLATION_COMMAND}
                     pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
                     python -u -c {sky_storage_codegen!r}
+                    echo Uploaded.
                     """)
                 task.run = task.run + '\n' + upload_code_gen
 

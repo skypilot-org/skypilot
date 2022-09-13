@@ -1025,8 +1025,10 @@ class GcsStore(AbstractStore):
         # Need explicitly export the credential file path in the environment
         # variable according to the doc
         # https://cloud.google.com/storage/docs/reference/libraries#setting_up_authentication # pylint: disable=line-too-long
-        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = (
-            clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH)
+        from google import auth # pylint: disable=
+        credentials, project_id = auth.default()
+        if project_id is None:
+            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH, clouds.gcp.GCP_CONFIGURE_PATH)
         self.client = gcp.storage_client()
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:

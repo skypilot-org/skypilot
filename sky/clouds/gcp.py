@@ -19,6 +19,11 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
+GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
+# Do not place the backup under the gcloud config directory, as ray
+# autoscaler can overwrite that directory on the remote nodes.
+GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
+
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
@@ -32,13 +37,13 @@ _IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
 GCLOUD_INSTALLATION_COMMAND = textwrap.dedent("""\
     pushd /tmp &>/dev/null && \\
-    gcloud --help > /dev/null 2>&1 || \\
+    (gcloud --help > /dev/null 2>&1 || \\
     (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \\
     tar xzf google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \\
     rm -rf ~/google-cloud-sdk && \\
     mv google-cloud-sdk ~/ && \\
     ~/google-cloud-sdk/install.sh -q > /dev/null 2>&1 && \\
-    echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc) && \\
+    echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc)) && \\
     source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \\
     popd &>/dev/null""")
 
@@ -344,10 +349,12 @@ class GCP(clouds.Cloud):
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
-        return {
+        credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        credentials[GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_PATH
+        return credentials
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')

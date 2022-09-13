@@ -30,7 +30,7 @@ if [ $? -eq 0 ]; then
 else
     conda create -n tf python=3.7 -y
     conda activate tf
-    pip install tensorflow==2.5.0 tensorflow-datasets
+    pip install tensorflow==2.5.1 tensorflow-datasets==4.4.0
     pip install protobuf==3.20
 fi
 """
@@ -54,7 +54,8 @@ TRAIN_SETUP = 'pip install --upgrade pip && \
             conda activate huggingface || \
             (conda create -n huggingface python=3.8 -y && \
             conda activate huggingface && \
-            pip install -r requirements.txt)'
+            pip install -r requirements.txt && \
+            pip install protobuf==3.20)'
 TRAIN_RUN = 'conda activate huggingface && python -u run_tpu.py --data_dir INPUTS[0]'
 
 INFER_SETUP = 'echo setup inference'
@@ -94,17 +95,17 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            sky.Resources(sky.AWS(), 'p3.2xlarge'),  # 1 V100, EC2.
-            sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
-            sky.Resources(sky.GCP(), accelerators={'V100': 1}),  # 1 V100s, GCP.
-            sky.Resources(sky.GCP(), accelerators={'V100': 4}),  # 4 V100s, GCP.
+            sky.Resources(sky.Azure(), accelerators={'V100': 4}),  # 1 V100, EC2.
+            # sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
+            # sky.Resources(sky.GCP(), accelerators={'V100': 1}),  # 1 V100s, GCP.
+            # sky.Resources(sky.GCP(), accelerators={'V100': 4}),  # 4 V100s, GCP.
             # Tuples mean all resources are required.
             sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         }
         train_op.set_resources(train_resources)
 
         # TODO(zhwu): time estimator for BERT
-        train_op.set_time_estimator(time_estimators.resnet50_estimate_runtime)
+        train_op.set_time_estimator(time_estimators.bert_base_finetune_estimate_runtime)
 
         # Infer.
         infer_op = sky.Task('infer_op', setup=INFER_SETUP, run=INFER_RUN)
@@ -118,14 +119,15 @@ def make_application():
         # for inf instances
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
-            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+            # sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
+            # sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+            sky.Resources(sky.Azure(), accelerators={'T4': 1})
         })
 
         # TODO(zhwu): time estimator for BERT
         infer_op.set_time_estimator(
-            time_estimators.resnet50_infer_estimate_runtime)
+            time_estimators.bert_base_infer_estimate_runtime)
 
         # # Chain the tasks (Airflow syntax).
         # # The dependency represents data flow.
