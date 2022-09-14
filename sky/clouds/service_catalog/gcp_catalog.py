@@ -411,6 +411,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
                     f'A100:{acc_count} cannot be attached to {instance_type}. '
                     f'Use {a100_instance_type} instead. Please refer to '
                     'https://cloud.google.com/compute/docs/gpus#a100-gpus')
+        return
 
     # Check maximum vCPUs and memory.
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
