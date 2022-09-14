@@ -96,7 +96,7 @@ setup_commands:
     source ~/.bashrc;
     sudo apt-get update;
     sudo DEBIAN_FRONTEND=noninteractive apt-get install gcc python3-dev -y;
-    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U https://ray-graviton.s3.amazonaws.com/ray-1.13.0-cp310-cp310-linux_aarch64.whl) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
+    (pip3 list | grep ray | grep {{ray_version}} 2>&1 > /dev/null || pip3 install -U https://ray-graviton.s3.amazonaws.com/ray-1.13.0-cp38-cp38-linux_aarch64.whl) && mkdir -p ~/sky_workdir && mkdir -p ~/.sky/sky_app;
     (pip3 list | grep skypilot && [ "$(cat {{sky_remote_path}}/current_sky_wheel_hash)" == "{{sky_wheel_hash}}" ]) || (pip3 uninstall skypilot -y; pip3 install "$(echo {{sky_remote_path}}/{{sky_wheel_hash}}/skypilot-{{sky_version}}*.whl)[aws]" && echo "{{sky_wheel_hash}}" > {{sky_remote_path}}/current_sky_wheel_hash || exit 1);
     sudo systemctl stop unattended-upgrades;
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;

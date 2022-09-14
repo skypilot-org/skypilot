@@ -2,9 +2,17 @@ name: graviton
 
 resources:
   cloud: aws
-  instance_type: m6i.4xlarge
+  instance_type: m6g.4xlarge
+  region: us-east-1
+  image_id: ami-0888c389af05d881a # Ubuntu 20.04 with Python 3.8
 
 setup: |
+
+  # Download JAVA 11
+  wget https://ray-graviton.s3.amazonaws.com/jdk-11.0.16.1_linux-aarch64_bin.tar
+  tar xvf jdk-11.0.16.1_linux-aarch64_bin.tar
+
+  # Download Spark 3.1.2
   wget https://archive.apache.org/dist/spark/spark-3.1.2/spark-3.1.2-bin-hadoop3.2.tgz
   tar zxvf spark-3.1.2-bin-hadoop3.2.tgz
 
@@ -17,7 +25,16 @@ setup: |
   make OS=LINUX
 
 run: |
+
+  # Add JAVA and Spark to PATH
+  export PATH=/home/ubuntu/sky_workdir/jdk-11.0.16.1/bin:$PATH
   export PATH=/home/ubuntu/sky_workdir/spark-3.1.2-bin-hadoop3.2/bin/:$PATH
+
+  # Generate data
   echo :quit | spark-shell --driver-memory 16g --jars spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar -i spark-sql-perf/scripts/gendata.scala
+
+  # Run benchmark
   echo :quit | spark-shell --driver-memory 16g --jars spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar --conf spark.sql.cbo.enabled=True --conf spark.sql.cbo.joinReorder.enabled=True -i spark-sql-perf/scripts/run.scala
+
+  # Get the runtime from the log
   echo :quit | spark-shell --driver-memory 16g --jars spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar -i spark-sql-perf/scripts/time.scala
