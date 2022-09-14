@@ -12,6 +12,22 @@ from transformers import TFDistilBertForSequenceClassification
 from transformers import TFBertForSequenceClassification
 from transformers import pipeline
 
+"""
+# Train on TPU
+python -u run_tpu.py \
+--data_dir gs://skypilot-pii-annonymized-dataset \
+--model_dir gs://skypilot-pipeline-b-model \
+--num_epochs 1 \
+--mode=train
+
+# Inference on TPU
+python -u run_tpu.py --data_dir gs://skypilot-pii-annonymized-dataset \
+--model_dir gs://skypilot-pipeline-b-model \
+--num_epochs 1 \
+--per_core_batch_size 1 \
+--mode=infer
+"""
+
 
 flags.DEFINE_string('tpu', default=None, help='tpu name')
 flags.DEFINE_integer('per_core_batch_size', default=32, help='batch size for each core')
