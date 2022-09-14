@@ -22,7 +22,8 @@ UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
 
 # Supported GPU types and counts.
 GPU_TYPES_TO_COUNTS = {
-    'A100': [1, 2, 4, 8, 16],
+    'A100 40GB': [1, 2, 4, 8, 16],
+    'A100 80GB': [1, 2, 4, 8],
     'T4': [1, 2, 4],
     'P4': [1, 2, 4],
     'V100': [1, 2, 4, 8],
@@ -31,7 +32,7 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 # FIXME(woosuk): This URL can change.
-A2_PRICING_URL = '/compute/vm-instance-pricing_500ae19db0b58b862da0bc662dafc1b90ed3365a4e002c244f84fa5cae0da2fc.frame'  # pylint: disable=line-too-long
+A2_PRICING_URL = '/compute/vm-instance-pricing_04e9ea153c2ab1ea37254107b92dc081d4459ca9fe9a46ef5b39e5d63353f089.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
         'vCPUs': 12,
@@ -50,6 +51,22 @@ A2_INSTANCE_TYPES = {
         'MemoryGiB': 680,
     },
     'a2-megagpu-16g': {
+        'vCPUs': 96,
+        'MemoryGiB': 1360,
+    },
+    'a2-ultragpu-1g': {
+        'vCPUs': 12,
+        'MemoryGiB': 170,
+    },
+    'a2-ultragpu-2g': {
+        'vCPUs': 24,
+        'MemoryGiB': 340,
+    },
+    'a2-ultragpu-4g': {
+        'vCPUs': 48,
+        'MemoryGiB': 680,
+    },
+    'a2-ultragpu-8g': {
         'vCPUs': 96,
         'MemoryGiB': 1360,
     },
@@ -478,6 +495,10 @@ def get_gpu_df():
 
     # Merge the two dataframes.
     gpu_df = pd.merge(gpu_zones, gpu_pricing, on=['AcceleratorName', 'Region'])
+
+    # Rename A100 GPUs.
+    gpu_df['AcceleratorName'] = gpu_df['AcceleratorName'].apply(
+        lambda x: {'A100 40GB': 'A100', 'A100 80GB': 'A100-80GB'}.get(x, x))
 
     # Explode GPU counts.
     gpu_df = gpu_df.explode(column='AcceleratorCount', ignore_index=True)
