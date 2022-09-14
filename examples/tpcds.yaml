@@ -20,6 +20,12 @@ setup: |
   sudo apt-get -y install gcc make flex bison byacc git htop tmux
 
   git clone git@github.com:WoosukKwon/skypilot-tpcds.git spark-sql-perf
+  cd spark-sql-perf
+  # git checkout query-1k
+  # git checkout query-2.5k
+  git checkout query-10k
+  cd ..
+
   git clone https://github.com/databricks/tpcds-kit.git
   cd tpcds-kit/tools
   make OS=LINUX
