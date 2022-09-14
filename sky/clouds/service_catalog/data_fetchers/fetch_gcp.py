@@ -21,6 +21,9 @@ NOT_AVAILABLE_STR = 'Not available in this region'
 UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
 
 # Supported GPU types and counts.
+# NOTE: GCP officially uses 'A100 40GB' and 'A100 80GB' as the names of the
+# two A100 GPU types. However, in the catalog, we rename them as
+# 'A100' and 'A100-80GB' respectively, for consistency with other clouds.
 GPU_TYPES_TO_COUNTS = {
     'A100 40GB': [1, 2, 4, 8, 16],
     'A100 80GB': [1, 2, 4, 8],
