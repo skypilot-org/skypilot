@@ -1,0 +1,23 @@
+name: graviton
+
+resources:
+  cloud: aws
+  instance_type: m6i.4xlarge
+
+setup: |
+  wget https://archive.apache.org/dist/spark/spark-3.1.2/spark-3.1.2-bin-hadoop3.2.tgz
+  tar zxvf spark-3.1.2-bin-hadoop3.2.tgz
+
+  sudo apt-get update
+  sudo apt-get -y install gcc make flex bison byacc git htop tmux
+
+  git clone git@github.com:WoosukKwon/skypilot-tpcds.git spark-sql-perf
+  git clone https://github.com/databricks/tpcds-kit.git
+  cd tpcds-kit/tools
+  make OS=LINUX
+
+run: |
+  export PATH=/home/ubuntu/sky_workdir/spark-3.1.2-bin-hadoop3.2/bin/:$PATH
+  echo :quit | spark-shell --driver-memory 16g --jars spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar -i spark-sql-perf/scripts/gendata.scala
+  echo :quit | spark-shell --driver-memory 16g --jars spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar --conf spark.sql.cbo.enabled=True --conf spark.sql.cbo.joinReorder.enabled=True -i spark-sql-perf/scripts/run.scala
+  echo :quit | spark-shell --driver-memory 16g --jars spark-sql-perf/target/scala-2.12/spark-sql-perf_2.12-0.5.1-SNAPSHOT.jar -i spark-sql-perf/scripts/time.scala
