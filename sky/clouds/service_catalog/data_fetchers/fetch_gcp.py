@@ -497,8 +497,10 @@ def get_gpu_df():
     gpu_df = pd.merge(gpu_zones, gpu_pricing, on=['AcceleratorName', 'Region'])
 
     # Rename A100 GPUs.
-    gpu_df['AcceleratorName'] = gpu_df['AcceleratorName'].apply(
-        lambda x: {'A100 40GB': 'A100', 'A100 80GB': 'A100-80GB'}.get(x, x))
+    gpu_df['AcceleratorName'] = gpu_df['AcceleratorName'].apply(lambda x: {
+        'A100 40GB': 'A100',
+        'A100 80GB': 'A100-80GB',
+    }.get(x, x))
 
     # Explode GPU counts.
     gpu_df = gpu_df.explode(column='AcceleratorCount', ignore_index=True)
