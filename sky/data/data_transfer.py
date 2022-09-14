@@ -106,6 +106,10 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
+    from google import auth # pylint: disable=
+    credentials, project_id = auth.default()
+    if project_id is None:
+        shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH, clouds.gcp.GCP_CONFIGURE_PATH)
     sync_command = (f'gsutil -m rsync -rd gs://{gs_bucket_name} '
                     f's3://{s3_bucket_name}')
 

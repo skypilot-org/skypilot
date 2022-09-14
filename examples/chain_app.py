@@ -24,7 +24,7 @@ REAL_TRAIN = True
 REAL_TEST = True
 
 CLUSTER_NAME = 'test-chain-app'
-# CLUSTER_NAME = 'profile-tpu'
+# CLUSTER_NAME = 'chain-profile-gpu'
 
 SETUP = textwrap.dedent("""\
             use_tpu=0
@@ -53,13 +53,13 @@ SETUP = textwrap.dedent("""\
                     conda activate resnet
                     conda install cudatoolkit=11.0 -y
                     pip install pyyaml
-                    pip install tensorflow==2.5.0 pyyaml
+                    pip install tensorflow==2.5.0 pyyaml pillow pandas
                     pip install protobuf==3.20
                 fi
                 if [ "$use_tpu" -eq 1 ]; then
                     conda create -n resnet python=3.7 -y
                     conda activate resnet
-                    pip install tensorflow==2.5.0 pyyaml cloud-tpu-client
+                    pip install tensorflow==2.5.0 pyyaml cloud-tpu-client pillow pandas
                     pip install protobuf==3.20
                 fi
                 if [ "$use_inf" -eq 1 ]; then
@@ -83,24 +83,22 @@ TRAIN_RUN = textwrap.dedent(f"""\
     if [ "$use_gpu" -eq 1 ]; then
         num_gpus=`nvidia-smi --list-gpus | wc -l`
         export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \\
-        python3 resnet50_tpu/resnet50.py \\
+        time python3 -u resnet50_tpu/resnet50.py \\
         --tpu=gpu \\
         --data=INPUTS[0] \\
         --precision=float16 \\
         --model_dir=OUTPUTS[0]/resnet-realImagenet-float16 \\
-        --num_epochs=5 \\
         --num_cores=$num_gpus \\
         --per_core_batch_size=256 \\
         --amp --xla --loss_scale=128 \\
         2>&1 | tee run-realData-gpu-float16.log
     fi
     if [ "$use_tpu" -eq 1 ]; then
-        python3 resnet50_tpu/resnet50.py \\
+        time python3 -u resnet50_tpu/resnet50.py \\
           --tpu=$TPU_NAME \\
           --data=INPUTS[0] \\
-          --use_bfloat16=True \\
+          --precision=bfloat16 \\
           --model_dir=OUTPUTS[0]/resnet-realImagenet-float16 \\
-          --num_epochs=5 \\
           2>&1 | tee run-realData-float16.log
     fi
     if [ "$use_inf" -eq 1 ]; then
@@ -113,29 +111,32 @@ INFER_SETUP = SETUP if REAL_TEST else "echo 'MOCK INFER_SETUP'"
 INFER_RUN = textwrap.dedent(f"""\
                 cd codebase
 
+                conda activate resnet
+                
                 if [ "$use_gpu" -eq 1 ]; then
-                    conda activate resnet
-                    python3 official/resnet/resnet_main.py \\
-                        --mode=eval \\
-                        --eval_batch_size=16 \\
-                        --use_tpu=False \\
-                        --data_dir=./kitten_small.jpg \\
-                        --model_dir=INPUTS[0]/resnet-realImagenet-float16 \\
-                        --train_batch_size=1024 \\
-                        --iterations_per_loop=1251 \\
-                        --train_steps=112590 2>&1 | tee run-realData-eval.log
+                    cd resnet50_tpu
+                    export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
+                    OMP_NUM_THREADS=8 python3 -u resnet50.py \
+                        --tpu=gpu \
+                        --mode=infer \
+                        --precision=float16 \
+                        --model_dir=$HOME/model \
+                        --num_cores=1 \
+                        --infer_images=1000000 \
+                        --per_core_batch_size=16 \
+                        --amp --xla --loss_scale=128 \
+                        2>&1 | tee run-realData-gpu-float16.log
                 fi
                 if [ "$use_tpu" -eq 1 ]; then
-                    conda activate resnet
-                    python3 official/resnet/resnet_main.py \\
-                        --mode=eval \\
-                        --eval_batch_size=16 \\
-                        --tpu=$TPU_NAME \\
-                        --data_dir=./kitten_small.jpg \\
-                        --model_dir=INPUTS[0]/resnet-realImagenet-float16/saved_model \\
-                        --train_batch_size=1024 \\
-                        --iterations_per_loop=1251 \\
-                        --train_steps=112590 2>&1 | tee run-realData-eval.log
+                    cd resnet50_tpu
+                    OMP_NUM_THREADS=8 python3 -u resnet50.py \
+                        --mode=infer \
+                        --num_cores=8 \
+                        --per_core_batch_size=16 \
+                        --precision=bfloat16 \
+                        --tpu=$TPU_NAME \
+                        --model_dir=$HOME/model \
+                        2>&1 | tee run-realData-float16.log
                 fi
                 if [ "$use_inf" -eq 1 ]; then
                     cd inferentia
@@ -161,27 +162,27 @@ def make_application():
         train_op.set_inputs(
             # 'gs://test-chain-app-0-train-op-inputs-0',
             's3://sky-imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
-            estimated_size_gigabytes=90,
+            estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,
         )
 
         # 'CLOUD': saves to the cloud this op ends up executing on.
-        train_op.set_outputs('CLOUD://skypilot-pipeline-model',
+        train_op.set_outputs(f'CLOUD://skypilot-pipeline-model-{CLUSTER_NAME}',
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            sky.Resources(sky.AWS(), 'p3.2xlarge',
-                          disk_size=400),  # 1 V100, EC2.
+            # sky.Resources(sky.AWS(), 'p3.2xlarge',
+            #               disk_size=400),  # 1 V100, EC2.
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
-            sky.Resources(sky.GCP(), accelerators={'V100': 1},
-                          disk_size=400),  # 1 V100s, GCP.
-            sky.Resources(sky.GCP(), accelerators={'V100': 4},
-                          disk_size=400),  # 4 V100s, GCP.
-            # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
-                          disk_size=400),
+            # sky.Resources(sky.GCP(), accelerators={'V100': 1},
+            #               disk_size=400),  # 1 V100s, GCP.
+            # sky.Resources(sky.GCP(), accelerators={'V100': 4},
+            #               disk_size=400),  # 4 V100s, GCP.
+            # # Tuples mean all resources are required.
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+            #               disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))

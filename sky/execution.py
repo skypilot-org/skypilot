@@ -290,9 +290,10 @@ def _launch_chain(dag: sky.Dag,
                     # https://cloud.google.com/storage/pricing#multi-regions
                     # pylint: disable=line-too-long
                     subprocess.run(f'gsutil mb {input_vm_path} || true', shell=True, check=True)
-                    input_storage_name = storage.get_storage_name_from_uri(input_store_path)
-                    input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
-                    sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
+                    if not dryrun:
+                        input_storage_name = storage.get_storage_name_from_uri(input_store_path)
+                        input_storage_name_gcs = storage.get_storage_name_from_uri(input_vm_path)
+                        sky.data.data_transfer.s3_to_gcs(input_storage_name, input_storage_name_gcs)
                     # pylint: disable=pointless-string-statement
                     """ # pylint: disable=line-too-long
 

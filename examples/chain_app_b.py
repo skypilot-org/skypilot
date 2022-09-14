@@ -37,22 +37,22 @@ fi
 
 PROC_RUN = textwrap.dedent("""\
         conda activate tf
-        python -u << EOF
-        import tensorflow_datasets as tfds
-        tfds.load('amazon_us_reviews/Books_v1_02',
-                    split='train[:5%]',
-                    with_info=True,
-                    download=True,
-                    data_dir='OUTPUTS[0]')
-        EOF
-        echo Annonymizing dataset
-        ls OUTPUTS[0]
+        # python -u << EOF
+        # import tensorflow_datasets as tfds
+        # tfds.load('amazon_us_reviews/Books_v1_02',
+        #             split='train[:5%]',
+        #             with_info=True,
+        #             download=True,
+        #             data_dir='OUTPUTS[0]')
+        # EOF
+        # echo Annonymizing dataset
+        # ls OUTPUTS[0]
         echo Done.
         """)
 
 TRAIN_SETUP = 'pip install --upgrade pip && \
             conda activate huggingface || \
-            (conda create -n huggingface python=3.8 -y && \
+            (conda create -n huggingface python=3.7 -y && \
             conda activate huggingface && \
             pip install -r requirements.txt && \
             pip install protobuf==3.20)'
@@ -81,7 +81,8 @@ def make_application():
             'train_op',
             setup=TRAIN_SETUP,
             run=TRAIN_RUN,
-            workdir='./examples/tpu/tpu_app_code'
+            workdir='./examples/tpu/tpu_app_code',
+            inputs_outputs_on_bucket=True,
         )
         # inputs_outputs_on_bucket=True)
 

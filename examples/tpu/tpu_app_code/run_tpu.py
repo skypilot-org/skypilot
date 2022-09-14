@@ -7,15 +7,53 @@ import tensorflow_text as tf_text
 from transformers import TFDistilBertForSequenceClassification
 from transformers import TFBertForSequenceClassification
 
-tpu = tf.distribute.cluster_resolver.TPUClusterResolver()
-tf.config.experimental_connect_to_cluster(tpu)
-tf.tpu.experimental.initialize_tpu_system(tpu)
-strategy = tf.distribute.experimental.TPUStrategy(tpu)
 
+flags.DEFINE_string('tpu', default=None, help='tpu name')
+flags.DEFINE_integer('per_core_batch_size', default=32, help='batch size for each core')
+flags.DEFINE_integer('num_cores', default=8, help='number of cores to use')
 flags.DEFINE_string('data_dir', default=None, help='path to the dataset')
+flags.DEFINE_string('model_dir', default=None, help='path to the model')
+flags.DEFINE_integer('num_epochs', default=5, help='num epochs')
+flags.DEFINE_boolean('amp', default=False, help='use amp')
+flags.DEFINE_boolean('xla', default=False, help='use xla')
 FLAGS = flags.FLAGS
 
 def main(unused):
+    use_gpu = (FLAGS.tpu is not None and FLAGS.tpu.lower() == 'gpu')
+    if use_gpu:
+        strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy(communication=tf.distribute.experimental.CollectiveCommunication.NCCL)
+    else:
+        resolver = tf.distribute.cluster_resolver.TPUClusterResolver(tpu=FLAGS.tpu)
+        tf.config.experimental_connect_to_cluster(resolver)
+        tf.tpu.experimental.initialize_tpu_system(resolver)
+        strategy = tf.distribute.experimental.TPUStrategy(resolver)
+    assert use_gpu or (not FLAGS.amp and not FLAGS.xla), 'AMP and XLA only supported on GPU.'
+    if use_gpu:
+        # From Nvidia Repo, explained here: htteps://github.com/NVIDIA/DeepLearningExamples/issues/57
+        os.environ['CUDA_CACHE_DISABLE'] = '0'
+        os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+        os.environ['TF_GPU_THREAD_COUNT'] = '2'
+        os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
+        os.environ['TF_ADJUST_HUE_FUSED'] = '1'
+        os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
+        os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
+        os.environ['TF_SYNC_ON_FINISH'] = '0'
+        os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
+        os.environ['TF_DISABLE_NVTX_RANGES'] = '1'
+    if FLAGS.amp:
+        os.environ["TF_ENABLE_AUTO_MIXED_PRECISION_GRAPH_REWRITE"] = "1"
+    if FLAGS.xla:
+        # https://github.com/tensorflow/tensorflow/blob/8d72537c6abf5a44103b57b9c2e22c14f5f49698/tensorflow/compiler/jit/flags.cc#L78-L87
+        # 1: on for things very likely to be improved
+        # 2: on for everything
+        # fusible: only for Tensorflow operations that XLA knows how to fuse
+        #
+        # os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=1'
+        # os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=2'
+        # Best Performing XLA Option
+        os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=fusible'
+        os.environ["TF_XLA_FLAGS"] = (os.environ.get("TF_XLA_FLAGS", "") + " --tf_xla_enable_lazy_compilation=false")
+
     ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
                                 split='train[:5%]',
                                 with_info=True,
@@ -132,13 +170,25 @@ def main(unused):
                                                                 num_labels=1)
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
+        if FLAGS.amp:
+            optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer, loss_scale='dynamic')
         model.compile(optimizer=optimizer,
                     loss=model.compute_loss)  # can also use any keras loss fn
         model.summary()
 
-    inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(256).prefetch(
+    batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
+    inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(batch_size).prefetch(
         tf.data.experimental.AUTOTUNE)
-    model.fit(inuse_dataset, epochs=1, batch_size=256)
+    model.fit(inuse_dataset, epochs=FLAGS.num_epochs, batch_size=batch_size)
+    tf.logging.info('This might take a while...')
+    model.save('saved_weights.h5', include_optimizer=False, save_format='h5')
+
+    saved_weights_path = os.path.join(FLAGS.model_dir, 'saved_weights.h5')
+    # Copy model.h5 over to Google Cloud Storage
+    with file_io.FileIO('saved_weights.h5', mode='rb') as input_f:
+        with file_io.FileIO(saved_weights_path, mode='wb+') as output_f:
+        output_f.write(input_f.read())
+        tf.logging.info(f'Saved model weights to {saved_weights_path}...')
 
 if __name__ == '__main__':
     app.run(main)

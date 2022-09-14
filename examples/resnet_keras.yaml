@@ -64,19 +64,18 @@ run: |
     if [ "$use_gpu" -eq 1 ]; then
         num_gpus=`nvidia-smi --list-gpus | wc -l`
         export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
-        python3 resnet50_tpu/resnet50.py \
+        time python3 -u resnet50_tpu/resnet50.py \
         --tpu=gpu \
-        --data=/tmp/imagenet \
+        --data=gs://chain-profile-gpu-0-train-op-inputs-0 \
         --precision=float16 \
-        --model_dir=/tmp \
-        --num_epochs=5 \
+        --model_dir=gs://skypilot-pipeline-model/resnet-realImagenet-float16 \
         --num_cores=$num_gpus \
         --per_core_batch_size=256 \
         --amp --xla --loss_scale=128 \
         2>&1 | tee run-realData-gpu-float16.log
     fi
     if [ "$use_tpu" -eq 1 ]; then
-        python3 resnet50_tpu/resnet50.py \
+        time python3 -u resnet50_tpu/resnet50.py \
           --tpu=$TPU_NAME \
           --data=INPUTS[0] \
           --use_bfloat16=True \

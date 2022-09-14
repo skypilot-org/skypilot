@@ -7,7 +7,7 @@ resources:
 
 
 file_mounts: {
-    /tmp/imagenet: gs://cloud-tpu-test-datasets/fake_imagenet,
+    ~/model/saved_weights.h5: gs://skypilot-pipeline-model/saved_weights.h5
 }
 
 setup: |
@@ -59,32 +59,36 @@ setup: |
 
 run: |
     cd codebase/resnet50_tpu
+    git pull
     conda activate resnet
     
     if [ "$use_gpu" -eq 1 ]; then
-        export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
-        python3 resnet50.py \
-        --tpu=gpu \
-        --mode=infer \
-        --data=gs://cloud-tpu-test-datasets/fake_imagenet \
-        --precision=float16 \
-        --model_dir=/model \
-        --num_cores=1 \
-        --infer_images=1000000 \
-        --per_core_batch_size=16 \
-        --amp --xla --loss_scale=128 \
-        2>&1 | tee run-realData-gpu-float16.log
+        for bs in 8 16 32 64 128 256 512; do
+            export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
+            OMP_NUM_THREADS=8 python3 -u resnet50.py \
+            --tpu=gpu \
+            --mode=infer \
+            --precision=float16 \
+            --model_dir=$HOME/model \
+            --num_cores=1 \
+            --infer_images=1000000 \
+            --per_core_batch_size=$bs \
+            --amp --xla --loss_scale=128 \
+            2>&1 | tee run-realData-gpu-float16-$bs.log
+        done
     fi
     if [ "$use_tpu" -eq 1 ]; then
-        python3 resnet50_tpu/resnet50.py \
+        # for bs in 1 2 4 8 16 32; do
+        for bs in 512; do
+        OMP_NUM_THREADS=8 python3 -u resnet50.py \
           --mode=infer \
-          --num_cores=1 \
-          --per_core_batch_size=16 \
-          --precision=bfloat16
+          --num_cores=8 \
+          --per_core_batch_size=$bs \
+          --precision=bfloat16 \
           --tpu=$TPU_NAME \
-          --data=gs://cloud-tpu-test-datasets/fake_imagenet \
-          --model_dir=/model \
-          2>&1 | tee run-realData-float16.log
+          --model_dir=$HOME/model \
+          2>&1 | tee run-realData-float16-$bs.log
+          done
     fi
     if [ "$use_inf" -eq 1 ]; then
         exit 1
