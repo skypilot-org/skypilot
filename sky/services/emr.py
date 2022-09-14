@@ -5,12 +5,16 @@ import time
 
 def provision_cluster(cluster_name,
                       spark_version='3.2.1',
-                      instance_type='c6g.4xlarge',
+                      instance_type='m5.4xlarge',
                       num_nodes=1,
                       region='us-east-2',
                       skip_provision=False):
 
-    service_dict = {'3.2.1': 'emr-6.7.0'}
+    service_dict = {
+        '3.2.1': 'emr-6.7.0',
+        '3.2.0': 'emr-6.6.0',
+        '3.1.2': 'emr-6.5.0'
+    }
     client = boto3.client('emr', region_name=region)
 
     if not skip_provision:

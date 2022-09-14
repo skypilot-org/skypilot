@@ -1,7 +1,7 @@
 service:
   type: data-analytics
   dependencies:
-    spark: 3.2.1
+    spark: 3.1.2
 
 resources:
   cloud: aws
