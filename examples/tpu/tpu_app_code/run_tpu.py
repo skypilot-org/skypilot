@@ -1,5 +1,8 @@
 from absl import app
 from absl import flags
+from absl import logging
+
+import time
 
 import tensorflow_datasets as tfds
 import tensorflow as tf
@@ -16,7 +19,23 @@ flags.DEFINE_string('model_dir', default=None, help='path to the model')
 flags.DEFINE_integer('num_epochs', default=5, help='num epochs')
 flags.DEFINE_boolean('amp', default=False, help='use amp')
 flags.DEFINE_boolean('xla', default=False, help='use xla')
+flags.DEFINE_integer('infer_sentences', default=1000000, help='number of sentences to infer')
+flags.DEFINE_enum('mode', 'train', ['train', 'infer'], help='Mode to run: train or infer.')
 FLAGS = flags.FLAGS
+
+class TFBertForSequenceClassificationFlatIO(tf.keras.Model):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+    def call(self, inputs):
+        input_ids, attention_mask = inputs
+        output = self.model({'input_ids': input_ids, 'attention_mask': attention_mask})
+        return output['logits']
+
+def save_model(model, model_dir):
+    model = TFBertForSequenceClassificationFlatIO(model)
+    model.save(model_dir)
+    
 
 def main(unused):
     use_gpu = (FLAGS.tpu is not None and FLAGS.tpu.lower() == 'gpu')
@@ -163,7 +182,73 @@ def main(unused):
 
     ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
 
-    tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
+    batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
+    inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(batch_size).prefetch(
+        tf.data.experimental.AUTOTUNE)
+
+    if not use_gpu:
+        tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
+
+    if FLAGS.mode == 'infer':
+        model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
+                                                                num_labels=1)
+        model = tf.keras.models.load_model(FLAGS.model_dir, custom_objects={'compute_loss': model.compute_loss})
+        if FLAGS.amp:
+            optimizer = tf.train.experimental.enable_mixed_precision_graph_rewrite(optimizer, loss_scale='dynamic')
+        
+    @tf.function
+    def infer_step(iterator):
+        def infer_fn(inputs):
+            sentences, labels = inputs
+            predictions = model(sentences, training=False)
+            return predictions
+        values = strategy.run(infer_fn, args=(next(iterator),))
+        if FLAGS.num_cores == 1:
+            return values
+        return strategy.gather(values, axis=0)
+    
+    if FLAGS.mode == 'infer':
+        train_iterator = iter(inuse_dataset)
+        logging.info('Starting inference...')
+        batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
+        total_steps = FLAGS.infer_sentences // batch_size
+        warmup_inf_steps = 100
+        counter = 0
+        inf_times = []
+        import numpy as np
+        shapes = []
+        while counter < total_steps + warmup_inf_steps:
+            start_time = time.time()
+            batch = infer_step(train_iterator)
+            shapes.append(batch.numpy().shape)
+            end_time = time.time()
+            test_accuracy.reset_states()
+            if counter > warmup_inf_steps:
+                inf_times.append(end_time - start_time)
+            counter += 1
+            if counter % 1000 == 0:
+                logging.info('Evaluation Iter ' + str(counter) + f'\nMean Latency: {np.mean(inf_times) * 1000:.2f} ms')
+            if counter >= total_steps + warmup_inf_steps:
+                break
+        inf_times = np.array(inf_times)
+        import pandas as pd
+        throughput = FLAGS.infer_sentences / np.sum(inf_times)
+        mean_latency = 1000.0 * np.mean(inf_times)
+        P90_latency = 1000.0 * np.percentile(inf_times, 90)
+        P99_latency = 1000.0 * np.percentile(inf_times, 99)
+        
+        df = pd.DataFrame({
+            'batch_size': [batch_size],
+            'throughput': [throughput],
+            'p90_ms': [P90_latency],
+            'p99_ms': [P99_latency],
+            'mean_ms': [mean_latency],
+            'num_images': [(counter - warmup_inf_steps) * batch_size],
+        })
+        print(shapes[0])
+        print(df)
+        df.to_csv(f'results-{batch_size}.csv', index=False, header=True)
+        return
 
     with strategy.scope():
         model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
@@ -176,19 +261,23 @@ def main(unused):
                     loss=model.compute_loss)  # can also use any keras loss fn
         model.summary()
 
-    batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
-    inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(batch_size).prefetch(
-        tf.data.experimental.AUTOTUNE)
+    save_model(model, FLAGS.model_dir)
+    
     model.fit(inuse_dataset, epochs=FLAGS.num_epochs, batch_size=batch_size)
-    tf.logging.info('This might take a while...')
-    model.save('saved_weights.h5', include_optimizer=False, save_format='h5')
+    train_iterator = iter(inuse_dataset)
+    logging.info('infer once')
+    batch = infer_step(train_iterator)
+    print(batch.numpy().shape())
+    logging.info('This might take a while...')
+    save_model(model, FLAGS.model_dir)
 
-    saved_weights_path = os.path.join(FLAGS.model_dir, 'saved_weights.h5')
-    # Copy model.h5 over to Google Cloud Storage
-    with file_io.FileIO('saved_weights.h5', mode='rb') as input_f:
-        with file_io.FileIO(saved_weights_path, mode='wb+') as output_f:
-        output_f.write(input_f.read())
-        tf.logging.info(f'Saved model weights to {saved_weights_path}...')
+    # saved_weights_path = os.path.join(FLAGS.model_dir, 'saved_weights.h5')
+    # # Copy model.h5 over to Google Cloud Storage
+    # with file_io.FileIO('saved_weights.h5', mode='rb') as input_f:
+    #     with file_io.FileIO(saved_weights_path, mode='wb+') as output_f:
+    #         output_f.write(input_f.read())
+    #     logging.info(f'Saved model weights to {saved_weights_path}...')
 
 if __name__ == '__main__':
+    logging.set_verbosity(logging.INFO)
     app.run(main)
