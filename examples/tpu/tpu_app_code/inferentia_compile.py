@@ -6,7 +6,9 @@ from transformers import TFBertForSequenceClassification
 from preprocess import get_example_input
 
 tf.keras.backend.set_learning_phase(0)
+tf.keras.backend.set_floatx('float16')
 
+COMPILED_MODEL_DIR = 'compiled-keras-bert'
 
 class TFBertForSequenceClassificationFlatIO(tf.keras.Model):
     def __init__(self, model):
@@ -26,7 +28,7 @@ model_wrapped = TFBertForSequenceClassificationFlatIO(model)
 
 batch_sizes = [1, 2, 4, 8]
 for batch_size in batch_sizes:
-    example_input = get_example_input(batch_size)
+    example_inputs = get_example_input(batch_size)
     #turn the dictionary input into list input
     example_inputs_list = [example_inputs['input_ids'], example_inputs['attention_mask']]
 
