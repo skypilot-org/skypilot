@@ -23,12 +23,11 @@ model = tf.keras.models.load_model('saved_model', custom_objects={'compute_loss'
 
 #wrap the original model from HuggingFace, now our model accepts a list as input
 model_wrapped = TFBertForSequenceClassificationFlatIO(model)
-#turn the dictionary input into list input
-example_inputs_list = [example_inputs['input_ids'], example_inputs['attention_mask']]
 
 batch_sizes = [1, 2, 4, 8]
 for batch_size in batch_sizes:
     example_input = get_example_input(batch_size)
+    #turn the dictionary input into list input
     example_inputs_list = [example_inputs['input_ids'], example_inputs['attention_mask']]
 
     # Prepare export directory (old one removed)
