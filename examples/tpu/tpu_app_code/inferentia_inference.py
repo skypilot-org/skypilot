@@ -77,7 +77,7 @@ for batch_size in batch_sizes:
     example_input = get_example_input(USER_BATCH_SIZE)
 
     # Warmup.
-    _ = predictor_inferentia(model_feed_dict, training=False)
+    _ = predictor_inferentia(example_input, training=False)
 
     num_loops = 10000
     num_inferences = num_loops * USER_BATCH_SIZE
@@ -95,7 +95,7 @@ for batch_size in batch_sizes:
     start = time.time()
     with futures.ThreadPoolExecutor(8) as exe:
         for i in range(num_loops):
-            fut = exe.submit(RunOneBatch, predictor_inferentia, model_feed_dict)
+            fut = exe.submit(RunOneBatch, predictor_inferentia, example_input)
             fut_list[i] = fut
         for i, fut in enumerate(fut_list):
             duration_ms[i] = fut.result()
