@@ -102,8 +102,9 @@ else
         # Install Neuron Driver
         sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
         conda activate aws_neuron_tensorflow2_p37
-        pip install tensorflow==2.5.1 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0
-        pip install tensorflow-neuron[cc]==2.5.1.* "protobuf<4"
+        # Require to be 2.5.3 to compile correctly
+        pip install tensorflow==2.5.3 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0
+        pip install tensorflow-neuron[cc]==2.5.3.* "protobuf<4"
     fi
 fi
 """

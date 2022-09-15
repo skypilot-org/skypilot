@@ -7,7 +7,7 @@ import shutil
 from preprocess import get_example_input
 
 tf.keras.backend.set_learning_phase(0)
-tf.keras.backend.set_floatx('float16')
+# tf.keras.backend.set_floatx('float16')
 
 COMPILED_MODEL_DIR = 'compiled-keras-bert'
 
@@ -27,8 +27,8 @@ class TFBertForSequenceClassificationFlatIO(tf.keras.Model):
         return output['logits']
 
 
-model = TFBertForSequenceClassification.from_pretrained(
-    'bert-base-uncased', num_labels=1)
+model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
+                                                        num_labels=1)
 loaded_model = tf.keras.models.load_model(
     'saved_model', custom_objects={'compute_loss': model.compute_loss})
 

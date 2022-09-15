@@ -7,6 +7,8 @@ from tensorflow.keras.preprocessing import image
 from tensorflow.keras.applications.resnet50 import preprocess_input
 from concurrent import futures
 
+from transformers import TFBertForSequenceClassification
+
 import pandas as pd
 
 from preprocess import get_example_input
@@ -50,7 +52,7 @@ p99_latencies = []
 p90_latencies = []
 throughputs = []
 
-COMPILED_MODEL_DIR = 'compiled-keras-resnet50'
+COMPILED_MODEL_DIR = 'compiled-keras-bert'
 batch_sizes = [1]
 batch_sizes = [1, 2, 4, 8, 16]
 # batch_sizes = [16]
