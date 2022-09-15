@@ -106,10 +106,10 @@ if [ "$use_tpu" -eq 1 ]; then
     python -u run_tpu.py \
     --tpu $TPU_NAME \
     --data_dir INPUTS[0] \
-    --per_core_batch_size 64 \
+    --per_core_batch_size 32 \
     --model_dir OUTPUTS[0] \
-    --num_epochs 2 \
-    --mode=train
+    --num_epochs 10 \
+    --mode=train | tee tpu.log
 fi
 """
 
@@ -181,13 +181,13 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            sky.Resources(sky.Azure(),
-                          accelerators={'V100': 4}),  # 1 V100, EC2.
+            # sky.Resources(sky.Azure(),
+            #               accelerators={'V100': 4}),  # 1 V100, EC2.
             # sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # sky.Resources(sky.GCP(), accelerators={'V100': 1}),  # 1 V100s, GCP.
             # sky.Resources(sky.GCP(), accelerators={'V100': 4}),  # 4 V100s, GCP.
             # Tuples mean all resources are required.
-            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         }
         train_op.set_resources(train_resources)
 

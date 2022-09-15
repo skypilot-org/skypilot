@@ -13,7 +13,7 @@ from transformers import TFDistilBertForSequenceClassification
 from transformers import TFBertForSequenceClassification
 from transformers import pipeline
 
-from preprocess import preprocessing_fn, preprocess_bert_input, get_example_input
+from preprocess import get_example_input
 """
 # Train on TPU
 python -u run_tpu.py \
@@ -65,9 +65,7 @@ def save_model(model, model_dir):
 def main(unused):
     use_gpu = (FLAGS.tpu is not None and FLAGS.tpu.lower() == 'gpu')
     if use_gpu:
-        strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy(
-            communication=tf.distribute.experimental.CollectiveCommunication.
-            NCCL)
+        strategy = tf.distribute.MirroredStrategy()
     else:
         resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
             tpu=FLAGS.tpu)
@@ -76,18 +74,18 @@ def main(unused):
         strategy = tf.distribute.experimental.TPUStrategy(resolver)
     assert use_gpu or (not FLAGS.amp and
                        not FLAGS.xla), 'AMP and XLA only supported on GPU.'
-    if use_gpu:
-        # From Nvidia Repo, explained here: htteps://github.com/NVIDIA/DeepLearningExamples/issues/57
-        os.environ['CUDA_CACHE_DISABLE'] = '0'
-        os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
-        os.environ['TF_GPU_THREAD_COUNT'] = '2'
-        os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
-        os.environ['TF_ADJUST_HUE_FUSED'] = '1'
-        os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
-        os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
-        os.environ['TF_SYNC_ON_FINISH'] = '0'
-        os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
-        os.environ['TF_DISABLE_NVTX_RANGES'] = '1'
+    # if use_gpu:
+    #     # From Nvidia Repo, explained here: htteps://github.com/NVIDIA/DeepLearningExamples/issues/57
+    #     os.environ['CUDA_CACHE_DISABLE'] = '0'
+    #     os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
+    #     os.environ['TF_GPU_THREAD_COUNT'] = '2'
+    #     os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
+    #     os.environ['TF_ADJUST_HUE_FUSED'] = '1'
+    #     os.environ['TF_ADJUST_SATURATION_FUSED'] = '1'
+    #     os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
+    #     os.environ['TF_SYNC_ON_FINISH'] = '0'
+    #     os.environ['TF_AUTOTUNE_THRESHOLD'] = '2'
+    #     os.environ['TF_DISABLE_NVTX_RANGES'] = '1'
     if FLAGS.xla:
         # https://github.com/tensorflow/tensorflow/blob/8d72537c6abf5a44103b57b9c2e22c14f5f49698/tensorflow/compiler/jit/flags.cc#L78-L87
         # 1: on for things very likely to be improved
@@ -112,10 +110,11 @@ def main(unused):
 
         tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
-        def dataset_fn(ds):
-            return ds.filter(lambda x: x['data']['helpful_votes'] >= 7)
+        # def dataset_fn(ds):
+        #     return ds.filter(lambda x: x['data']['helpful_votes'] >= 7)
 
-        ds_train_filtered = ds_train.apply(dataset_fn)
+        # ds_train_filtered = ds_train.apply(dataset_fn)
+        ds_train_filtered = ds_train
 
         def process(example):
             return (dict(tokenizer(
@@ -131,8 +130,78 @@ def main(unused):
                 inp2.numpy()
             ]
 
-        # ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
-        ds_train_filtered_2 = ds_train_filtered.map(process)
+        MAX_SEQ_LEN = 512
+        bert_tokenizer = tf_text.BertTokenizer(
+        vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
+        token_out_type=tf.int64,
+        lower_case=True)
+                
+        def preprocessing_fn(inputs):
+            """Preprocess input column of text into transformed columns of.
+                * input token ids
+                * input mask
+                * input type ids
+            """
+            CLS_ID = tf.constant(101, dtype=tf.int64)
+            SEP_ID = tf.constant(102, dtype=tf.int64)
+            PAD_ID = tf.constant(0, dtype=tf.int64)
+
+
+            def tokenize_text(text, sequence_length=MAX_SEQ_LEN):
+                """
+                Perform the BERT preprocessing from text -> input token ids
+                """
+
+                # convert text into token ids
+                tokens = bert_tokenizer.tokenize(text)
+
+                # flatten the output ragged tensors
+                tokens = tokens.merge_dims(1, 2)[:, :sequence_length]
+
+                # Add start and end token ids to the id sequence
+                start_tokens = tf.fill([tf.shape(text)[0], 1], CLS_ID)
+                end_tokens = tf.fill([tf.shape(text)[0], 1], SEP_ID)
+                tokens = tokens[:, :sequence_length - 2]
+                tokens = tf.concat([start_tokens, tokens, end_tokens], axis=1)
+
+                # truncate sequences greater than MAX_SEQ_LEN
+                tokens = tokens[:, :sequence_length]
+
+                # pad shorter sequences with the pad token id
+                tokens = tokens.to_tensor(default_value=PAD_ID)
+                pad = sequence_length - tf.shape(tokens)[1]
+                tokens = tf.pad(tokens, [[0, 0], [0, pad]], constant_values=PAD_ID)
+
+                # and finally reshape the word token ids to fit the output
+                # data structure of TFT
+                return tf.reshape(tokens, [-1, sequence_length])
+
+
+            def preprocess_bert_input(text, sequence_length=MAX_SEQ_LEN):
+                """
+                Convert input text into the input_word_ids, input_mask, input_type_ids
+                """
+                input_word_ids = tokenize_text(text, sequence_length)
+                input_mask = tf.cast(input_word_ids > 0, tf.int64)
+                input_mask = tf.reshape(input_mask, [-1, sequence_length])
+
+                zeros_dims = tf.stack(tf.shape(input_mask))
+                input_type_ids = tf.fill(zeros_dims, 0)
+                input_type_ids = tf.cast(input_type_ids, tf.int64)
+
+                return (tf.squeeze(input_word_ids, axis=0), tf.squeeze(input_mask, axis=0),
+                        tf.squeeze(input_type_ids, axis=0))
+            input_word_ids, input_mask, input_type_ids = preprocess_bert_input(
+                [inputs['data']['review_body']])
+
+            return (dict({
+                'input_ids': input_word_ids,
+                'token_type_ids': input_type_ids,
+                'attention_mask': input_mask
+            }), inputs['data']['star_rating'])
+
+
+        ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
 
         batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
         inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(
@@ -143,20 +212,19 @@ def main(unused):
     if FLAGS.amp:
         policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
         tf.keras.mixed_precision.experimental.set_policy(policy)
-        # tf.keras.backend.set_floatx('float16')
+        tf.keras.backend.set_floatx('float16')
 
     if FLAGS.mode == 'infer':
-        with strategy.scope():
-            model = TFBertForSequenceClassification.from_pretrained(
-                'bert-base-uncased', num_labels=1)
-            loaded_model = tf.keras.models.load_model(
+        model = TFBertForSequenceClassification.from_pretrained(
+            'bert-base-uncased', num_labels=1)
+        loaded_model = tf.keras.models.load_model(
                 FLAGS.model_dir, custom_objects={'compute_loss': model.compute_loss})
-            del model
+        tf.keras.backend.set_floatx('float16')
+        ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
 
-            tf.keras.backend.set_floatx('float16')
+        with strategy.scope():
             model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
                                                                     num_labels=1)
-            ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
             model.set_weights(ws)
 
         #Our example data!
@@ -225,7 +293,7 @@ def main(unused):
         if FLAGS.amp:
             optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
         model.compile(optimizer=optimizer,
-                      loss=model.compute_loss)  # can also use any keras loss fn
+                      loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True))  # can also use any keras loss fn
         model.summary()
 
     logging.info(f'Batch size {batch_size}')

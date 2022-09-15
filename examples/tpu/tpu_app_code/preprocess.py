@@ -1,7 +1,7 @@
 import tensorflow as tf
 import tensorflow_text as tf_text
 
-MAX_SEQ_LEN = 384
+MAX_SEQ_LEN = 512
 bert_tokenizer = tf_text.BertTokenizer(
     vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
     token_out_type=tf.int64,
@@ -55,23 +55,6 @@ def preprocess_bert_input(text, sequence_length=MAX_SEQ_LEN):
 
     return (tf.squeeze(input_word_ids, axis=0), tf.squeeze(input_mask, axis=0),
             tf.squeeze(input_type_ids, axis=0))
-
-
-def preprocessing_fn(inputs):
-    """Preprocess input column of text into transformed columns of.
-        * input token ids
-        * input mask
-        * input type ids
-    """
-
-    input_word_ids, input_mask, input_type_ids = preprocess_bert_input(
-        [inputs['data']['review_body']])
-
-    return (dict({
-        'input_ids': input_word_ids,
-        'token_type_ids': input_type_ids,
-        'attention_mask': input_mask
-    }), inputs['data']['star_rating'])
 
 
 def get_example_input(per_core_batch_size):
