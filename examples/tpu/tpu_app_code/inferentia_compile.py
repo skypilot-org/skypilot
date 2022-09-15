@@ -7,7 +7,6 @@ import shutil
 from preprocess import get_example_input
 
 tf.keras.backend.set_learning_phase(0)
-# tf.keras.backend.set_floatx('float16')
 
 COMPILED_MODEL_DIR = 'compiled-keras-bert'
 
@@ -31,15 +30,20 @@ model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
                                                         num_labels=1)
 loaded_model = tf.keras.models.load_model(
     'saved_model', custom_objects={'compute_loss': model.compute_loss})
+del model
 
-model.set_weights(loaded_model.get_weights())
-
+tf.keras.backend.set_floatx('float16')
+model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
+                                                        num_labels=1)
+ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
+model.set_weights(ws)
 del loaded_model
 
 #wrap the original model from HuggingFace, now our model accepts a list as input
 model_wrapped = TFBertForSequenceClassificationFlatIO(model)
 
-batch_sizes = [1, 2, 4, 8]
+#batch_sizes = [1, 2, 4, 8]
+batch_sizes = [2, 4, 8]
 for batch_size in batch_sizes:
     example_inputs = get_example_input(batch_size)
     #turn the dictionary input into list input
