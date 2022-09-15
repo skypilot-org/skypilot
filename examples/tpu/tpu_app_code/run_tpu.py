@@ -221,6 +221,7 @@ def main(unused):
                       loss=model.compute_loss)  # can also use any keras loss fn
         model.summary()
 
+    logging.info(f'Batch size {batch_size}')
     save_model(model, FLAGS.model_dir)
     model.fit(inuse_dataset, epochs=FLAGS.num_epochs, batch_size=batch_size)
     logging.info('Saving. This might take a while...')
