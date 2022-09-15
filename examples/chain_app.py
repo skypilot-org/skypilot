@@ -23,8 +23,8 @@ import time_estimators
 REAL_TRAIN = True
 REAL_TEST = True
 
-CLUSTER_NAME = 'test-chain-app'
-# CLUSTER_NAME = 'chain-profile-gpu'
+# CLUSTER_NAME = 'test-chain-app'
+CLUSTER_NAME = 'chain-profile-gpu'
 
 SETUP = textwrap.dedent("""\
             use_tpu=0
@@ -173,17 +173,17 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            sky.Resources(sky.AWS(), 'p3.2xlarge',
-                          disk_size=400),  # 1 V100, EC2.
+            # sky.Resources(sky.AWS(), 'p3.2xlarge',
+            #               disk_size=400),  # 1 V100, EC2.
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
-            sky.Resources(sky.GCP(), accelerators={'V100': 1},
-                          disk_size=400),  # 1 V100s, GCP.
-            sky.Resources(sky.GCP(), accelerators={'V100': 4},
-                          disk_size=400),  # 4 V100s, GCP.
-            # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
-                          disk_size=400),
+            # sky.Resources(sky.GCP(), accelerators={'V100': 1},
+            #               disk_size=400),  # 1 V100s, GCP.
+            # sky.Resources(sky.GCP(), accelerators={'V100': 4},
+            #               disk_size=400),  # 4 V100s, GCP.
+            # # Tuples mean all resources are required.
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+            #               disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))

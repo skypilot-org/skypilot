@@ -34,6 +34,8 @@ loaded_model = tf.keras.models.load_model(
 
 model.set_weights(loaded_model.get_weights())
 
+del loaded_model
+
 #wrap the original model from HuggingFace, now our model accepts a list as input
 model_wrapped = TFBertForSequenceClassificationFlatIO(model)
 

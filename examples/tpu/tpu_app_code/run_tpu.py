@@ -103,7 +103,7 @@ def main(unused):
 
     if FLAGS.mode != 'infer':
         ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
-                                      split='train',
+                                      split='train[:1000000]',
                                       with_info=True,
                                       download=False,
                                       data_dir=FLAGS.data_dir)
