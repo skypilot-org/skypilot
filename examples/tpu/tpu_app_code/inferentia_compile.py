@@ -19,7 +19,7 @@ class TFBertForSequenceClassificationFlatIO(tf.keras.Model):
 
 original_model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
                                                                 num_labels=1)
-model = tf.keras.models.load_model(FLAGS.model_dir, custom_objects={'compute_loss': original_model.compute_loss})
+model = tf.keras.models.load_model('saved_model', custom_objects={'compute_loss': original_model.compute_loss})
 
 #wrap the original model from HuggingFace, now our model accepts a list as input
 model_wrapped = TFBertForSequenceClassificationFlatIO(pipe.model)
