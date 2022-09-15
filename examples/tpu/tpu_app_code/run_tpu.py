@@ -147,11 +147,17 @@ def main(unused):
 
     if FLAGS.mode == 'infer':
         with strategy.scope():
-            original_model = TFBertForSequenceClassification.from_pretrained(
+            model = TFBertForSequenceClassification.from_pretrained(
                 'bert-base-uncased', num_labels=1)
-            model = tf.keras.models.load_model(
-                FLAGS.model_dir,
-                custom_objects={'compute_loss': original_model.compute_loss})
+            loaded_model = tf.keras.models.load_model(
+                FLAGS.model_dir, custom_objects={'compute_loss': model.compute_loss})
+            del model
+
+            tf.keras.backend.set_floatx('float16')
+            model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
+                                                                    num_labels=1)
+            ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
+            model.set_weights(ws)
 
         #Our example data!
         example_input = get_example_input(FLAGS.per_core_batch_size)
