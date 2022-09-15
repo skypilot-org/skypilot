@@ -29,7 +29,7 @@ example_inputs_list = [example_inputs['input_ids'], example_inputs['attention_ma
 batch_sizes = [1, 2, 4, 8]
 for batch_size in batch_sizes:
     example_input = get_example_input(batch_size)
-    example_inputs_list = [example_inputs['input_ids'], example_inputs['attention_mask]]
+    example_inputs_list = [example_inputs['input_ids'], example_inputs['attention_mask']]
 
     # Prepare export directory (old one removed)
     compiled_model_dir = f'{COMPILED_MODEL_DIR}_batch' + str(batch_size)

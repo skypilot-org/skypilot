@@ -1,3 +1,6 @@
+import tensorflow as tf
+import tensorflow_text as tf_text
+
 MAX_SEQ_LEN = 512
 bert_tokenizer = tf_text.BertTokenizer(
     vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
