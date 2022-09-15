@@ -161,7 +161,8 @@ def make_application():
 
         train_op.set_inputs(
             # 'gs://test-chain-app-0-train-op-inputs-0',
-            's3://sky-imagenet-bucket' if REAL_TRAIN else 's3://sky-example-test',
+            's3://sky-imagenet-bucket'
+            if REAL_TRAIN else 's3://sky-example-test',
             estimated_size_gigabytes=150,
             # estimated_size_gigabytes=1500,
             # estimated_size_gigabytes=600,

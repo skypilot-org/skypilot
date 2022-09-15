@@ -1,6 +1,7 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
+import shutil
 import subprocess
 import time
 from typing import Any, Dict, Optional, Tuple, Union
@@ -1025,13 +1026,15 @@ class GcsStore(AbstractStore):
         # Need explicitly export the credential file path in the environment
         # variable according to the doc
         # https://cloud.google.com/storage/docs/reference/libraries#setting_up_authentication # pylint: disable=line-too-long
-        from google import auth # pylint: disable=
+        from google import auth  # pylint: disable=import-outside-toplevel
         credentials, project_id = auth.default()
         if project_id is None:
-            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH, clouds.gcp.GCP_CONFIGURE_PATH)
+            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH,
+                        clouds.gcp.GCP_CONFIGURE_PATH)
             credentials, project_id = auth.default()
             assert project_id is not None
-        self.client = gcp.storage_client(project=project_id, credentials=credentials)
+        self.client = gcp.storage_client(project=project_id,
+                                         credentials=credentials)
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
             # If is_sky_managed is not specified, then this is a new storage
@@ -1072,10 +1075,11 @@ class GcsStore(AbstractStore):
 
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
-        from google import auth # pylint: disable=
-        credentials, project_id = auth.default()
+        from google import auth  # pylint: disable=import-outside-toplevel
+        _, project_id = auth.default()
         if project_id is None:
-            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH, clouds.gcp.GCP_CONFIGURE_PATH)
+            shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH,
+                        clouds.gcp.GCP_CONFIGURE_PATH)
         source = os.path.abspath(os.path.expanduser(self.source))
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         with backend_utils.safe_console_status(

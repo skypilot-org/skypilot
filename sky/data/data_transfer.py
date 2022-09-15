@@ -17,6 +17,7 @@ TODO:
 """
 from datetime import datetime
 import json
+import shutil
 import subprocess
 import time
 from typing import Any
@@ -32,6 +33,7 @@ GcsStore = Any
 
 MAX_POLLS = 120000
 POLL_INTERVAL = 1
+
 
 def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
@@ -59,7 +61,6 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     _add_bucket_iam_member(gs_bucket_name, 'roles/storage.admin',
                            'serviceAccount:' + storage_account['accountEmail'])
 
-    starttime = datetime.utcnow()
     transfer_job = {
         'description': f'Transferring data from S3 Bucket \
         {s3_bucket_name} to GCS Bucket {gs_bucket_name}',
@@ -79,24 +80,28 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
         }
     }
 
-    response = storagetransfer.transferJobs().create(body=transfer_job).execute()
-    operation = storagetransfer.transferJobs().run(jobName=response['name'], body={'projectId': project_id}).execute()
+    response = storagetransfer.transferJobs().create(
+        body=transfer_job).execute()
+    operation = storagetransfer.transferJobs().run(jobName=response['name'],
+                                                   body={
+                                                       'projectId': project_id
+                                                   }).execute()
 
     logger.info(f'AWS -> GCS Transfer Job: {json.dumps(operation, indent=4)}')
     logger.info('Waiting for the transfer to finish')
     start = time.time()
     for _ in range(MAX_POLLS):
-        result = (storagetransfer.transferOperations().get(name=operation['name']).execute())
-        if "error" in result:
-            raise Exception(result["error"])
+        result = (storagetransfer.transferOperations().get(
+            name=operation['name']).execute())
+        if 'error' in result:
+            raise Exception(result['error'])
 
         if 'done' in result and result['done']:
-            logger.info("Operation done.")
+            logger.info('Operation done.')
             break
         logger.info('Waiting for the data transfer to be finished...')
         time.sleep(POLL_INTERVAL)
     logger.info(f'Transfer finished in {time.time() - start}')
-
 
 
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
@@ -106,10 +111,11 @@ def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
       gs_bucket_name: str; Name of the Google Cloud Storage Bucket
       s3_bucket_name: str; Name of the Amazon S3 Bucket
     """
-    from google import auth # pylint: disable=
-    credentials, project_id = auth.default()
+    from google import auth  # pylint: disable=import-outside-toplevel
+    _, project_id = auth.default()
     if project_id is None:
-        shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH, clouds.gcp.GCP_CONFIGURE_PATH)
+        shutil.copy(clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH,
+                    clouds.gcp.GCP_CONFIGURE_PATH)
     sync_command = (f'gsutil -m rsync -rd gs://{gs_bucket_name} '
                     f's3://{s3_bucket_name}')
 

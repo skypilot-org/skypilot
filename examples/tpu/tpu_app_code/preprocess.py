@@ -10,6 +10,7 @@ CLS_ID = tf.constant(101, dtype=tf.int64)
 SEP_ID = tf.constant(102, dtype=tf.int64)
 PAD_ID = tf.constant(0, dtype=tf.int64)
 
+
 def tokenize_text(text, sequence_length=MAX_SEQ_LEN):
     """
     Perform the BERT preprocessing from text -> input token ids
@@ -39,6 +40,7 @@ def tokenize_text(text, sequence_length=MAX_SEQ_LEN):
     # data structure of TFT
     return tf.reshape(tokens, [-1, sequence_length])
 
+
 def preprocess_bert_input(text, sequence_length=MAX_SEQ_LEN):
     """
     Convert input text into the input_word_ids, input_mask, input_type_ids
@@ -51,9 +53,9 @@ def preprocess_bert_input(text, sequence_length=MAX_SEQ_LEN):
     input_type_ids = tf.fill(zeros_dims, 0)
     input_type_ids = tf.cast(input_type_ids, tf.int64)
 
-    return (tf.squeeze(input_word_ids,
-                    axis=0), tf.squeeze(input_mask, axis=0),
+    return (tf.squeeze(input_word_ids, axis=0), tf.squeeze(input_mask, axis=0),
             tf.squeeze(input_type_ids, axis=0))
+
 
 def preprocessing_fn(inputs):
     """Preprocess input column of text into transformed columns of.
@@ -72,13 +74,19 @@ def preprocessing_fn(inputs):
     }), inputs['data']['star_rating'])
 
 
-
 def get_example_input(per_core_batch_size):
     string_inputs = 'I really do not want to type out 128 strings to create batch 128 data.',
 
-    input_word_ids, input_mask, input_type_ids = preprocess_bert_input(string_inputs, sequence_length=128)
-    input_ids = tf.repeat(tf.expand_dims(input_word_ids, axis=0), per_core_batch_size, axis=0, name='input_ids/input_ids')
-    input_masks = tf.repeat(tf.expand_dims(input_mask, axis=0), per_core_batch_size, axis=0, name='input_ids/attention_mask')
+    input_word_ids, input_mask, input_type_ids = preprocess_bert_input(
+        string_inputs, sequence_length=128)
+    input_ids = tf.repeat(tf.expand_dims(input_word_ids, axis=0),
+                          per_core_batch_size,
+                          axis=0,
+                          name='input_ids/input_ids')
+    input_masks = tf.repeat(tf.expand_dims(input_mask, axis=0),
+                            per_core_batch_size,
+                            axis=0,
+                            name='input_ids/attention_mask')
 
     example_input = {'input_ids': input_ids, 'attention_mask': input_masks}
     return example_input

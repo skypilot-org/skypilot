@@ -56,9 +56,57 @@ TRAIN_SETUP = 'pip install --upgrade pip && \
             conda activate huggingface && \
             pip install -r requirements.txt && \
             pip install protobuf==3.20)'
+
 TRAIN_RUN = 'conda activate huggingface && python -u run_tpu.py --data_dir INPUTS[0]'
 
-INFER_SETUP = 'echo setup inference'
+INFER_SETUP = """\
+use_tpu=0
+[ -z "$TPU_NAME" ] && echo 'export use_tpu=0' >> ~/.bashrc || echo 'export use_tpu=1' >> ~/.bashrc
+
+use_gpu=0
+nvidia-smi && (echo 'export use_gpu=1' >> ~/.bashrc) || echo 'export use_gpu=0' >> ~/.bashrc
+
+use_inf=0
+neuron-ls && (echo 'export use_inf=1' >> ~/.bashrc) || echo 'export use_inf=0' >> ~/.bashrc
+
+source ~/.bashrc
+. $(conda info --base)/etc/profile.d/conda.sh
+
+pip install --upgrade pip
+
+git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
+cd codebase
+conda activate resnet
+
+if [ $? -eq 0 ]; then
+    echo "conda env exists"
+else
+    if [ "$use_gpu" -eq 1 ]; then
+        conda create -n resnet python=3.7 -y
+        conda activate resnet
+        conda install cudatoolkit=11.0 -y
+        pip install pyyaml
+        pip install tensorflow==2.5.0 pyyaml pillow pandas
+        pip install protobuf==3.20
+    fi
+    if [ "$use_tpu" -eq 1 ]; then
+        conda create -n resnet python=3.7 -y
+        conda activate resnet
+        pip install tensorflow==2.5.0 pyyaml cloud-tpu-client pillow pandas
+        pip install protobuf==3.20
+    fi
+    if [ "$use_inf" -eq 1 ]; then
+        # Install OS headers
+        sudo snap install linux-headers-$(uname -r) -y
+
+        # Install Neuron Driver
+        sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
+        conda activate aws_neuron_tensorflow2_p37
+        pip install tensorflow==2.5.1 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0
+        pip install tensorflow-neuron[cc]==2.5.1.* "protobuf<4"
+    fi
+fi
+"""
 INFER_RUN = 'cat INPUTS[0]/model.txt; echo inference DONE.'
 
 
@@ -96,7 +144,8 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            sky.Resources(sky.Azure(), accelerators={'V100': 4}),  # 1 V100, EC2.
+            sky.Resources(sky.Azure(),
+                          accelerators={'V100': 4}),  # 1 V100, EC2.
             # sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # sky.Resources(sky.GCP(), accelerators={'V100': 1}),  # 1 V100s, GCP.
             # sky.Resources(sky.GCP(), accelerators={'V100': 4}),  # 4 V100s, GCP.
@@ -106,7 +155,8 @@ def make_application():
         train_op.set_resources(train_resources)
 
         # TODO(zhwu): time estimator for BERT
-        train_op.set_time_estimator(time_estimators.bert_base_finetune_estimate_runtime)
+        train_op.set_time_estimator(
+            time_estimators.bert_base_finetune_estimate_runtime)
 
         # Infer.
         infer_op = sky.Task('infer_op', setup=INFER_SETUP, run=INFER_RUN)

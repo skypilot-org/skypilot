@@ -13,7 +13,6 @@ from transformers import TFBertForSequenceClassification
 from transformers import pipeline
 
 from preprocess import preprocessing_fn, preprocess_bert_input, get_example_input
-
 """
 # Train on TPU
 python -u run_tpu.py \
@@ -30,40 +29,50 @@ python -u run_tpu.py --data_dir gs://skypilot-pii-annonymized-dataset \
 --mode=infer
 """
 
-
 flags.DEFINE_string('tpu', default=None, help='tpu name')
-flags.DEFINE_integer('per_core_batch_size', default=32, help='batch size for each core')
+flags.DEFINE_integer('per_core_batch_size',
+                     default=32,
+                     help='batch size for each core')
 flags.DEFINE_integer('num_cores', default=8, help='number of cores to use')
 flags.DEFINE_string('data_dir', default=None, help='path to the dataset')
 flags.DEFINE_string('model_dir', default=None, help='path to the model')
 flags.DEFINE_integer('num_epochs', default=5, help='num epochs')
 flags.DEFINE_boolean('amp', default=False, help='use amp')
 flags.DEFINE_boolean('xla', default=False, help='use xla')
-flags.DEFINE_integer('infer_sentences', default=1000000, help='number of sentences to infer')
-flags.DEFINE_enum('mode', 'train', ['train', 'infer'], help='Mode to run: train or infer.')
+flags.DEFINE_integer('infer_sentences',
+                     default=1000000,
+                     help='number of sentences to infer')
+flags.DEFINE_enum('mode',
+                  'train', ['train', 'infer'],
+                  help='Mode to run: train or infer.')
 FLAGS = flags.FLAGS
-
 
 SAVED_MODEL_LENGTH = 128
 
+
 def save_model(model, model_dir):
-    a = tf.constant([list(range(1, SAVED_MODEL_LENGTH+1))], dtype=tf.int64)
+    a = tf.constant([list(range(1, SAVED_MODEL_LENGTH + 1))], dtype=tf.int64)
     b = tf.constant([[1] * SAVED_MODEL_LENGTH], dtype=tf.int64)
     inp = {"input_ids": a, "attention_mask": b}
     model._saved_model_inputs_spec = None
     model._set_save_spec(inp)
     model.save(model_dir)
 
+
 def main(unused):
     use_gpu = (FLAGS.tpu is not None and FLAGS.tpu.lower() == 'gpu')
     if use_gpu:
-        strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy(communication=tf.distribute.experimental.CollectiveCommunication.NCCL)
+        strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy(
+            communication=tf.distribute.experimental.CollectiveCommunication.
+            NCCL)
     else:
-        resolver = tf.distribute.cluster_resolver.TPUClusterResolver(tpu=FLAGS.tpu)
+        resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
+            tpu=FLAGS.tpu)
         tf.config.experimental_connect_to_cluster(resolver)
         tf.tpu.experimental.initialize_tpu_system(resolver)
         strategy = tf.distribute.experimental.TPUStrategy(resolver)
-    assert use_gpu or (not FLAGS.amp and not FLAGS.xla), 'AMP and XLA only supported on GPU.'
+    assert use_gpu or (not FLAGS.amp and
+                       not FLAGS.xla), 'AMP and XLA only supported on GPU.'
     if use_gpu:
         # From Nvidia Repo, explained here: htteps://github.com/NVIDIA/DeepLearningExamples/issues/57
         os.environ['CUDA_CACHE_DISABLE'] = '0'
@@ -86,49 +95,45 @@ def main(unused):
         # os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=2'
         # Best Performing XLA Option
         os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=fusible'
-        os.environ["TF_XLA_FLAGS"] = (os.environ.get("TF_XLA_FLAGS", "") + " --tf_xla_enable_lazy_compilation=false")
+        os.environ["TF_XLA_FLAGS"] = (os.environ.get("TF_XLA_FLAGS", "") +
+                                      " --tf_xla_enable_lazy_compilation=false")
 
     if FLAGS.mode != 'infer':
         ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
-                                    split='train[:5%]',
-                                    with_info=True,
-                                    download=False,
-                                    data_dir=FLAGS.data_dir)
+                                      split='train[:5%]',
+                                      with_info=True,
+                                      download=False,
+                                      data_dir=FLAGS.data_dir)
 
     if FLAGS.mode != 'infer':
         from transformers import BertTokenizerFast
 
         tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
-
         def dataset_fn(ds):
             return ds.filter(lambda x: x['data']['helpful_votes'] >= 7)
 
-
         ds_train_filtered = ds_train.apply(dataset_fn)
-
 
         def process(example):
             return (dict(tokenizer(
                 example['data']['review_body'].numpy().decode('utf-8')),
-                        truncation=True,
-                        padding=True), example['data']['star_rating'].numpy())
-
+                         truncation=True,
+                         padding=True), example['data']['star_rating'].numpy())
 
         def process_py(inp1, inp2):
             return [
                 dict(tokenizer(inp1.numpy().decode('utf-8')),
-                    truncation=True,
-                    padding=True),
+                     truncation=True,
+                     padding=True),
                 inp2.numpy()
             ]
-
 
         ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
 
         batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
-        inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(batch_size).prefetch(
-            tf.data.experimental.AUTOTUNE)
+        inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(
+            batch_size).prefetch(tf.data.experimental.AUTOTUNE)
 
     if not use_gpu:
         tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
@@ -138,24 +143,27 @@ def main(unused):
 
     if FLAGS.mode == 'infer':
         with strategy.scope():
-            original_model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
-                                                                    num_labels=1)
-            model = tf.keras.models.load_model(FLAGS.model_dir, custom_objects={'compute_loss': original_model.compute_loss})
-        
+            original_model = TFBertForSequenceClassification.from_pretrained(
+                'bert-base-uncased', num_labels=1)
+            model = tf.keras.models.load_model(
+                FLAGS.model_dir,
+                custom_objects={'compute_loss': original_model.compute_loss})
+
         #Our example data!
         example_input = get_example_input(FLAGS.per_core_batch_size)
 
         @tf.function
         def infer_step(example):
+
             def infer_fn(example):
                 predictions = model(example, training=False)['logits']
                 predictions = tf.cast(predictions, tf.float32)
                 return predictions
+
             values = strategy.run(infer_fn, args=(example,))
             if FLAGS.num_cores == 1:
                 return values
             return strategy.gather(values, axis=0)
-
 
         logging.info('Starting inference...')
         batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
@@ -174,7 +182,9 @@ def main(unused):
                 inf_times.append(end_time - start_time)
             counter += 1
             if counter % 1000 == 0:
-                logging.info('Evaluation Iter ' + str(counter) + f'\nMean Latency: {np.mean(inf_times) * 1000:.2f} ms')
+                logging.info(
+                    'Evaluation Iter ' + str(counter) +
+                    f'\nMean Latency: {np.mean(inf_times) * 1000:.2f} ms')
             if counter >= total_steps + warmup_inf_steps:
                 break
         inf_times = np.array(inf_times)
@@ -183,7 +193,7 @@ def main(unused):
         mean_latency = 1000.0 * np.mean(inf_times)
         P90_latency = 1000.0 * np.percentile(inf_times, 90)
         P99_latency = 1000.0 * np.percentile(inf_times, 99)
-        
+
         df = pd.DataFrame({
             'batch_size': [batch_size],
             'throughput': [throughput],
@@ -198,14 +208,14 @@ def main(unused):
         return
 
     with strategy.scope():
-        model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
-                                                                num_labels=1)
+        model = TFBertForSequenceClassification.from_pretrained(
+            'bert-base-uncased', num_labels=1)
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
         if FLAGS.amp:
             optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
         model.compile(optimizer=optimizer,
-                    loss=model.compute_loss)  # can also use any keras loss fn
+                      loss=model.compute_loss)  # can also use any keras loss fn
         model.summary()
 
     save_model(model, FLAGS.model_dir)
@@ -219,6 +229,7 @@ def main(unused):
     #     with file_io.FileIO(saved_weights_path, mode='wb+') as output_f:
     #         output_f.write(input_f.read())
     #     logging.info(f'Saved model weights to {saved_weights_path}...')
+
 
 if __name__ == '__main__':
     logging.set_verbosity(logging.INFO)

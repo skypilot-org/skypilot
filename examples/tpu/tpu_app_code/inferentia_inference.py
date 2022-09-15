@@ -11,7 +11,6 @@ import pandas as pd
 
 from preprocess import get_example_input
 
-
 # The following line creates 4 groups, each having 1 core.
 #
 # If pipelining (e.g., across 4 cores) is used, this line must be commented
@@ -20,19 +19,23 @@ os.environ['NEURON_RT_NUM_CORES'] = '4'
 # os.environ['NEURONCORE_GROUP_SIZES'] = '1,1,1,1'
 # num_workers = 4
 
+
 class TFBertForSequenceClassificationDictIO(tf.keras.Model):
+
     def __init__(self, model_wrapped):
         super().__init__()
         self.model_wrapped = model_wrapped
         self.aws_neuron_function = model_wrapped.aws_neuron_function
+
     def call(self, inputs):
         input_ids = inputs['input_ids']
         attention_mask = inputs['attention_mask']
         logits = self.model_wrapped([input_ids, attention_mask])
         return [logits]
 
-original_model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
-                                                                num_labels=1)
+
+original_model = TFBertForSequenceClassification.from_pretrained(
+    'bert-base-uncased', num_labels=1)
 
 
 def RunOneBatch(model, inputs):
@@ -61,7 +64,9 @@ for batch_size in batch_sizes:
     # Load model
     compiled_model_dir = f'{COMPILED_MODEL_DIR}_batch' + str(batch_size)
 
-    model = tf.keras.models.load_model(compiled_model_dir, custom_objects={'compute_loss': original_model.compute_loss})
+    model = tf.keras.models.load_model(
+        compiled_model_dir,
+        custom_objects={'compute_loss': original_model.compute_loss})
     model = TFBertForSequenceClassificationDictIO(model)
 
     predictor_inferentia = model
@@ -88,13 +93,14 @@ for batch_size in batch_sizes:
     start = time.time()
     with futures.ThreadPoolExecutor(8) as exe:
         for i in range(num_loops):
-            fut = exe.submit(RunOneBatch, predictor_inferentia,
-                             model_feed_dict)
+            fut = exe.submit(RunOneBatch, predictor_inferentia, model_feed_dict)
             fut_list[i] = fut
         for i, fut in enumerate(fut_list):
             duration_ms[i] = fut.result()
             if i != 0 and i % 100 == 0:
-                print(f'Finished {i} / {num_loops} -- throughput: {i*USER_BATCH_SIZE / (time.time() - start):.2f} images/sec')
+                print(
+                    f'Finished {i} / {num_loops} -- throughput: {i*USER_BATCH_SIZE / (time.time() - start):.2f} images/sec'
+                )
     elapsed_time = time.time() - start
 
     mean_latency = np.mean(duration_ms)
