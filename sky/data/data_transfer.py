@@ -15,7 +15,6 @@ TODO:
 - All combinations of Azure Transfer
 - GCS -> S3
 """
-from datetime import datetime
 import json
 import shutil
 import subprocess
