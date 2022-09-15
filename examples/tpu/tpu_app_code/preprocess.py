@@ -78,7 +78,7 @@ def get_example_input(per_core_batch_size):
     string_inputs = 'I really do not want to type out 128 strings to create batch 128 data.',
 
     input_word_ids, input_mask, input_type_ids = preprocess_bert_input(
-        string_inputs, sequence_length=128)
+        string_inputs, sequence_length=384)
     input_ids = tf.repeat(tf.expand_dims(input_word_ids, axis=0),
                           per_core_batch_size,
                           axis=0,

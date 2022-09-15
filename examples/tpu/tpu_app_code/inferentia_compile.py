@@ -37,8 +37,7 @@ model.set_weights(loaded_model.get_weights())
 #wrap the original model from HuggingFace, now our model accepts a list as input
 model_wrapped = TFBertForSequenceClassificationFlatIO(model)
 
-# batch_sizes = [1, 2, 4, 8]
-batch_sizes = [1]
+batch_sizes = [1, 2, 4, 8]
 for batch_size in batch_sizes:
     example_inputs = get_example_input(batch_size)
     #turn the dictionary input into list input

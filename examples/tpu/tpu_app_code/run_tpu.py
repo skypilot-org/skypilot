@@ -16,13 +16,15 @@ from preprocess import preprocessing_fn, preprocess_bert_input, get_example_inpu
 """
 # Train on TPU
 python -u run_tpu.py \
+--tpu $TPU_NAME \
 --data_dir gs://skypilot-pii-annonymized-dataset \
 --model_dir gs://skypilot-pipeline-b-model \
 --num_epochs 1 \
---mode=train
+--mode=train --amp --xla
 
 # Inference on TPU
-python -u run_tpu.py --data_dir gs://skypilot-pii-annonymized-dataset \
+python -u run_tpu.py \
+--tpu $TPU_NAME \
 --model_dir gs://skypilot-pipeline-b-model \
 --num_epochs 1 \
 --per_core_batch_size 1 \
@@ -47,7 +49,7 @@ flags.DEFINE_enum('mode',
                   help='Mode to run: train or infer.')
 FLAGS = flags.FLAGS
 
-SAVED_MODEL_LENGTH = 128
+SAVED_MODEL_LENGTH = 384
 
 
 def save_model(model, model_dir):

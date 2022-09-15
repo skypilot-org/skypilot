@@ -54,7 +54,7 @@ throughputs = []
 
 COMPILED_MODEL_DIR = 'compiled-keras-bert'
 batch_sizes = [1]
-batch_sizes = [1, 2, 4, 8, 16]
+batch_sizes = [1, 2, 4, 8]
 # batch_sizes = [16]
 
 for batch_size in batch_sizes:
@@ -101,7 +101,7 @@ for batch_size in batch_sizes:
             duration_ms[i] = fut.result()
             if i != 0 and i % 100 == 0:
                 print(
-                    f'Finished {i} / {num_loops} -- throughput: {i*USER_BATCH_SIZE / (time.time() - start):.2f} images/sec'
+                    f'Finished {i} / {num_loops} -- throughput: {i*USER_BATCH_SIZE / (time.time() - start):.2f} sentences/sec'
                 )
     elapsed_time = time.time() - start
 

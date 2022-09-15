@@ -23,6 +23,7 @@ import time_estimators
 CLUSTER_NAME = 'test-chain-app-b'
 # CLUSTER_NAME = 'profile-tpu'
 
+# TODO (zhwu): add real opaque code
 PROC_SETUP = """\
 conda activate tf
 if [ $? -eq 0 ]; then
@@ -50,16 +51,7 @@ PROC_RUN = textwrap.dedent("""\
         echo Done.
         """)
 
-TRAIN_SETUP = 'pip install --upgrade pip && \
-            conda activate huggingface || \
-            (conda create -n huggingface python=3.7 -y && \
-            conda activate huggingface && \
-            pip install -r requirements.txt && \
-            pip install protobuf==3.20)'
-
-TRAIN_RUN = 'conda activate huggingface && python -u run_tpu.py --data_dir INPUTS[0]'
-
-INFER_SETUP = """\
+SETUP = """\
 use_tpu=0
 [ -z "$TPU_NAME" ] && echo 'export use_tpu=0' >> ~/.bashrc || echo 'export use_tpu=1' >> ~/.bashrc
 
@@ -74,41 +66,78 @@ source ~/.bashrc
 
 pip install --upgrade pip
 
-git clone https://github.com/Michaelvll/skypilot-ml-pipeline-exp.git ./codebase || true
-cd codebase
-conda activate resnet
+if [ "$use_inf" -eq 1 ]; then
+    # Install OS headers
+    sudo snap install linux-headers-$(uname -r) -y
 
-if [ $? -eq 0 ]; then
-    echo "conda env exists"
+    # Install Neuron Driver
+    sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
+    conda activate aws_neuron_tensorflow2_p37
+    # Require to be 2.5.3 to compile correctly
+    pip install tensorflow==2.5.3 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0 tensorflow-neuron[cc]==2.5.3.* "protobuf<4"
 else
-    if [ "$use_gpu" -eq 1 ]; then
-        conda create -n resnet python=3.7 -y
-        conda activate resnet
-        conda install cudatoolkit=11.0 -y
-        pip install pyyaml
-        pip install tensorflow==2.5.0 pyyaml pillow pandas
-        pip install protobuf==3.20
-    fi
-    if [ "$use_tpu" -eq 1 ]; then
-        conda create -n resnet python=3.7 -y
-        conda activate resnet
-        pip install tensorflow==2.5.0 pyyaml cloud-tpu-client pillow pandas
-        pip install protobuf==3.20
-    fi
-    if [ "$use_inf" -eq 1 ]; then
-        # Install OS headers
-        sudo snap install linux-headers-$(uname -r) -y
-
-        # Install Neuron Driver
-        sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
-        conda activate aws_neuron_tensorflow2_p37
-        # Require to be 2.5.3 to compile correctly
-        pip install tensorflow==2.5.3 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0
-        pip install tensorflow-neuron[cc]==2.5.3.* "protobuf<4"
-    fi
+    pip install --upgrade pip
+    conda activate huggingface || \
+    (conda create -n huggingface python=3.7 -y && \
+    conda activate huggingface && \
+    pip install -r requirements.txt && \
+    pip install protobuf==3.20)
 fi
 """
-INFER_RUN = 'cat INPUTS[0]/model.txt; echo inference DONE.'
+
+TRAIN_SETUP = SETUP
+
+TRAIN_RUN = """\
+if [ "$use_gpu" -eq 1 ]; then
+    conda activate huggingface
+    python -u run_tpu.py \
+    --tpu gpu \
+    --data_dir INPUTS[0] \
+    --model_dir OUTPUTS[0] \
+    --num_epochs 1 \
+    --mode=train --amp --xla
+fi
+if [ "$use_tpu" -eq 1 ]; then
+    conda activate huggingface
+    python -u run_tpu.py \
+    --tpu $TPU_NAME \
+    --data_dir INPUTS[0] \
+    --model_dir OUTPUTS[0] \
+    --num_epochs 1 \
+    --mode=train
+fi
+"""
+
+INFER_SETUP = SETUP
+INFER_RUN = """\
+mkdir -p ./saved_model
+mv INPUTS[0]/* ./saved_model
+BATCH_SIZE=8
+
+if [ "$use_gpu" -eq 1 ]; then
+    conda activate huggingface
+    python -u run_tpu.py \
+    --tpu=gpu \
+    --model_dir ./saved_model \
+    --num_epochs 1 \
+    --per_core_batch_size $BATCH_SIZE \
+    --mode=infer --amp --xla
+fi
+if [ "$use_tpu" -eq 1 ]; then
+    conda activate huggingface
+    python -u run_tpu.py \
+    --tpu $TPU_NAME \
+    --model_dir ./saved_model \
+    --num_epochs 1 \
+    --per_core_batch_size $((BATCH_SIZE / 8)) \
+    --mode=infer
+fi
+if [ "$use_inf" -eq 1 ]; then
+    conda activate aws_neuron_tensorflow2_p37
+    python -u inferentia_compile.py
+    python -u inferentia_inference.py
+fi
+"""
 
 
 def make_application():
@@ -160,7 +189,10 @@ def make_application():
             time_estimators.bert_base_finetune_estimate_runtime)
 
         # Infer.
-        infer_op = sky.Task('infer_op', setup=INFER_SETUP, run=INFER_RUN)
+        infer_op = sky.Task('infer_op',
+                            setup=INFER_SETUP,
+                            run=INFER_RUN,
+                            workdir='./examples/tpu/tpu_app_code')
 
         # Data dependency.
         # FIXME: make the system know this is from train_op's outputs.
@@ -171,9 +203,9 @@ def make_application():
         # for inf instances
         infer_op.set_resources({
             sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
-            # sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            # sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-            # sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
             sky.Resources(sky.Azure(), accelerators={'T4': 1})
         })
 
