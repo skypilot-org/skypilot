@@ -67,6 +67,12 @@ def provision_cluster(cluster_name,
                 'Name': 'Spark'
             }, {
                 'Name': 'Hadoop'
+            }, {
+                'Name': 'Hive'
+            }, {
+                'Name': 'Pig'
+            }, {
+                'Name': 'Hue'
             }],
             VisibleToAllUsers=True,
             ServiceRole='EMR_DefaultRole',
