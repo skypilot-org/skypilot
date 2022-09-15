@@ -38,16 +38,16 @@ fi
 
 PROC_RUN = textwrap.dedent("""\
         conda activate tf
-        # python -u << EOF
-        # import tensorflow_datasets as tfds
-        # tfds.load('amazon_us_reviews/Books_v1_02',
-        #             split='train[:5%]',
-        #             with_info=True,
-        #             download=True,
-        #             data_dir='OUTPUTS[0]')
-        # EOF
-        # echo Annonymizing dataset
-        # ls OUTPUTS[0]
+        python -u << EOF
+        import tensorflow_datasets as tfds
+        tfds.load('amazon_us_reviews/Books_v1_02',
+                    split='train',
+                    with_info=True,
+                    download=True,
+                    data_dir='OUTPUTS[0]')
+        EOF
+        echo Annonymizing dataset
+        ls OUTPUTS[0]
         echo Done.
         """)
 
@@ -90,11 +90,15 @@ TRAIN_SETUP = SETUP
 TRAIN_RUN = """\
 if [ "$use_gpu" -eq 1 ]; then
     conda activate huggingface
-    python -u run_tpu.py \
+    num_gpus=`nvidia-smi --list-gpus | wc -l`
+    export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
+    time python -u run_tpu.py \
     --tpu gpu \
     --data_dir INPUTS[0] \
     --model_dir OUTPUTS[0] \
-    --num_epochs 1 \
+    --per_core_batch_size 24 \
+    --num_cores $num_gpus \
+    --num_epochs 2 \
     --mode=train --amp --xla
 fi
 if [ "$use_tpu" -eq 1 ]; then
@@ -102,8 +106,9 @@ if [ "$use_tpu" -eq 1 ]; then
     python -u run_tpu.py \
     --tpu $TPU_NAME \
     --data_dir INPUTS[0] \
+    --per_core_batch_size 64 \
     --model_dir OUTPUTS[0] \
-    --num_epochs 1 \
+    --num_epochs 2 \
     --mode=train
 fi
 """
@@ -116,6 +121,7 @@ BATCH_SIZE=8
 
 if [ "$use_gpu" -eq 1 ]; then
     conda activate huggingface
+    export XLA_FLAGS='--xla_gpu_cuda_data_dir=/usr/local/cuda/' && \
     python -u run_tpu.py \
     --tpu=gpu \
     --model_dir ./saved_model \
@@ -180,7 +186,7 @@ def make_application():
             # sky.Resources(sky.GCP(), accelerators={'V100': 1}),  # 1 V100s, GCP.
             # sky.Resources(sky.GCP(), accelerators={'V100': 4}),  # 4 V100s, GCP.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         }
         train_op.set_resources(train_resources)
 
@@ -202,10 +208,10 @@ def make_application():
         # NOTE(zhwu): Have to add use_spot here, since I only have spot quota
         # for inf instances
         infer_op.set_resources({
-            sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
-            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+            # sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
+            # sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
+            # sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
             sky.Resources(sky.Azure(), accelerators={'T4': 1})
         })
 
