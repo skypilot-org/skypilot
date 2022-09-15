@@ -108,7 +108,6 @@ def main(unused):
                                       download=False,
                                       data_dir=FLAGS.data_dir)
 
-    if FLAGS.mode != 'infer':
         from transformers import BertTokenizerFast
 
         tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
@@ -132,7 +131,8 @@ def main(unused):
                 inp2.numpy()
             ]
 
-        ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
+        # ds_train_filtered_2 = ds_train_filtered.map(preprocessing_fn)
+        ds_train_filtered_2 = ds_train_filtered.map(process)
 
         batch_size = FLAGS.per_core_batch_size * FLAGS.num_cores
         inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(
@@ -143,6 +143,7 @@ def main(unused):
     if FLAGS.amp:
         policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
         tf.keras.mixed_precision.experimental.set_policy(policy)
+        # tf.keras.backend.set_floatx('float16')
 
     if FLAGS.mode == 'infer':
         with strategy.scope():
