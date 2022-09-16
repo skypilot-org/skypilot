@@ -92,7 +92,7 @@ def resnet50_infer_estimate_runtime(resources):
 
     instance = resources.instance_type
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
-    utilization = 1/5
+    utilization = 1/6
     logger.debug(f'****** trying {utilization} util for all')
 
     if instance == 'p3.2xlarge':
