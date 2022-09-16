@@ -357,6 +357,11 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
     return global_user_state.get_storage_names(incomplete)
 
 
+_RELOAD_ZSH_CMD = 'source ~/.zshrc'
+_RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
+_RELOAD_BASH_CMD = 'source ~/.bashrc'
+
+
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                               value: str):
     """A callback for installing shell completion for click."""
@@ -364,28 +369,42 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     if not value or ctx.resilient_parsing:
         return
 
+    zshrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
+    bashrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.bash'
+
     if value == 'bash':
-        cmd = '_SKY_COMPLETE=bash_source sky > ~/.sky-complete.bash && \
-                echo "# For SkyPilot shell completion" >> ~/.bashrc && \
-                echo ". ~/.sky-complete.bash\n" >> ~/.bashrc'
+        install_cmd = f'_SKY_COMPLETE=bash_source sky > \
+                ~/.sky/.sky-complete.bash && \
+                echo "{bashrc_diff}" >> ~/.bashrc'
+
+        cmd = f'(grep -q "SkyPilot" ~/.bashrc) || ({install_cmd})'
+        reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
         cmd = '_SKY_COMPLETE=fish_source sky > \
                 ~/.config/fish/completions/sky.fish'
 
+        reload_cmd = _RELOAD_FISH_CMD
+
     elif value == 'zsh':
-        cmd = '_SKY_COMPLETE=zsh_source sky > ~/.sky-complete.zsh && \
-                echo "# For SkyPilot shell completion" >> ~/.zshrc && \
-                echo ". ~/.sky-complete.zsh\n" >> ~/.zshrc'
+        install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
+                ~/.sky/.sky-complete.zsh && \
+                echo "{zshrc_diff}" >> ~/.zshrc'
+
+        cmd = f'(grep -q "SkyPilot" ~/.zshrc) || ({install_cmd})'
+        reload_cmd = _RELOAD_ZSH_CMD
 
     else:
         click.secho(f'Unsupported shell: {value}', fg='yellow')
         ctx.exit()
 
+    click.secho(cmd)
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion installed for {value}', fg='green')
-        click.echo('Completion will take effect once you restart the terminal')
+        click.echo(
+            'Completion will take effect once you restart the terminal: ' +
+            click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Installation failed with code {e.returncode}',
                     fg='yellow')
