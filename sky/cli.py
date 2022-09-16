@@ -369,6 +369,15 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     if not value or ctx.resilient_parsing:
         return
 
+    if value == 'auto':
+        if 'SHELL' not in os.environ:
+            click.secho(
+                'Cannot auto-detect shell. Please specify shell explicitly.',
+                fg='yellow')
+            ctx.exit()
+        else:
+            value = os.path.basename(os.environ['SHELL'])
+
     zshrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
     bashrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.bash'
 
@@ -417,6 +426,15 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     del param  # Unused.
     if not value or ctx.resilient_parsing:
         return
+
+    if value == 'auto':
+        if 'SHELL' not in os.environ:
+            click.secho(
+                'Cannot auto-detect shell. Please specify shell explicitly.',
+                fg='yellow')
+            ctx.exit()
+        else:
+            value = os.path.basename(os.environ['SHELL'])
 
     if value == 'bash':
         cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.bashrc && \
@@ -897,13 +915,13 @@ class _DocumentedCodeCommand(click.Command):
 
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
-              type=click.Choice(['bash', 'zsh', 'fish']),
+              type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
               callback=_install_shell_completion,
               expose_value=False,
               is_eager=True,
               help='Install shell completion for the specified shell.')
 @click.option('--uninstall-shell-completion',
-              type=click.Choice(['bash', 'zsh', 'fish']),
+              type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
               callback=_uninstall_shell_completion,
               expose_value=False,
               is_eager=True,
