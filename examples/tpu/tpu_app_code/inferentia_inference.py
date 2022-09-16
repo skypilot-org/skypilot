@@ -99,7 +99,7 @@ for batch_size in batch_sizes:
             fut_list[i] = fut
         for i, fut in enumerate(fut_list):
             duration_ms[i] = fut.result()
-            if i != 0 and i % 100 == 0:
+            if i != 0 and i % 5000 == 0:
                 print(
                     f'Finished {i} / {num_loops} -- throughput: {i*USER_BATCH_SIZE / (time.time() - start):.2f} sentences/sec'
                 )
