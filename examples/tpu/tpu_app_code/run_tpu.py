@@ -74,9 +74,9 @@ def main(unused):
         strategy = tf.distribute.experimental.TPUStrategy(resolver)
     assert use_gpu or (not FLAGS.amp and
                        not FLAGS.xla), 'AMP and XLA only supported on GPU.'
-    # if use_gpu:
-    #     # From Nvidia Repo, explained here: htteps://github.com/NVIDIA/DeepLearningExamples/issues/57
-    #     os.environ['CUDA_CACHE_DISABLE'] = '0'
+    if use_gpu:
+        # From Nvidia Repo, explained here: htteps://github.com/NVIDIA/DeepLearningExamples/issues/57
+        os.environ['CUDA_CACHE_DISABLE'] = '1'
     #     os.environ['TF_GPU_THREAD_MODE'] = 'gpu_private'
     #     os.environ['TF_GPU_THREAD_COUNT'] = '2'
     #     os.environ['TF_USE_CUDNN_BATCHNORM_SPATIAL_PERSISTENT'] = '1'
@@ -95,9 +95,16 @@ def main(unused):
         # os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=1'
         # os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=2'
         # Best Performing XLA Option
-        os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=fusible'
-        os.environ["TF_XLA_FLAGS"] = (os.environ.get("TF_XLA_FLAGS", "") +
-                                      " --tf_xla_enable_lazy_compilation=false")
+        # os.environ['TF_XLA_FLAGS'] = '--tf_xla_auto_jit=fusible'
+        # os.environ["TF_XLA_FLAGS"] = (os.environ.get("TF_XLA_FLAGS", "") +
+        #                               " --tf_xla_enable_lazy_compilation=false")
+        tf.config.optimizer.set_jit(True) # For better GPU memory efficiency
+
+    if not use_gpu:
+        tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
+    if FLAGS.amp:
+        policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
+        tf.keras.mixed_precision.experimental.set_policy(policy)
 
     if FLAGS.mode != 'infer':
         ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
@@ -130,11 +137,11 @@ def main(unused):
                 inp2.numpy()
             ]
 
-        MAX_SEQ_LEN = 512
+        MAX_SEQ_LEN = 384
         bert_tokenizer = tf_text.BertTokenizer(
-        vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
-        token_out_type=tf.int64,
-        lower_case=True)
+            vocab_lookup_table='gs://weilin-bert-test/vocab.txt',
+            token_out_type=tf.int64,
+            lower_case=True)
                 
         def preprocessing_fn(inputs):
             """Preprocess input column of text into transformed columns of.
@@ -207,20 +214,16 @@ def main(unused):
         inuse_dataset = ds_train_filtered_2.shuffle(1000).batch(
             batch_size).prefetch(tf.data.experimental.AUTOTUNE)
 
-    if not use_gpu:
-        tf.keras.mixed_precision.experimental.set_policy('mixed_bfloat16')
-    if FLAGS.amp:
-        policy = tf.keras.mixed_precision.experimental.Policy('mixed_float16')
-        tf.keras.mixed_precision.experimental.set_policy(policy)
-        tf.keras.backend.set_floatx('float16')
+
 
     if FLAGS.mode == 'infer':
         model = TFBertForSequenceClassification.from_pretrained(
             'bert-base-uncased', num_labels=1)
         loaded_model = tf.keras.models.load_model(
                 FLAGS.model_dir, custom_objects={'compute_loss': model.compute_loss})
-        tf.keras.backend.set_floatx('float16')
-        ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
+        # tf.keras.backend.set_floatx('float16')
+        # ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
+        ws = loaded_model.get_weights()
 
         with strategy.scope():
             model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
@@ -290,14 +293,15 @@ def main(unused):
             'bert-base-uncased', num_labels=1)
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=5e-5)
-        if FLAGS.amp:
-            optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
+        # This will be automatically applied by the .fit()
+        # if FLAGS.amp: 
+        #     optimizer = tf.keras.mixed_precision.LossScaleOptimizer(optimizer)
         model.compile(optimizer=optimizer,
-                      loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True))  # can also use any keras loss fn
+                      loss=model.compute_loss)  # can also use any keras loss fn
         model.summary()
 
     logging.info(f'Batch size {batch_size}')
-    save_model(model, FLAGS.model_dir)
+    # save_model(model, FLAGS.model_dir)
     model.fit(inuse_dataset, epochs=FLAGS.num_epochs, batch_size=batch_size)
     logging.info('Saving. This might take a while...')
     save_model(model, FLAGS.model_dir)
