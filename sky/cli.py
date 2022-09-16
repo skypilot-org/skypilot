@@ -407,7 +407,6 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         click.secho(f'Unsupported shell: {value}', fg='yellow')
         ctx.exit()
 
-    click.secho(cmd)
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion installed for {value}', fg='green')
@@ -444,7 +443,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
         reload_cmd = _RELOAD_BASH_CMD
 
     elif value == 'fish':
-        cmd = 'rm ~/.config/fish/completions/sky.fish'
+        cmd = 'rm -f ~/.config/fish/completions/sky.fish'
         reload_cmd = _RELOAD_FISH_CMD
 
     elif value == 'zsh':
