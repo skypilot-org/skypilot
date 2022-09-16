@@ -240,6 +240,8 @@ class Azure(clouds.Cloud):
         ) = service_catalog.get_instance_type_for_accelerator(acc,
                                                               acc_count,
                                                               clouds='azure')
+        if acc == 'T4' and acc_count == 1:
+            instance_list = [instance_list[1], instance_list[0], *instance_list[2:]]
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)

@@ -20,8 +20,8 @@ import sky
 
 import time_estimators
 
-CLUSTER_NAME = 'test-chain-app-b'
-# CLUSTER_NAME = 'profile-tpu'
+# CLUSTER_NAME = 'test-chain-app-b'
+CLUSTER_NAME = 'profile-azure'
 
 # TODO (zhwu): add real opaque code
 PROC_SETUP = """\
@@ -74,14 +74,14 @@ if [ "$use_inf" -eq 1 ]; then
     sudo apt-get install aws-neuron-dkms --allow-change-held-packages -y
     conda activate aws_neuron_tensorflow2_p37
     # Require to be 2.5.3 to compile correctly
-    pip install tensorflow==2.5.3 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0 tensorflow-neuron[cc]==2.5.3.* "protobuf<4"
+    pip install tensorflow==2.5.3 tensorflow-datasets==4.4.0 transformers==4.12.0 tensorflow-text==2.5.0 tensorflow-neuron[cc]==2.5.3.* "protobuf<4" pandas
 else
     pip install --upgrade pip
     conda activate huggingface || \
     (conda create -n huggingface python=3.7 -y && \
     conda activate huggingface && \
     pip install -r requirements.txt && \
-    pip install protobuf==3.20)
+    pip install protobuf==3.20 pandas)
 fi
 """
 
@@ -96,9 +96,9 @@ if [ "$use_gpu" -eq 1 ]; then
     --tpu gpu \
     --data_dir INPUTS[0] \
     --model_dir OUTPUTS[0] \
-    --per_core_batch_size 16 \
+    --per_core_batch_size 20 \
     --num_cores $num_gpus \
-    --num_epochs 2 \
+    --num_epochs 10 \
     --mode=train --amp --xla
 fi
 if [ "$use_tpu" -eq 1 ]; then
@@ -126,8 +126,9 @@ if [ "$use_gpu" -eq 1 ]; then
     --tpu=gpu \
     --model_dir ./saved_model \
     --num_epochs 1 \
+    --num_cores 1 \
     --per_core_batch_size $BATCH_SIZE \
-    --mode=infer --amp --xla
+    --mode=infer --amp --xla | tee gpu-inference.log
 fi
 if [ "$use_tpu" -eq 1 ]; then
     conda activate huggingface
@@ -136,7 +137,7 @@ if [ "$use_tpu" -eq 1 ]; then
     --model_dir ./saved_model \
     --num_epochs 1 \
     --per_core_batch_size $((BATCH_SIZE / 8)) \
-    --mode=infer
+    --mode=infer | tee tpu-inference.log
 fi
 if [ "$use_inf" -eq 1 ]; then
     conda activate aws_neuron_tensorflow2_p37
@@ -177,17 +178,18 @@ def make_application():
         )
 
         # 'CLOUD': saves to the cloud this op ends up executing on.
-        train_op.set_outputs('CLOUD://skypilot-pipeline-b-model',
-                             estimated_size_gigabytes=0.1)
+        train_op.set_outputs(
+            'CLOUD://skypilot-pipeline-b-model',
+            estimated_size_gigabytes=0.1)
 
         train_resources = {
-            # sky.Resources(sky.Azure(),
-            #               accelerators={'V100': 4}),  # 1 V100, EC2.
+            sky.Resources(sky.Azure(),
+                          accelerators={'V100': 4}),  # 1 V100, EC2.
             # sky.Resources(sky.AWS(), 'p3.8xlarge'),  # 4 V100s, EC2.
             # sky.Resources(sky.GCP(), accelerators={'V100': 1}),  # 1 V100s, GCP.
             # sky.Resources(sky.GCP(), accelerators={'V100': 4}),  # 4 V100s, GCP.
             # Tuples mean all resources are required.
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
+            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         }
         train_op.set_resources(train_resources)
 

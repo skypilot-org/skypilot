@@ -355,7 +355,10 @@ def _launch_chain(dag: sky.Dag,
                 # If the cloud is Azure, send to the bucket on the next cloud,
                 # as object store is not supported for Azure in our code yet.
                 next_cloud = tasks[i + 1].best_resources.cloud
-                store_type = storage.StoreType.from_cloud(next_cloud)
+                if isinstance(next_cloud, clouds.Azure):
+                    store_type = storage.StoreType.GCS
+                else:
+                    store_type = storage.StoreType.from_cloud(next_cloud)
             else:
                 store_type = storage.StoreType.from_cloud(cloud)
 
