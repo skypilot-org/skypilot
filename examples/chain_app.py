@@ -24,7 +24,8 @@ REAL_TRAIN = True
 REAL_TEST = True
 
 # CLUSTER_NAME = 'test-chain-app'
-CLUSTER_NAME = 'chain-profile-gpu'
+# CLUSTER_NAME = 'chain-profile-gpu'
+CLUSTER_NAME = 'test-optimizer'
 
 SETUP = textwrap.dedent("""\
             use_tpu=0
@@ -173,8 +174,8 @@ def make_application():
                              estimated_size_gigabytes=0.1)
 
         train_resources = {
-            # sky.Resources(sky.AWS(), 'p3.2xlarge',
-            #               disk_size=400),  # 1 V100, EC2.
+            sky.Resources(sky.AWS(), 'p3.2xlarge',
+                          disk_size=400),  # 1 V100, EC2.
             sky.Resources(sky.AWS(), 'p3.8xlarge',
                           disk_size=400),  # 4 V100s, EC2.
             # sky.Resources(sky.GCP(), accelerators={'V100': 1},
@@ -182,8 +183,8 @@ def make_application():
             # sky.Resources(sky.GCP(), accelerators={'V100': 4},
             #               disk_size=400),  # 4 V100s, GCP.
             # # Tuples mean all resources are required.
-            # sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
-            #               disk_size=400),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8',
+                          disk_size=400),
         }
         if not REAL_TRAIN:
             train_resources.add(sky.Resources(sky.GCP(), disk_size=400))
@@ -202,10 +203,10 @@ def make_application():
         # NOTE(zhwu): Have to add use_spot here, since I only have spot quota
         # for inf instances
         infer_op.set_resources({
-            sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
-            sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
-            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
+            sky.Resources(sky.AWS(), 'inf1.2xlarge'),
+            sky.Resources(sky.AWS(), 'p3.2xlarge'),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'T4'),
+            sky.Resources(sky.GCP(), 'n1-standard-8', 'tpu-v3-8'),
         })
 
         infer_op.set_time_estimator(
@@ -222,4 +223,5 @@ dag = make_application()
 sky.execution._launch_chain(dag,
                             cluster_name=CLUSTER_NAME,
                             retry_until_up=True,
+                            # optimize_target=sky.OptimizeTarget.TIME,
                             dryrun=True)

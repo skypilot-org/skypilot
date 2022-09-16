@@ -180,7 +180,7 @@ def make_application():
         # 'CLOUD': saves to the cloud this op ends up executing on.
         train_op.set_outputs(
             'CLOUD://skypilot-pipeline-b-model',
-            estimated_size_gigabytes=0.1)
+            estimated_size_gigabytes=1)
 
         train_resources = {
             sky.Resources(sky.Azure(),
@@ -213,7 +213,6 @@ def make_application():
         infer_op.set_resources({
             # sky.Resources(sky.AWS(), 'inf1.2xlarge', use_spot=True),
             # sky.Resources(sky.AWS(), 'p3.2xlarge', use_spot=True),
-            # sky.Resources(sky.GCP(), 'n1-standard-4', 'T4', use_spot=True),
             # sky.Resources(sky.GCP(), 'n1-standard-8', 'T4', use_spot=True),
             sky.Resources(sky.Azure(), accelerators={'T4': 1})
         })

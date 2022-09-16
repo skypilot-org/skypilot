@@ -62,7 +62,7 @@ def resnet50_estimate_runtime(resources):
         # GPU - fixed to 1/3 util
         # TPU
         #  - 1/4 util: doesn't work
-        #  - 1/3 util: works
+        #  - 1/3 util: doesn't works
         #  - 1/2 util: works
 
         # print('*** trying hand written util for TPU')
@@ -86,17 +86,18 @@ def resnet50_estimate_runtime(resources):
 def resnet50_infer_estimate_runtime(resources):
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD.
     flops_for_one_image = 3.8 * (10**9) * 2
-    num_images = 0.1 * 1e6  # TODO: vary this.
+    # num_images = 0.1 * 1e6  # TODO: vary this.
     num_images = 1e6  # TODO: vary this.
-    num_images = 70 * 1e6  # TODO: vary this.
+    # num_images = 70 * 1e6  # TODO: vary this.
 
     instance = resources.instance_type
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
+    utilization = 1/5
+    logger.debug(f'****** trying {utilization} util for all')
 
     if instance == 'p3.2xlarge':
         # 120 TFLOPS TensorCore.
-        logger.debug('****** trying 1/3 util for v100')
-        utilized_flops = 120 * (10**12) / 3
+        utilized_flops = 120 * (10**12) * utilization
 
         # # Max bs to keep p99 < 15ms.
         # max_per_device_batch_size = 8
@@ -122,8 +123,12 @@ def resnet50_infer_estimate_runtime(resources):
         # operations per second) of performance [assume 16, as it casts to
         # bfloat16 by default).
         # TODO: also assume 1/3 utilization
-        utilized_flops = 128 * (10**12) / 3
+        utilized_flops = 128 * (10**12) * utilization
         # TODO: this ignores offline vs. online.  It's a huge batch.
+        estimated_run_time_seconds = \
+            flops_for_one_image * num_images / utilized_flops
+    elif isinstance(resources.cloud, sky.GCP) and 'tpu-v3-8' in resources.accelerators:
+        utilized_flops = 420 * (10**12) * utilization
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
     elif resources.accelerators is not None:
@@ -132,7 +137,7 @@ def resnet50_infer_estimate_runtime(resources):
             break
         assert acc == 'T4' and acc_count == 1, resources
         # T4 GPU: 65 TFLOPS fp16
-        utilized_flops = 65 * (10**12) / 3
+        utilized_flops = 65 * (10**12) * utilization
         estimated_run_time_seconds = \
             flops_for_one_image * num_images / utilized_flops
     else:
