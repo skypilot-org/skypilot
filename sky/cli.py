@@ -411,6 +411,46 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     ctx.exit()
 
 
+def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
+                                value: str):
+    """A callback for uninstalling shell completion for click."""
+    del param  # Unused.
+    if not value or ctx.resilient_parsing:
+        return
+
+    if value == 'bash':
+        cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.bashrc && \
+               sed -i"" -e "/sky-complete.bash/d" ~/.bashrc && \
+               rm -f ~/.sky/.sky-complete.bash'
+
+        reload_cmd = _RELOAD_BASH_CMD
+
+    elif value == 'fish':
+        cmd = 'rm ~/.config/fish/completions/sky.fish'
+        reload_cmd = _RELOAD_FISH_CMD
+
+    elif value == 'zsh':
+        cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.zshrc && \
+               sed -i"" -e "/sky-complete.zsh/d" ~/.zshrc && \
+               rm -f ~/.sky/.sky-complete.zsh'
+
+        reload_cmd = _RELOAD_ZSH_CMD
+
+    else:
+        click.secho(f'Unsupported shell: {value}', fg='yellow')
+        ctx.exit()
+
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+        click.secho(f'Shell completion uninstalled for {value}', fg='green')
+        click.echo('Changes will take effect once you restart the terminal: ' +
+                   click.style(f'{reload_cmd}', bold=True))
+    except subprocess.CalledProcessError as e:
+        click.secho(f'> Uninstallation failed with code {e.returncode}',
+                    fg='yellow')
+    ctx.exit()
+
+
 def _add_click_options(options: List[click.Option]):
     """A decorator for adding a list of click option decorators."""
 
@@ -862,6 +902,12 @@ class _DocumentedCodeCommand(click.Command):
               expose_value=False,
               is_eager=True,
               help='Install shell completion for the specified shell.')
+@click.option('--uninstall-shell-completion',
+              type=click.Choice(['bash', 'zsh', 'fish']),
+              callback=_uninstall_shell_completion,
+              expose_value=False,
+              is_eager=True,
+              help='Uninstall shell completion for the specified shell.')
 @click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
 def cli():
     pass
