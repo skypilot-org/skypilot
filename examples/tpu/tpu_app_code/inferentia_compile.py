@@ -30,14 +30,13 @@ model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
                                                         num_labels=1)
 loaded_model = tf.keras.models.load_model(
     'saved_model', custom_objects={'compute_loss': model.compute_loss})
-del model
 
 tf.keras.backend.set_floatx('float16')
+ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
+del model, loaded_model
 model = TFBertForSequenceClassification.from_pretrained('bert-base-uncased',
                                                         num_labels=1)
-ws = [w.astype(tf.keras.backend.floatx()) for w in loaded_model.get_weights()]
 model.set_weights(ws)
-del loaded_model
 
 #wrap the original model from HuggingFace, now our model accepts a list as input
 model_wrapped = TFBertForSequenceClassificationFlatIO(model)
