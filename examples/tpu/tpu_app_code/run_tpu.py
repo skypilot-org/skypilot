@@ -101,7 +101,7 @@ def main(unused):
 
     if FLAGS.mode != 'infer':
         ds_train, ds_info = tfds.load('amazon_us_reviews/Books_v1_02',
-                                      split='train[:1000000]',
+                                      split='train',
                                       with_info=True,
                                       download=False,
                                       data_dir=FLAGS.data_dir)
@@ -110,11 +110,11 @@ def main(unused):
 
         tokenizer = BertTokenizerFast.from_pretrained('bert-base-uncased')
 
-        # def dataset_fn(ds):
-        #     return ds.filter(lambda x: x['data']['helpful_votes'] >= 7)
+        def dataset_fn(ds):
+            return ds.filter(lambda x: x['data']['helpful_votes'] >= 7)
 
-        # ds_train_filtered = ds_train.apply(dataset_fn)
-        ds_train_filtered = ds_train
+        ds_train_filtered = ds_train.apply(dataset_fn)
+        # ds_train_filtered = ds_train
 
         def process(example):
             return (dict(tokenizer(
