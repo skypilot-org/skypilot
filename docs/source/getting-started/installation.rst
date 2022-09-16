@@ -160,10 +160,11 @@ Enabling shell completion
 SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish.
 
 To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
-SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name:
+SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
 
 .. code-block:: console
 
-  $ sky --install-shell-completion zsh
+  $ sky --install-shell-completion auto
+  $ # sky --install-shell-completion zsh
   $ # sky --install-shell-completion bash
   $ # sky --install-shell-completion fish
