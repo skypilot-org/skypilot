@@ -8,6 +8,8 @@ def resnet50_estimate_runtime(resources):
     """A simple runtime model for Resnet50."""
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD, 3 for fwd+bwd.
     flops_for_one_image = 3.8 * (10**9) * 2 * 3
+    utilization = 1/4
+    logger.debug(f'****** trying {utilization} util for all')
 
     def _v100(num_v100s):
         # Adds communication overheads per step (in seconds).
@@ -29,7 +31,8 @@ def resnet50_estimate_runtime(resources):
         utilized_flops = 27 * (10**12)
 
         # print('****** trying 1/3 util for v100')
-        utilized_flops = 120 * (10**12) / 3
+        # mixed precision
+        utilized_flops = 120 * (10**12) * utilization
 
         estimated_step_time_seconds = flops_for_one_batch / utilized_flops \
           + communication_slack
@@ -61,12 +64,12 @@ def resnet50_estimate_runtime(resources):
 
         # GPU - fixed to 1/3 util
         # TPU
-        #  - 1/4 util: doesn't work
+        #  - 1/4 util: works
         #  - 1/3 util: doesn't works
-        #  - 1/2 util: works
+        #  - 1/2 util: doesn't works
 
         # print('*** trying hand written util for TPU')
-        # known_resnet50_utilization = 1 / 3
+        known_resnet50_utilization = utilization
 
         max_per_device_batch_size = 1024
         total_steps = 112590  # 112590 steps, 1024 BS = 90 epochs.
@@ -92,7 +95,7 @@ def resnet50_infer_estimate_runtime(resources):
 
     instance = resources.instance_type
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
-    utilization = 1/6
+    utilization = 1/7
     logger.debug(f'****** trying {utilization} util for all')
 
     if instance == 'p3.2xlarge':
