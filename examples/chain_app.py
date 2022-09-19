@@ -223,5 +223,5 @@ dag = make_application()
 sky.execution._launch_chain(dag,
                             cluster_name=CLUSTER_NAME,
                             retry_until_up=True,
-                            # optimize_target=sky.OptimizeTarget.TIME,
+                            optimize_target=sky.OptimizeTarget.TIME,
                             dryrun=True)

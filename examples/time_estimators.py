@@ -90,12 +90,13 @@ def resnet50_infer_estimate_runtime(resources):
     # 3.8 G Multiply-Adds, 2 FLOPs per MADD.
     flops_for_one_image = 3.8 * (10**9) * 2
     # num_images = 0.1 * 1e6  # TODO: vary this.
-    num_images = 1e6  # TODO: vary this.
+    # num_images = 1e6  # TODO: vary this.
+    num_images = 1e8  # TODO: vary this.
     # num_images = 70 * 1e6  # TODO: vary this.
 
     instance = resources.instance_type
     # assert instance in ['p3.2xlarge', 'inf1.2xlarge', 'nvidia-t4'], instance
-    utilization = 1/7
+    utilization = 1/5
     logger.debug(f'****** trying {utilization} util for all')
 
     if instance == 'p3.2xlarge':
