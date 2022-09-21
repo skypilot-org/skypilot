@@ -64,7 +64,7 @@ SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-SKY_REMOTE_PATH = '~/.sky/sky_wheels'
+SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
 
 BOLD = '\033[1m'
@@ -662,6 +662,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          cluster_config_template: str,
                          cluster_name: str,
                          local_wheel_path: pathlib.Path,
+                         wheel_hash: str,
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          auth_config: Optional[Dict[str, str]] = None,
@@ -727,6 +728,7 @@ def write_cluster_config(to_provision: 'resources.Resources',
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
                 'sky_version': str(version.parse(sky.__version__)),
+                'sky_wheel_hash': wheel_hash,
                 # Local IP handling (optional).
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],

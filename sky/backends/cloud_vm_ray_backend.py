@@ -146,10 +146,18 @@ class RayCodeGen:
 
     def add_prologue(self,
                      job_id: int,
-                     spot_task: Optional['task_lib.Task'] = None) -> None:
+                     spot_task: Optional['task_lib.Task'] = None,
+                     is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
         self.job_id = job_id
+        # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
+        # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
+        # Otherwise, it will a bug of ray job failed to get the placement group
+        # in ray <= 2.0.0.
+        # TODO(mluo): Check why 'auto' not working with on-prem cluster and
+        # whether the placement group issue also occurs in on-prem cluster.
+        ray_address = 'ray://localhost:10001' if is_local else 'auto'
         self._code = [
             textwrap.dedent(f"""\
             import getpass
@@ -174,7 +182,7 @@ class RayCodeGen:
             SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
-            ray.init(address = 'ray://localhost:10001', namespace='__sky__{job_id}__', log_to_driver=True)
+            ray.init(address={ray_address!r}, namespace='__sky__{job_id}__', log_to_driver=True)
 
             run_fn = None
             futures = []"""),
@@ -431,7 +439,7 @@ class RetryingVmProvisioner(object):
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
                  optimize_target: OptimizeTarget,
-                 local_wheel_path: pathlib.Path):
+                 local_wheel_path: pathlib.Path, wheel_hash: str):
         self._blocked_regions = set()
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
@@ -440,6 +448,7 @@ class RetryingVmProvisioner(object):
         self._dag = dag
         self._optimize_target = optimize_target
         self._local_wheel_path = local_wheel_path
+        self._wheel_hash = wheel_hash
 
         colorama.init()
 
@@ -911,6 +920,7 @@ class RetryingVmProvisioner(object):
                 _get_cluster_config_template(to_provision.cloud),
                 cluster_name,
                 self._local_wheel_path,
+                self._wheel_hash,
                 region=region,
                 zones=zones,
                 dryrun=dryrun)
@@ -1646,7 +1656,7 @@ class CloudVmRayBackend(backends.Backend):
             with timeline.Event('backend.provision.wheel_build'):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
-                local_wheel_path = wheel_utils.build_sky_wheel()
+                local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
             backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
@@ -1661,7 +1671,8 @@ class CloudVmRayBackend(backends.Backend):
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                                         self._optimize_target,
-                                                        local_wheel_path)
+                                                        local_wheel_path,
+                                                        wheel_hash)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
@@ -2883,7 +2894,10 @@ class CloudVmRayBackend(backends.Backend):
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id, spot_task=task.spot_task)
+        is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
+        codegen.add_prologue(job_id,
+                             spot_task=task.spot_task,
+                             is_local=is_local)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
         if callable(task.run):
@@ -2928,7 +2942,10 @@ class CloudVmRayBackend(backends.Backend):
             num_actual_nodes = task.num_nodes
 
         codegen = RayCodeGen()
-        codegen.add_prologue(job_id, spot_task=task.spot_task)
+        is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
+        codegen.add_prologue(job_id,
+                             spot_task=task.spot_task,
+                             is_local=is_local)
         codegen.add_gang_scheduling_placement_group(num_actual_nodes,
                                                     accelerator_dict)
 
