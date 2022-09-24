@@ -357,6 +357,16 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
     return global_user_state.get_storage_names(incomplete)
 
 
+def _complete_file_name(ctx: click.Context, param: click.Parameter,
+                        incomplete: str) -> List[str]:
+    """Handle shell completion for file names in the current directory."""
+    del ctx, param  # Unused.
+    return [
+        file_name for file_name in os.listdir('.')
+        if os.path.isfile(file_name) and file_name.startswith(incomplete)
+    ]
+
+
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
 _RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
@@ -931,7 +941,11 @@ def cli():
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 @click.option('--cluster',
               '-c',
               default=None,
