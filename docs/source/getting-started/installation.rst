@@ -168,3 +168,12 @@ SkyPilot automates this process using the :code:`--install-shell-completion` opt
   $ # sky --install-shell-completion zsh
   $ # sky --install-shell-completion bash
   $ # sky --install-shell-completion fish
+
+To disable shell completion after it has been installed, you can use the :code:`--uninstall-shell-completion` option, which you should similarly call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: console
+
+  $ sky --uninstall-shell-completion auto
+  $ # sky --uninstall-shell-completion zsh
+  $ # sky --uninstall-shell-completion bash
+  $ # sky --uninstall-shell-completion fish
