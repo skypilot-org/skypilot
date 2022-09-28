@@ -412,6 +412,7 @@ class SSHConfigHelper(object):
             config = ['\n']
             with open(config_path, 'w') as f:
                 f.writelines(config)
+            os.chmod(config_path, 0o644)
 
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path)
