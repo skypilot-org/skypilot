@@ -1535,10 +1535,13 @@ class CloudVmRayBackend(backends.Backend):
             return os.path.expanduser(self._cluster_yaml)
 
         def __setstate__(self, state):
+            self._version = self._VERSION
+
             version = state.pop('_version', None)
             if version is None:
+                version = -1
                 state.pop('cluster_region', None)
-            elif version < 2:
+            if version < 2:
                 state['_cluster_yaml'] = state.pop('cluster_yaml')
 
             self.__dict__.update(state)
