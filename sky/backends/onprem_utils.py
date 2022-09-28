@@ -430,7 +430,7 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
     cluster_config['python'] = backend_utils.run_command_and_handle_ssh_failure(
         head_runner,
-        'sudo which python3',
+        'which python3',
         failure_message='Failed to obtain admin python path.').split()[0]
 
     cluster_name = cluster_config['cluster']['name']
