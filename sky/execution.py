@@ -439,7 +439,6 @@ def spot_launch(
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
                 'cluster_name': name,
-                'sky_remote_path': backend_utils.SKY_REMOTE_PATH,
                 'is_dev': env_options.Options.IS_DEVELOPER.get(),
                 'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
                 'logging_user_hash': common_utils.get_user_hash(),

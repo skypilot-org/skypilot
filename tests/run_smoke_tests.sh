@@ -13,7 +13,7 @@ if [ -z "$test" ]
 then
     test_spec=tests/test_smoke.py
 else
-    test_spec=tests/test_smoke.py::"$test"
+    test_spec=tests/test_smoke.py::"${test}"
 fi
 
 pytest -s -n 16 -q --tb=short --disable-warnings "$test_spec"
