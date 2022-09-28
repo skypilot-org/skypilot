@@ -9,8 +9,12 @@ logger = sky_logging.init_logger(__name__)
 logger.info('skylet started')
 
 EVENTS = [
-    events.JobUpdateEvent(),
     events.AutostopEvent(),
+    events.JobUpdateEvent(),
+    # The spot job update event should be after the job update event.
+    # Otherwise, the abnormal spot job status update will be delayed
+    # until the next job update event.
+    events.SpotJobUpdateEvent(),
 ]
 
 while True:

@@ -61,7 +61,7 @@ class TestReservedClustersOperations:
             head_ip='1.1.1.2',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.GCP(),
-                                             instance_type='n1-highmem-8',
+                                             instance_type='a2-highgpu-4g',
                                              accelerators={'A100': 4},
                                              region='us-west1'),
         )

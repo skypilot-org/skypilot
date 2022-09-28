@@ -54,6 +54,7 @@ Use the clouds **easily** and **cost effectively**, without needing cloud infra 
    reference/auto-stop
    examples/spot-jobs
    reference/benchmark/index
+   reference/tpu
 
 .. toctree::
    :maxdepth: 1

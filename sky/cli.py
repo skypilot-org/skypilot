@@ -92,7 +92,7 @@ _INTERACTIVE_NODE_DEFAULT_RESOURCES = {
                              use_spot=False),
     'tpunode': sky.Resources(cloud=sky.GCP(),
                              instance_type=None,
-                             accelerators={'tpu-v3-8': 1},
+                             accelerators={'tpu-v2-8': 1},
                              accelerator_args={'runtime_version': '2.5.0'},
                              use_spot=False),
 }
@@ -112,6 +112,20 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
                 click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
+
+
+def _get_glob_storages(storages: List[str]) -> List[str]:
+    """Returns a list of storages that match the glob pattern."""
+    glob_storages = []
+    for storage_object in storages:
+        glob_storage = global_user_state.get_glob_storage_name(storage_object)
+        if len(glob_storage) == 0:
+            click.echo(f'Storage {storage_object} not found.')
+        else:
+            plural = 's' if len(glob_storage) > 1 else ''
+            click.echo(f'Deleting {len(glob_storage)} storage object{plural}.')
+        glob_storages.extend(glob_storage)
+    return list(set(glob_storages))
 
 
 def _warn_if_local_cluster(cluster: str, local_clusters: List[str],
@@ -176,6 +190,11 @@ def _interactive_node_cli_command(cli_func):
                                is_flag=True,
                                help='If true, use spot instances.')
 
+    tpuvm_option = click.option('--tpu-vm',
+                                default=False,
+                                is_flag=True,
+                                help='If true, use TPU VMs.')
+
     disk_size = click.option('--disk-size',
                              default=None,
                              type=int,
@@ -200,6 +219,7 @@ def _interactive_node_cli_command(cli_func):
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
+        *([tpuvm_option] if cli_func.__name__ == 'tpunode' else []),
 
         # Attach options
         screen_option,
@@ -1034,9 +1054,11 @@ def exec(
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
 
-    The following metadata for each cluster is stored: cluster name, time since
-    last launch, resources, region, status, duration, autostop, command, hourly
-    price. Display all metadata using ``sky status -a``.
+    The following fields for each cluster are recorded: cluster name, time
+    since last launch, resources, region, zone, hourly price, status, autostop,
+    command.
+
+    Display all fields using ``sky status -a``.
 
     \b
     Each cluster can have one of the following statuses:
@@ -1051,6 +1073,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       live.  (The most recent ``sky launch`` has completed successfully.)
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
+
     """
     cluster_records = core.status(all=all, refresh=refresh)
     local_clusters = onprem_utils.check_and_get_local_clusters(
@@ -1865,8 +1888,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            use_spot: Optional[bool], tpu_vm: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int]):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -1905,6 +1929,10 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     user_requested_resources = not (instance_type is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
+    accelerator_args = default_resources.accelerator_args
+    if tpu_vm:
+        accelerator_args['tpu_vm'] = True
+        accelerator_args['runtime_version'] = 'tpu-vm-base'
     if instance_type is None:
         instance_type = default_resources.instance_type
     if tpus is None:
@@ -1914,6 +1942,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=sky.GCP(),
                               instance_type=instance_type,
                               accelerators=tpus,
+                              accelerator_args=accelerator_args,
                               use_spot=use_spot,
                               disk_size=disk_size)
 
@@ -2100,6 +2129,9 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         # Delete two storage objects.
         sky storage delete imagenet cifar10
         \b
+        # Delete all storage objects matching glob pattern 'imagenet*'.
+        sky storage delete "imagenet*"
+        \b
         # Delete all storage objects.
         sky storage delete -a
     """
@@ -2109,6 +2141,9 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         click.echo('Deleting all storage objects.')
         storages = sky.storage_ls()
         names = [s['name'] for s in storages]
+    else:
+        names = _get_glob_storages(names)
+
     for name in names:
         sky.storage_delete(name)
 
