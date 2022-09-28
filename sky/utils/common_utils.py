@@ -26,6 +26,7 @@ def get_user_hash():
 
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    os.path.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
