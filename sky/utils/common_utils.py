@@ -23,7 +23,7 @@ def get_user_hash():
     if os.path.exists(_USER_HASH_FILE):
         with open(_USER_HASH_FILE, 'r') as f:
             return f.read()
-    
+
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
     with open(_USER_HASH_FILE, 'w') as f:

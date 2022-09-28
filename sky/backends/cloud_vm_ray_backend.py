@@ -1446,7 +1446,8 @@ class CloudVmRayBackend(backends.Backend):
                      tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
-            self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'), '~', 1)
+            self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
+                                                      '~', 1)
             self.head_ip = head_ip
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
