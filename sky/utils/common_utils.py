@@ -13,13 +13,22 @@ import yaml
 
 from sky import sky_logging
 
+_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+
 logger = sky_logging.init_logger(__name__)
 
 
 def get_user_hash():
     """Returns a unique user-machine specific hash as a user id."""
+    if os.path.exists(_USER_HASH_FILE):
+        with open(_USER_HASH_FILE, 'r') as f:
+            return f.read()
+    
     hash_str = user_and_hostname_hash()
-    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    with open(_USER_HASH_FILE, 'w') as f:
+        f.write(user_hash)
+    return user_hash
 
 
 class Backoff:
