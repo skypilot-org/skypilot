@@ -361,8 +361,8 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
                         incomplete: str) -> List[str]:
     """Handle shell completion for file names.
 
-    Returns a special completion marker that tells the click
-    to use the default shell file path completions.
+    Returns a special completion marker that tells click to use
+    the shell's default file completion.
     """
     del ctx, param  # Unused.
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
