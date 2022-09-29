@@ -467,12 +467,14 @@ class Task:
             self.storage_mounts = None
             return self
         for target, _ in storage_mounts.items():
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
+            if target == constants.SKY_REMOTE_WORKDIR:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Cannot mount to {constants.SKY_REMOTE_WORKDIR!r} '
-                        'when workdir is set.')
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
 
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
@@ -492,8 +494,7 @@ class Task:
         task_storage_mounts.update(storage_mounts)
         return self.set_storage_mounts(task_storage_mounts)
 
-    def sync_storage_mounts(self) -> None:
-        """Adds storage mounts to the Task."""
+    def get_preferred_store_type(self) -> storage_lib.StoreType:
         # TODO(zhwu, romilb): The optimizer should look at the source and
         #  destination to figure out the right stores to use. For now, we
         #  use a heuristic solution to find the store type by the following
@@ -501,6 +502,7 @@ class Task:
         #  1. cloud decided in best_resources.
         #  2. cloud specified in the task resources.
         #  3. the first enabled cloud.
+        # This should be refactored and moved to the optimizer.
         assert len(self.resources) == 1, self.resources
         storage_cloud = None
         if self.best_resources is not None:
@@ -525,9 +527,14 @@ class Task:
         if storage_cloud is None:
             raise ValueError('No available cloud to mount storage.')
         store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
+        return store_type
+
+    def sync_storage_mounts(self) -> None:
+        """Adds storage mounts to the Task."""
 
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
+                store_type = self.get_preferred_store_type()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type)
             else:

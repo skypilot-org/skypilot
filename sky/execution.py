@@ -12,6 +12,7 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
+import copy
 import enum
 import getpass
 import tempfile
@@ -377,14 +378,56 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         return
 
+    task = _translate_local_file_mounts(task)
+
+    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
+                                     mode='w') as f:
+        task_config = task.to_yaml_config()
+        common_utils.dump_yaml(f.name, task_config)
+
+        controller_name = spot.SPOT_CONTROLLER_NAME
+        yaml_path = backend_utils.fill_template(
+            spot.SPOT_CONTROLLER_TEMPLATE, {
+                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+                'user_yaml_path': f.name,
+                'spot_controller': controller_name,
+                'cluster_name': name,
+                'is_dev': env_options.Options.IS_DEVELOPER.get(),
+                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+                'logging_user_hash': common_utils.get_user_hash(),
+                'retry_until_up': retry_until_up,
+            },
+            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
+        with sky.Dag() as spot_dag:
+            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task.spot_task = task
+            assert len(controller_task.resources) == 1
+        print(f'{colorama.Fore.YELLOW}'
+              f'Launching managed spot job {name} from spot controller...'
+              f'{colorama.Style.RESET_ALL}')
+        print('Launching spot controller...')
+        _execute(
+            dag=spot_dag,
+            stream_logs=stream_logs,
+            cluster_name=controller_name,
+            detach_run=detach_run,
+            idle_minutes_to_autostop=spot.
+            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+            retry_until_up=True,
+        )
+
+
+def _translate_local_file_mounts(task: sky.Task) -> sky.Task:
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
+    task = copy.deepcopy(task)
     run_id = common_utils.get_run_id()[:8]
 
     # Step 1: Translate the workdir SkyPilot storage.
-    logger.info(f'{colorama.Fore.YELLOW}Translating file_mounts with local '
-    f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+    logger.info(
+        f'{colorama.Fore.YELLOW}Translating file_mounts with local '
+        f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
     new_storage_mounts = dict()
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
@@ -464,9 +507,9 @@ def spot_launch(
                     'being taken.')
         sources = list(src_to_file_id.keys())
         sources_str = '\n\t'.join(sources)
-        logger.info(
-            f'Source files in file_mounts will be synced to cloud storage {bucket_name}:'
-            f'\n\t{sources_str}')
+        logger.info('Source files in file_mounts will be synced to '
+                    f'cloud storage {bucket_name}:'
+                    f'\n\t{sources_str}')
     task.update_storage_mounts(new_storage_mounts)
 
     # Step 4: Upload storage from sources
@@ -512,38 +555,4 @@ def spot_launch(
             storage_obj.name = None
             storage_obj.force_delete = True
 
-    with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
-                                     mode='w') as f:
-        task_config = task.to_yaml_config()
-        common_utils.dump_yaml(f.name, task_config)
-
-        controller_name = spot.SPOT_CONTROLLER_NAME
-        yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'is_dev': env_options.Options.IS_DEVELOPER.get(),
-                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': common_utils.get_user_hash(),
-                'retry_until_up': retry_until_up,
-            },
-            output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
-        with sky.Dag() as spot_dag:
-            controller_task = sky.Task.from_yaml(yaml_path)
-            controller_task.spot_task = task
-            assert len(controller_task.resources) == 1
-        print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {name} from spot controller...'
-              f'{colorama.Style.RESET_ALL}')
-        print('Launching spot controller...')
-        _execute(
-            dag=spot_dag,
-            stream_logs=stream_logs,
-            cluster_name=controller_name,
-            detach_run=detach_run,
-            idle_minutes_to_autostop=spot.
-            SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-            retry_until_up=True,
-        )
+    return task

@@ -25,6 +25,8 @@ Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
 
+# Clouds with object storage implemented in this module. Azure Blob
+# Storage isn't supported yet (even though Azure is).
 STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 
 # Max number of objects a GCS bucket can be directly deleted with
@@ -55,7 +57,7 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
         return StoreType.GCS
     elif isinstance(cloud, clouds.Azure):
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Azure is not supported yet.')
+            raise ValueError('Azure is not supported yet.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')
@@ -68,7 +70,7 @@ def get_store_prefix(storetype: StoreType) -> str:
         return 'gs://'
     elif storetype == StoreType.AZURE:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Azure is not supported yet.')
+            raise ValueError('Azure is not supported yet.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
