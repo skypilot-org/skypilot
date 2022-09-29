@@ -359,12 +359,13 @@ def _complete_storage_name(ctx: click.Context, param: click.Parameter,
 
 def _complete_file_name(ctx: click.Context, param: click.Parameter,
                         incomplete: str) -> List[str]:
-    """Handle shell completion for file names in the current directory."""
+    """Handle shell completion for file names.
+
+    Returns a special completion marker that tells the click
+    to use the default shell file path completions.
+    """
     del ctx, param  # Unused.
-    return [
-        file_name for file_name in os.listdir('.')
-        if os.path.isfile(file_name) and file_name.startswith(incomplete)
-    ]
+    return [click.shell_completion.CompletionItem(incomplete, type='file')]
 
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
