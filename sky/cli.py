@@ -347,14 +347,14 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for cluster names."""
     del ctx, param  # Unused.
-    return global_user_state.get_cluster_names(incomplete)
+    return global_user_state.get_cluster_names_start_with(incomplete)
 
 
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    return global_user_state.get_storage_names(incomplete)
+    return global_user_state.get_storage_names_start_with(incomplete)
 
 
 def _complete_file_name(ctx: click.Context, param: click.Parameter,

@@ -280,7 +280,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
-def get_cluster_names(starts_with: str) -> List[str]:
+def get_cluster_names_start_with(starts_with: str) -> List[str]:
     rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
                               (f'{starts_with}%',))
     return [row[0] for row in rows]
@@ -374,7 +374,7 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_storage_names(starts_with: str) -> List[str]:
+def get_storage_names_start_with(starts_with: str) -> List[str]:
     rows = _DB.cursor.execute('SELECT name FROM storage WHERE name LIKE (?)',
                               (f'{starts_with}%',))
     return [row[0] for row in rows]
