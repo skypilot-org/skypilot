@@ -384,7 +384,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         if 'SHELL' not in os.environ:
             click.secho(
                 'Cannot auto-detect shell. Please specify shell explicitly.',
-                fg='yellow')
+                fg='red')
             ctx.exit()
         else:
             value = os.path.basename(os.environ['SHELL'])
@@ -415,7 +415,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         reload_cmd = _RELOAD_ZSH_CMD
 
     else:
-        click.secho(f'Unsupported shell: {value}', fg='yellow')
+        click.secho(f'Unsupported shell: {value}', fg='red')
         ctx.exit()
 
     try:
@@ -425,8 +425,7 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
             'Completion will take effect once you restart the terminal: ' +
             click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
-        click.secho(f'> Installation failed with code {e.returncode}',
-                    fg='yellow')
+        click.secho(f'> Installation failed with code {e.returncode}', fg='red')
     ctx.exit()
 
 
@@ -441,7 +440,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
         if 'SHELL' not in os.environ:
             click.secho(
                 'Cannot auto-detect shell. Please specify shell explicitly.',
-                fg='yellow')
+                fg='red')
             ctx.exit()
         else:
             value = os.path.basename(os.environ['SHELL'])
@@ -465,7 +464,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
         reload_cmd = _RELOAD_ZSH_CMD
 
     else:
-        click.secho(f'Unsupported shell: {value}', fg='yellow')
+        click.secho(f'Unsupported shell: {value}', fg='red')
         ctx.exit()
 
     try:
@@ -475,7 +474,7 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
                    click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Uninstallation failed with code {e.returncode}',
-                    fg='yellow')
+                    fg='red')
     ctx.exit()
 
 
