@@ -13,6 +13,7 @@ import yaml
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
+from sky.spot import spot_utils
 from sky.utils import common_utils
 
 # Seconds of sleep between the processing of skylet events.
@@ -65,6 +66,14 @@ class JobUpdateEvent(SkyletEvent):
         job_owner = getpass.getuser()
         job_lib.update_status(job_owner,
                               submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
+
+
+class SpotJobUpdateEvent(SkyletEvent):
+    """Skylet event for updating spot job status."""
+    EVENT_INTERVAL_SECONDS = 300
+
+    def _run(self):
+        spot_utils.update_spot_job_status()
 
 
 class AutostopEvent(SkyletEvent):

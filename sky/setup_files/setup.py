@@ -85,6 +85,8 @@ install_requires = [
     'pulp',
 ]
 
+# NOTE: Change the templates/spot-controller.yaml.j2 file if any of the following
+# packages dependencies are changed.
 extras_require = {
     'aws': [
         'awscli',
@@ -94,7 +96,7 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
-    'azure': ['azure-cli==2.30.0'],
+    'azure': ['azure-cli==2.31.0', 'azure-core'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
 }

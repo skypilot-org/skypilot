@@ -440,7 +440,7 @@ class RetryingVmProvisioner(object):
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
                  optimize_target: OptimizeTarget,
-                 local_wheel_path: pathlib.Path):
+                 local_wheel_path: pathlib.Path, wheel_hash: str):
         self._blocked_regions = set()
         self._blocked_zones = set()
         self._blocked_launchable_resources = set()
@@ -449,6 +449,7 @@ class RetryingVmProvisioner(object):
         self._dag = dag
         self._optimize_target = optimize_target
         self._local_wheel_path = local_wheel_path
+        self._wheel_hash = wheel_hash
 
         colorama.init()
 
@@ -920,6 +921,7 @@ class RetryingVmProvisioner(object):
                 _get_cluster_config_template(to_provision.cloud),
                 cluster_name,
                 self._local_wheel_path,
+                self._wheel_hash,
                 region=region,
                 zones=zones,
                 dryrun=dryrun)
@@ -1431,7 +1433,7 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
-        _VERSION = 1
+        _VERSION = 2
 
         def __init__(self,
                      *,
@@ -1445,7 +1447,8 @@ class CloudVmRayBackend(backends.Backend):
                      tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
-            self.cluster_yaml = cluster_yaml
+            self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
+                                                      '~', 1)
             self.head_ip = head_ip
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
@@ -1529,10 +1532,19 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
+        @property
+        def cluster_yaml(self):
+            return os.path.expanduser(self._cluster_yaml)
+
         def __setstate__(self, state):
+            self._version = self._VERSION
+
             version = state.pop('_version', None)
             if version is None:
+                version = -1
                 state.pop('cluster_region', None)
+            if version < 2:
+                state['_cluster_yaml'] = state.pop('cluster_yaml')
 
             self.__dict__.update(state)
             self._update_cluster_region()
@@ -1655,7 +1667,7 @@ class CloudVmRayBackend(backends.Backend):
             with timeline.Event('backend.provision.wheel_build'):
                 # TODO(suquark): once we have sky on PyPI, we should directly
                 # install sky from PyPI.
-                local_wheel_path = wheel_utils.build_sky_wheel()
+                local_wheel_path, wheel_hash = wheel_utils.build_sky_wheel()
             backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
@@ -1670,7 +1682,8 @@ class CloudVmRayBackend(backends.Backend):
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                                         self._optimize_target,
-                                                        local_wheel_path)
+                                                        local_wheel_path,
+                                                        wheel_hash)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
