@@ -96,7 +96,7 @@ class GcsCloudStorage(CloudStorage):
     # parellel workers on our end.
     _GET_GSUTIL = [gcp.GCLOUD_INSTALLATION_COMMAND]
 
-    _GSUTIL = '~/google-cloud-sdk/bin/gsutil'
+    _GSUTIL = 'gsutil'
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
