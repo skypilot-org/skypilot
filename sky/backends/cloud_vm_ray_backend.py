@@ -1432,7 +1432,7 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
-        _VERSION = 1
+        _VERSION = 2
 
         def __init__(self,
                      *,
@@ -1446,7 +1446,8 @@ class CloudVmRayBackend(backends.Backend):
                      tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
-            self.cluster_yaml = cluster_yaml
+            self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
+                                                      '~', 1)
             self.head_ip = head_ip
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
@@ -1530,10 +1531,19 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
+        @property
+        def cluster_yaml(self):
+            return os.path.expanduser(self._cluster_yaml)
+
         def __setstate__(self, state):
+            self._version = self._VERSION
+
             version = state.pop('_version', None)
             if version is None:
+                version = -1
                 state.pop('cluster_region', None)
+            if version < 2:
+                state['_cluster_yaml'] = state.pop('cluster_yaml')
 
             self.__dict__.update(state)
             self._update_cluster_region()
