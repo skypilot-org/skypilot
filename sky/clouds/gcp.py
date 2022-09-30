@@ -46,7 +46,7 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
-    {{ cp {GCP_CONFIGURE_SKY_BACKUP_PATH} {GCP_CONFIGURE_PATH} || true; }} && \
+    {{ cp {GCP_CONFIGURE_SKY_BACKUP_PATH} {GCP_CONFIGURE_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
 
 
@@ -348,6 +348,21 @@ class GCP(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        # Create a backup of the config_default file, as the original file can
+        # be modified on the remote cluster by ray causing authentication
+        # problems. The backup file should be updated whenever the original file
+        # is not empty.
+        if os.path.getsize(os.path.expanduser(GCP_CONFIGURE_PATH)) > 0:
+            subprocess.run(
+                f'cp {GCP_CONFIGURE_PATH} {GCP_CONFIGURE_SKY_BACKUP_PATH}',
+                shell=True,
+                check=True)
+        elif not os.path.exists(
+                os.path.expanduser(GCP_CONFIGURE_SKY_BACKUP_PATH)):
+            raise RuntimeError(
+                'GCP credential file is empty. Please make sure you '
+                'have run: gcloud init')
+
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
@@ -355,7 +370,7 @@ class GCP(clouds.Cloud):
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
-        credentials[GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_PATH
+        credentials[GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
         return credentials
 
     def instance_type_exists(self, instance_type):
