@@ -105,6 +105,7 @@ def _execute(
     cluster_name: Optional[str] = None,
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    no_setup: bool = False,
 ) -> None:
     """Runs a DAG.
 
@@ -192,6 +193,7 @@ def _execute(
         if dryrun:
             logger.info('Dry run finished.')
             return
+        
 
         if stages is None or Stage.SYNC_WORKDIR in stages:
             if task.workdir is not None:
@@ -201,7 +203,10 @@ def _execute(
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
-        if stages is None or Stage.SETUP in stages:
+        if no_setup:
+            logger.info('Setup instructions skipped.')
+
+        if not no_setup and (stages is None or Stage.SETUP in stages):
             backend.setup(handle, task)
 
         if stages is None or Stage.PRE_EXEC in stages:
@@ -251,6 +256,7 @@ def launch(
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
+    no_setup: bool = False,
 ):
     """Launch a sky.DAG (rerun setup if cluster exists).
 
@@ -262,6 +268,7 @@ def launch(
             up.
         idle_minutes_to_autostop: if provided, the cluster will be auto-stop
             after this many minutes of idleness.
+        no_setup: if true, the cluster will not re-run setup instructions
 
     Examples:
         >>> import sky
@@ -290,6 +297,7 @@ def launch(
         cluster_name=cluster_name,
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        no_setup=no_setup,
     )
 
 

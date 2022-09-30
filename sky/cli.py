@@ -604,6 +604,7 @@ def _launch_with_confirm(
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     retry_until_up: bool = False,
+    no_setup: bool = False,
     node_type: Optional[str] = None,
     is_local_cloud: Optional[bool] = False,
 ):
@@ -651,7 +652,8 @@ def _launch_with_confirm(
                    detach_run=detach_run,
                    backend=backend,
                    idle_minutes_to_autostop=idle_minutes_to_autostop,
-                   retry_until_up=retry_until_up)
+                   retry_until_up=retry_until_up,
+                   no_setup=no_setup,)
 
 
 # TODO: skip installing ray to speed up provisioning.
@@ -1002,6 +1004,12 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--no-setup',
+              '-n',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip setup phase when re-launching cluster.')
 @usage_lib.entrypoint
 def launch(
     entrypoint: str,
@@ -1024,6 +1032,7 @@ def launch(
     idle_minutes_to_autostop: Optional[int],
     retry_until_up: bool,
     yes: bool,
+    no_setup: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
@@ -1072,6 +1081,7 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
+        no_setup=no_setup,
         is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
 
 
