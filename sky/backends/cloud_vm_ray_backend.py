@@ -2115,12 +2115,12 @@ class CloudVmRayBackend(backends.Backend):
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
-                                                          require_outputs=True)
+                                                          require_outputs=True,
+                                                          separate_stderr=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to fetch job id.',
-                                           job_id_str + stderr)
+                                           'Failed to fetch job id.', stderr)
         try:
             job_id_match = _JOB_ID_PATTERN.search(job_id_str)
             if job_id_match is not None:
