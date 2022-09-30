@@ -467,7 +467,8 @@ class Task:
             self.storage_mounts = None
             return self
         for target, _ in storage_mounts.items():
-            if target == constants.SKY_REMOTE_WORKDIR:
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
@@ -561,7 +562,7 @@ class Task:
                     self.setup = (
                         '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
                         'echo GOOGLE_APPLICATION_CREDENTIALS='
-                        f'{data_transfer_lib.DEFAULT_GCS_CREDENTIALS_PATH} '
+                        f'{clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} '
                         f'>> ~/.bashrc || true); {self.setup or "true"}')
                     if storage.source.startswith('gs://'):
                         blob_path = storage.source
@@ -630,7 +631,9 @@ class Task:
                     raise ValueError(
                         f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
                         'destination path of a file mount, as it will be used '
-                        'by the workdir.')
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
 
         self.file_mounts = file_mounts
         return self

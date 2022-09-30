@@ -841,7 +841,6 @@ class S3Store(AbstractStore):
                     if not line:
                         break
                     str_line = line.decode('utf-8')
-                    logger.info(str_line)
                     stderr.append(str_line)
                     if 'Access Denied' in str_line:
                         process.kill()
@@ -1075,6 +1074,8 @@ class GcsStore(AbstractStore):
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
         source = os.path.abspath(os.path.expanduser(self.source))
+        # TODO(zhwu): Speed up the upload process by providing a list of files
+        # so that we can utilize the parallelism.
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
@@ -1088,7 +1089,6 @@ class GcsStore(AbstractStore):
                     if not line:
                         break
                     str_line = line.decode('utf-8')
-                    logger.info(str_line)
                     stderr.append(str_line)
                     if 'AccessDeniedException' in str_line:
                         process.kill()

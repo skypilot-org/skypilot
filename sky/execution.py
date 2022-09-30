@@ -29,6 +29,7 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky import spot
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -399,7 +400,7 @@ def spot_launch(
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as spot_dag:
-            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task = task_lib.Task.from_yaml(yaml_path)
             controller_task.spot_task = task
             assert len(controller_task.resources) == 1
         print(f'{colorama.Fore.YELLOW}'
@@ -417,12 +418,14 @@ def spot_launch(
         )
 
 
-def _translate_local_file_mounts(task: sky.Task) -> sky.Task:
+def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
     task = copy.deepcopy(task)
     run_id = common_utils.get_run_id()[:8]
+    original_file_mounts = task.file_mounts if task.file_mounts else {}
+    original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
     # Step 1: Translate the workdir SkyPilot storage.
     logger.info(
@@ -434,6 +437,10 @@ def _translate_local_file_mounts(task: sky.Task) -> sky.Task:
             username=getpass.getuser(), id=run_id)
         workdir = task.workdir
         task.workdir = None
+        if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
+            raise ValueError(
+                f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the workdir '
+                'and file_mounts contains it as the target.')
         new_storage_mounts[
             constants.
             SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
