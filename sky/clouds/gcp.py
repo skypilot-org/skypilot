@@ -370,7 +370,8 @@ class GCP(clouds.Cloud):
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
-        credentials[GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
+        credentials[
+            GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
         return credentials
 
     def instance_type_exists(self, instance_type):
