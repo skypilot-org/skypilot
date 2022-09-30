@@ -165,9 +165,8 @@ class StrategyExecutor:
                         'ClusterNameTooLong: ' in str(e)):
                     # The cluster name is too long.
                     raise exceptions.ResourcesUnavailableError(str(e)) from e
-                logger.info(
-                    f'Failed to launch the spot cluster with error: {type(e)}: {e}'
-                )
+                logger.info('Failed to launch the spot cluster with error: '
+                            f'{type(e)}: {e}')
                 retry_launch = True
                 exception = e
 
