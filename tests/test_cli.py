@@ -57,6 +57,8 @@ def test_accelerator_mismatch(monkeypatch):
         lambda: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
+    config_file_backup = tempfile.NamedTemporaryFile(prefix='tmp_backup_config_default', delete=False)
+    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH', config_file_backup.name)
 
     spec = textwrap.dedent("""\
         resources:
