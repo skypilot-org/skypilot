@@ -2,7 +2,6 @@
 import json
 import os
 import subprocess
-import textwrap
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -29,21 +28,6 @@ _CREDENTIAL_FILES = [
 ]
 
 _IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
-
-_GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
-# Need to be run with /bin/bash
-GCLOUD_INSTALLATION_COMMAND = textwrap.dedent(f"""\
-    pushd /tmp &>/dev/null && \\
-    gcloud --help > /dev/null 2>&1 || \\
-    {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \\
-    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-382.0.0-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \\
-    tar xzf google-cloud-sdk-382.0.0-linux-x86_64.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \\
-    rm -rf ~/google-cloud-sdk >> {_GCLOUD_INSTALLATION_LOG}  && \\
-    mv google-cloud-sdk ~/ && \\
-    ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \\
-    echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc && \
-    source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \\
-    popd &>/dev/null""")
 
 
 def _run_output(cmd):
