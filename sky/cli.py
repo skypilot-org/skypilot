@@ -645,15 +645,17 @@ def _launch_with_confirm(
 
     if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
-        sky.launch(dag,
-                   dryrun=dryrun,
-                   stream_logs=True,
-                   cluster_name=cluster,
-                   detach_run=detach_run,
-                   backend=backend,
-                   idle_minutes_to_autostop=idle_minutes_to_autostop,
-                   retry_until_up=retry_until_up,
-                   no_setup=no_setup,)
+        sky.launch(
+            dag,
+            dryrun=dryrun,
+            stream_logs=True,
+            cluster_name=cluster,
+            detach_run=detach_run,
+            backend=backend,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            retry_until_up=retry_until_up,
+            no_setup=no_setup,
+        )
 
 
 # TODO: skip installing ray to speed up provisioning.

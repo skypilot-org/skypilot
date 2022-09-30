@@ -193,7 +193,6 @@ def _execute(
         if dryrun:
             logger.info('Dry run finished.')
             return
-        
 
         if stages is None or Stage.SYNC_WORKDIR in stages:
             if task.workdir is not None:
