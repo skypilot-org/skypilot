@@ -2223,13 +2223,13 @@ class CloudVmRayBackend(backends.Backend):
         stream_logs: bool = True
     ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
-        # All error messages should have been redirected to stdout.
-        returncode, stdout, _ = self.run_on_head(handle,
-                                                 code,
-                                                 stream_logs=stream_logs,
-                                                 require_outputs=True)
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      stream_logs=stream_logs,
+                                                      require_outputs=True,
+                                                      separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to get job status.', stdout)
+                                           'Failed to get job status.', stderr)
         statuses = job_lib.load_statuses_json(stdout)
         return statuses
 
@@ -2258,10 +2258,14 @@ class CloudVmRayBackend(backends.Backend):
         """
         code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
         returncode, run_timestamps, stderr = self.run_on_head(
-            handle, code, stream_logs=False, require_outputs=True)
+            handle,
+            code,
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = json.loads(run_timestamps)
+        run_timestamps = common_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -2614,6 +2618,7 @@ class CloudVmRayBackend(backends.Backend):
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
+        separate_stderr: bool = False,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
@@ -2634,6 +2639,7 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             require_outputs=require_outputs,
+            separate_stderr=separate_stderr,
             **kwargs,
         )
 

@@ -281,7 +281,8 @@ def queue(cluster_name: str,
 
     returncode, jobs_json, stderr = backend.run_on_head(handle,
                                                         code,
-                                                        require_outputs=True)
+                                                        require_outputs=True,
+                                                        separate_stderr=True)
     if returncode != 0:
         raise RuntimeError(f'{jobs_json + stderr}\n{colorama.Fore.RED}'
                            f'Failed to get job queue on cluster {cluster_name}.'
@@ -484,11 +485,14 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
     code = spot.SpotCodeGen.get_job_table()
     returncode, job_table_json, stderr = backend.run_on_head(
-        handle, code, require_outputs=True, stream_logs=False)
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
     try:
         subprocess_utils.handle_returncode(
-            returncode, code, 'Failed to fetch managed job statuses',
-            job_table_json + stderr)
+            returncode, code, 'Failed to fetch managed job statuses', stderr)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 

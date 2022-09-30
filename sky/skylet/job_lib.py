@@ -3,7 +3,6 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
-import json
 import os
 import pathlib
 import shlex
@@ -14,6 +13,7 @@ import filelock
 
 from sky import constants
 from sky import sky_logging
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
@@ -230,11 +230,11 @@ def get_statuses_json(job_ids: List[Optional[int]]) -> str:
     statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return json.dumps(statuses)
+    return common_utils.encode_payload(statuses)
 
 
 def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
-    statuses = json.loads(statuses_json)
+    statuses = common_utils.decode_payload(statuses_json)
     for job_id, status in statuses.items():
         if status is not None:
             statuses[job_id] = JobStatus[status]
@@ -475,7 +475,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-    return json.dumps(jobs, indent=2)
+    return common_utils.encode_payload(jobs)
 
 
 def load_job_queue(json_str: str) -> List[Dict[str, Any]]:
@@ -484,7 +484,7 @@ def load_job_queue(json_str: str) -> List[Dict[str, Any]]:
     Args:
         json_str: The json string to load.
     """
-    jobs = json.loads(json_str)
+    jobs = common_utils.decode_payload(json_str)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
     return jobs
@@ -549,7 +549,7 @@ def run_timestamp_with_globbing_json(
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
-    return json.dumps(run_timestamps)
+    return common_utils.encode_payload(run_timestamps)
 
 
 class JobLibCodeGen:
