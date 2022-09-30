@@ -13,7 +13,6 @@ from sky import clouds
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
-from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import schemas
@@ -558,13 +557,6 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
-                    # NOTE: this won't work as the gcs donwloading will happen before this.
-                    # # Remember to run `gcloud auth application-default login`
-                    # self.setup = (
-                    #     '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
-                    #     'echo export GOOGLE_APPLICATION_CREDENTIALS='
-                    #     f'{clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} '
-                    #     f'>> ~/.bashrc || true); {self.setup or "true"}')
                     if storage.source.startswith('gs://'):
                         blob_path = storage.source
                     else:

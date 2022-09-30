@@ -439,10 +439,11 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
             username=getpass.getuser(), id=run_id)
         workdir = task.workdir
         task.workdir = None
-        if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
+        if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
+                constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
             raise ValueError(
-                f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the workdir '
-                'and file_mounts contains it as the target.')
+                f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
+                'workdir and file_mounts contains it as the target.')
         new_storage_mounts[
             constants.
             SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
