@@ -94,7 +94,7 @@ class GcsCloudStorage(CloudStorage):
     # We use gsutil as a basic implementation.  One pro is that its -m
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
-    _GET_GSUTIL = [gcp.GCLOUD_INSTALLATION_COMMAND]
+    _GET_GSUTIL = gcp.GCLOUD_INSTALLATION_COMMAND
 
     _GSUTIL = f'GOOGLE_APPLICATION_CREDENTIALS={gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} gsutil'
 
@@ -103,7 +103,7 @@ class GcsCloudStorage(CloudStorage):
         In cloud object stores, a "directory" refers to a regular object whose
         name is a prefix of other objects.
         """
-        commands = self._GET_GSUTIL
+        commands = [self._GET_GSUTIL]
         commands.append(f'{self._GSUTIL} ls -d {url}')
         command = ' && '.join(commands)
         p = subprocess.run(command,
@@ -133,14 +133,14 @@ class GcsCloudStorage(CloudStorage):
         """Downloads a directory using gsutil."""
         download_via_gsutil = (
             f'{self._GSUTIL} -m rsync -r {source} {destination}')
-        all_commands = self._GET_GSUTIL
+        all_commands = [self._GET_GSUTIL]
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using gsutil."""
         download_via_gsutil = f'{self._GSUTIL} -m cp {source} {destination}'
-        all_commands = self._GET_GSUTIL
+        all_commands = [self._GET_GSUTIL]
         all_commands.append(download_via_gsutil)
         return ' && '.join(all_commands)
 
