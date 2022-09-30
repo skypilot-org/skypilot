@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
+from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
@@ -1031,6 +1032,9 @@ class GcsStore(AbstractStore):
           StorageBucketGetError: If fetching existing bucket fails
           StorageInitError: If general initialization fails.
         """
+        if os.getenv('GOOGLE_APPLICATION_CREDENTIALS') is None:
+            os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = (
+                clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH)
         self.client = gcp.storage_client()
         self.bucket, is_new_bucket = self._get_bucket()
         if self.is_sky_managed is None:
