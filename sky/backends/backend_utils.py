@@ -1831,9 +1831,9 @@ def check_cluster_name_is_valid(cluster_name: str,
         if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP}'
-                    ' chars.')
+                    f'ClusterNameTooLong: Cluster name {cluster_name!r} has '
+                    f'{len(cluster_name)} chars; maximum length is '
+                    f'{_MAX_CLUSTER_NAME_LEN_FOR_GCP} chars.')
 
 
 def check_cluster_name_not_reserved(

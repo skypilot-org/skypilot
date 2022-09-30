@@ -161,8 +161,11 @@ class StrategyExecutor:
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
+                if isinstance(e, ValueError) and 'ClusterNameTooLong: ' in str(e):
+                    # The cluster name is too long. 
+                    raise exceptions.ResourcesUnavailableError(str(e)) from e
                 logger.info(
-                    f'Failed to launch the spot cluster with error: {e}')
+                    f'Failed to launch the spot cluster with error: {type(e)}: {e}')
                 retry_launch = True
                 exception = e
 
