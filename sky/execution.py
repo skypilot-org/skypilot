@@ -31,7 +31,6 @@ from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
 from sky.backends import backend_utils
-from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.usage import usage_lib
@@ -394,7 +393,6 @@ def spot_launch(
                 'user_yaml_path': f.name,
                 'spot_controller': controller_name,
                 'cluster_name': name,
-                'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
                 'is_dev': env_options.Options.IS_DEVELOPER.get(),
                 'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
                 'logging_user_hash': common_utils.get_user_hash(),
