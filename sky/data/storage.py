@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
+from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
