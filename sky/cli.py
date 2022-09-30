@@ -32,6 +32,7 @@ import functools
 import getpass
 import os
 import shlex
+import subprocess
 import sys
 import textwrap
 import typing
@@ -340,6 +341,141 @@ _EXTRA_RESOURCES_OPTIONS = [
               'config.'),
     ),
 ]
+
+
+def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
+                           incomplete: str) -> List[str]:
+    """Handle shell completion for cluster names."""
+    del ctx, param  # Unused.
+    return global_user_state.get_cluster_names_start_with(incomplete)
+
+
+def _complete_storage_name(ctx: click.Context, param: click.Parameter,
+                           incomplete: str) -> List[str]:
+    """Handle shell completion for storage names."""
+    del ctx, param  # Unused.
+    return global_user_state.get_storage_names_start_with(incomplete)
+
+
+def _complete_file_name(ctx: click.Context, param: click.Parameter,
+                        incomplete: str) -> List[str]:
+    """Handle shell completion for file names.
+
+    Returns a special completion marker that tells click to use
+    the shell's default file completion.
+    """
+    del ctx, param  # Unused.
+    return [click.shell_completion.CompletionItem(incomplete, type='file')]
+
+
+_RELOAD_ZSH_CMD = 'source ~/.zshrc'
+_RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
+_RELOAD_BASH_CMD = 'source ~/.bashrc'
+
+
+def _install_shell_completion(ctx: click.Context, param: click.Parameter,
+                              value: str):
+    """A callback for installing shell completion for click."""
+    del param  # Unused.
+    if not value or ctx.resilient_parsing:
+        return
+
+    if value == 'auto':
+        if 'SHELL' not in os.environ:
+            click.secho(
+                'Cannot auto-detect shell. Please specify shell explicitly.',
+                fg='red')
+            ctx.exit()
+        else:
+            value = os.path.basename(os.environ['SHELL'])
+
+    zshrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.zsh'
+    bashrc_diff = '# For SkyPilot shell completion\n. ~/.sky/.sky-complete.bash'
+
+    if value == 'bash':
+        install_cmd = f'_SKY_COMPLETE=bash_source sky > \
+                ~/.sky/.sky-complete.bash && \
+                echo "{bashrc_diff}" >> ~/.bashrc'
+
+        cmd = f'(grep -q "SkyPilot" ~/.bashrc) || ({install_cmd})'
+        reload_cmd = _RELOAD_BASH_CMD
+
+    elif value == 'fish':
+        cmd = '_SKY_COMPLETE=fish_source sky > \
+                ~/.config/fish/completions/sky.fish'
+
+        reload_cmd = _RELOAD_FISH_CMD
+
+    elif value == 'zsh':
+        install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
+                ~/.sky/.sky-complete.zsh && \
+                echo "{zshrc_diff}" >> ~/.zshrc'
+
+        cmd = f'(grep -q "SkyPilot" ~/.zshrc) || ({install_cmd})'
+        reload_cmd = _RELOAD_ZSH_CMD
+
+    else:
+        click.secho(f'Unsupported shell: {value}', fg='red')
+        ctx.exit()
+
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+        click.secho(f'Shell completion installed for {value}', fg='green')
+        click.echo(
+            'Completion will take effect once you restart the terminal: ' +
+            click.style(f'{reload_cmd}', bold=True))
+    except subprocess.CalledProcessError as e:
+        click.secho(f'> Installation failed with code {e.returncode}', fg='red')
+    ctx.exit()
+
+
+def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
+                                value: str):
+    """A callback for uninstalling shell completion for click."""
+    del param  # Unused.
+    if not value or ctx.resilient_parsing:
+        return
+
+    if value == 'auto':
+        if 'SHELL' not in os.environ:
+            click.secho(
+                'Cannot auto-detect shell. Please specify shell explicitly.',
+                fg='red')
+            ctx.exit()
+        else:
+            value = os.path.basename(os.environ['SHELL'])
+
+    if value == 'bash':
+        cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.bashrc && \
+               sed -i"" -e "/sky-complete.bash/d" ~/.bashrc && \
+               rm -f ~/.sky/.sky-complete.bash'
+
+        reload_cmd = _RELOAD_BASH_CMD
+
+    elif value == 'fish':
+        cmd = 'rm -f ~/.config/fish/completions/sky.fish'
+        reload_cmd = _RELOAD_FISH_CMD
+
+    elif value == 'zsh':
+        cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.zshrc && \
+               sed -i"" -e "/sky-complete.zsh/d" ~/.zshrc && \
+               rm -f ~/.sky/.sky-complete.zsh'
+
+        reload_cmd = _RELOAD_ZSH_CMD
+
+    else:
+        click.secho(f'Unsupported shell: {value}', fg='red')
+        ctx.exit()
+
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+        click.secho(f'Shell completion uninstalled for {value}', fg='green')
+        click.echo('Changes will take effect once you restart the terminal: ' +
+                   click.style(f'{reload_cmd}', bold=True))
+    except subprocess.CalledProcessError as e:
+        click.secho(f'> Uninstallation failed with code {e.returncode}',
+                    fg='red')
+    ctx.exit()
 
 
 def _add_click_options(options: List[click.Option]):
@@ -787,17 +923,34 @@ class _DocumentedCodeCommand(click.Command):
 
 
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
+@click.option('--install-shell-completion',
+              type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
+              callback=_install_shell_completion,
+              expose_value=False,
+              is_eager=True,
+              help='Install shell completion for the specified shell.')
+@click.option('--uninstall-shell-completion',
+              type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
+              callback=_uninstall_shell_completion,
+              expose_value=False,
+              is_eager=True,
+              help='Uninstall shell completion for the specified shell.')
 @click.version_option(sky.__version__, '--version', '-v', prog_name='skypilot')
 def cli():
     pass
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 @click.option('--cluster',
               '-c',
               default=None,
               type=str,
+              shell_complete=_complete_cluster_name,
               help=_CLUSTER_FLAG_HELP)
 @click.option('--dryrun',
               default=False,
@@ -923,7 +1076,10 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('cluster', required=True, type=str)
+@click.argument('cluster',
+                required=True,
+                type=str,
+                shell_complete=_complete_cluster_name)
 @click.argument('entrypoint', required=True, type=str, nargs=-1)
 @click.option('--detach-run',
               '-d',
@@ -1095,7 +1251,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.argument('clusters', required=False, type=str, nargs=-1)
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_cluster_name)
 @usage_lib.entrypoint
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
@@ -1151,7 +1311,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     default=False,
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
-@click.argument('cluster', required=True, type=str)
+@click.argument('cluster',
+                required=True,
+                type=str,
+                shell_complete=_complete_cluster_name)
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
@@ -1210,7 +1373,10 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
 
 
 @cli.command()
-@click.argument('cluster', required=True, type=str)
+@click.argument('cluster',
+                required=True,
+                type=str,
+                shell_complete=_complete_cluster_name)
 @click.option('--all',
               '-a',
               default=False,
@@ -1228,7 +1394,10 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=False)
+@click.argument('clusters',
+                nargs=-1,
+                required=False,
+                shell_complete=_complete_cluster_name)
 @click.option('--all',
               '-a',
               default=None,
@@ -1281,7 +1450,10 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=False)
+@click.argument('clusters',
+                nargs=-1,
+                required=False,
+                shell_complete=_complete_cluster_name)
 @click.option('--all',
               '-a',
               default=None,
@@ -1353,7 +1525,10 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=False)
+@click.argument('clusters',
+                nargs=-1,
+                required=False,
+                shell_complete=_complete_cluster_name)
 @click.option('--all',
               '-a',
               default=False,
@@ -1514,7 +1689,10 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters', nargs=-1, required=False)
+@click.argument('clusters',
+                nargs=-1,
+                required=False,
+                shell_complete=_complete_cluster_name)
 @click.option('--all',
               '-a',
               default=None,
@@ -2111,7 +2289,11 @@ def storage_ls():
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
-@click.argument('names', required=False, type=str, nargs=-1)
+@click.argument('names',
+                required=False,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_storage_name)
 @click.option('--all',
               '-a',
               default=False,
