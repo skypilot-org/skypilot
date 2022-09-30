@@ -2230,7 +2230,7 @@ class CloudVmRayBackend(backends.Backend):
                                                       separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to get job status.', stderr)
-        statuses = job_lib.load_statuses_json(stdout)
+        statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):

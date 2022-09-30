@@ -193,6 +193,7 @@ class SSHCommandRunner:
             check: Check the success of the command.
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
+            separate_stderr: Whether to separate stderr from stdout.
 
 
         Returns:
