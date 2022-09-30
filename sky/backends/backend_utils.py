@@ -1909,8 +1909,7 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    with ux_utils.print_exception_no_traceback():
-        raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
+    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1919,8 +1918,7 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    with ux_utils.print_exception_no_traceback():
-        raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
+    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):
