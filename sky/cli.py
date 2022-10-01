@@ -2158,8 +2158,17 @@ def check():
               default=None,
               type=str,
               help='Cloud provider to query.')
+@click.option(
+        "--region",
+        required=False,
+        type=str,
+        help=(
+            "The region to use. If specified, overrides the "
+            '"resources.region" config. Passing "none" resets the config.'
+        ),
+    )
 @usage_lib.entrypoint
-def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
+def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
     To show the detailed information of a GPU/TPU type (which clouds offer it,
@@ -2171,6 +2180,12 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
     NOTE: The price displayed for each instance type is the lowest across all
     regions for both on-demand and spot instances.
     """
+    # validation for the --region flag
+    if region and (not cloud):
+        raise click.UsageError(
+            "The --region flag is only valid when the --cloud flag is set."
+        )
+    service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -2188,7 +2203,8 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
 
         if gpu_name is None:
             result = service_catalog.list_accelerator_counts(gpus_only=True,
-                                                             clouds=cloud)
+                                                             clouds=cloud,
+                                                             region_filter=region,)
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -2216,6 +2232,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name,
+                                                   region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
             yield f'Resources \'{gpu_name}\' not found. '

@@ -64,8 +64,9 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 def list_accelerators(gpus_only: bool,
                       name_filter: Optional[str],
+                      region_filter: Optional[str],
                       case_sensitive: bool = True
                      ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
-    return common.list_accelerators_impl('AWS', _df, gpus_only, name_filter,
+    return common.list_accelerators_impl('AWS', _df, gpus_only, name_filter, region_filter,
                                          case_sensitive)

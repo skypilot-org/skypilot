@@ -226,6 +226,7 @@ def list_accelerators_impl(
     df: pd.DataFrame,
     gpus_only: bool,
     name_filter: Optional[str],
+    region_filter: Optional[str],
     case_sensitive: bool = True,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
@@ -246,11 +247,14 @@ def list_accelerators_impl(
         'MemoryGiB',
         'Price',
         'SpotPrice',
+        'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
                                                    regex=True)]
+    if region_filter is not None:
+        df[df['Region'].str.contains(region_filter, case=case_sensitive, regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     grouped = df.groupby('AcceleratorName')
 
