@@ -135,6 +135,7 @@ def _execute(
       detach_run: bool; whether to detach the process after the job submitted.
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
+      no_setup: bool; whether to skip setup commands or not when (re)-launching.
     """
     _type_check_dag(dag)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
@@ -203,9 +204,8 @@ def _execute(
                                      task.storage_mounts)
 
         if no_setup:
-            logger.info('Setup instructions skipped.')
-
-        if not no_setup and (stages is None or Stage.SETUP in stages):
+            logger.info('Setup commands skipped.')
+        elif stages is None or Stage.SETUP in stages:
             backend.setup(handle, task)
 
         if stages is None or Stage.PRE_EXEC in stages:
