@@ -2575,13 +2575,13 @@ def spot_status(all: bool, refresh: bool):
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
-            job_table_json = (
+            job_table_payload = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
                 f'{cache[1]}\n')
         else:
-            job_table_json = 'No cached job status table found.'
-        click.echo(job_table_json)
+            job_table_payload = 'No cached job status table found.'
+        click.echo(job_table_payload)
         return
     job_table = spot_lib.format_job_table(job_table, all)
 
