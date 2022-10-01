@@ -65,6 +65,7 @@ from sky.utils import command_runner
 from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 from sky.usage import usage_lib
@@ -733,10 +734,13 @@ def _make_dag_from_entrypoint_with_overrides(
             task.name = name
         task.set_envs(env)
         # TODO(wei-lin): move this validation into Python API.
-        if new_resources.accelerators is not None:
-            acc, _ = list(new_resources.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster is not supported. '
+        if task.num_nodes > 1 and tpu_utils.is_tpu(new_resources):
+            if not tpu_utils.is_tpu_vm(new_resources):
+                raise ValueError(
+                    'For TPU Node, multi-node cluster is not supported. '
+                    f'Got num_nodes={task.num_nodes}.')
+            if tpu_utils.is_tpu_vm_pod(new_resources):
+                raise ValueError('Multi-node TPU Pod cluster is not supported. '
                                  f'Got num_nodes={task.num_nodes}.')
     return dag
 

@@ -62,7 +62,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout (seconds) for provision progress: if in this duration no new nodes
 # are launched, abort and failover.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 150
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -1721,6 +1721,15 @@ class CloudVmRayBackend(backends.Backend):
                                    config_dict['launched_nodes'],
                                    config_dict['tpu_name'])
 
+            handle = self.ResourceHandle(
+                cluster_name=cluster_name,
+                cluster_yaml=cluster_config_file,
+                launched_nodes=config_dict['launched_nodes'],
+                launched_resources=config_dict['launched_resources'],
+                # TPU.
+                tpu_create_script=config_dict.get('tpu-create-script'),
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+
             if config_dict['launched_nodes'] == 1 and config_dict[
                     'head_ip'] is not None:
                 # Optimization for 1-node: we may have parsed the stdout of
@@ -1733,20 +1742,13 @@ class CloudVmRayBackend(backends.Backend):
                     ip_list = backend_utils.get_node_ips(
                         cluster_config_file,
                         config_dict['launched_nodes'],
+                        handle=handle,
                         head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
                         worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
                     head_ip = ip_list[0]
 
-            handle = self.ResourceHandle(
-                cluster_name=cluster_name,
-                cluster_yaml=cluster_config_file,
-                # Cache head ip in the handle to speed up ssh operations.
-                head_ip=head_ip,
-                launched_nodes=config_dict['launched_nodes'],
-                launched_resources=config_dict['launched_resources'],
-                # TPU.
-                tpu_create_script=config_dict.get('tpu-create-script'),
-                tpu_delete_script=config_dict.get('tpu-delete-script'))
+            # Cache head ip in the handle to speed up ssh operations.
+            handle.head_ip = head_ip
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
@@ -2405,8 +2407,7 @@ class CloudVmRayBackend(backends.Backend):
                     stream_logs=False,
                     require_outputs=True)
         elif (terminate and
-              (prev_status == global_user_state.ClusterStatus.STOPPED or
-               use_tpu_vm)):
+              (prev_status == global_user_state.ClusterStatus.STOPPED)):
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
@@ -2419,9 +2420,10 @@ class CloudVmRayBackend(backends.Backend):
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
                     f'--query Reservations[].Instances[].InstanceId '
                     '--output text')
-                terminate_cmd = (
-                    f'aws ec2 terminate-instances --region {region} '
-                    f'--instance-ids $({query_cmd})')
+                terminate_cmds = [
+                    (f'aws ec2 terminate-instances --region {region} '
+                     f'--instance-ids $({query_cmd})')
+                ]
             elif isinstance(cloud, clouds.GCP):
                 zone = config['provider']['availability_zone']
                 # TODO(wei-lin): refactor by calling functions of node provider
@@ -2434,29 +2436,42 @@ class CloudVmRayBackend(backends.Backend):
                         f'gcloud compute tpus tpu-vm list --filter='
                         f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zone={zone} --format=value\\(name\\)')
-                    terminate_cmd = (
-                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        query_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+
+                    # Needs to create a list as GCP does not allow deleting
+                    # multiple TPU VMs at once
+                    terminate_cmds = []
+                    for tpu_id in stdout.splitlines():
+                        terminate_cmds.append(
+                            f'gcloud compute tpus tpu-vm delete --zone={zone}'
+                            f' --quiet {tpu_id}')
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='
                         f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zones={zone} --format=value\\(name\\)')
-                    terminate_cmd = (
-                        f'gcloud compute instances delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                    terminate_cmds = [
+                        (f'gcloud compute instances delete --zone={zone}'
+                         f' --quiet $({query_cmd})')
+                    ]
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Unsupported cloud {cloud} for stopped '
                                      f'cluster {cluster_name!r}.')
             with backend_utils.safe_console_status(f'[bold cyan]Terminating '
                                                    f'[green]{cluster_name}'):
-                returncode, stdout, stderr = log_lib.run_with_log(
-                    terminate_cmd,
-                    log_abs_path,
-                    shell=True,
-                    stream_logs=False,
-                    require_outputs=True)
+                for terminate_cmd in terminate_cmds:
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        terminate_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
@@ -2938,6 +2953,7 @@ class CloudVmRayBackend(backends.Backend):
         if is_tpu_vm_pod:
             num_actual_nodes = tpu_utils.get_num_tpu_devices(
                 handle.launched_resources)
+            num_actual_nodes = task.num_nodes
         else:
             num_actual_nodes = task.num_nodes
 

@@ -246,7 +246,7 @@ class GCPNodeProvider(NodeProvider):
                             time.sleep(POLL_INTERVAL)
                         else:
                             raise RuntimeError(f"Unexpected instance status."
-                                               " Details: {instance}")
+                                               f" Details: {instance}")
 
                     if instance.is_stopping():
                         raise RuntimeError(f"Maximum number of polls: "

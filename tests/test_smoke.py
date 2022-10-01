@@ -407,6 +407,30 @@ def test_tpu_vm():
     run_one_test(test)
 
 
+# ---------- Multi-node TPU VM. ----------
+# Mark slow because it's expensive to run.
+#@pytest.mark.slow
+def test_multi_tpu_vm():
+    name = _get_cluster_name()
+    test = Test(
+        'multi_tpu_vm',
+        [
+            f'sky launch -y -c {name} examples/tpu/tpuvm_multinode.yml -d',
+            f'sky exec {name} -d --num-nodes 1 examples/tpu/tpuvm_multinode.yml',
+            f'sky exec {name} -d --num-nodes 1 examples/tpu/tpuvm_multinode.yml',
+            f'sleep 10',
+            f'sky logs {name} 1 --status | grep "RUNNING"',
+            f'sky logs {name} 2 --status | grep "PENDING"',
+            f'sky cancel {name} 1',
+            f'sleep 10',
+            f'sky logs {name} 1 --status | grep "CANCELLED"',
+            f'sky logs {name} 2 --status | grep "RUNNING"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- TPU VM Pod. ----------
 # Mark slow because it's expensive to run.
 @pytest.mark.slow

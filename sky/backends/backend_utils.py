@@ -48,6 +48,7 @@ from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
@@ -1066,8 +1067,8 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
-    use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
-    if use_tpu_vm:
+    is_tpu_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
+    if is_tpu_pod:
         return _get_tpu_vm_pod_ips(ray_config)
 
     # Try optimize for the common case where we have 1 node.
@@ -1136,25 +1137,48 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
                  f'\\(labels.ray-cluster-name={cluster_name}\\) '
                  f'--zone={zone} --format=value\\(name\\)')
-    tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                 f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                 '(networkEndpoints.accessConfig.externalIp)"')
-
-    rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+    rcode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                  '/dev/null',
                                                  shell=True,
                                                  stream_logs=False,
                                                  require_outputs=True)
     if rcode != 0:
-        failure_massage = ('Failed to run gcloud to get TPU VM Pod IPs.\n'
+        failure_massage = ('Failed to run gcloud to get TPU VM IDs.\n'
                            '**** STDOUT ****\n'
                            '{stdout}\n'
                            '**** STDERR ****\n'
-                           '{stderr}')
+                           '{stderr}\n'
+                           '**** CMD ****\n'
+                           f'{query_cmd}')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
                 failure_massage.format(stdout=stdout, stderr=stderr))
-    all_ips = re.findall(IP_ADDR_REGEX, stdout)
+
+    ip_stdout = ''
+    for tpu_id in stdout.splitlines():
+        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
+                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                     '(networkEndpoints.accessConfig.externalIp)"')
+        rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+                                                     '/dev/null',
+                                                     shell=True,
+                                                     stream_logs=False,
+                                                     require_outputs=True)
+        if rcode != 0:
+            failure_massage = ('Failed to run gcloud to get TPU VM IPs.\n'
+                               '**** STDOUT ****\n'
+                               '{stdout}\n'
+                               '**** STDERR ****\n'
+                               '{stderr}\n'
+                               '**** CMD ****\n'
+                               f'{tpuvm_cmd}')
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    failure_massage.format(stdout=stdout, stderr=stderr))
+
+        ip_stdout += stdout
+
+    all_ips = re.findall(IP_ADDR_REGEX, ip_stdout)
     return all_ips
 
 

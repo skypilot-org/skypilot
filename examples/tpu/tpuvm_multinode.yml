@@ -1,0 +1,12 @@
+name: tpuvm_multinode
+
+resources:
+  accelerators: tpu-v2-8
+  accelerator_args:
+    runtime_version: tpu-vm-base
+    tpu_vm: True
+
+num_nodes: 2
+
+run: |
+  sleep 120

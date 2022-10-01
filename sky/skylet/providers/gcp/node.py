@@ -174,7 +174,7 @@ class GCPNode(UserDict, metaclass=abc.ABCMeta):
         return
 
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}: {self.get('name')}>"
+        return f"<{self.__class__.__name__}: {self.get('name')} STATUS: {self.get(self.STATUS_FIELD)}>"
 
 
 class GCPComputeNode(GCPNode):
