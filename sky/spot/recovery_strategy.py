@@ -158,13 +158,12 @@ class StrategyExecutor:
                            cluster_name=self.cluster_name,
                            detach_run=True)
                 logger.info('Spot cluster launched.')
+            except exceptions.InvalidClusterNameError as e:
+                # The cluster name is too long.
+                raise exceptions.ResourcesUnavailableError(str(e)) from e
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
-                if (isinstance(e, ValueError) and
-                        'ClusterNameTooLong: ' in str(e)):
-                    # The cluster name is too long.
-                    raise exceptions.ResourcesUnavailableError(str(e)) from e
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{type(e)}: {e}')
                 retry_launch = True

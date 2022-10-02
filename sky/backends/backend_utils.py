@@ -1822,7 +1822,7 @@ def check_cluster_name_is_valid(cluster_name: str,
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.InvalidClusterNameError(
                 f'Cluster name "{cluster_name}" is invalid; '
                 f'ensure it is fully matched by regex: {valid_regex}')
     if isinstance(cloud, clouds.GCP):
@@ -1830,7 +1830,7 @@ def check_cluster_name_is_valid(cluster_name: str,
         # clouds.
         if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
+                raise exceptions.InvalidClusterNameError(
                     f'ClusterNameTooLong: Cluster name {cluster_name!r} has '
                     f'{len(cluster_name)} chars; maximum length is '
                     f'{_MAX_CLUSTER_NAME_LEN_FOR_GCP} chars.')
