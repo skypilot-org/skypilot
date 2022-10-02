@@ -1011,7 +1011,7 @@ def cli():
               is_flag=True,
               default=False,
               required=False,
-              help='Skip setup phase when re-launching cluster.')
+              help='Skip setup phase when (re)-launching cluster.')
 @usage_lib.entrypoint
 def launch(
     entrypoint: str,
