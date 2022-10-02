@@ -135,7 +135,7 @@ def _execute(
       detach_run: bool; whether to detach the process after the job submitted.
       autostop_idle_minutes: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
-      no_setup: bool; whether to skip setup commands or not when (re)-launching.
+      no_setup: bool; whether to skip setup commands or not when (re-)launching.
     """
     _type_check_dag(dag)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
