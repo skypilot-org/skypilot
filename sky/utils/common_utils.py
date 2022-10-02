@@ -4,17 +4,23 @@ import functools
 import getpass
 import inspect
 import hashlib
+import json
 import random
 import os
+import re
 import socket
 import sys
 import time
 import uuid
+from typing import Dict, List, Union
 import yaml
 
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+
+_PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
+_PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
 
@@ -215,3 +221,31 @@ def retry(method, max_retries=3, initial_backoff=1):
                     raise
 
     return method_with_retries
+
+
+def encode_payload(payload: Union[List, Dict]) -> str:
+    """Encode a payload to make it more robust for parsing.
+
+    Args:
+        payload: A dict or list to be encoded.
+
+    Returns:
+        A string that is encoded from the payload.
+    """
+    payload_str = json.dumps(payload)
+    payload_str = _PAYLOAD_STR.format(payload_str)
+    return payload_str
+
+
+def decode_payload(payload_str: str) -> Union[List, Dict]:
+    """Decode a payload string.
+
+    Args:
+        payload_str: A string that is encoded from a payload.
+
+    Returns:
+        A dict or list that is decoded from the payload string.
+    """
+    payload_str = _PAYLOAD_PATTERN.match(payload_str).group(1)
+    payload = json.loads(payload_str)
+    return payload

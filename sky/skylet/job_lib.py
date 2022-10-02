@@ -3,7 +3,6 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
-import json
 import os
 import pathlib
 import shlex
@@ -14,6 +13,7 @@ import filelock
 
 from sky import sky_logging
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
@@ -220,7 +220,7 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return get_status_no_lock(job_id)
 
 
-def get_statuses_json(job_ids: List[Optional[int]]) -> str:
+def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     # Per-job lock is not required here, since the staled job status will not
     # affect the caller.
     query_str = ','.join(['?'] * len(job_ids))
@@ -230,11 +230,11 @@ def get_statuses_json(job_ids: List[Optional[int]]) -> str:
     statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return json.dumps(statuses)
+    return common_utils.encode_payload(statuses)
 
 
-def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
-    statuses = json.loads(statuses_json)
+def load_statuses_payload(statuses_payload: str) -> Dict[int, JobStatus]:
+    statuses = common_utils.decode_payload(statuses_payload)
     for job_id, status in statuses.items():
         if status is not None:
             statuses[job_id] = JobStatus[status]
@@ -460,7 +460,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
 
 
 def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
-    """Get the job queue in json format.
+    """Get the job queue in encoded json format.
 
     Args:
         username: The username to show jobs for. Show all the users if None.
@@ -475,16 +475,16 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-    return json.dumps(jobs, indent=2)
+    return common_utils.encode_payload(jobs)
 
 
-def load_job_queue(json_str: str) -> List[Dict[str, Any]]:
-    """Load the job queue from json format.
+def load_job_queue(payload: str) -> List[Dict[str, Any]]:
+    """Load the job queue from encoded json format.
 
     Args:
-        json_str: The json string to load.
+        payload: The encoded payload string to load.
     """
-    jobs = json.loads(json_str)
+    jobs = common_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
     return jobs
@@ -535,7 +535,7 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     return run_timestamp
 
 
-def run_timestamp_with_globbing_json(
+def run_timestamp_with_globbing_payload(
         job_ids: List[Optional[str]]) -> Dict[str, str]:
     """Returns the relative paths to the log files for job with globbing."""
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
@@ -549,7 +549,7 @@ def run_timestamp_with_globbing_json(
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
-    return json.dumps(run_timestamps)
+    return common_utils.encode_payload(run_timestamps)
 
 
 class JobLibCodeGen:
@@ -623,7 +623,7 @@ class JobLibCodeGen:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'job_statuses = job_lib.get_statuses_json(job_ids)',
+            'job_statuses = job_lib.get_statuses_payload(job_ids)',
             'print(job_statuses, flush=True)',
         ]
         return cls._build(code)
@@ -646,7 +646,7 @@ class JobLibCodeGen:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.run_timestamp_with_globbing_json(job_ids)',
+            'log_dirs = job_lib.run_timestamp_with_globbing_payload(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)
