@@ -2254,6 +2254,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: 
                 'HOST_MEMORY',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
+                'REGION',
             ])
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
@@ -2272,10 +2273,12 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: 
                     item.price) else '-'
                 spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                     item.spot_price) else '-'
+                region_str = item.region if not pd.isna(item.region) else '-'
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
                     instance_type_str, cpu_str, mem_str, price_str,
-                    spot_price_str
+                    spot_price_str,
+                    region_str
                 ])
 
             if i != 0:

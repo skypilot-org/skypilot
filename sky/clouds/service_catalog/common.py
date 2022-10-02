@@ -31,6 +31,7 @@ class InstanceTypeInfo(NamedTuple):
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
+    - region: Region where this instance type belongs to.
     """
     cloud: str
     instance_type: Optional[str]
@@ -40,6 +41,7 @@ class InstanceTypeInfo(NamedTuple):
     memory: Optional[float]
     price: float
     spot_price: float
+    region: str
 
 
 def get_catalog_path(filename: str) -> str:
@@ -254,7 +256,7 @@ def list_accelerators_impl(
                                                    case=case_sensitive,
                                                    regex=True)]
     if region_filter is not None:
-        df[df['Region'].str.contains(region_filter, case=case_sensitive, regex=True)]
+        df = df[df['Region'].str.contains(region_filter, case=case_sensitive, regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     grouped = df.groupby('AcceleratorName')
 
@@ -275,6 +277,7 @@ def list_accelerators_impl(
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
+                row['Region'],
             ),
             axis='columns',
         ).tolist()
