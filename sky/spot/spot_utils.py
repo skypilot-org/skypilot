@@ -310,12 +310,12 @@ def dump_spot_job_queue() -> str:
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
-    return json.dumps(jobs, indent=2)
+    return common_utils.encode_payload(jobs)
 
 
-def load_spot_job_queue(json_str: str) -> List[Dict[str, Any]]:
+def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
-    jobs = json.loads(json_str)
+    jobs = common_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = spot_state.SpotStatus(job['status'])
     return jobs
