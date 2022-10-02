@@ -2159,16 +2159,14 @@ def check():
               type=str,
               help='Cloud provider to query.')
 @click.option(
-        "--region",
-        required=False,
-        type=str,
-        help=(
-            "The region to use. If specified, overrides the "
-            '"resources.region" config. Passing "none" resets the config.'
-        ),
-    )
+    '--region',
+    required=False,
+    type=str,
+    help=('The region to use for the query. If not specified, the default '),
+)
 @usage_lib.entrypoint
-def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: Optional[str]):  # pylint: disable=redefined-builtin
+def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
+              region: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
     To show the detailed information of a GPU/TPU type (which clouds offer it,
@@ -2183,8 +2181,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: 
     # validation for the --region flag
     if region and (not cloud):
         raise click.UsageError(
-            "The --region flag is only valid when the --cloud flag is set."
-        )
+            'The --region flag is only valid when the --cloud flag is set.')
     service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and gpu_name is not None:
@@ -2202,9 +2199,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: 
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(gpus_only=True,
-                                                             clouds=cloud,
-                                                             region_filter=region,)
+            result = service_catalog.list_accelerator_counts(
+                gpus_only=True,
+                clouds=cloud,
+                region_filter=region,
+            )
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -2277,8 +2276,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str], region: 
                 accelerator_table.add_row([
                     item.accelerator_name, item.accelerator_count, item.cloud,
                     instance_type_str, cpu_str, mem_str, price_str,
-                    spot_price_str,
-                    region_str
+                    spot_price_str, region_str
                 ])
 
             if i != 0:

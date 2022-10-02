@@ -256,8 +256,8 @@ def list_accelerators(
     case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter, region_filter,
-                                            case_sensitive)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
+                                            region_filter, case_sensitive)
 
     a100_infos = results.get('A100', None)
     if a100_infos is None:

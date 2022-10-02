@@ -256,7 +256,9 @@ def list_accelerators_impl(
                                                    case=case_sensitive,
                                                    regex=True)]
     if region_filter is not None:
-        df = df[df['Region'].str.contains(region_filter, case=case_sensitive, regex=True)]
+        df = df[df['Region'].str.contains(region_filter,
+                                          case=case_sensitive,
+                                          regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     grouped = df.groupby('AcceleratorName')
 
