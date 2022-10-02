@@ -128,6 +128,7 @@ class SpotUserCancelledError(Exception):
     """Raised when a spot user cancels the job."""
     pass
 
+
 class InvalidClusterNameError(Exception):
     """Raised when the cluster name is invalid."""
     pass
