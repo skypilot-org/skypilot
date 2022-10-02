@@ -279,14 +279,15 @@ def queue(cluster_name: str,
     handle = _check_cluster_available(cluster_name, 'getting the job queue')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    returncode, jobs_json, stderr = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True)
+    returncode, jobs_payload, stderr = backend.run_on_head(handle,
+                                                           code,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
     if returncode != 0:
-        raise RuntimeError(f'{jobs_json + stderr}\n{colorama.Fore.RED}'
+        raise RuntimeError(f'{jobs_payload + stderr}\n{colorama.Fore.RED}'
                            f'Failed to get job queue on cluster {cluster_name}.'
                            f'{colorama.Style.RESET_ALL}')
-    jobs = job_lib.load_job_queue(jobs_json)
+    jobs = job_lib.load_job_queue(jobs_payload)
     return jobs
 
 
@@ -483,16 +484,19 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     code = spot.SpotCodeGen.get_job_table()
-    returncode, job_table_json, stderr = backend.run_on_head(
-        handle, code, require_outputs=True, stream_logs=False)
+    returncode, job_table_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
     try:
         subprocess_utils.handle_returncode(
-            returncode, code, 'Failed to fetch managed job statuses',
-            job_table_json + stderr)
+            returncode, code, 'Failed to fetch managed job statuses', stderr)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    jobs = spot.load_spot_job_queue(job_table_json)
+    jobs = spot.load_spot_job_queue(job_table_payload)
     return jobs
 
 

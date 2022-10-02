@@ -838,7 +838,8 @@ def wait_until_ray_cluster_ready(
             rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
                                             stream_logs=False,
-                                            require_outputs=True)
+                                            require_outputs=True,
+                                            separate_stderr=True)
             subprocess_utils.handle_returncode(
                 rc, 'ray status', 'Failed to run ray status on head node.',
                 stderr)
