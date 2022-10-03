@@ -314,6 +314,7 @@ class SSHCommandRunner:
                 f'{self.ssh_user}@{self.ip}:{source!r}',
                 f'{target!r}',
             ])
+
         command = ' '.join(rsync_command)
         returncode, _, stderr = log_lib.run_with_log(command,
                                                      log_path=log_path,
