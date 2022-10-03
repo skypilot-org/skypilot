@@ -245,7 +245,7 @@ def path_size_megabytes(path: str) -> int:
         subprocess.check_output(
             f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
             f'{command_runner.RSYNC_FILTER_OPTION} '
-            f'{git_exclude_filter} --dry-run "{path}"',
+            f'{git_exclude_filter} --dry-run {path!r}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
