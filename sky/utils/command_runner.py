@@ -306,16 +306,15 @@ class SSHCommandRunner:
         rsync_command.append(f'-e "ssh {ssh_options}"')
         if up:
             rsync_command.extend([
-                source,
-                f'{self.ssh_user}@{self.ip}:{target}',
+                f'"{source}"',
+                f'{self.ssh_user}@{self.ip}:"{target}"',
             ])
         else:
             rsync_command.extend([
-                f'{self.ssh_user}@{self.ip}:{source}',
-                target,
+                f'{self.ssh_user}@{self.ip}:"{source}"',
+                f'"{target}"',
             ])
         command = ' '.join(rsync_command)
-
         returncode, _, stderr = log_lib.run_with_log(command,
                                                      log_path=log_path,
                                                      stream_logs=stream_logs,
