@@ -27,6 +27,11 @@ setup: |
 
   {{gcloud_installation_commands}}
 
+  # Internal: disable logging for manually logging into the spot controller for debugging.
+  {% if is_dev %}
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
+
 run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \

@@ -1187,11 +1187,19 @@ class RetryingVmProvisioner(object):
                         'Retrying head node provisioning due to head fetching '
                         'timeout.')
                     return True
+
+            if isinstance(to_provision_cloud, clouds.GCP):
+                if ('Quota exceeded for quota metric \'List requests\' and '
+                        'limit \'List requests per minute\'' in stderr):
+                    logger.info(
+                        'Retrying due to list request rate limit exceeded.')
+                    return True
+
             if ('Processing file mounts' in stdout and
                     'Running setup commands' not in stdout and
                     'Failed to setup head node.' in stderr):
                 logger.info(
-                    'Retrying sky runtime setup due to ssh connection issue.')
+                    'Retrying runtime setup due to ssh connection issue.')
                 return True
 
             if ('ConnectionResetError: [Errno 54] Connection reset by peer'
@@ -1202,9 +1210,18 @@ class RetryingVmProvisioner(object):
 
         retry_cnt = 0
         ray_up_return_value = None
+        # 5 seconds to 180 seconds. We need backoff for e.g., rate limit per
+        # minute errors.
+        backoff = common_utils.Backoff(initial_backoff=5,
+                                       max_backoff_factor=180 // 5)
         while (retry_cnt < _MAX_RAY_UP_RETRY and
                need_ray_up(ray_up_return_value)):
             retry_cnt += 1
+            if retry_cnt > 1:
+                sleep = backoff.current_backoff()
+                logger.info(
+                    'Retrying launching in {:.1f} seconds.'.format(sleep))
+                time.sleep(sleep)
             ray_up_return_value = ray_up()
 
         assert ray_up_return_value is not None
@@ -1672,11 +1689,11 @@ class CloudVmRayBackend(backends.Backend):
                 # RetryingVmProvisioner will retry within a cloud's regions
                 # first (if a region is not explicitly requested), then
                 # optionally retry on all other clouds (if
-                # backend.register_info() has been called).
-                # After this "round" of optimization across clouds, provisioning
-                # may still have not succeeded. This while loop will then kick
-                # in if retry_until_up is set, which will kick off new "rounds"
-                # of optimization infinitely.
+                # backend.register_info() has been called).  After this "round"
+                # of optimization across clouds, provisioning may still have
+                # not succeeded. This while loop will then kick in if
+                # retry_until_up is set, which will kick off new "rounds" of
+                # optimization infinitely.
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                                         self._optimize_target,
@@ -2483,6 +2500,9 @@ class CloudVmRayBackend(backends.Backend):
                 with backend_utils.safe_console_status(
                         f'[bold cyan]{teardown_verb} '
                         f'[green]{cluster_name}'):
+                    # FIXME(zongheng): support retries. This call can fail for
+                    # example due to GCP returning list requests per limit
+                    # exceeded.
                     returncode, stdout, stderr = log_lib.run_with_log(
                         ['ray', 'down', '-y', f.name],
                         log_abs_path,

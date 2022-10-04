@@ -15,7 +15,6 @@ Current task launcher:
 import enum
 import tempfile
 import os
-import time
 from typing import Any, List, Optional
 
 import colorama
@@ -226,18 +225,17 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        # UX: print live clusters to make users aware (to save costs).
-        # Needed because this finally doesn't always get executed on errors.
-        # Disable the usage collection for this status command.
-        env = dict(os.environ,
-                   **{env_options.Options.DISABLE_LOGGING.value: '1'})
-        if cluster_name == spot.SPOT_CONTROLLER_NAME:
-            # For spot controller task, it requires a while to have the
-            # managed spot status shown in the status table.
-            time.sleep(0.5)
-            subprocess_utils.run(
-                f'sky spot status | head -n {_MAX_SPOT_JOB_LENGTH}')
-        else:
+        if cluster_name != spot.SPOT_CONTROLLER_NAME:
+            # UX: print live clusters to make users aware (to save costs).
+            #
+            # Don't print if this job is launched by the spot controller,
+            # because spot jobs are serverless, there can be many of them, and
+            # users tend to continuously monitor spot jobs using `sky spot
+            # status`.
+            #
+            # Disable the usage collection for this status command.
+            env = dict(os.environ,
+                       **{env_options.Options.DISABLE_LOGGING.value: '1'})
             subprocess_utils.run('sky status', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
@@ -370,11 +368,8 @@ def spot_launch(
 
     change_default_value = dict()
     if not resources.use_spot_specified:
-        logger.info('Field use_spot not specified; defaulting to True.')
         change_default_value['use_spot'] = True
     if resources.spot_recovery is None:
-        logger.info('No spot recovery strategy specified; defaulting to '
-                    f'{spot.SPOT_DEFAULT_STRATEGY}.')
         change_default_value['spot_recovery'] = spot.SPOT_DEFAULT_STRATEGY
 
     new_resources = resources.copy(**change_default_value)
