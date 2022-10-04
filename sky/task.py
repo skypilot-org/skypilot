@@ -618,6 +618,8 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
             if (target == constants.SKY_REMOTE_WORKDIR and
                     self.workdir is not None):
                 with ux_utils.print_exception_no_traceback():
