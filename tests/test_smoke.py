@@ -282,7 +282,7 @@ def test_job_queue():
     test = Test(
         'job_queue',
         [
-            f'sky launch --cloud gcp -y -c {name} examples/job_queue/cluster.yaml',
+            f'sky launch -y -c {name} examples/job_queue/cluster.yaml',
             f'sky exec {name} -d examples/job_queue/job.yaml',
             f'sky exec {name} -d examples/job_queue/job.yaml',
             f'sky exec {name} -d examples/job_queue/job.yaml',
@@ -299,7 +299,7 @@ def test_n_node_job_queue():
     test = Test(
         'job_queue_multinode',
         [
-            f'sky launch --cloud gcp -y -c {name} examples/job_queue/cluster_multinode.yaml',
+            f'sky launch -y -c {name} examples/job_queue/cluster_multinode.yaml',
             f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
             f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
             f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
