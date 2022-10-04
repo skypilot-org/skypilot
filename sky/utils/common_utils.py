@@ -4,22 +4,38 @@ import functools
 import getpass
 import inspect
 import hashlib
+import json
 import random
 import os
+import re
 import socket
 import sys
 import time
+from typing import Dict, List, Union
 import yaml
 
 from sky import sky_logging
+
+_USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+
+_PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
+_PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
 
 
 def get_user_hash():
     """Returns a unique user-machine specific hash as a user id."""
+    if os.path.exists(_USER_HASH_FILE):
+        with open(_USER_HASH_FILE, 'r') as f:
+            return f.read()
+
     hash_str = user_and_hostname_hash()
-    return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
+    with open(_USER_HASH_FILE, 'w') as f:
+        f.write(user_hash)
+    return user_hash
 
 
 class Backoff:
@@ -189,3 +205,31 @@ def retry(method, max_retries=3, initial_backoff=1):
                     raise
 
     return method_with_retries
+
+
+def encode_payload(payload: Union[List, Dict]) -> str:
+    """Encode a payload to make it more robust for parsing.
+
+    Args:
+        payload: A dict or list to be encoded.
+
+    Returns:
+        A string that is encoded from the payload.
+    """
+    payload_str = json.dumps(payload)
+    payload_str = _PAYLOAD_STR.format(payload_str)
+    return payload_str
+
+
+def decode_payload(payload_str: str) -> Union[List, Dict]:
+    """Decode a payload string.
+
+    Args:
+        payload_str: A string that is encoded from a payload.
+
+    Returns:
+        A dict or list that is decoded from the payload string.
+    """
+    payload_str = _PAYLOAD_PATTERN.match(payload_str).group(1)
+    payload = json.loads(payload_str)
+    return payload

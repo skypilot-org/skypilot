@@ -1351,10 +1351,9 @@ class RetryingVmProvisioner(object):
                     # change the cloud assignment.
                     backend_utils.check_cluster_name_is_valid(
                         cluster_name, to_provision.cloud)
-                except ValueError as value_error:
+                except exceptions.InvalidClusterNameError as e:
                     # Let failover below handle this (i.e., block this cloud).
-                    raise exceptions.ResourcesUnavailableError(
-                        str(value_error)) from value_error
+                    raise exceptions.ResourcesUnavailableError(str(e)) from e
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1432,7 +1431,7 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
-        _VERSION = 1
+        _VERSION = 2
 
         def __init__(self,
                      *,
@@ -1446,7 +1445,8 @@ class CloudVmRayBackend(backends.Backend):
                      tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
-            self.cluster_yaml = cluster_yaml
+            self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
+                                                      '~', 1)
             self.head_ip = head_ip
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
@@ -1530,10 +1530,19 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
+        @property
+        def cluster_yaml(self):
+            return os.path.expanduser(self._cluster_yaml)
+
         def __setstate__(self, state):
+            self._version = self._VERSION
+
             version = state.pop('_version', None)
             if version is None:
+                version = -1
                 state.pop('cluster_region', None)
+            if version < 2:
+                state['_cluster_yaml'] = state.pop('cluster_yaml')
 
             self.__dict__.update(state)
             self._update_cluster_region()
@@ -2105,12 +2114,12 @@ class CloudVmRayBackend(backends.Backend):
         returncode, job_id_str, stderr = self.run_on_head(handle,
                                                           code,
                                                           stream_logs=False,
-                                                          require_outputs=True)
+                                                          require_outputs=True,
+                                                          separate_stderr=True)
         # TODO(zhwu): this sometimes will unexpectedly fail, we can add
         # retry for this, after we figure out the reason.
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to fetch job id.',
-                                           job_id_str + stderr)
+                                           'Failed to fetch job id.', stderr)
         try:
             job_id_match = _JOB_ID_PATTERN.search(job_id_str)
             if job_id_match is not None:
@@ -2213,14 +2222,14 @@ class CloudVmRayBackend(backends.Backend):
         stream_logs: bool = True
     ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
-        # All error messages should have been redirected to stdout.
-        returncode, stdout, _ = self.run_on_head(handle,
-                                                 code,
-                                                 stream_logs=stream_logs,
-                                                 require_outputs=True)
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      stream_logs=stream_logs,
+                                                      require_outputs=True,
+                                                      separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
-                                           'Failed to get job status.', stdout)
-        statuses = job_lib.load_statuses_json(stdout)
+                                           'Failed to get job status.', stderr)
+        statuses = job_lib.load_statuses_payload(stdout)
         return statuses
 
     def cancel_jobs(self, handle: ResourceHandle, jobs: Optional[List[int]]):
@@ -2248,10 +2257,14 @@ class CloudVmRayBackend(backends.Backend):
         """
         code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
         returncode, run_timestamps, stderr = self.run_on_head(
-            handle, code, stream_logs=False, require_outputs=True)
+            handle,
+            code,
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = json.loads(run_timestamps)
+        run_timestamps = common_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -2604,6 +2617,7 @@ class CloudVmRayBackend(backends.Backend):
         NON_INTERACTIVE,
         under_remote_workdir: bool = False,
         require_outputs: bool = False,
+        separate_stderr: bool = False,
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
@@ -2624,6 +2638,7 @@ class CloudVmRayBackend(backends.Backend):
             stream_logs=stream_logs,
             ssh_mode=ssh_mode,
             require_outputs=require_outputs,
+            separate_stderr=separate_stderr,
             **kwargs,
         )
 

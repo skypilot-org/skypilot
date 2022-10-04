@@ -412,6 +412,7 @@ class SSHConfigHelper(object):
             config = ['\n']
             with open(config_path, 'w') as f:
                 f.writelines(config)
+            os.chmod(config_path, 0o644)
 
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
                                             username, key_path)
@@ -837,7 +838,8 @@ def wait_until_ray_cluster_ready(
             rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
                                             stream_logs=False,
-                                            require_outputs=True)
+                                            require_outputs=True,
+                                            separate_stderr=True)
             subprocess_utils.handle_returncode(
                 rc, 'ray status', 'Failed to run ray status on head node.',
                 stderr)
@@ -1821,7 +1823,7 @@ def check_cluster_name_is_valid(cluster_name: str,
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.InvalidClusterNameError(
                 f'Cluster name "{cluster_name}" is invalid; '
                 f'ensure it is fully matched by regex: {valid_regex}')
     if isinstance(cloud, clouds.GCP):
@@ -1829,10 +1831,10 @@ def check_cluster_name_is_valid(cluster_name: str,
         # clouds.
         if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP}'
-                    ' chars.')
+                raise exceptions.InvalidClusterNameError(
+                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
+                    f'chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP} '
+                    'chars.')
 
 
 def check_cluster_name_not_reserved(
