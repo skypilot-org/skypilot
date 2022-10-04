@@ -98,7 +98,8 @@ class GcsCloudStorage(CloudStorage):
     # the installation logic here.
     _GET_GSUTIL = gcp.GCLOUD_INSTALLATION_COMMAND
 
-    _GSUTIL = 'gsutil'
+    _GSUTIL = ('GOOGLE_APPLICATION_CREDENTIALS='
+               f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} gsutil')
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.

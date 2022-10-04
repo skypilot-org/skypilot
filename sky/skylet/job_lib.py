@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 
 import filelock
 
-from sky import constants
 from sky import sky_logging
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import db_utils

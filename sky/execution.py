@@ -12,7 +12,9 @@ Current task launcher:
 
   - ray exec + each task's commands
 """
+import copy
 import enum
+import getpass
 import tempfile
 import os
 from typing import Any, List, Optional
@@ -26,11 +28,13 @@ from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky import spot
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.data import storage
+from sky.data import storage as storage_lib
 from sky.usage import usage_lib
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import env_options, timeline
 from sky.utils import subprocess_utils
@@ -179,7 +183,7 @@ def _execute(
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
-        task.add_storage_mounts()
+        task.sync_storage_mounts()
 
     try:
         if stages is None or Stage.PROVISION in stages:
@@ -381,54 +385,7 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         return
 
-    # TODO(zhwu): Refactor the Task (as Resources), so that we can enforce the
-    # following validations.
-    # Check the file mounts in the task.
-    # Disallow all local file mounts (copy mounts).
-    if task.workdir is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Workdir is currently not allowed for managed spot jobs.\n'
-                'Hint: use Storage to auto-upload the workdir to a cloud '
-                'bucket.')
-    copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts:
-        local_sources = '\t' + '\n\t'.join(
-            src for _, src in copy_mounts.items())
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                'Local file mounts are currently not allowed for managed spot '
-                f'jobs.\nFound local source paths:\n{local_sources}\nHint: use '
-                'Storage to auto-upload local files to a cloud bucket.')
-
-    # Copy the local source to a bucket. The task will not be executed locally,
-    # so we need to copy the files to the bucket manually here before sending to
-    # the remote spot controller.
-    with backend_utils.suppress_output():
-        task.add_storage_mounts()
-
-    # Replace the source field that is local path in all storage_mounts with
-    # bucket URI and remove the name field.
-    for storage_obj in task.storage_mounts.values():
-        if (storage_obj.source is not None and
-                not data_utils.is_cloud_store_url(storage_obj.source)):
-            # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the storage mount can work on the spot
-            # controller.
-            store_types = list(storage_obj.stores.keys())
-            assert len(store_types) == 1, (
-                'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            if store_type == storage.StoreType.S3:
-                storage_obj.source = f's3://{storage_obj.name}'
-            elif store_type == storage.StoreType.GCS:
-                storage_obj.source = f'gs://{storage_obj.name}'
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        f'Unsupported store type: {store_type}')
-            storage_obj.name = None
-            storage_obj.force_delete = True
+    task = _translate_local_file_mounts(task)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
@@ -450,7 +407,7 @@ def spot_launch(
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         with sky.Dag() as spot_dag:
-            controller_task = sky.Task.from_yaml(yaml_path)
+            controller_task = task_lib.Task.from_yaml(yaml_path)
             controller_task.spot_task = task
             assert len(controller_task.resources) == 1
         print(f'{colorama.Fore.YELLOW}'
@@ -466,3 +423,153 @@ def spot_launch(
             SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
             retry_until_up=True,
         )
+
+
+def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
+    # ================================================================
+    # Translate the workdir and local file mounts to cloud file mounts.
+    # ================================================================
+    task = copy.deepcopy(task)
+    run_id = common_utils.get_run_id()[:8]
+    original_file_mounts = task.file_mounts if task.file_mounts else {}
+    original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
+
+    # Step 1: Translate the workdir to SkyPilot storage.
+    logger.info(
+        f'{colorama.Fore.YELLOW}Translating file_mounts with local '
+        f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+    new_storage_mounts = dict()
+    if task.workdir is not None:
+        bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
+            username=getpass.getuser(), id=run_id)
+        workdir = task.workdir
+        task.workdir = None
+        if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
+                constants.SKY_REMOTE_WORKDIR in original_storage_mounts):
+            raise ValueError(
+                f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
+                'workdir and file_mounts contains it as the target.')
+        new_storage_mounts[
+            constants.
+            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
+                'name': bucket_name,
+                'source': workdir,
+                'persistent': False,
+                'mode': 'COPY',
+            })
+        # Check of the existence of the workdir in file_mounts is done in
+        # the task construction.
+        logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
+                    f'{bucket_name!r}.')
+
+    # Step 2: Translate the local file mounts with folder in src to SkyPilot
+    # storage.
+    # TODO(zhwu): Optimize this by:
+    # 1. Use the same bucket for all the mounts.
+    # 2. When the src is the same, use the same bucket.
+    copy_mounts = task.get_local_to_remote_file_mounts()
+    if copy_mounts is None:
+        copy_mounts = {}
+    copy_mounts_with_file_in_src = dict()
+    for i, (dst, src) in enumerate(copy_mounts.items()):
+        task.file_mounts.pop(dst)
+        if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
+            copy_mounts_with_file_in_src[dst] = src
+            continue
+        bucket_name = spot.constants.SPOT_FM_BUCKET_NAME.format(
+            username=getpass.getuser(),
+            id=f'{run_id}-{i}',
+        )
+        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
+            'name': bucket_name,
+            'source': src,
+            'persistent': False,
+            'mode': 'COPY',
+        })
+        logger.info(
+            f'Folder in local file mount {src!r} will be synced to SkyPilot '
+            f'storage {bucket_name}.')
+
+    # Step 3: Translate local file mounts with file in src to SkyPilot storage.
+    # Hard link the files in src to a temporary directory, and upload folder.
+    original_storage_mounts = {}
+    if task.storage_mounts is not None:
+        original_storage_mounts = task.storage_mounts
+    local_fm_path = os.path.join(
+        tempfile.gettempdir(),
+        spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
+    os.makedirs(local_fm_path, exist_ok=True)
+    file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
+        username=getpass.getuser(), id=run_id)
+    if copy_mounts_with_file_in_src:
+        src_to_file_id = dict()
+        for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
+            src_to_file_id[src] = i
+            os.link(os.path.abspath(os.path.expanduser(src)),
+                    os.path.join(local_fm_path, f'file-{i}'))
+
+        new_storage_mounts[
+            spot.constants.
+            SPOT_FM_REMOTE_TMP_DIR] = storage_lib.Storage.from_yaml_config({
+                'name': file_bucket_name,
+                'source': local_fm_path,
+                'persistent': False,
+                'mode': 'MOUNT',
+            })
+        if spot.constants.SPOT_FM_REMOTE_TMP_DIR in original_storage_mounts:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Failed to translate file mounts, due to the default '
+                    f'destination {spot.constants.SPOT_FM_REMOTE_TMP_DIR} '
+                    'being taken.')
+        sources = list(src_to_file_id.keys())
+        sources_str = '\n\t'.join(sources)
+        logger.info('Source files in file_mounts will be synced to '
+                    f'cloud storage {bucket_name}:'
+                    f'\n\t{sources_str}')
+    task.update_storage_mounts(new_storage_mounts)
+
+    # Step 4: Upload storage from sources
+    # Upload the local source to a bucket. The task will not be executed
+    # locally, so we need to upload the files/folders to the bucket manually
+    # here before sending the task to the remote spot controller.
+    logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
+                f'{colorama.Style.RESET_ALL} See sky storage ls')
+    task.sync_storage_mounts()
+
+    # Step 5: Add the file download into the file mounts, such as
+    #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
+    new_file_mounts = dict()
+    for dst, src in copy_mounts_with_file_in_src.items():
+        storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
+        store_type = list(storage.stores.keys())[0]
+        store_prefix = storage_lib.get_store_prefix(store_type)
+        bucket_url = store_prefix + file_bucket_name
+        file_id = src_to_file_id[src]
+        new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
+    task.update_file_mounts(new_file_mounts)
+
+    # Step 6: Replace the source field that is local path in all storage_mounts
+    # with bucket URI and remove the name field.
+    for storage_obj in task.storage_mounts.values():
+        if (storage_obj.source is not None and
+                not data_utils.is_cloud_store_url(storage_obj.source)):
+            # Need to replace the local path with bucket URI, and remove the
+            # name field, so that the storage mount can work on the spot
+            # controller.
+            store_types = list(storage_obj.stores.keys())
+            assert len(store_types) == 1, (
+                'We only support one store type for now.', storage_obj.stores)
+            store_type = store_types[0]
+            if store_type == storage_lib.StoreType.S3:
+                storage_obj.source = f's3://{storage_obj.name}'
+            elif store_type == storage_lib.StoreType.GCS:
+                storage_obj.source = f'gs://{storage_obj.name}'
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        f'Unsupported store type: {store_type}')
+            storage_obj.name = None
+            storage_obj.force_delete = True
+
+    return task

@@ -22,7 +22,6 @@ import sky
 from sky import backends
 from sky import clouds
 from sky import cloud_stores
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import resources as resources_lib
@@ -36,6 +35,7 @@ from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
 from sky.skylet import autostop_lib
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
@@ -54,7 +54,7 @@ OptimizeTarget = optimizer.OptimizeTarget
 Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
-SKY_REMOTE_WORKDIR = backend_utils.SKY_REMOTE_WORKDIR
+SKY_REMOTE_WORKDIR = constants.SKY_REMOTE_WORKDIR
 
 logger = sky_logging.init_logger(__name__)
 
@@ -176,10 +176,11 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
+            from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
 
-            SKY_REMOTE_WORKDIR = {log_lib.SKY_REMOTE_WORKDIR!r}
+            SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
             job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init(address={ray_address!r}, namespace='__sky__{job_id}__', log_to_driver=True)

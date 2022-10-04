@@ -19,7 +19,6 @@ from sky.spot.spot_utils import load_spot_job_queue
 
 pathlib.Path(SPOT_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
                                                               exist_ok=True)
-
 __all__ = [
     'SpotController',
     'SPOT_STRATEGIES',
