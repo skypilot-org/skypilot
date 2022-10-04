@@ -208,11 +208,12 @@ def setup_gcp_authentication(config):
             'additional authentication steps.')
         # Read the account information from the credential file, since the user
         # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIGURE_PATH)
+        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
         sky_backup_config_path = os.path.expanduser(
-            clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH)
-        assert os.path.exists(sky_backup_config_path
-                             ), 'GCP credential backup file does not exist.'
+            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+        assert os.path.exists(sky_backup_config_path), (
+            'GCP credential backup file '
+            f'{sky_backup_config_path!r} does not exist.')
 
         with open(sky_backup_config_path, 'r') as infile:
             for line in infile:

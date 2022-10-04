@@ -41,7 +41,7 @@ def _make_resources(
 
     config_file_backup = tempfile.NamedTemporaryFile(
         prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIGURE_SKY_BACKUP_PATH',
+    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
                         config_file_backup.name)
 
     # Should create Resources here, since it uses the enabled clouds.
