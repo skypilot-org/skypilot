@@ -8,16 +8,16 @@
 ![pytest](https://github.com/skypilot-org/skypilot/actions/workflows/pytest.yml/badge.svg)
 [![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
 
-SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud through a unified interface. 
+SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
 Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
 
 _Ease of use & productivity_
 * **Run existing projects on the cloud** with zero code changes
+* Use a **unified interface** to run on any cloud to avoid lock-in (currently AWS, Azure, GCP)
 * **Easily manage jobs** across multiple clusters
 * **Automatic fail-over** to find scarce resources (GPUs) across regions and clouds
 * **Store datasets on the cloud** and access them like you would on a local file system 
-* **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
 
 _Cost saving_
 * Run jobs on **spot instances** with **automatic recovery** from preemptions
@@ -35,9 +35,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 A SkyPilot task is specified as a YAML file containing: the resource requirements, data to be synced, setup commands, and the task commands. 
 
-Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html), the task can be launched on any available cloud. We currently support AWS, Azure, GCP.
-
-Example:
+Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html), the task can be launched on any available cloud. Example:
 
 ```yaml
 # my_task.yaml
@@ -101,4 +99,4 @@ We are excited to hear your feedback! SkyPilot has two channels for engaging wit
 We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
 
 <!-- Footnote -->
-[^1]: While SkyPilot is currently targeted at machine learning workloads, it can also support and has been used for other general workloads. We're excited to hear about your use case and how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
+[^1]: While SkyPilot is currently targeted at machine learning workloads, it supports and has been used for other general workloads. We're excited to hear about your use case and how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
