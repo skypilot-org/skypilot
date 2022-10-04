@@ -5,6 +5,8 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import boto3
+
 from sky import clouds
 from sky.clouds import service_catalog
 
@@ -314,6 +316,18 @@ class AWS(clouds.Cloud):
             elif line.startswith('secret_key'):
                 if '<not set>' not in line:
                     secret_key_ok = True
+
+        # Checks if AWS credentials are valid and can connect to AWS services.
+        # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
+        sts = boto3.client('sts')
+        try:
+            sts.get_caller_identity()
+        except boto3.exceptions.ClientError:
+            return False, (
+                'AWS credentials are not set properly.'
+                ' Make sure that the access and secret keys are correct'
+                ' in `~/.aws/credentials`.')
+
         if access_key_ok and secret_key_ok:
             return True, None
         return False, 'AWS credentials is not set.' + help_str
