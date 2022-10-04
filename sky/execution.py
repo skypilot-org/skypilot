@@ -463,6 +463,8 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # 1. Use the same bucket for all the mounts.
     # 2. When the src is the same, use the same bucket.
     copy_mounts = task.get_local_to_remote_file_mounts()
+    if copy_mounts is None:
+        copy_mounts = {}
     copy_mounts_with_file_in_src = dict()
     for i, (dst, src) in enumerate(copy_mounts.items()):
         task.file_mounts.pop(dst)
