@@ -14,9 +14,9 @@ Use the clouds **easily** and **cost effectively**, without needing cloud infra 
 
 _Ease of use & productivity_
 * **Run existing projects on the cloud** with zero code changes
-* Use a **unified interface** to run on any cloud to avoid lock-in (currently AWS, Azure, GCP)
-* **Easily manage jobs** across multiple clusters
-* **Automatic fail-over** to find scarce resources (GPUs) across regions and clouds
+* Use a **unified interface** to run on any cloud (currently AWS, Azure, GCP), without vendor lock-in 
+* **Manage and queue jobs** across multiple clusters
+* **Automatic failover** to find scarce resources (GPUs) across regions and clouds
 * **Store datasets on the cloud** and access them like you would on a local file system 
 
 _Cost saving_
