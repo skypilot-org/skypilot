@@ -33,6 +33,7 @@ setup: |
     source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \
     echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc)
 
+  # Internal: disable logging for manually logging into the spot controller for debugging.
   {% if is_dev %}
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}

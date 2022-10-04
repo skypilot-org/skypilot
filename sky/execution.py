@@ -224,10 +224,15 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        # UX: print live clusters to make users aware (to save costs).
-        # Needed because this finally doesn't always get executed on errors.
-        # Disable the usage collection for this status command.
         if cluster_name != spot.SPOT_CONTROLLER_NAME:
+            # UX: print live clusters to make users aware (to save costs).
+            #
+            # Don't print if this job is launched by the spot controller,
+            # because spot jobs are serverless, there can be many of them, and
+            # users tend to continuously monitor spot jobs using `sky spot
+            # status`.
+            #
+            # Disable the usage collection for this status command.
             env = dict(os.environ,
                        **{env_options.Options.DISABLE_LOGGING.value: '1'})
             subprocess_utils.run('sky status', env=env)
