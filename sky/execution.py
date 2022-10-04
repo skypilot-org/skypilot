@@ -429,7 +429,7 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
-    # Step 1: Translate the workdir SkyPilot storage.
+    # Step 1: Translate the workdir to SkyPilot storage.
     logger.info(
         f'{colorama.Fore.YELLOW}Translating file_mounts with local '
         f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')

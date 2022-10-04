@@ -530,7 +530,7 @@ class Task:
         return store_type
 
     def sync_storage_mounts(self) -> None:
-        """Adds storage mounts to the Task."""
+        """Syncs storage mounts: sync files/dirs to cloud storage."""
 
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
