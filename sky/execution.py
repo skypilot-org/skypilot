@@ -523,9 +523,9 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     task.update_storage_mounts(new_storage_mounts)
 
     # Step 4: Upload storage from sources
-    # Copy the local source to a bucket. The task will not be executed locally,
-    # so we need to copy the files to the bucket manually here before sending to
-    # the remote spot controller.
+    # Upload the local source to a bucket. The task will not be executed locally,
+    # so we need to upload the files/folders to the bucket manually here before
+    # sending the task to the remote spot controller.
     logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
                 f'{colorama.Style.RESET_ALL} See sky storage ls')
     task.sync_storage_mounts()
