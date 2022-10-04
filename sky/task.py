@@ -466,6 +466,8 @@ class Task:
             self.storage_mounts = None
             return self
         for target, _ in storage_mounts.items():
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
             if (target == constants.SKY_REMOTE_WORKDIR and
                     self.workdir is not None):
                 with ux_utils.print_exception_no_traceback():
