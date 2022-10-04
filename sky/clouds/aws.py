@@ -327,7 +327,7 @@ class AWS(clouds.Cloud):
                 return False, (
                     'AWS credentials are not set properly.'
                     ' Make sure that the access and secret keys are correct'
-                    ' in `~/.aws/credentials`.')
+                    ' in `~/.aws/credentials`.' + help_str)
             return True, None
         return False, 'AWS credentials are not set.' + help_str
 
