@@ -38,10 +38,12 @@ class SpotController:
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
-        self._task.env = self._task.env or {}
+        task_envs = self._task.envs or {}
         timestamp = self.backend.run_timestamp
         time_str = datetime.fromtimestamp(timestamp).strftime('%y%m%d%H%M%S')
-        self._task.env['SKY_SPOT_RUN_ID'] = f'{self._job_id}-{time_str}'
+        task_envs['SKYPILOT_SPOT_RUN_ID'] = f'{self._job_id}-{time_str}'
+        self._task.set_envs(task_envs)
+
 
         spot_state.set_submitted(
             self._job_id,
