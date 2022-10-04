@@ -252,7 +252,7 @@ class Resources:
         if self._cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cloud must be specified together with region/zone.')
+                    'Cloud must be specified when region/zone are specified.')
 
         # Validate whether region and zone exist in the catalog.
         self._cloud.validate_region_zone(region, zone)

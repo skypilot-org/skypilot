@@ -1740,7 +1740,7 @@ def get_clusters(
         yellow = colorama.Fore.YELLOW
         reset = colorama.Style.RESET_ALL
         logger.warning(f'{yellow}The following cluster{plural} terminated on '
-                       'the cloud and removed from Sky\'s cluster table: '
+                       'the cloud and removed from the cluster table: '
                        f'{cluster_str}{reset}')
     updated_records = [
         record for record in updated_records if record is not None
