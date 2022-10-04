@@ -33,6 +33,10 @@ setup: |
     source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \
     echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc)
 
+  {% if is_dev %}
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
+
 run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
