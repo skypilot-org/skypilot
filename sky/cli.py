@@ -334,6 +334,7 @@ _EXTRA_RESOURCES_OPTIONS = [
          'Passing "none" resets the config.')),
     click.option(
         '--instance-type',
+        '-t',
         required=False,
         type=str,
         help=('The instance type to use. If specified, overrides the '
@@ -604,6 +605,7 @@ def _launch_with_confirm(
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     retry_until_up: bool = False,
+    no_setup: bool = False,
     node_type: Optional[str] = None,
     is_local_cloud: Optional[bool] = False,
 ):
@@ -644,14 +646,17 @@ def _launch_with_confirm(
 
     if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
-        sky.launch(dag,
-                   dryrun=dryrun,
-                   stream_logs=True,
-                   cluster_name=cluster,
-                   detach_run=detach_run,
-                   backend=backend,
-                   idle_minutes_to_autostop=idle_minutes_to_autostop,
-                   retry_until_up=retry_until_up)
+        sky.launch(
+            dag,
+            dryrun=dryrun,
+            stream_logs=True,
+            cluster_name=cluster,
+            detach_run=detach_run,
+            backend=backend,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            retry_until_up=retry_until_up,
+            no_setup=no_setup,
+        )
 
 
 # TODO: skip installing ray to speed up provisioning.
@@ -942,7 +947,7 @@ def cli():
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 shell_complete=_complete_file_name)
@@ -1002,6 +1007,12 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--no-setup',
+              '-n',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip setup phase when (re-)launching cluster.')
 @usage_lib.entrypoint
 def launch(
     entrypoint: str,
@@ -1024,6 +1035,7 @@ def launch(
     idle_minutes_to_autostop: Optional[int],
     retry_until_up: bool,
     yes: bool,
+    no_setup: bool,
 ):
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
@@ -1072,6 +1084,7 @@ def launch(
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         retry_until_up=retry_until_up,
+        no_setup=no_setup,
         is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
 
 
@@ -1809,7 +1822,7 @@ def _terminate_or_stop_clusters(
                        f'{reserved_clusters_str} is not supported.')
                 if terminate:
                     msg += (
-                        '\nPlease specify --purge to force termination of the '
+                        '\nPlease specify --purge (-p) to force-terminate the '
                         'reserved cluster(s).')
                 raise click.UsageError(msg)
             if len(names) != 0:
