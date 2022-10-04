@@ -18,10 +18,10 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
-GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
+GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # Do not place the backup under the gcloud config directory, as ray
 # autoscaler can overwrite that directory on the remote nodes.
-GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
+GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
@@ -36,6 +36,8 @@ _IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
 _GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
 # Need to be run with /bin/bash
+# We factor out the installation logic to keep it align in both spot
+# controller and cloud stores.
 GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
@@ -46,7 +48,7 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
-    {{ cp {GCP_CONFIGURE_SKY_BACKUP_PATH} {GCP_CONFIGURE_PATH} > /dev/null 2>&1 || true; }} && \
+    {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
 
 
@@ -350,16 +352,15 @@ class GCP(clouds.Cloud):
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # Create a backup of the config_default file, as the original file can
         # be modified on the remote cluster by ray causing authentication
-        # problems. The backup file should be updated whenever the original file
-        # is not empty.
-        if (os.path.exists(os.path.expanduser(GCP_CONFIGURE_PATH)) and
-                os.path.getsize(os.path.expanduser(GCP_CONFIGURE_PATH)) > 0):
-            subprocess.run(
-                f'cp {GCP_CONFIGURE_PATH} {GCP_CONFIGURE_SKY_BACKUP_PATH}',
-                shell=True,
-                check=True)
-        elif not os.path.exists(
-                os.path.expanduser(GCP_CONFIGURE_SKY_BACKUP_PATH)):
+        # problems. The backup file will be updated to the remote cluster
+        # whenever the original file is not empty and will be applied
+        # appropriately on the remote cluster when neccessary.
+        if (os.path.exists(os.path.expanduser(GCP_CONFIG_PATH)) and
+                os.path.getsize(os.path.expanduser(GCP_CONFIG_PATH)) > 0):
+            subprocess.run(f'cp {GCP_CONFIG_PATH} {GCP_CONFIG_SKY_BACKUP_PATH}',
+                           shell=True,
+                           check=True)
+        elif not os.path.exists(os.path.expanduser(GCP_CONFIG_SKY_BACKUP_PATH)):
             raise RuntimeError(
                 'GCP credential file is empty. Please make sure you '
                 'have run: gcloud init')
@@ -371,8 +372,7 @@ class GCP(clouds.Cloud):
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
-        credentials[
-            GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
+        credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
     def instance_type_exists(self, instance_type):

@@ -94,6 +94,8 @@ class GcsCloudStorage(CloudStorage):
     # We use gsutil as a basic implementation.  One pro is that its -m
     # multi-threaded download is nice, which frees us from implementing
     # parellel workers on our end.
+    # The gsutil command is part of the Google Cloud SDK, and we reuse
+    # the installation logic here.
     _GET_GSUTIL = gcp.GCLOUD_INSTALLATION_COMMAND
 
     _GSUTIL = ('GOOGLE_APPLICATION_CREDENTIALS='
