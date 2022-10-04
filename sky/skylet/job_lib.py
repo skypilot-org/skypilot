@@ -604,8 +604,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_owner: str, job_id: Optional[int],
-                  spot_job_id: Optional[int]) -> str:
+    def tail_logs(cls,
+                  job_owner: str,
+                  job_id: Optional[int],
+                  spot_job_id: Optional[int],
+                  follow: bool = True) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
@@ -613,7 +616,7 @@ class JobLibCodeGen:
             (f'log_dir = os.path.join({constants.SKY_LOGS_DIRECTORY!r}, '
              'run_timestamp)'),
             (f'log_lib.tail_logs({job_owner!r},'
-             f'job_id, log_dir, {spot_job_id!r})'),
+             f'job_id, log_dir, {spot_job_id!r}, follow={follow})'),
         ]
         return cls._build(code)
 

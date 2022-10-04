@@ -1,7 +1,7 @@
 """Util constants/functions for the backends."""
 import contextlib
 import copy
-import datetime
+from datetime import datetime
 import difflib
 import enum
 import getpass
@@ -803,7 +803,12 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
 
 
 def get_run_timestamp() -> str:
-    return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+
+
+def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
+    return datetime.strptime(
+        run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
 
 
 @timeline.event

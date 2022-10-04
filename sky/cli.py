@@ -1328,6 +1328,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     default=False,
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
+@click.option('--follow/--no-follow',
+              is_flag=True,
+              default=True,
+              help='Follow the logs of the job. [default: --follow]')
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -1335,7 +1339,13 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
-def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
+def logs(
+    cluster: str,
+    job_ids: Tuple[str],
+    sync_down: bool,
+    status: bool,  # pylint: disable=redefined-outer-name
+    follow: bool,
+):
     """Tail the log of a job.
 
     If JOB_ID is not provided, the latest job on the cluster will be used.
@@ -1386,7 +1396,7 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id)
+    core.tail_logs(cluster, job_id, follow)
 
 
 @cli.command()
@@ -2682,11 +2692,16 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               required=False,
               type=str,
               help='Managed spot job name.')
+@click.option('--follow/--no-follow',
+              is_flag=True,
+              default=True,
+              show_default=True,
+              help='Follow the logs of the job. [default: --follow]')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def spot_logs(name: Optional[str], job_id: Optional[int]):
+def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
     """Tail the log of a managed spot job."""
-    core.spot_tail_logs(name=name, job_id=job_id)
+    core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
 
 
 # ==============================

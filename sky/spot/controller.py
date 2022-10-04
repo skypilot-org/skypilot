@@ -1,6 +1,5 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
-from datetime import datetime
 import pathlib
 import time
 import traceback
@@ -30,7 +29,6 @@ class SpotController:
         self._job_id = job_id
         self._task_name = pathlib.Path(task_yaml).stem
         self._task = sky.Task.from_yaml(task_yaml)
-        
 
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
@@ -39,11 +37,9 @@ class SpotController:
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
         task_envs = self._task.envs or {}
-        timestamp = self.backend.run_timestamp
-        time_str = datetime.fromtimestamp(timestamp).strftime('%y%m%d%H%M%S')
-        task_envs['SKYPILOT_SPOT_RUN_ID'] = f'{self._job_id}-{time_str}'
+        task_envs['SKYPILOT_SPOT_RUN_ID'] = (f'{self.backend.run_timestamp}'
+                                             f'_id-{self._job_id}')
         self._task.set_envs(task_envs)
-
 
         spot_state.set_submitted(
             self._job_id,

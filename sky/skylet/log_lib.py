@@ -363,7 +363,8 @@ def _follow_job_logs(file,
 def tail_logs(job_owner: str,
               job_id: int,
               log_dir: Optional[str],
-              spot_job_id: Optional[int] = None) -> None:
+              spot_job_id: Optional[int] = None,
+              follow: bool = True) -> None:
     """Tail the logs of a job."""
     job_str = f'job {job_id}'
     if spot_job_id is not None:
@@ -403,7 +404,9 @@ def tail_logs(job_owner: str,
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
 
-    if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
+    if follow and status in [
+            job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+    ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
         with open(log_path, 'r', newline='') as log_file:

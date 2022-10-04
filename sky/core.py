@@ -331,7 +331,7 @@ def cancel(cluster_name: str,
     backend.cancel_jobs(handle, job_ids)
 
 
-def tail_logs(cluster_name: str, job_id: Optional[str]):
+def tail_logs(cluster_name: str, job_id: Optional[str], follow: bool = True):
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
@@ -352,7 +352,7 @@ def tail_logs(cluster_name: str, job_id: Optional[str]):
           f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
           f'{colorama.Style.RESET_ALL}')
 
-    backend.tail_logs(handle, job_id)
+    backend.tail_logs(handle, job_id, follow=follow)
 
 
 def download_logs(
@@ -556,7 +556,7 @@ def spot_cancel(name: Optional[str] = None,
                 'Please specify the job ID instead of the job name.')
 
 
-def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
+def spot_tail_logs(name: Optional[str], job_id: Optional[int], follow: bool):
     """Tail logs of managed spot jobs.
 
     Please refer to the sky.cli.spot_logs for the document.
@@ -580,7 +580,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
         raise ValueError('Cannot specify both name and job_id.')
     backend = backend_utils.get_backend_from_handle(handle)
     # Stream the realtime logs
-    backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+    backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
 
 
 # ======================
