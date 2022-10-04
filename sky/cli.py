@@ -1093,7 +1093,11 @@ def launch(
                 required=True,
                 type=str,
                 shell_complete=_complete_cluster_name)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 @click.option('--detach-run',
               '-d',
               default=False,
@@ -2446,7 +2450,11 @@ def spot():
 
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
@@ -2731,7 +2739,11 @@ def bench():
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 @click.option('--benchmark',
               '-b',
               required=True,
