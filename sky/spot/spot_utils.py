@@ -250,8 +250,8 @@ def stream_logs_by_id(job_id: int) -> str:
                         f'(status: {job_status.value}).')
             break
         logger.info(
-            f'INFO: The return code is {returncode}. '
-            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            f'INFO: (Log streaming) Got return code {returncode}. Retrying '
+            f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot status again.

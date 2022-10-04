@@ -316,7 +316,7 @@ class GCP(clouds.Cloud):
                 'Run the following commands:\n    '
                 # Install the Google Cloud SDK:
                 '  $ pip install google-api-python-client\n    '
-                '  $ conda install -c conda-forge google-cloud-sdk\n    '
+                '  $ conda install -c conda-forge google-cloud-sdk -y\n    '
                 # This authenticates the CLI to make `gsutil` work:
                 '  $ gcloud init\n    '
                 # This will generate
