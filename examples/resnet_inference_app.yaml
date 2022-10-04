@@ -1,18 +1,14 @@
+# Runs ResNet in inference mode on the fake_imagenet dataset
+#
+# Usage:
+#   sky launch -c infer resnet_inference_app.yaml
+#   sky down infer
+
 name: resnet-inference
 
 resources:
-  cloud: aws
   accelerators:
     V100: 1
-
-inputs: {
-  s3://mluo-resnet-model-dir: 0.5,
-}
-
-
-outputs: {
-  resnet-model-dir: 0.1,
-}
 
 file_mounts:
   /tmp/resnet-model-dir: 
