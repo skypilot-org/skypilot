@@ -317,20 +317,19 @@ class AWS(clouds.Cloud):
                 if '<not set>' not in line:
                     secret_key_ok = True
 
-        # Checks if AWS credentials are valid and can connect to AWS services.
-        # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
-        sts = boto3.client('sts')
-        try:
-            sts.get_caller_identity()
-        except boto3.exceptions.ClientError:
-            return False, (
-                'AWS credentials are not set properly.'
-                ' Make sure that the access and secret keys are correct'
-                ' in `~/.aws/credentials`.')
-
         if access_key_ok and secret_key_ok:
+            # Checks if AWS credentials are valid and can connect to AWS services.
+            # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
+            sts = boto3.client('sts')
+            try:
+                sts.get_caller_identity()
+            except boto3.exceptions.ClientError:
+                return False, (
+                    'AWS credentials are not set properly.'
+                    ' Make sure that the access and secret keys are correct'
+                    ' in `~/.aws/credentials`.')
             return True, None
-        return False, 'AWS credentials is not set.' + help_str
+        return False, 'AWS credentials are not set.' + help_str
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
