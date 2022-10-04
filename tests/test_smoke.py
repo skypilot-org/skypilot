@@ -661,18 +661,18 @@ def test_spot_recovery():
             f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_SPOT_RUN_ID: $SKYPILOT_SPOT_RUN_ID; sleep 1000"  -y -d',
             'sleep 300',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky spot logs -n {name} 1 | grep SKYPILOT_SPOT_RUN_ID | cut -d: -f2); echo $RUN_ID',
+            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_SPOT_RUN_ID | cut -d: -f2); echo $RUN_ID',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-            f'aws ec2 describe-instances --region {region} '
-            f'--filters Name=tag:ray-cluster-name,Values={name}* '
-            f'--query Reservations[].Instances[].InstanceId '
-            '--output text)'),
+             f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
             'sleep 50',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
-            f'sky spot logs -n {name} 1 | grep SKYPILOT_SPOT_RUN_ID | greo "$RUN_ID"',
+            f'sky spot logs -n {name} --no-follow | grep SKYPILOT_SPOT_RUN_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
     )
