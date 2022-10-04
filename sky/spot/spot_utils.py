@@ -250,8 +250,8 @@ def stream_logs_by_id(job_id: int) -> str:
                         f'(status: {job_status.value}).')
             break
         logger.info(
-            f'INFO: The return code is {returncode}. '
-            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            f'INFO: (Log streaming) Got return code {returncode}. Retrying '
+            f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot status again.
@@ -321,7 +321,7 @@ def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     return jobs
 
 
-def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
+def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
     """Show all spot jobs."""
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',

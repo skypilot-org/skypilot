@@ -1,6 +1,7 @@
 """Constants for SkyPilot."""
 
 SKY_LOGS_DIRECTORY = '~/sky_logs'
+SKY_REMOTE_WORKDIR = '~/sky_workdir'
 SKY_REMOTE_RAY_VERSION = '1.13.0'
 
 # TODO(mluo): Make explicit `sky launch -c <name> ''` optional.

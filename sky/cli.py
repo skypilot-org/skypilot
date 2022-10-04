@@ -47,7 +47,6 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -59,6 +58,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
@@ -334,6 +334,7 @@ _EXTRA_RESOURCES_OPTIONS = [
          'Passing "none" resets the config.')),
     click.option(
         '--instance-type',
+        '-t',
         required=False,
         type=str,
         help=('The instance type to use. If specified, overrides the '
@@ -946,7 +947,7 @@ def cli():
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
                 shell_complete=_complete_file_name)
@@ -1092,7 +1093,11 @@ def launch(
                 required=True,
                 type=str,
                 shell_complete=_complete_cluster_name)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 @click.option('--detach-run',
               '-d',
               default=False,
@@ -1821,7 +1826,7 @@ def _terminate_or_stop_clusters(
                        f'{reserved_clusters_str} is not supported.')
                 if terminate:
                     msg += (
-                        '\nPlease specify --purge to force termination of the '
+                        '\nPlease specify --purge (-p) to force-terminate the '
                         'reserved cluster(s).')
                 raise click.UsageError(msg)
             if len(names) != 0:
@@ -2445,7 +2450,11 @@ def spot():
 
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
@@ -2730,7 +2739,11 @@ def bench():
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                shell_complete=_complete_file_name)
 @click.option('--benchmark',
               '-b',
               required=True,

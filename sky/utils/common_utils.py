@@ -11,6 +11,7 @@ import re
 import socket
 import sys
 import time
+import uuid
 from typing import Dict, List, Union
 import yaml
 
@@ -22,6 +23,21 @@ _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
+
+_run_id = None
+
+
+def get_run_id():
+    """Returns a unique run id for each 'run'.
+
+    A run is defined as the lifetime of a process that has imported `sky`
+    and has called its CLI or programmatic APIs. For example, two successive
+    `sky launch` are two runs.
+    """
+    global _run_id
+    if _run_id is None:
+        _run_id = str(uuid.uuid4())
+    return _run_id
 
 
 def get_user_hash():

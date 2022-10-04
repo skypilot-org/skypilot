@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import dag
 from sky import task
 from sky import backends
-from sky import constants
 from sky import data
 from sky import exceptions
 from sky import global_user_state
@@ -14,6 +13,7 @@ from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -464,6 +464,9 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot status --refresh'
     controller_status, handle = _is_spot_controller_up(stop_msg)
+
+    if controller_status is None:
+        return []
 
     if (refresh and controller_status in [
             global_user_state.ClusterStatus.STOPPED,

@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
 
+from sky import clouds
 from sky import sky_logging
 from sky.adaptors import aws, gcp
 from sky.utils import common_utils
@@ -29,11 +30,6 @@ logger = sky_logging.init_logger(__name__)
 
 MAX_TRIALS = 64
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
-
-GCP_CONFIGURE_PATH = '~/.config/gcloud/configurations/config_default'
-# Do not place the backup under the gcloud config directory, as ray
-# autoscaler can overwrite that directory on the remote nodes.
-GCP_CONFIGURE_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
 
 
 def generate_rsa_key_pair():
@@ -212,27 +208,13 @@ def setup_gcp_authentication(config):
             'additional authentication steps.')
         # Read the account information from the credential file, since the user
         # should be set according the account, when the oslogin is enabled.
-        config_path = os.path.expanduser(GCP_CONFIGURE_PATH)
+        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
         sky_backup_config_path = os.path.expanduser(
-            GCP_CONFIGURE_SKY_BACKUP_PATH)
-        if not os.path.exists(sky_backup_config_path):
-            if not os.path.exists(config_path):
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'GCP authentication failed, as the oslogin is enabled '
-                        f'but the file {config_path} is not found.')
+            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+        assert os.path.exists(sky_backup_config_path), (
+            'GCP credential backup file '
+            f'{sky_backup_config_path!r} does not exist.')
 
-            # Create a backup of the config_default file in the same folder (the
-            # folder will be uploaded by `sky launch`), as the original file can
-            # be modified on the remote cluster by ray causing failure of
-            # launching GCP cluster on a remote cluster.
-            subprocess.run(f'cp {config_path} {sky_backup_config_path}',
-                           shell=True,
-                           check=True)
-        new_file_mounts = config.get('file_mounts', {})
-        new_file_mounts[
-            GCP_CONFIGURE_SKY_BACKUP_PATH] = GCP_CONFIGURE_SKY_BACKUP_PATH
-        config['file_mounts'] = new_file_mounts
         with open(sky_backup_config_path, 'r') as infile:
             for line in infile:
                 if line.startswith('account'):
