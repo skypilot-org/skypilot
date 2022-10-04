@@ -33,7 +33,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 ## Example SkyPilot Task
 
-A SkyPilot task is specified as a YAML file containing: the resource requirements, data to be synced, setup commands, and the task commands. 
+A SkyPilot task is specified as a YAML file containing: resource requirements, data to be synced, setup commands, and the task commands. 
 
 Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html), the task can be launched on any available cloud. Example:
 
