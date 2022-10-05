@@ -1,4 +1,7 @@
 """Amazon Web Services."""
+
+# pylint: disable=import-outside-toplevel
+
 import json
 import os
 import subprocess
@@ -273,6 +276,12 @@ class AWS(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        try:
+            import boto3
+            import botocore
+        except ImportError:
+            raise ImportError('Fail to import dependencies for AWS.'
+                              'Try pip install "skypilot[aws]"') from None
         help_str = (
             ' Run the following commands:'
             '\n      $ pip install boto3'
@@ -285,8 +294,10 @@ class AWS(clouds.Cloud):
         # `aws configure list` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
             return (False, '~/.aws/credentials does not exist.' + help_str)
+
+        # Checks if the AWS CLI is installed properly
         try:
-            output = _run_output('aws configure list')
+            _run_output('aws configure list')
         except subprocess.CalledProcessError:
             return False, (
                 'AWS CLI is not installed properly.'
@@ -295,28 +306,21 @@ class AWS(clouds.Cloud):
                 # change this to `pip install sky[aws]`
                 '\n     $ pip install .[aws]'
                 '\n   Credentials may also need to be set.' + help_str)
-        # Configured correctly, the AWS output should look like this:
-        #   ...
-        #   access_key     ******************** shared-credentials-file
-        #   secret_key     ******************** shared-credentials-file
-        #   ...
-        # Otherwise, one or both keys will show as '<not set>'.
-        lines = output.split('\n')
-        if len(lines) < 2:
-            return False, 'AWS CLI output invalid.'
-        access_key_ok = False
-        secret_key_ok = False
-        for line in lines[2:]:
-            line = line.lstrip()
-            if line.startswith('access_key'):
-                if '<not set>' not in line:
-                    access_key_ok = True
-            elif line.startswith('secret_key'):
-                if '<not set>' not in line:
-                    secret_key_ok = True
-        if access_key_ok and secret_key_ok:
-            return True, None
-        return False, 'AWS credentials is not set.' + help_str
+
+        # Checks if AWS credentials 1) exist and 2) are valid.
+        # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
+        sts = boto3.client('sts')
+        try:
+            sts.get_caller_identity()
+        except botocore.exceptions.NoCredentialsError:
+            return False, 'AWS credentials are not set.' + help_str
+        except botocore.exceptions.ClientError:
+            return False, (
+                'Failed to access AWS services with credentials stored in ~/.aws/credentials.'
+                ' Make sure that the access and secret keys are correct.'
+                ' To reconfigure the credentials, ' + help_str[1].lower() +
+                help_str[2:])
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
