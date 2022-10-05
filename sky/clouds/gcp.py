@@ -65,6 +65,7 @@ def _run_output(cmd):
 def is_api_disabled(endpoint: str, project_id: str) -> bool:
     proc = subprocess.run((f'gcloud services list --project {project_id} '
                            f' | grep {endpoint}.googleapis.com'),
+                          check=False,
                           shell=True,
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
@@ -379,6 +380,7 @@ class GCP(clouds.Cloud):
                 proc = subprocess.run(
                     f'gcloud services enable {endpoint}.googleapis.com '
                     f'--project {project_id}',
+                    check=False,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT)

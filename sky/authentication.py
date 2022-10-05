@@ -210,7 +210,7 @@ def setup_gcp_authentication(config):
         # then retry. If you enabled this API recently, wait a few minutes for
         # the action to propagate to our systems and retry.'
         if ' API has not been used in project' in e.reason:
-            match = re.fullmatch('(.+)(https://.*project=\d+) (.+)', e.reason)
+            match = re.fullmatch(r'(.+)(https://.*project=\d+) (.+)', e.reason)
             if match is None:
                 raise  # This should not happen.
             yellow = colorama.Fore.YELLOW
