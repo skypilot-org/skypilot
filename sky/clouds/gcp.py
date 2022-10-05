@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -59,6 +60,15 @@ def _run_output(cmd):
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
+
+
+def is_api_disabled(endpoint: str, project_id: str) -> bool:
+    proc = subprocess.run((f'gcloud services list --project {project_id} '
+                           f' | grep {endpoint}.googleapis.com'),
+                          shell=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.returncode != 0
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -347,6 +357,45 @@ class GCP(clouds.Cloud):
                 'For more info: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
+
+        # Check APIs.
+        project_id = self.get_project_id()
+        apis = (
+            ('compute', 'Compute Engine'),
+            ('cloudresourcemanager', 'Cloud Resource Manager'),
+            ('iam', 'Identity and Access Management (IAM)'),
+        )
+        enabled_api = False
+        for endpoint, display_name in apis:
+            if is_api_disabled(endpoint, project_id):
+                # For 'compute': ~55-60 seconds for the first run. If already
+                # enabled, ~1s. Other API endpoints take ~1-5s to enable.
+                if endpoint == 'compute':
+                    suffix = ' (may take a minute)'
+                else:
+                    suffix = ''
+                print(f'\nEnabling {display_name} API{suffix}...')
+                t1 = time.time()
+                proc = subprocess.run(
+                    f'gcloud services enable {endpoint}.googleapis.com '
+                    f'--project {project_id}',
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT)
+                if proc.returncode == 0:
+                    enabled_api = True
+                    print(f'Done. Took {time.time() - t1:.1f} secs.')
+                else:
+                    print('Failed; please manually enable the API. Log:')
+                    print(proc.stdout.decode())
+                    return False, (
+                        f'{display_name} API is disabled. Please retry '
+                        '`sky check` in a few minutes, or manually enable it.')
+        if enabled_api:
+            print('\nHint: Enabled GCP API(s) may take a few minutes to take '
+                  'effect. If any SkyPilot commands/calls failed, retry after '
+                  'some time.')
+
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

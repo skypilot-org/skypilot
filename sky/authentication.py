@@ -4,13 +4,17 @@ import functools
 import hashlib
 import os
 import pathlib
+import re
 import subprocess
+import sys
 import time
 import uuid
 
+import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
+import googleapiclient
 
 from sky import clouds
 from sky import sky_logging
@@ -19,8 +23,7 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-logger = sky_logging.init_logger(__name__)
-
+colorama.init()
 logger = sky_logging.init_logger(__name__)
 
 # TODO: Should tolerate if gcloud is not installed. Also,
@@ -195,7 +198,37 @@ def setup_gcp_authentication(config):
                         credentials=None,
                         cache_discovery=False)
     user = config['auth']['ssh_user']
-    project = compute.projects().get(project=project_id).execute()
+
+    try:
+        project = compute.projects().get(project=project_id).execute()
+    except googleapiclient.errors.HttpError as e:
+        # Can happen for a new project where Compute Engine API is disabled.
+        # Ex:
+        # 'Compute Engine API has not been used in project 123456 before
+        # or it is disabled. Enable it by visiting
+        # https://console.developers.google.com/apis/api/compute.googleapis.com/overview?project=123456
+        # then retry. If you enabled this API recently, wait a few minutes for
+        # the action to propagate to our systems and retry.'
+        if ' API has not been used in project' in e.reason:
+            match = re.fullmatch('(.+)(https://.*project=\d+) (.+)', e.reason)
+            if match is None:
+                raise  # This should not happen.
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            bright = colorama.Style.BRIGHT
+            dim = colorama.Style.DIM
+            logger.error(
+                f'{yellow}Certain GCP APIs are disabled for the GCP project '
+                f'{project_id}.{reset}')
+            logger.error(f'{yellow}Enable them by running:{reset} '
+                         f'{bright}sky check{reset}')
+            logger.error('Details:')
+            logger.error(f'{dim}{match.group(1)}{reset}\n'
+                         f'{dim}    {match.group(2)}{reset}\n'
+                         f'{dim}{match.group(3)}{reset}')
+            sys.exit(1)
+        else:
+            raise
 
     project_oslogin = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
