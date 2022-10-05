@@ -1,12 +1,12 @@
 """Amazon Web Services."""
+
+# pylint: disable=import-outside-toplevel
+
 import json
 import os
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
-
-import boto3
-import botocore
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -276,6 +276,12 @@ class AWS(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        try:
+            import boto3
+            import botocore
+        except ImportError:
+            raise ImportError('Fail to import dependencies for AWS.'
+                              'Try pip install "skypilot[aws]"') from None
         help_str = (
             ' Run the following commands:'
             '\n      $ pip install boto3'
