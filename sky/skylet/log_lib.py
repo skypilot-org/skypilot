@@ -365,7 +365,15 @@ def tail_logs(job_owner: str,
               log_dir: Optional[str],
               spot_job_id: Optional[int] = None,
               follow: bool = True) -> None:
-    """Tail the logs of a job."""
+    """Tail the logs of a job.
+
+    Args:
+        job_owner: The owner username of the job.
+        job_id: The job id.
+        log_dir: The log directory of the job.
+        spot_job_id: The spot job id (for logging info only to avoid confusion).
+        follow: Whether to follow the logs or print the logs so far and exit.
+    """
     job_str = f'job {job_id}'
     if spot_job_id is not None:
         job_str = f'spot job {spot_job_id}'
