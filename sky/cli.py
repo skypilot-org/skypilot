@@ -1328,10 +1328,12 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     default=False,
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
-@click.option('--follow/--no-follow',
-              is_flag=True,
-              default=True,
-              help='Follow the logs of the job. [default: --follow]')
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow]'
+          'If --no-follow is specified, print the log so far and exit.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2692,11 +2694,12 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               required=False,
               type=str,
               help='Managed spot job name.')
-@click.option('--follow/--no-follow',
-              is_flag=True,
-              default=True,
-              show_default=True,
-              help='Follow the logs of the job. [default: --follow]')
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow]'
+          'If --no-follow is specified, print the log so far and exit.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
