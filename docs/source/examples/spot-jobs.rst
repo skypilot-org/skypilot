@@ -128,7 +128,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     --doc_stride 128 \
     --output_dir /checkpoint/bert_qa/ \
     --report_to wandb \
-    --run_name $SKYPILOT_SPOT_RUN_ID \
+    --run_name $SKYPILOT_RUN_ID \
     --save_total_limit 10 \
     --save_steps 1000
 
@@ -148,11 +148,13 @@ With the above changes, you are ready to launch a spot job with ``sky spot launc
     $ sky spot launch -n bert-qa bert_qa.yaml
 
 SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
-search for resources across regions and clouds to re-launch the job. To identify the same job across multiple
-recoveries, use the environment variable :code:`$SKYPILOT_SPOT_RUN_ID` in the task's :code:`run` commands or directly
-in the program itself (e.g., access via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your
-training script). It is made available to the task whenever it is invoked. The spot run ID is kept identical
-across all recoveries of the same spot job.
+search for resources across regions and clouds to re-launch the job. 
+
+.. note::
+  To identify the same job across multiple recoveries, use the environment variable :code:`$SKYPILOT_RUN_ID` in the task's
+  :code:`run` commands or directly in the program itself (e.g., access via :code:`os.environ` and pass to Weights & Biases
+  for tracking purposes in your training script). It is made available to the task whenever it is invoked. The spot run ID
+  is kept identical across all recoveries of the same spot job.
 
 
 Here are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.

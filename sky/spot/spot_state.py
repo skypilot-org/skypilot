@@ -91,6 +91,11 @@ def set_pending(job_id: int, name: str, resources_str: str):
 def set_submitted(job_id: int, name: str, run_timestamp: str,
                   resources_str: str):
     """Set the job to submitted."""
+    # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
+    # log directory and submission time align with each other, so as to make
+    # it easier to find them based on one of the values.
+    # Also, using the earlier timestamp should be closer to the term
+    # `submit_at`, which represents the time the spot task is submitted.
     submit_time = backend_utils.get_timestamp_from_run_timestamp(run_timestamp)
     _CURSOR.execute(
         """\
