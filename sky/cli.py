@@ -207,6 +207,12 @@ def _interactive_node_cli_command(cli_func):
                               default=False,
                               required=False,
                               help='Skip confirmation prompt.')
+    retry_until_up = click.option('--retry-until-up',
+                                  '-r',
+                                  is_flag=True,
+                                  default=False,
+                                  required=False,
+                                  help='Retry until up.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
@@ -226,6 +232,7 @@ def _interactive_node_cli_command(cli_func):
         screen_option,
         tmux_option,
         disk_size,
+        retry_until_up,
     ]
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
@@ -669,6 +676,7 @@ def _create_and_ssh_into_node(
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
     no_confirm: bool = False,
+    retry_until_up: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -681,6 +689,7 @@ def _create_and_ssh_into_node(
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
+        retry_until_up: Retry until up when true.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
@@ -719,6 +728,7 @@ def _create_and_ssh_into_node(
         dryrun=False,
         detach_run=True,
         no_confirm=no_confirm,
+        retry_until_up=retry_until_up,
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -1960,7 +1970,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             gpus: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            disk_size: Optional[int], retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2021,6 +2031,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2030,7 +2041,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], instance_type: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            tmux: Optional[bool], disk_size: Optional[int],
+            retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2087,6 +2099,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2097,7 +2110,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            disk_size: Optional[int], retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2161,6 +2174,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        retry_until_up=retry_until_up,
     )
 
 
