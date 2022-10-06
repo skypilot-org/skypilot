@@ -2346,11 +2346,13 @@ class CloudVmRayBackend(backends.Backend):
     def tail_logs(self,
                   handle: ResourceHandle,
                   job_id: Optional[int],
-                  spot_job_id: Optional[int] = None) -> int:
+                  spot_job_id: Optional[int] = None,
+                  follow: bool = True) -> int:
         job_owner = onprem_utils.get_job_owner(handle.cluster_yaml)
         code = job_lib.JobLibCodeGen.tail_logs(job_owner,
                                                job_id,
-                                               spot_job_id=spot_job_id)
+                                               spot_job_id=spot_job_id,
+                                               follow=follow)
         if job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
@@ -2380,13 +2382,14 @@ class CloudVmRayBackend(backends.Backend):
     def tail_spot_logs(self,
                        handle: ResourceHandle,
                        job_id: Optional[int] = None,
-                       job_name: Optional[str] = None) -> None:
+                       job_name: Optional[str] = None,
+                       follow: bool = True) -> None:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_name is not None:
-            code = spot_lib.SpotCodeGen.stream_logs_by_name(job_name)
+            code = spot_lib.SpotCodeGen.stream_logs_by_name(job_name, follow)
         else:
-            code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id)
+            code = spot_lib.SpotCodeGen.stream_logs_by_id(job_id, follow)
 
         # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
         # kill the process, so we need to handle it manually here.
