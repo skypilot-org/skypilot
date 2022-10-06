@@ -160,6 +160,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         df = pd.concat(
             [df, df.apply(get_additional_columns, axis='columns')],
             axis='columns')
+        df['GPUInfo'].fillna(df['AcceleratorName'], inplace=True)
     except Exception as e:
         print(f'{region} failed with {e}')
         return region
