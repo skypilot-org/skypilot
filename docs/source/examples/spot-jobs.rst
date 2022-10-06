@@ -153,7 +153,7 @@ search for resources across regions and clouds to re-launch the job.
 .. note::
   To identify the same job across multiple recoveries, use the environment variable :code:`$SKYPILOT_RUN_ID` in the task's
   :code:`run` commands or directly in the program itself (e.g., access via :code:`os.environ` and pass to Weights & Biases
-  for tracking purposes in your training script). It is made available to the task whenever it is invoked. The spot run ID
+  for tracking purposes in your training script). It is made available to the task whenever it is invoked. The run ID
   is kept identical across all recoveries of the same spot job.
 
 
