@@ -365,6 +365,7 @@ class GCP(clouds.Cloud):
             ('compute', 'Compute Engine'),
             ('cloudresourcemanager', 'Cloud Resource Manager'),
             ('iam', 'Identity and Access Management (IAM)'),
+            ('tpu', 'Cloud TPU'),  # Keep as final element.
         )
         enabled_api = False
         for endpoint, display_name in apis:
@@ -372,9 +373,9 @@ class GCP(clouds.Cloud):
                 # For 'compute': ~55-60 seconds for the first run. If already
                 # enabled, ~1s. Other API endpoints take ~1-5s to enable.
                 if endpoint == 'compute':
-                    suffix = ' (may take a minute)'
+                    suffix = ' (free of charge; this may take a minute)'
                 else:
-                    suffix = ''
+                    suffix = ' (free of charge)'
                 print(f'\nEnabling {display_name} API{suffix}...')
                 t1 = time.time()
                 proc = subprocess.run(
@@ -387,12 +388,20 @@ class GCP(clouds.Cloud):
                 if proc.returncode == 0:
                     enabled_api = True
                     print(f'Done. Took {time.time() - t1:.1f} secs.')
-                else:
-                    print('Failed; please manually enable the API. Log:')
+                elif endpoint != 'tpu':
+                    print('Failed. Detailed output:')
                     print(proc.stdout.decode())
                     return False, (
                         f'{display_name} API is disabled. Please retry '
                         '`sky check` in a few minutes, or manually enable it.')
+                else:
+                    # TPU API failed. Should still enable GCP.
+                    print('Failed to enable Cloud TPU API. '
+                          'This can be ignored if you do not use TPUs. '
+                          'Otherwise, please enable it manually.\n'
+                          'Detailed output:')
+                    print(proc.stdout.decode())
+
         if enabled_api:
             print('\nHint: Enabled GCP API(s) may take a few minutes to take '
                   'effect. If any SkyPilot commands/calls failed, retry after '

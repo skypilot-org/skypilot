@@ -203,7 +203,8 @@ def setup_gcp_authentication(config):
         project = compute.projects().get(project=project_id).execute()
     except googleapiclient.errors.HttpError as e:
         # Can happen for a new project where Compute Engine API is disabled.
-        # Ex:
+        #
+        # Example message:
         # 'Compute Engine API has not been used in project 123456 before
         # or it is disabled. Enable it by visiting
         # https://console.developers.google.com/apis/api/compute.googleapis.com/overview?project=123456
