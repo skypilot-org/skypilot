@@ -40,7 +40,10 @@ REGION_SET = set(REGIONS)
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
-USEFULE_COLUMNS = ['InstanceType','AcceleratorName','AcceleratorCount','vCPUs','MemoryGiB','GpuInfo','Price','SpotPrice','Region','AvailabilityZone']
+USEFULE_COLUMNS = [
+    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
+]
 
 
 def get_pricing_url(region: Optional[str] = None) -> str:
@@ -156,13 +159,21 @@ def get_all_regions_instance_types_df():
     df.drop_duplicates(inplace=True)
 
     df = df[df['unitPrice'] > 0]
-    
+
     print('Getting price df')
-    df['merge_name'] = df['armSkuName'] 
+    df['merge_name'] = df['armSkuName']
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
-    df.rename(columns={'armSkuName': 'InstanceType', 'armRegionName': 'Region'}, inplace=True)
-    demand_df = df[~df['skuName'].str.contains(' Spot')][['is_promo', 'InstanceType', 'Region', 'unitPrice']]
-    spot_df = df[df['skuName'].str.contains(' Spot')][['is_promo', 'InstanceType', 'Region', 'unitPrice']]
+    df.rename(columns={
+        'armSkuName': 'InstanceType',
+        'armRegionName': 'Region'
+    },
+              inplace=True)
+    demand_df = df[~df['skuName'].str.contains(' Spot')][[
+        'is_promo', 'InstanceType', 'Region', 'unitPrice'
+    ]]
+    spot_df = df[df['skuName'].str.contains(' Spot')][[
+        'is_promo', 'InstanceType', 'Region', 'unitPrice'
+    ]]
     demand_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
     spot_df.set_index(['InstanceType', 'Region', 'is_promo'], inplace=True)
 
@@ -175,10 +186,12 @@ def get_all_regions_instance_types_df():
     df_sku['merge_name'] = df_sku['InstanceType'].str.replace('_Promo', '')
 
     print('Joining')
-    df = df_sku.join(demand_df, on=['merge_name', 'Region', 'is_promo'], how='left')
+    df = df_sku.join(demand_df,
+                     on=['merge_name', 'Region', 'is_promo'],
+                     how='left')
     df = df.join(spot_df, on=['merge_name', 'Region', 'is_promo'], how='left')
-    # df.dropna(subset=['Price', 'SpotPrice'], inplace=True, how='all')
 
+    # df.dropna(subset=['Price', 'SpotPrice'], inplace=True, how='all')
 
     def get_capabilities(row):
         gpu_name = None
@@ -214,7 +227,9 @@ def get_all_regions_instance_types_df():
     )
 
     before_drop_len = len(df_ret)
-    df_ret.dropna(subset=['InstanceType', 'AvailabilityZone'], inplace=True, how='all')
+    df_ret.dropna(subset=['InstanceType', 'AvailabilityZone'],
+                  inplace=True,
+                  how='all')
     after_drop_len = len(df_ret)
     print('Dropped {} duplicated rows'.format(before_drop_len - after_drop_len))
 

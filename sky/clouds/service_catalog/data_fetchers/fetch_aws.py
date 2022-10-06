@@ -121,8 +121,8 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         def get_acc_info(row) -> Tuple[str, float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
-                                ('InferenceAcceleratorInfo', 'Accelerators'),
-                                ('FpgaInfo', 'Fpgas')]:
+                                  ('InferenceAcceleratorInfo', 'Accelerators'),
+                                  ('FpgaInfo', 'Fpgas')]:
                 info = row.get(col)
                 if isinstance(info, dict):
                     accelerator = info[info_key][0]
@@ -153,8 +153,9 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         df['Region'] = region
         df = df.merge(pd.DataFrame(zone_df), how='cross')
-        df = pd.concat([df, df.apply(get_additional_columns, axis='columns')],
-                    axis='columns')
+        df = pd.concat(
+            [df, df.apply(get_additional_columns, axis='columns')],
+            axis='columns')
     except Exception as e:
         print(f'{region} failed with {e}')
         return region
@@ -169,7 +170,7 @@ def get_all_regions_instance_types_df():
             print(f'{df} failed')
         else:
             new_dfs.append(df)
-        
+
     df = pd.concat(new_dfs)
     df.sort_values(['InstanceType', 'Region'], inplace=True)
     return df
