@@ -70,12 +70,18 @@ def get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
+    df.rename(columns={
+        'Instance Type': 'InstanceType',
+        'PricePerUnit': 'Price'
+    },
+              inplace=True)
     return df[(df['TermType'] == 'OnDemand') &
               (df['Operating System'] == 'Linux') &
               df['Pre Installed S/W'].isnull() &
               (df['CapacityStatus'] == 'Used') &
-              (df['Tenancy'].isin(['Host', 'Shared'])) &
-              df['PricePerUnit'] > 0].set_index('Instance Type')
+              (df['Tenancy'].isin(['Host', 'Shared'])) & df['Price'] > 0][[
+                  'InstanceType', 'Price', 'vCPU', 'Memory'
+              ]]
 
 
 @ray.remote
@@ -88,7 +94,8 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
     ret = []
     for response in response_iterator:
         ret = ret + response['SpotPriceHistory']
-    df = pd.DataFrame(ret).set_index(['InstanceType', 'AvailabilityZone'])
+    df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice'
+                           ]].set_index(['InstanceType', 'AvailabilityZone'])
     return df
 
 
@@ -103,21 +110,6 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         ])
         print(f'{region} Processing dataframes')
 
-        def get_price(row):
-            t = row['InstanceType']
-            try:
-                return pricing_df.loc[t]['PricePerUnit']
-            except KeyError:
-                return np.nan
-
-        def get_spot_price(row):
-            instance = row['InstanceType']
-            zone = row['AvailabilityZone']
-            try:
-                return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
-            except KeyError:
-                return np.nan
-
         def get_acc_info(row) -> Tuple[str, float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
@@ -131,10 +123,14 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             return accelerator['Name'], accelerator['Count']
 
         def get_vcpus(row) -> float:
+            if not np.isnan(row['vCPU']):
+                return float(row['vCPU'])
             return float(row['VCpuInfo']['DefaultVCpus'])
 
         def get_memory_gib(row) -> float:
-            return row['MemoryInfo']['SizeInMiB'] // 1024
+            if isinstance(row['MemoryInfo'], dict):
+                return row['MemoryInfo']['SizeInMiB'] // 1024
+            return int(row['Memory'].split(' GiB')[0])
 
         def get_additional_columns(row):
             acc_name, acc_count = get_acc_info(row)
@@ -142,17 +138,25 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
+            if row['InstanceType'] == 'p4de.24xlarge':
+                acc_name = 'A100-80GB'
+                acc_count = 8
             return pd.Series({
-                'Price': get_price(row),
-                'SpotPrice': get_spot_price(row),
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,
                 'vCPUs': get_vcpus(row),
                 'MemoryGiB': get_memory_gib(row),
             })
 
+        df = df.merge(pricing_df, on=['InstanceType'], how='outer')
         df['Region'] = region
         df = df.merge(pd.DataFrame(zone_df), how='cross')
+
+        df = df.merge(spot_pricing_df,
+                      left_on=['InstanceType', 'AvailabilityZone'],
+                      right_index=True,
+                      how='outer')
+
         df = pd.concat(
             [df, df.apply(get_additional_columns, axis='columns')],
             axis='columns')
