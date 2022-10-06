@@ -213,6 +213,10 @@ def _interactive_node_cli_command(cli_func):
                                   default=False,
                                   required=False,
                                   help='Retry until up.')
+    region_option = click.option('--region',
+                                 default=None,
+                                 type=str,
+                                 help='The region to use.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
@@ -222,6 +226,7 @@ def _interactive_node_cli_command(cli_func):
 
         # Resource options
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
+        region_option,
         instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
@@ -1967,10 +1972,11 @@ def _terminate_or_stop_clusters(
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            gpus: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], retry_until_up: bool):
+            cloud: Optional[str], region: Optional[str],
+            instance_type: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2018,6 +2024,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
                               instance_type=instance_type,
                               accelerators=gpus,
                               use_spot=use_spot,
@@ -2039,10 +2046,10 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            retry_until_up: bool):
+            cloud: Optional[str], region: Optional[str],
+            instance_type: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2087,6 +2094,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
                               instance_type=instance_type,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2107,10 +2115,11 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            instance_type: Optional[str], tpus: Optional[str],
-            use_spot: Optional[bool], tpu_vm: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], retry_until_up: bool):
+            region: Optional[str], instance_type: Optional[str],
+            tpus: Optional[str], use_spot: Optional[bool],
+            tpu_vm: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2160,6 +2169,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),
+                              region=region,
                               instance_type=instance_type,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
