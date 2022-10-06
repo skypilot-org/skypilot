@@ -17,8 +17,12 @@ GCP_GPU_ZONES_URL = 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zone
 
 NOT_AVAILABLE_STR = 'Not available in this region'
 
+ALL_REGION_PREFIX = ''
+US_REGION_PREFIX = 'us-'
+REGION_PREFIX = US_REGION_PREFIX
+
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
+UNSUPPORTED_VMS = ['f1-micro']
 
 # Supported GPU types and counts.
 # NOTE: GCP officially uses 'A100 40GB' and 'A100 80GB' as the names of the
@@ -370,7 +374,7 @@ def get_vm_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    vm_df = vm_df[vm_df['Region'].str.startswith('us-')]
+    vm_df = vm_df[vm_df['Region'].str.startswith(REGION_PREFIX)]
     return vm_df
 
 
@@ -526,7 +530,7 @@ def get_gpu_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    gpu_df = gpu_df[gpu_df['Region'].str.startswith('us-')]
+    gpu_df = gpu_df[gpu_df['Region'].str.startswith(REGION_PREFIX)]
     return gpu_df
 
 

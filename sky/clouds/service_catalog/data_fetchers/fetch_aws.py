@@ -1,9 +1,8 @@
 """A script that queries AWS API to get instance types and pricing information.
-
 This script takes about 1 minute to finish.
 """
 import datetime
-from typing import Tuple
+from typing import Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -11,7 +10,34 @@ import ray
 
 from sky.adaptors import aws
 
-REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
+ALL_REGIONS = [
+    'us-east-1',
+    'us-east-2',
+    'us-west-1',
+    'us-west-2',
+    'ca-central-1',
+    'eu-central-1',
+    'eu-west-1',
+    'eu-west-2',
+    'eu-south-1',
+    'eu-west-3',
+    'eu-north-1',
+    'me-south-1',
+    # 'me-central-1', # failed for no credential
+    'af-south-1',
+    'ap-east-1',
+    'ap-southeast-3',
+    # 'ap-south-1', # failed for no credential
+    'ap-northeast-3',
+    'ap-northeast-2',
+    'ap-southeast-1',
+    'ap-southeast-2',
+    'ap-northeast-1',
+]
+US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
+
+REGIONS = US_REGIONS
+
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'
@@ -67,73 +93,84 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_instance_types_df(region: str) -> pd.DataFrame:
-    df, zone_df, pricing_df, spot_pricing_df = ray.get([
-        get_instance_types.remote(region),
-        get_availability_zones.remote(region),
-        get_pricing_table.remote(region),
-        get_spot_pricing_table.remote(region)
-    ])
-    print(f'{region} Processing dataframes')
+def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
+    try:
+        df, zone_df, pricing_df, spot_pricing_df = ray.get([
+            get_instance_types.remote(region),
+            get_availability_zones.remote(region),
+            get_pricing_table.remote(region),
+            get_spot_pricing_table.remote(region)
+        ])
+        print(f'{region} Processing dataframes')
 
-    def get_price(row):
-        t = row['InstanceType']
-        try:
-            return pricing_df.loc[t]['PricePerUnit']
-        except KeyError:
-            return np.nan
+        def get_price(row):
+            t = row['InstanceType']
+            try:
+                return pricing_df.loc[t]['PricePerUnit']
+            except KeyError:
+                return np.nan
 
-    def get_spot_price(row):
-        instance = row['InstanceType']
-        zone = row['AvailabilityZone']
-        try:
-            return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
-        except KeyError:
-            return np.nan
+        def get_spot_price(row):
+            instance = row['InstanceType']
+            zone = row['AvailabilityZone']
+            try:
+                return spot_pricing_df.loc[(instance, zone)]['SpotPrice']
+            except KeyError:
+                return np.nan
 
-    def get_acc_info(row) -> Tuple[str, float]:
-        accelerator = None
-        for col, info_key in [('GpuInfo', 'Gpus'),
-                              ('InferenceAcceleratorInfo', 'Accelerators'),
-                              ('FpgaInfo', 'Fpgas')]:
-            info = row.get(col)
-            if isinstance(info, dict):
-                accelerator = info[info_key][0]
-        if accelerator is None:
-            return None, np.nan
-        return accelerator['Name'], accelerator['Count']
+        def get_acc_info(row) -> Tuple[str, float]:
+            accelerator = None
+            for col, info_key in [('GpuInfo', 'Gpus'),
+                                ('InferenceAcceleratorInfo', 'Accelerators'),
+                                ('FpgaInfo', 'Fpgas')]:
+                info = row.get(col)
+                if isinstance(info, dict):
+                    accelerator = info[info_key][0]
+            if accelerator is None:
+                return None, np.nan
+            return accelerator['Name'], accelerator['Count']
 
-    def get_vcpus(row) -> float:
-        return float(row['VCpuInfo']['DefaultVCpus'])
+        def get_vcpus(row) -> float:
+            return float(row['VCpuInfo']['DefaultVCpus'])
 
-    def get_memory_gib(row) -> float:
-        return row['MemoryInfo']['SizeInMiB'] // 1024
+        def get_memory_gib(row) -> float:
+            return row['MemoryInfo']['SizeInMiB'] // 1024
 
-    def get_additional_columns(row):
-        acc_name, acc_count = get_acc_info(row)
-        # AWS p3dn.24xlarge offers a different V100 GPU.
-        # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
-        if row['InstanceType'] == 'p3dn.24xlarge':
-            acc_name = 'V100-32GB'
-        return pd.Series({
-            'Price': get_price(row),
-            'SpotPrice': get_spot_price(row),
-            'AcceleratorName': acc_name,
-            'AcceleratorCount': acc_count,
-            'vCPUs': get_vcpus(row),
-            'MemoryGiB': get_memory_gib(row),
-        })
+        def get_additional_columns(row):
+            acc_name, acc_count = get_acc_info(row)
+            # AWS p3dn.24xlarge offers a different V100 GPU.
+            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
+            if row['InstanceType'] == 'p3dn.24xlarge':
+                acc_name = 'V100-32GB'
+            return pd.Series({
+                'Price': get_price(row),
+                'SpotPrice': get_spot_price(row),
+                'AcceleratorName': acc_name,
+                'AcceleratorCount': acc_count,
+                'vCPUs': get_vcpus(row),
+                'MemoryGiB': get_memory_gib(row),
+            })
 
-    df['Region'] = region
-    df = df.merge(pd.DataFrame(zone_df), how='cross')
-    df = pd.concat([df, df.apply(get_additional_columns, axis='columns')],
-                   axis='columns')
+        df['Region'] = region
+        df = df.merge(pd.DataFrame(zone_df), how='cross')
+        df = pd.concat([df, df.apply(get_additional_columns, axis='columns')],
+                    axis='columns')
+    except Exception as e:
+        print(f'{region} failed with {e}')
+        return region
     return df
 
 
 def get_all_regions_instance_types_df():
     dfs = ray.get([get_instance_types_df.remote(r) for r in REGIONS])
-    df = pd.concat(dfs)
+    new_dfs = []
+    for df in dfs:
+        if isinstance(df, str):
+            print(f'{df} failed')
+        else:
+            new_dfs.append(df)
+        
+    df = pd.concat(new_dfs)
     df.sort_values(['InstanceType', 'Region'], inplace=True)
     return df
 
