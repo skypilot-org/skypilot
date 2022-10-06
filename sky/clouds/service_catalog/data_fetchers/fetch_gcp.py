@@ -22,7 +22,7 @@ US_REGION_PREFIX = 'us-'
 REGION_PREFIX = US_REGION_PREFIX
 
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-UNSUPPORTED_VMS = ['f1-micro']
+UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
 
 # Supported GPU types and counts.
 # NOTE: GCP officially uses 'A100 40GB' and 'A100 80GB' as the names of the
