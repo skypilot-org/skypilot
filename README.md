@@ -15,7 +15,7 @@ Use the clouds **easily** and **cost effectively**, without needing cloud infra 
 _Ease of use_
 * **Run existing projects on the cloud** with zero code changes
 * Use a **unified interface** to run on any cloud, without vendor lock-in (currently AWS, Azure, GCP)
-* Easily **queue jobs** on one or multiple clusters
+* **Queue jobs** on one or multiple clusters
 * **Automatic failover** to find scarce resources (GPUs) across regions and clouds
 * **Use datasets on the cloud** like you would on a local file system 
 
@@ -33,9 +33,11 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 ## Example SkyPilot Task
 
-A SkyPilot task is specified as a YAML file containing: resource requirements, data to be synced, setup commands, and the task commands. 
+A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
 
-Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html), the task can be launched on any available cloud. Example:
+Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud. 
+
+Example:
 
 ```yaml
 # my_task.yaml
