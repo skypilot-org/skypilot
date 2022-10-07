@@ -10,13 +10,13 @@ SkyPilot is a framework for easily running machine learning workloads on any clo
 
 Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
 
-*Ease of use & productivity*
+*Ease of use*
 
 - **Run existing projects on the cloud** with zero code changes
-- **Easily manage jobs** across multiple clusters
-- **Automatic fail-over** to find scarce resources (GPUs) across regions and clouds
-- **Store datasets on the cloud** and access them like you would on a local file system
-- **No cloud lock-in** – seamlessly run your code across different cloud providers (AWS, Azure or GCP)
+- Use a **unified interface** to run on any cloud, without vendor lock-in (currently AWS, Azure, GCP)
+- **Queue jobs** on one or multiple clusters
+- **Automatic failover** to find scarce resources (GPUs) across regions and clouds
+- **Use datasets on the cloud** like you would on a local file system
 
 *Cost saving*
 
