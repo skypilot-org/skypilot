@@ -6,6 +6,15 @@ SkyPilot Documentation
   :align: center
   :alt: SkyPilot
 
+.. raw:: html
+
+    <script async defer src="https://buttons.github.io/buttons.js"></script>
+    <p style="text-align:center">
+    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-size="large" data-show-count="true" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
+    <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
+    <a class="github-button" href="https://github.com/skypilot-org/skypilot/fork" data-icon="octicon-repo-forked" data-size="large" aria-label="Fork skypilot-org/skypilot on GitHub">Fork</a>
+    </p>
+
 SkyPilot is a framework for easily running machine learning workloads on any cloud.
 
 Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
