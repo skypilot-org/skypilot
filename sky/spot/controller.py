@@ -29,9 +29,20 @@ class SpotController:
         self._job_id = job_id
         self._task_name = pathlib.Path(task_yaml).stem
         self._task = sky.Task.from_yaml(task_yaml)
+
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        # Add a unique identifier to the task environment variables, so that
+        # the user can have the same id for multiple recoveries.
+        #   Example value: sky-2022-10-04-22-46-52-467694_id-17
+        # TODO(zhwu): support SKYPILOT_RUN_ID for normal jobs as well, so
+        # the use can use env_var for normal jobs.
+        task_envs = self._task.envs or {}
+        task_envs['SKYPILOT_RUN_ID'] = (f'{self.backend.run_timestamp}'
+                                        f'_id-{self._job_id}')
+        self._task.set_envs(task_envs)
 
         spot_state.set_submitted(
             self._job_id,

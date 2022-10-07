@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import dag
 from sky import task
 from sky import backends
-from sky import constants
 from sky import data
 from sky import exceptions
 from sky import global_user_state
@@ -14,6 +13,7 @@ from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -279,14 +279,15 @@ def queue(cluster_name: str,
     handle = _check_cluster_available(cluster_name, 'getting the job queue')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    returncode, jobs_json, stderr = backend.run_on_head(handle,
-                                                        code,
-                                                        require_outputs=True)
+    returncode, jobs_payload, stderr = backend.run_on_head(handle,
+                                                           code,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
     if returncode != 0:
-        raise RuntimeError(f'{jobs_json + stderr}\n{colorama.Fore.RED}'
+        raise RuntimeError(f'{jobs_payload + stderr}\n{colorama.Fore.RED}'
                            f'Failed to get job queue on cluster {cluster_name}.'
                            f'{colorama.Style.RESET_ALL}')
-    jobs = job_lib.load_job_queue(jobs_json)
+    jobs = job_lib.load_job_queue(jobs_payload)
     return jobs
 
 
@@ -330,7 +331,7 @@ def cancel(cluster_name: str,
     backend.cancel_jobs(handle, job_ids)
 
 
-def tail_logs(cluster_name: str, job_id: Optional[str]):
+def tail_logs(cluster_name: str, job_id: Optional[str], follow: bool = True):
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
@@ -351,7 +352,7 @@ def tail_logs(cluster_name: str, job_id: Optional[str]):
           f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
           f'{colorama.Style.RESET_ALL}')
 
-    backend.tail_logs(handle, job_id)
+    backend.tail_logs(handle, job_id, follow=follow)
 
 
 def download_logs(
@@ -464,6 +465,9 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
         stop_msg = 'To view the latest job table: sky spot status --refresh'
     controller_status, handle = _is_spot_controller_up(stop_msg)
 
+    if controller_status is None:
+        return []
+
     if (refresh and controller_status in [
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.INIT
@@ -483,16 +487,19 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     assert isinstance(backend, backends.CloudVmRayBackend)
 
     code = spot.SpotCodeGen.get_job_table()
-    returncode, job_table_json, stderr = backend.run_on_head(
-        handle, code, require_outputs=True, stream_logs=False)
+    returncode, job_table_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
     try:
         subprocess_utils.handle_returncode(
-            returncode, code, 'Failed to fetch managed job statuses',
-            job_table_json + stderr)
+            returncode, code, 'Failed to fetch managed job statuses', stderr)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    jobs = spot.load_spot_job_queue(job_table_json)
+    jobs = spot.load_spot_job_queue(job_table_payload)
     return jobs
 
 
@@ -549,7 +556,7 @@ def spot_cancel(name: Optional[str] = None,
                 'Please specify the job ID instead of the job name.')
 
 
-def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
+def spot_tail_logs(name: Optional[str], job_id: Optional[int], follow: bool):
     """Tail logs of managed spot jobs.
 
     Please refer to the sky.cli.spot_logs for the document.
@@ -573,7 +580,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int]):
         raise ValueError('Cannot specify both name and job_id.')
     backend = backend_utils.get_backend_from_handle(handle)
     # Stream the realtime logs
-    backend.tail_spot_logs(handle, job_id=job_id, job_name=name)
+    backend.tail_spot_logs(handle, job_id=job_id, job_name=name, follow=follow)
 
 
 # ======================

@@ -1,7 +1,7 @@
 """Util constants/functions for the backends."""
 import contextlib
 import copy
-import datetime
+from datetime import datetime
 import difflib
 import enum
 import getpass
@@ -37,12 +37,12 @@ from sky import authentication as auth
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
+from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
@@ -60,7 +60,6 @@ logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
 
 # NOTE: keep in sync with the cluster template 'file_mounts'.
-SKY_REMOTE_WORKDIR = log_lib.SKY_REMOTE_WORKDIR
 SKY_REMOTE_APP_DIR = '~/.sky/sky_app'
 SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
@@ -804,7 +803,12 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
 
 
 def get_run_timestamp() -> str:
-    return 'sky-' + datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+
+
+def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
+    return datetime.strptime(
+        run_timestamp.partition('-')[2], '%Y-%m-%d-%H-%M-%S-%f').timestamp()
 
 
 @timeline.event
@@ -838,7 +842,8 @@ def wait_until_ray_cluster_ready(
             rc, output, stderr = runner.run('ray status',
                                             log_path=log_path,
                                             stream_logs=False,
-                                            require_outputs=True)
+                                            require_outputs=True,
+                                            separate_stderr=True)
             subprocess_utils.handle_returncode(
                 rc, 'ray status', 'Failed to run ray status on head node.',
                 stderr)
@@ -1739,7 +1744,7 @@ def get_clusters(
         yellow = colorama.Fore.YELLOW
         reset = colorama.Style.RESET_ALL
         logger.warning(f'{yellow}The following cluster{plural} terminated on '
-                       'the cloud and removed from Sky\'s cluster table: '
+                       'the cloud and removed from the cluster table: '
                        f'{cluster_str}{reset}')
     updated_records = [
         record for record in updated_records if record is not None
@@ -1822,7 +1827,7 @@ def check_cluster_name_is_valid(cluster_name: str,
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(
+            raise exceptions.InvalidClusterNameError(
                 f'Cluster name "{cluster_name}" is invalid; '
                 f'ensure it is fully matched by regex: {valid_regex}')
     if isinstance(cloud, clouds.GCP):
@@ -1830,10 +1835,10 @@ def check_cluster_name_is_valid(cluster_name: str,
         # clouds.
         if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)}'
-                    f' chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP}'
-                    ' chars.')
+                raise exceptions.InvalidClusterNameError(
+                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
+                    f'chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP} '
+                    'chars.')
 
 
 def check_cluster_name_not_reserved(
@@ -1909,7 +1914,8 @@ def interrupt_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
+    with ux_utils.print_exception_no_traceback():
+        raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
 
 # Handle ctrl-z
@@ -1918,7 +1924,8 @@ def stop_handler(signum, frame):
     logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
-    raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
+    with ux_utils.print_exception_no_traceback():
+        raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
 
 def validate_schema(obj, schema, err_msg_prefix=''):

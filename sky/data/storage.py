@@ -6,6 +6,7 @@ import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
+from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
@@ -23,6 +24,10 @@ logger = sky_logging.init_logger(__name__)
 Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
+
+# Clouds with object storage implemented in this module. Azure Blob
+# Storage isn't supported yet (even though Azure is).
+STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 
 # Max number of objects a GCS bucket can be directly deleted with
 _GCS_RM_MAX_OBJS = 256
@@ -43,6 +48,32 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+
+
+def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
+    if isinstance(cloud, clouds.AWS):
+        return StoreType.S3
+    elif isinstance(cloud, clouds.GCP):
+        return StoreType.GCS
+    elif isinstance(cloud, clouds.Azure):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure Blob Storage is not supported yet.')
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown cloud type: {cloud}')
+
+
+def get_store_prefix(storetype: StoreType) -> str:
+    if storetype == StoreType.S3:
+        return 's3://'
+    elif storetype == StoreType.GCS:
+        return 'gs://'
+    elif storetype == StoreType.AZURE:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure Blob Storage is not supported yet.')
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
 
 
 def _get_storetype_from_store(store: 'Storage') -> StoreType:
@@ -803,15 +834,14 @@ class S3Store(AbstractStore):
             # to a log file.
             with subprocess.Popen(sync_command.split(' '),
                                   stderr=subprocess.PIPE,
-                                  stdout=subprocess.PIPE) as process:
+                                  stdout=subprocess.DEVNULL) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
                     str_line = line.decode('utf-8')
-                    logger.info(str_line)
-                    stderr.append(line)
+                    stderr.append(str_line)
                     if 'Access Denied' in str_line:
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
@@ -824,8 +854,7 @@ class S3Store(AbstractStore):
                 if returncode != 0:
                     stderr = '\n'.join(stderr)
                     with ux_utils.print_exception_no_traceback():
-                        logger.error(
-                            f'{process.stdout.decode("utf-8")}\n{stderr}')
+                        logger.error(stderr)
                         raise exceptions.StorageUploadError(
                             f'Upload to S3 failed for store {self.name} and '
                             f'source {self.source}. Please check the logs.')
@@ -1045,20 +1074,21 @@ class GcsStore(AbstractStore):
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
         source = os.path.abspath(os.path.expanduser(self.source))
+        # TODO(zhwu): Speed up the upload process by providing a list of files
+        # so that we can utilize the parallelism.
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{self.source} to gs://{self.name}/'):
             with subprocess.Popen(sync_command.split(' '),
                                   stderr=subprocess.PIPE,
-                                  stdout=subprocess.PIPE) as process:
+                                  stdout=subprocess.DEVNULL) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
                     str_line = line.decode('utf-8')
-                    logger.info(str_line)
                     stderr.append(str_line)
                     if 'AccessDeniedException' in str_line:
                         process.kill()
@@ -1072,8 +1102,7 @@ class GcsStore(AbstractStore):
                 if returncode != 0:
                     with ux_utils.print_exception_no_traceback():
                         stderr = '\n'.join(stderr)
-                        logger.error(
-                            f'{process.stdout.decode("utf-8")}\n{stderr}')
+                        logger.error(stderr)
                         raise exceptions.StorageUploadError(
                             f'Upload to GCS failed for store {self.name} and '
                             f'source {self.source}. Please check logs.')
