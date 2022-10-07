@@ -11,10 +11,10 @@ import click
 import rich.console as rich_console
 import yaml
 
-from sky import constants
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -154,7 +154,7 @@ def get_local_cluster_config_or_error(cluster_name: str) -> Dict[str, Any]:
     raise ValueError(f'Cluster config {local_file} not found.')
 
 
-def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
+def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
     """Checks if the Sky dependencies are properly installed on the machine.
 
     This function checks for the following dependencies on the root user:
