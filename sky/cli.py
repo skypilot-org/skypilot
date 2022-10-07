@@ -212,7 +212,11 @@ def _interactive_node_cli_command(cli_func):
                                   is_flag=True,
                                   default=False,
                                   required=False,
-                                  help='Retry until up.')
+                                  help=('Whether to retry provisioning '
+                                        'infinitely until the cluster is up '
+                                        'if we fail to launch the cluster on '
+                                        'any possible region/cloud due to '
+                                        'unavailability errors.'))
     region_option = click.option('--region',
                                  default=None,
                                  type=str,
@@ -228,8 +232,15 @@ def _interactive_node_cli_command(cli_func):
                                  default=None,
                                  type=int,
                                  required=False,
-                                 help=('Automatically stop the cluster after'
-                                       'this many minutes of idleness.'))
+                                 help=('Automatically stop the cluster after '
+                                       'this many minutes of idleness, i.e. '
+                                       'no running or pending jobs in the '
+                                       'cluster\'s job queue. Idleness starts '
+                                       'counting after setup/file_mounts are '
+                                       'done; the clock gets reset whenever '
+                                       'there are running/pending jobs in the '
+                                       'job queue. If not set, the cluster '
+                                       'will not be auto-stopped.'))
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
@@ -710,9 +721,14 @@ def _create_and_ssh_into_node(
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
-        idle_minutes_to_autostop: Automatically stop the cluster after this
-                                  many minutes of idleness.
-        retry_until_up: Retry until up when true.
+        idle_minutes_to_autostop: Automatically stop the cluster after
+                                  specified minutes of idleness. Idleness
+                                  starts counting after setup/file_mounts are
+                                  done; the clock gets reset whenever there
+                                  are running/pending jobs in the job queue.
+        retry_until_up: Whether to retry provisioning infinitely until the
+                        cluster is up if we fail to launch due to
+                        unavailability errors.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
