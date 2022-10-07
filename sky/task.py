@@ -8,11 +8,13 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
+from sky import check
 from sky import clouds
+from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
-from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
+from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -464,25 +466,79 @@ class Task:
             self.storage_mounts = None
             return self
         for target, _ in storage_mounts.items():
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
+
             if data_utils.is_cloud_store_url(target):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Storage mount destination path cannot be cloud storage'
                     )
         # Storage source validation is done in Storage object
-
         self.storage_mounts = storage_mounts
         return self
 
-    def add_storage_mounts(self) -> None:
-        """Adds storage mounts to the Task."""
-        # TODO(romilb): The optimizer should look at the source and destination
-        #  to figure out the right stores to use. For now, we hardcode
-        #  storage_plans to AWS as the optimal plan.
+    def update_storage_mounts(self, storage_mounts: Dict[str,
+                                                         storage_lib.Storage]):
+        """Updates the storage mounts for this Task"""
+        if not storage_mounts:
+            return self
+        task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
+        task_storage_mounts.update(storage_mounts)
+        return self.set_storage_mounts(task_storage_mounts)
+
+    def get_preferred_store_type(self) -> storage_lib.StoreType:
+        # TODO(zhwu, romilb): The optimizer should look at the source and
+        #  destination to figure out the right stores to use. For now, we
+        #  use a heuristic solution to find the store type by the following
+        #  order:
+        #  1. cloud decided in best_resources.
+        #  2. cloud specified in the task resources.
+        #  3. the first enabled cloud.
+        # This should be refactored and moved to the optimizer.
+        assert len(self.resources) == 1, self.resources
+        storage_cloud = None
+        if self.best_resources is not None:
+            storage_cloud = self.best_resources.cloud
+        else:
+            resources = list(self.resources)[0]
+            storage_cloud = resources.cloud
+            if storage_cloud is None:
+                # Get the first enabled cloud.
+                enabled_clouds = global_user_state.get_enabled_clouds()
+                if len(enabled_clouds) == 0:
+                    check.check(quiet=True)
+                    enabled_clouds = global_user_state.get_enabled_clouds()
+                if len(enabled_clouds) == 0:
+                    raise ValueError('No enabled clouds.')
+
+                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
+                    for enabled_cloud in enabled_clouds:
+                        if cloud.is_same_cloud(enabled_cloud):
+                            storage_cloud = cloud
+                            break
+        if storage_cloud is None:
+            raise ValueError('No available cloud to mount storage.')
+        store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
+        return store_type
+
+    def sync_storage_mounts(self) -> None:
+        """Syncs storage mounts: sync files/dirs to cloud storage."""
+
         for storage in self.storage_mounts.values():
             if len(storage.stores) == 0:
-                self.storage_plans[storage] = storage_lib.StoreType.S3
-                storage.add_store(storage_lib.StoreType.S3)
+                store_type = self.get_preferred_store_type()
+                self.storage_plans[storage] = store_type
+                storage.add_store(store_type)
             else:
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
@@ -503,12 +559,6 @@ class Task:
                         mnt_path: blob_path,
                     })
                 elif store_type is storage_lib.StoreType.GCS:
-                    # Remember to run `gcloud auth application-default login`
-                    self.setup = (
-                        '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
-                        'echo GOOGLE_APPLICATION_CREDENTIALS='
-                        f'{data_transfer_lib.DEFAULT_GCS_CREDENTIALS_PATH} '
-                        f'>> ~/.bashrc || true); {self.setup or "true"}')
                     if storage.source.startswith('gs://'):
                         blob_path = storage.source
                     else:
@@ -570,6 +620,17 @@ class Task:
                             f'File mount source {source!r} does not exist '
                             'locally. To fix: check if it exists, and correct '
                             'the path.')
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
 
         self.file_mounts = file_mounts
         return self
