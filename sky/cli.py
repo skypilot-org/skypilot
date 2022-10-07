@@ -218,6 +218,11 @@ def _interactive_node_cli_command(cli_func):
                                  type=str,
                                  required=False,
                                  help='The region to use.')
+    zone_option = click.option('--zone',
+                               default=None,
+                               type=str,
+                               required=False,
+                               help='The zone to use.')
     idle_autostop = click.option('--idle-minutes-to-autostop',
                                  '-i',
                                  default=None,
@@ -237,6 +242,7 @@ def _interactive_node_cli_command(cli_func):
         # Resource options
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
         region_option,
+        zone_option,
         instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
@@ -1985,7 +1991,7 @@ def _terminate_or_stop_clusters(
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], region: Optional[str],
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
@@ -2038,6 +2044,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
                               region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=gpus,
                               use_spot=use_spot,
@@ -2060,7 +2067,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], region: Optional[str],
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
@@ -2110,6 +2117,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
                               region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2131,11 +2139,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            region: Optional[str], instance_type: Optional[str],
-            tpus: Optional[str], use_spot: Optional[bool],
-            tpu_vm: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], retry_until_up: bool):
+            region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], tpus: Optional[str],
+            use_spot: Optional[bool], tpu_vm: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2186,6 +2195,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),
                               region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
