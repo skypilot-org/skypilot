@@ -334,7 +334,7 @@ def launch_ray_on_local_cluster(
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
-                'sudo ray stop -f',
+                'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
 
         subprocess_utils.run_in_parallel(_stop_ray_workers,
@@ -342,7 +342,7 @@ def launch_ray_on_local_cluster(
 
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
-    head_cmd = ('sudo ray start --head --port=6379 '
+    head_cmd = ('ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
                 f'--resources={head_resources!r}')
 
@@ -378,12 +378,12 @@ def launch_ray_on_local_cluster(
             runner, idx = runner_tuple
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
-                'sudo ray stop -f',
+                'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
 
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
-            worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
+            worker_cmd = (f'ray start --address={head_ip}:6379 '
                           '--object-manager-port=8076 --dashboard-port 8265 '
                           f'--resources={worker_resources!r}')
             backend_utils.run_command_and_handle_ssh_failure(
@@ -434,7 +434,7 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
     cluster_config['python'] = backend_utils.run_command_and_handle_ssh_failure(
         head_runner,
-        'sudo which python3',
+        'which python3',
         failure_message='Failed to obtain admin python path.').split()[0]
 
     cluster_name = cluster_config['cluster']['name']
