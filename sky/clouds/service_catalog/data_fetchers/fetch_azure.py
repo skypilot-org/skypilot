@@ -102,14 +102,16 @@ def get_sku_df() -> pd.DataFrame:
     )
     print(f'Done fetching SKUs')
     items = json.loads(proc.stdout.decode('ascii'))
+    filtered_items = []
     for item in items:
         # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
         if region not in REGION_SET:
             continue
         item['Region'] = region
+        filtered_items.append(item)
 
-    df = pd.DataFrame(items)
+    df = pd.DataFrame(filtered_items)
     df = df[(df['resourceType'] == 'virtualMachines')]
     return df
 
