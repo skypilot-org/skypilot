@@ -42,8 +42,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation',
-    'capabilities'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation', 'capabilities'
 ]
 
 
@@ -222,9 +221,7 @@ def get_all_regions_instance_types_df():
     )
 
     before_drop_len = len(df_ret)
-    df_ret.dropna(subset=['InstanceType'],
-                  inplace=True,
-                  how='all')
+    df_ret.dropna(subset=['InstanceType'], inplace=True, how='all')
     after_drop_len = len(df_ret)
     print('Dropped {} duplicated rows'.format(before_drop_len - after_drop_len))
 
