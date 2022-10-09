@@ -72,7 +72,7 @@ def get_pricing_table(region: str) -> pd.DataFrame:
     df = pd.read_csv(url, skiprows=5, low_memory=False)
     df.rename(columns={
         'Instance Type': 'InstanceType',
-        'PricePerUnit': 'Price'
+        'PricePerUnit': 'Price',
     },
               inplace=True)
     return df[(df['TermType'] == 'OnDemand') &
