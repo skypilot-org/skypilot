@@ -25,6 +25,7 @@ US_REGIONS = [
     # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
 ]
 
+# To enable all the regions, uncomment the following line.
 # def get_regions() -> Tuple[str]:
 #     """Get all available regions."""
 #     proc = subprocess.run('az account list-locations  --query "[?not_null(metadata.latitude)] .{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json', shell=True, check=True, stdout=subprocess.PIPE)

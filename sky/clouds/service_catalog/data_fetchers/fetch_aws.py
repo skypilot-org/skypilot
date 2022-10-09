@@ -94,8 +94,8 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
     ret = []
     for response in response_iterator:
         ret = ret + response['SpotPriceHistory']
-    df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice'
-                           ]].set_index(['InstanceType', 'AvailabilityZone'])
+    df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
+    df = df.set_index(['InstanceType', 'AvailabilityZone'])
     return df
 
 
@@ -106,7 +106,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             get_instance_types.remote(region),
             get_availability_zones.remote(region),
             get_pricing_table.remote(region),
-            get_spot_pricing_table.remote(region)
+            get_spot_pricing_table.remote(region),
         ])
         print(f'{region} Processing dataframes')
 
@@ -132,7 +132,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
                 return row['MemoryInfo']['SizeInMiB'] // 1024
             return int(row['Memory'].split(' GiB')[0])
 
-        def get_additional_columns(row):
+        def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS p3dn.24xlarge offers a different V100 GPU.
             # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
@@ -148,15 +148,21 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
                 'MemoryGiB': get_memory_gib(row),
             })
 
+        # The AWS API may not have all the instance types in the pricing table,
+        # so we need to merge the two dataframes.
         df = df.merge(pricing_df, on=['InstanceType'], how='outer')
         df['Region'] = region
+        # Cartesian product of instance types and availability zones, so that
+        # we can join the spot pricing table per instance type and zone.
         df = df.merge(pd.DataFrame(zone_df), how='cross')
 
+        # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,
                       left_on=['InstanceType', 'AvailabilityZone'],
                       right_index=True,
                       how='outer')
 
+        # Extract vCPUs, memory, and accelerator info from the columns.
         df = pd.concat(
             [df, df.apply(get_additional_columns, axis='columns')],
             axis='columns')
@@ -168,13 +174,13 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
 
 def get_all_regions_instance_types_df():
-    dfs = ray.get([get_instance_types_df.remote(r) for r in REGIONS])
+    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in REGIONS])
     new_dfs = []
-    for df in dfs:
-        if isinstance(df, str):
-            print(f'{df} failed')
+    for df_or_region in df_or_regions:
+        if isinstance(df_or_region, str):
+            print(f'{df_or_region} failed')
         else:
-            new_dfs.append(df)
+            new_dfs.append(df_or_region)
 
     df = pd.concat(new_dfs)
     df.sort_values(['InstanceType', 'Region'], inplace=True)
