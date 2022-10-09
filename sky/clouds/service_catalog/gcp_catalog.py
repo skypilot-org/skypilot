@@ -33,17 +33,17 @@ _DEFAULT_HOST_VM_FAMILY = 'n1'
 # count -> vm type
 _A100_INSTANCE_TYPE_DICTS = {
     'A100': {
-    1: 'a2-highgpu-1g',
-    2: 'a2-highgpu-2g',
-    4: 'a2-highgpu-4g',
-    8: 'a2-highgpu-8g',
-    16: 'a2-megagpu-16g',
+        1: 'a2-highgpu-1g',
+        2: 'a2-highgpu-2g',
+        4: 'a2-highgpu-4g',
+        8: 'a2-highgpu-8g',
+        16: 'a2-megagpu-16g',
     },
     'A100-80GB': {
         1: 'a2-ultragpu-1g',
-    2: 'a2-ultragpu-2g',
-    4: 'a2-ultragpu-4g',
-    8: 'a2-ultragpu-8g',
+        2: 'a2-ultragpu-2g',
+        4: 'a2-ultragpu-4g',
+        8: 'a2-ultragpu-8g',
     }
 }
 
@@ -277,7 +277,8 @@ def list_accelerators(
     new_infos = defaultdict(list)
     for info in a100_infos:
         assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
-        a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][info.accelerator_count]
+        a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][
+            info.accelerator_count]
         df = _df[_df['InstanceType'] == a100_host_vm_type]
         cpu_count = df['vCPUs'].iloc[0]
         memory = df['MemoryGiB'].iloc[0]
