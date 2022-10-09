@@ -19,8 +19,10 @@ CLOUD_CHECKS = {
     'gcp': ['InstanceType', 'Region', 'AcceleratorName', 'AcceleratorCount']}
 
 
+table = {}
 
 for cloud in CLOUD_CHECKS:
+    result = {}
     print(f'=> Checking {cloud}')
     original_df = common.read_catalog(f'{cloud}.csv')
     new_df = pd.read_csv(f'{cloud}.csv')
@@ -29,15 +31,22 @@ for cloud in CLOUD_CHECKS:
     
     diff_df = resource_diff(original_df, new_df, current_check_tuple)
     diff_df.merge(new_df, on=current_check_tuple, how='left').to_csv(f'{cloud}_diff.csv', index=False)
-    print(f'New resources in {cloud}: {len(diff_df)}')
+
+    result['#resources'] = len(diff_df)
 
     check_price = current_check_tuple + ['Price']
     diff_df = resource_diff(original_df, new_df, check_price)
-    print(f'New prices in {cloud}: {len(diff_df)}')
+    result['#prices'] = len(diff_df)
 
     check_price = current_check_tuple + ['SpotPrice']
     diff_df = resource_diff(original_df, new_df, check_price)
-    print(f'New spot prices in {cloud}: {len(diff_df)}')
+    result['#spot_prices'] = len(diff_df)
+
+    table[cloud] = result
+
+summary = pd.DataFrame(table).T
+summary.to_csv('diff_summary.csv')
+print(summary)
 
 
 
