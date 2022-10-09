@@ -70,7 +70,7 @@ def get_region_zones_for_instance_type(instance_type: str,
 def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
     if 'Generation' in _df.columns:
         return _df[_df['InstanceType'] == instance_type]['Generation'].iloc[0]
-    
+
     # Backward compatibility for the older catalog.
     cell = _df[_df['InstanceType'] == instance_type]['capabilities'].iloc[0]
     cap_list = ast.literal_eval(cell)
