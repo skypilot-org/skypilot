@@ -43,7 +43,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Generation'
 ]
 
 
@@ -195,6 +195,7 @@ def get_all_regions_instance_types_df():
         gpu_count = np.nan
         vcpus = np.nan
         memory_gb = np.nan
+        gen_version = None
         caps = row['capabilities']
         for item in caps:
             assert isinstance(item, dict), (item, caps)
@@ -206,16 +207,19 @@ def get_all_regions_instance_types_df():
                 vcpus = float(item['value'])
             elif item['name'] == 'MemoryGB':
                 memory_gb = item['value']
-        return gpu_name, gpu_count, vcpus, memory_gb
+            elif item['name'] == 'HyperVGenerations':
+                gen_version = item['value']
+        return gpu_name, gpu_count, vcpus, memory_gb, gen_version
 
     def get_additional_columns(row):
-        gpu_name, gpu_count, vcpus, memory_gb = get_capabilities(row)
+        gpu_name, gpu_count, vcpus, memory_gb, gen_version = get_capabilities(row)
         return pd.Series({
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
             'vCPUs': vcpus,
             'MemoryGiB': memory_gb,
             'GpuInfo': gpu_name,
+            'Generation': gen_version,
         })
 
     df_ret = pd.concat(
