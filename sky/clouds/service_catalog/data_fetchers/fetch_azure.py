@@ -212,7 +212,8 @@ def get_all_regions_instance_types_df():
         return gpu_name, gpu_count, vcpus, memory_gb, gen_version
 
     def get_additional_columns(row):
-        gpu_name, gpu_count, vcpus, memory_gb, gen_version = get_capabilities(row)
+        gpu_name, gpu_count, vcpus, memory_gb, gen_version = get_capabilities(
+            row)
         return pd.Series({
             'AcceleratorName': gpu_name,
             'AcceleratorCount': gpu_count,
