@@ -41,7 +41,7 @@ REGION_SET = set(REGIONS)
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
-USEFULE_COLUMNS = [
+USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
 ]
@@ -109,10 +109,8 @@ def get_sku_df() -> pd.DataFrame:
         if region not in REGION_SET:
             continue
         if len(zones) == 0:
-            new_item = item.copy()
-            new_item['Region'] = region
-            new_item['AvailabilityZone'] = f'{region}-0'
-            new_items.append(new_item)
+            # The default zone is '0'.
+            zones = ['0']
 
         for zone in zones:
             new_item = item.copy()
@@ -166,7 +164,7 @@ def get_all_regions_instance_types_df():
     df['is_promo'] = df['skuName'].str.endswith(' Low Priority')
     df.rename(columns={
         'armSkuName': 'InstanceType',
-        'armRegionName': 'Region'
+        'armRegionName': 'Region',
     },
               inplace=True)
     demand_df = df[~df['skuName'].str.contains(' Spot')][[
@@ -191,8 +189,6 @@ def get_all_regions_instance_types_df():
                      on=['merge_name', 'Region', 'is_promo'],
                      how='left')
     df = df.join(spot_df, on=['merge_name', 'Region', 'is_promo'], how='left')
-
-    # df.dropna(subset=['Price', 'SpotPrice'], inplace=True, how='all')
 
     def get_capabilities(row):
         gpu_name = None
@@ -236,7 +232,7 @@ def get_all_regions_instance_types_df():
 
     # Filter out deprecated families
     df_ret = df_ret.loc[~df_ret['family'].isin(DEPRECATED_FAMILIES)]
-    df_ret = df_ret[USEFULE_COLUMNS]
+    df_ret = df_ret[USEFUL_COLUMNS]
     return df_ret
 
 

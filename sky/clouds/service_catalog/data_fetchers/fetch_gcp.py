@@ -20,6 +20,8 @@ NOT_AVAILABLE_STR = 'Not available in this region'
 ALL_REGION_PREFIX = ''
 US_REGION_PREFIX = 'us-'
 REGION_PREFIX = US_REGION_PREFIX
+# Uncomment the following line to VM pricings from all regions.
+# REGION_PREFIX = ALL_REGION_PREFIX
 
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
 UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
@@ -264,7 +266,7 @@ def get_vm_price_table(url):
         df = df[['Item', 'Region', 'Price', 'SpotPrice']]
         item = df['Item'].iloc[0]
         if item == 'Predefined vCPUs':
-            return get_a2_df(df)
+            df = get_a2_df(df)
     return df
 
 
