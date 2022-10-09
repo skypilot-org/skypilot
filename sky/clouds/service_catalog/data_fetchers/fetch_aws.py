@@ -167,7 +167,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             [df, df.apply(get_additional_columns, axis='columns')],
             axis='columns')
         # patch the GpuInfo for p4de.24xlarge
-        df[df['InstanceType'] == 'p4de.24xlarge']['GpuInfo'] = 'A100-80GB'
+        df.loc[df['InstanceType'] == 'p4de.24xlarge', 'GpuInfo'] = 'A100-80GB'
     except Exception as e:
         print(f'{region} failed with {e}')
         return region

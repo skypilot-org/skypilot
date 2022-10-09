@@ -3,9 +3,8 @@
 This script takes about 1 minute to finish.
 """
 import json
-import os
 import subprocess
-from typing import Optional, Tuple
+from typing import Optional
 import urllib
 
 import numpy as np
@@ -43,7 +42,8 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Generation'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Generation',
+    'capabilities'
 ]
 
 
