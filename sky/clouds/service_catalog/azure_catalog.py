@@ -68,7 +68,7 @@ def get_region_zones_for_instance_type(instance_type: str,
 
 
 def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
-    return _df[_df['InstanceType'] == instance_type]['Generation']
+    return _df[_df['InstanceType'] == instance_type]['Generation'].iloc[0]
 
 
 def list_accelerators(gpus_only: bool,
