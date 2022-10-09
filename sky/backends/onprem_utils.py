@@ -199,7 +199,7 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
         # raise an error.
         backend_utils.run_command_and_handle_ssh_failure(
             runner,
-            f'(ray --version | grep {sky_ray_version})',
+            f'ray --version | grep {sky_ray_version}',
             failure_message=(
                 f'Ray (on {runner.ip}) does not match skypilot\'s'
                 f' requirement for ray=={sky_ray_version}.'
