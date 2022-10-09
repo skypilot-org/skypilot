@@ -14,7 +14,6 @@ import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
-import googleapiclient
 
 from sky import clouds
 from sky import sky_logging
@@ -181,6 +180,7 @@ def _wait_for_compute_global_operation(project_name, operation_name, compute):
 # avoid duplicated codes.
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
+@gcp.import_package
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
@@ -201,7 +201,7 @@ def setup_gcp_authentication(config):
 
     try:
         project = compute.projects().get(project=project_id).execute()
-    except googleapiclient.errors.HttpError as e:
+    except gcp.googleapiclient.errors.HttpError as e:
         # Can happen for a new project where Compute Engine API is disabled.
         #
         # Example message:
