@@ -42,7 +42,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone', 'Generation',
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation',
     'capabilities'
 ]
 
@@ -102,23 +102,14 @@ def get_sku_df() -> pd.DataFrame:
     )
     print(f'Done fetching SKUs')
     items = json.loads(proc.stdout.decode('ascii'))
-    new_items = []
     for item in items:
-        zones = item['locationInfo'][0]['zones']
+        # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
         if region not in REGION_SET:
             continue
-        if len(zones) == 0:
-            # The default zone is '0'.
-            zones = ['0']
+        item['Region'] = region
 
-        for zone in zones:
-            new_item = item.copy()
-            new_item['Region'] = region
-            new_item['AvailabilityZone'] = f'{region}-{zone}'
-            new_items.append(new_item)
-
-    df = pd.DataFrame(new_items)
+    df = pd.DataFrame(items)
     df = df[(df['resourceType'] == 'virtualMachines')]
     return df
 
@@ -229,7 +220,7 @@ def get_all_regions_instance_types_df():
     )
 
     before_drop_len = len(df_ret)
-    df_ret.dropna(subset=['InstanceType', 'AvailabilityZone'],
+    df_ret.dropna(subset=['InstanceType'],
                   inplace=True,
                   how='all')
     after_drop_len = len(df_ret)
