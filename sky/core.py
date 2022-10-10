@@ -51,10 +51,12 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
     return cluster_records
 
 
-def _start(cluster_name: str,
-           idle_minutes_to_autostop: Optional[int] = None,
-           retry_until_up: bool = False,
-           terminate: bool = False) -> backends.Backend.ResourceHandle:
+def _start(
+        cluster_name: str,
+        idle_minutes_to_autostop: Optional[int] = None,
+        retry_until_up: bool = False,
+        down: bool = False,  #pylint: disable=redefined-outer-name
+) -> backends.Backend.ResourceHandle:
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
@@ -80,16 +82,16 @@ def _start(cluster_name: str,
                                cluster_name=cluster_name,
                                retry_until_up=retry_until_up)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle,
-                             idle_minutes_to_autostop,
-                             terminate=terminate)
+        backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
     return handle
 
 
-def start(cluster_name: str,
-          idle_minutes_to_autostop: Optional[int] = None,
-          retry_until_up: bool = False,
-          terminate: bool = False):
+def start(
+        cluster_name: str,
+        idle_minutes_to_autostop: Optional[int] = None,
+        retry_until_up: bool = False,
+        down: bool = False,  #pylint: disable=redefined-outer-name
+):
     """Start the cluster.
 
     Please refer to the sky.cli.start for the document.
@@ -97,7 +99,7 @@ def start(cluster_name: str,
     Raises:
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    _start(cluster_name, idle_minutes_to_autostop, retry_until_up, terminate)
+    _start(cluster_name, idle_minutes_to_autostop, retry_until_up, down)
 
 
 def stop(cluster_name: str, purge: bool = False):
@@ -160,9 +162,11 @@ def down(cluster_name: str, purge: bool = False):
     backend.teardown(handle, terminate=True, purge=purge)
 
 
-def autostop(cluster_name: str,
-             idle_minutes_to_autostop: int,
-             terminate: bool = False):
+def autostop(
+        cluster_name: str,
+        idle_minutes_to_autostop: int,
+        down: bool = False,  #pylint: disable=redefined-outer-name
+):
     """Set the autostop time of the cluster.
 
     Please refer to the sky.cli.autostop for the document.
@@ -176,7 +180,7 @@ def autostop(cluster_name: str,
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
     verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-    option_str = 'stop' if terminate else 'down'
+    option_str = 'stop' if down else 'down'
     operation = f'{verb} auto-{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
@@ -209,7 +213,7 @@ def autostop(cluster_name: str,
                 f'{colorama.Style.RESET_ALL}'
                 '\n  Auto-stop can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
-    backend.set_autostop(handle, idle_minutes_to_autostop, terminate)
+    backend.set_autostop(handle, idle_minutes_to_autostop, down)
 
 
 # ==================
