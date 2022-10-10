@@ -525,7 +525,7 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
         sources = list(src_to_file_id.keys())
         sources_str = '\n\t'.join(sources)
         logger.info('Source files in file_mounts will be synced to '
-                    f'cloud storage {bucket_name}:'
+                    f'cloud storage {file_bucket_name}:'
                     f'\n\t{sources_str}')
     task.update_storage_mounts(new_storage_mounts)
 
