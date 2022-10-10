@@ -997,7 +997,7 @@ def cli():
 @click.option(
     '--terminate',
     default=False,
-    type=bool,
+    is_flag=True,
     required=False,
     help=(
         'Terminate the cluster after execution. If --idle-minutes-to-autostop '
@@ -1607,7 +1607,7 @@ def autostop(
 @click.option(
     '--terminate',
     default=False,
-    type=bool,
+    is_flag=True,
     required=False,
     help=(
         'Terminate the cluster after execution. If --idle-minutes-to-autostop '
