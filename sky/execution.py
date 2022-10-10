@@ -121,7 +121,8 @@ def _execute(
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
       terminate: bool; whether to terminate the launched resources after
-        execution.
+        execution. If idle_minutes_to_autostop is set, the cluster will be
+        terminated after the specified idle time.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
