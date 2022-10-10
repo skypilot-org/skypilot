@@ -119,7 +119,8 @@ class AutostopEvent(SkyletEvent):
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
-            self._replace_yaml_for_stopping(self.ray_yaml_path, autostop_config.teardown)
+            self._replace_yaml_for_stopping(self.ray_yaml_path,
+                                            autostop_config.teardown)
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
@@ -142,9 +143,11 @@ class AutostopEvent(SkyletEvent):
         yaml_str = self._NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
         yaml_str = self._UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
         if teardown:
-            yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: false', yaml_str)
+            yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: false',
+                                             yaml_str)
         else:
-            yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true', yaml_str)
+            yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true',
+                                             yaml_str)
         config = yaml.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'

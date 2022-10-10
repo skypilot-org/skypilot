@@ -93,13 +93,13 @@ class Stage(enum.Enum):
     SETUP = enum.auto()
     PRE_EXEC = enum.auto()
     EXEC = enum.auto()
-    TEARDOWN = enum.auto()
+    TERMINATE = enum.auto()
 
 
 def _execute(
     dag: sky.Dag,
     dryrun: bool = False,
-    teardown: bool = False,
+    terminate: bool = False,
     stream_logs: bool = True,
     handle: Any = None,
     backend: Optional[backends.Backend] = None,
@@ -120,7 +120,7 @@ def _execute(
       dag: sky.Dag.
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
-      teardown: bool; whether to teardown the launched resources after
+      terminate: bool; whether to terminate the launched resources after
         execution.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
@@ -214,7 +214,9 @@ def _execute(
 
         if stages is None or Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
-                backend.set_autostop(handle, idle_minutes_to_autostop, teardown=teardown)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     terminate=terminate)
 
         if stages is None or Stage.EXEC in stages:
             try:
@@ -222,10 +224,10 @@ def _execute(
                 backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
-                backend.post_execute(handle, teardown)
+                backend.post_execute(handle, terminate)
 
-        if stages is None or Stage.TEARDOWN in stages:
-            if teardown and idle_minutes_to_autostop is None:
+        if stages is None or Stage.TERMINATE in stages:
+            if terminate and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
@@ -253,7 +255,7 @@ def launch(
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
-    teardown: bool = False,
+    terminate: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
@@ -290,7 +292,7 @@ def launch(
     _execute(
         dag=dag,
         dryrun=dryrun,
-        teardown=teardown,
+        terminate=terminate,
         stream_logs=stream_logs,
         handle=None,
         backend=backend,
@@ -308,7 +310,7 @@ def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
     dryrun: bool = False,
-    teardown: bool = False,
+    terminate: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
@@ -327,7 +329,7 @@ def exec(  # pylint: disable=redefined-builtin
                              'Use `sky status` to check the status.')
     _execute(dag=dag,
              dryrun=dryrun,
-             teardown=teardown,
+             terminate=terminate,
              stream_logs=stream_logs,
              handle=handle,
              backend=backend,
