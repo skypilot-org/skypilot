@@ -198,18 +198,12 @@ def autostop(
         sky.exceptions.NotSupportedError: the cluster is not supported.
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
-    is_cancel = idle_minutes_to_autostop < 0
     verb = 'Cancelling' if is_cancel else 'Scheduling'
     option_str = 'down' if down else 'stop'
     if is_cancel:
         option_str = '{stop,down}'
     operation = f'{verb} auto{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
-        raise exceptions.NotSupportedError(
-            f'{operation} sky reserved cluster {cluster_name!r} '
-            f'is not supported.')
-    (cluster_status,
-     handle) = backend_utils.refresh_cluster_status_handle(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
