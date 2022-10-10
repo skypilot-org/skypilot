@@ -280,6 +280,12 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
+def get_cluster_names_start_with(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
+    return [row[0] for row in rows]
+
+
 def get_enabled_clouds() -> List[clouds.Cloud]:
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_ENABLED_CLOUDS_KEY,))
@@ -365,6 +371,12 @@ def get_glob_storage_name(storage_name: str) -> List[str]:
     assert storage_name is not None, 'storage_name cannot be None'
     rows = _DB.cursor.execute('SELECT name FROM storage WHERE name GLOB (?)',
                               (storage_name,))
+    return [row[0] for row in rows]
+
+
+def get_storage_names_start_with(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM storage WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
     return [row[0] for row in rows]
 
 

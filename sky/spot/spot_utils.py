@@ -194,7 +194,7 @@ def cancel_job_by_name(job_name: str) -> str:
             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
 
 
-def stream_logs_by_id(job_id: int) -> str:
+def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
     while (controller_status != job_lib.JobStatus.RUNNING and
@@ -237,7 +237,10 @@ def stream_logs_by_id(job_id: int) -> str:
             spot_status = spot_state.get_status(job_id)
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        returncode = backend.tail_logs(handle, job_id=None, spot_job_id=job_id)
+        returncode = backend.tail_logs(handle,
+                                       job_id=None,
+                                       spot_job_id=job_id,
+                                       follow=follow)
         if returncode == 0:
             # If the log tailing exit successfully (the real job can be
             # SUCCEEDED or FAILED), we can safely break the loop. We use the
@@ -250,8 +253,8 @@ def stream_logs_by_id(job_id: int) -> str:
                         f'(status: {job_status.value}).')
             break
         logger.info(
-            f'INFO: The return code is {returncode}. '
-            f'Check the job status in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            f'INFO: (Log streaming) Got return code {returncode}. Retrying '
+            f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot status again.
@@ -264,7 +267,7 @@ def stream_logs_by_id(job_id: int) -> str:
     return ''
 
 
-def stream_logs_by_name(job_name: str) -> str:
+def stream_logs_by_name(job_name: str, follow: bool = True) -> str:
     """Stream logs by name."""
     job_ids = spot_state.get_nonterminal_job_ids_by_name(job_name)
     if len(job_ids) == 0:
@@ -274,7 +277,7 @@ def stream_logs_by_name(job_name: str) -> str:
         return (f'{colorama.Fore.RED}Multiple running jobs found '
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
-    stream_logs_by_id(job_ids[0])
+    stream_logs_by_id(job_ids[0], follow)
     return ''
 
 
@@ -310,18 +313,18 @@ def dump_spot_job_queue() -> str:
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
-    return json.dumps(jobs, indent=2)
+    return common_utils.encode_payload(jobs)
 
 
-def load_spot_job_queue(json_str: str) -> List[Dict[str, Any]]:
+def load_spot_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
-    jobs = json.loads(json_str)
+    jobs = common_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = spot_state.SpotStatus(job['status'])
     return jobs
 
 
-def format_job_table(jobs: Dict[str, Any], show_all: bool) -> str:
+def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
     """Show all spot jobs."""
     columns = [
         'ID', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION', 'JOB DURATION',
@@ -414,19 +417,22 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def stream_logs_by_name(cls, job_name: str) -> str:
+    def stream_logs_by_name(cls, job_name: str, follow: bool = True) -> str:
         code = [
-            f'msg = spot_utils.stream_logs_by_name({job_name!r})',
+            f'msg = spot_utils.stream_logs_by_name({job_name!r}, '
+            f'follow={follow})',
             'print(msg, flush=True)',
         ]
         return cls._build(code)
 
     @classmethod
-    def stream_logs_by_id(cls, job_id: Optional[int]) -> str:
+    def stream_logs_by_id(cls,
+                          job_id: Optional[int],
+                          follow: bool = True) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else spot_state.get_latest_job_id()',
-            'msg = spot_utils.stream_logs_by_id(job_id)',
+            f'msg = spot_utils.stream_logs_by_id(job_id, follow={follow})',
             'print(msg, flush=True)',
         ]
         return cls._build(code)

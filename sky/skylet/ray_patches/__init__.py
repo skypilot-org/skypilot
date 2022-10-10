@@ -27,7 +27,7 @@ Example workflow:
 import os
 import subprocess
 
-from sky import constants
+from sky.skylet import constants
 
 
 def _to_absolute(pwd_file):
