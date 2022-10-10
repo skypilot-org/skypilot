@@ -1000,8 +1000,9 @@ def cli():
     is_flag=True,
     required=False,
     help=(
-        'Terminate the cluster after execution. If --idle-minutes-to-autostop '
-        'is set, the cluster will be torn down after the idle time.'),
+        'Terminate the cluster after execution (successfully or abnormally). If '
+        '--idle-minutes-to-autostop is set, the cluster will be torn down after '
+        'the idle time.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1517,7 +1518,8 @@ def stop(
     default=False,
     is_flag=True,
     required=False,
-    help='Terminate the cluster instead of stopping it, when auto-stopping.')
+    help='Terminate the cluster instead of stopping it, when auto-stopping '
+    '(i.e., autodown rather than autostop).')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1540,6 +1542,8 @@ def autostop(
 
     ``--idle-minutes`` is the number of minutes of idleness (no pending/running
     jobs) after which the cluster will be stopped automatically.
+    Scheduling autostop twice on the same cluster will overwrite the previous
+    autostop schedule.
 
     ``--cancel`` will cancel the autostopping. If the cluster was not scheduled
     autostop, this will do nothing to autostop.
@@ -1610,8 +1614,9 @@ def autostop(
     is_flag=True,
     required=False,
     help=(
-        'Terminate the cluster after execution. If --idle-minutes-to-autostop '
-        'is set, the cluster will be torn down after the idle time.'),
+        'Terminate the cluster after execution (successfully or abnormally). If '
+        '--idle-minutes-to-autostop is set, the cluster will be torn down after '
+        'the idle time.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1653,6 +1658,9 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
       sky start -a
 
     """
+    if terminate and idle_minutes_to_autostop is None:
+        raise click.UsageError(
+            '--idle-minutes-to-autostop must be set if --terminate is set.')
     to_start = []
 
     if not clusters and not all:
@@ -1838,8 +1846,8 @@ def _terminate_or_stop_clusters(
     operation = 'Terminating' if terminate else 'Stopping'
     if idle_minutes_to_autostop is not None:
         verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-        down_str = ' (terminate)' if terminate else ''
-        operation = f'{verb} auto-stop{down_str} on'
+        option_str = 'down' if terminate else 'stop'
+        operation = f'{verb} auto-{option_str} on'
 
     if len(names) > 0:
         reserved_clusters = [

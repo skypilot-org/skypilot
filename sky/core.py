@@ -176,8 +176,8 @@ def autostop(cluster_name: str,
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
     verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-    down_str = ' (tear down)' if terminate else ''
-    operation = f'{verb} auto-stop{down_str} on'
+    option_str = 'stop' if terminate else 'down'
+    operation = f'{verb} auto-{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '

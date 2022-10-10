@@ -121,8 +121,8 @@ def _execute(
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
       terminate: bool; whether to terminate the launched resources after
-        execution. If idle_minutes_to_autostop is set, the cluster will be
-        terminated after the specified idle time.
+        execution (successfully or abnormally). If idle_minutes_to_autostop
+        is set, the cluster will be terminated after the specified idle time.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
@@ -226,12 +226,12 @@ def _execute(
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, terminate)
-
+    finally:
         if stages is None or Stage.TERMINATE in stages:
             if terminate and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
-    finally:
+
         if cluster_name != spot.SPOT_CONTROLLER_NAME:
             # UX: print live clusters to make users aware (to save costs).
             #
