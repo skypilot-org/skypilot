@@ -604,6 +604,7 @@ def _launch_with_confirm(
     detach_run: bool,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    teardown: bool = False,
     retry_until_up: bool = False,
     no_setup: bool = False,
     node_type: Optional[str] = None,
@@ -654,6 +655,7 @@ def _launch_with_confirm(
             detach_run=detach_run,
             backend=backend,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
+            teardown=teardown,
             retry_until_up=retry_until_up,
             no_setup=no_setup,
         )
@@ -993,6 +995,14 @@ def cli():
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be auto-stopped.'))
 @click.option(
+    '--idle-minutes-to-autodown',
+    '-I',
+    default=None,
+    type=int,
+    required=False,
+    help=('Same as --idle-minutes-to-autostop, but tears down the cluster.'),
+)
+@click.option(
     '--retry-until-up',
     '-r',
     default=False,
@@ -1033,6 +1043,7 @@ def launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
+    idle_minutes_to_autodown: Optional[int],
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
@@ -1045,6 +1056,14 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    autodown = False
+    if idle_minutes_to_autostop is not None and idle_minutes_to_autodown is not None:
+        raise click.UsageError(
+            'Only one of --idle-minutes-to-autostop and --idle-minutes-to-autodown should be specified. '
+            f'autostop: {idle_minutes_to_autostop}, autodown: {idle_minutes_to_autodown}')
+    if idle_minutes_to_autodown is not None:
+        idle_minutes_to_autostop = idle_minutes_to_autodown
+        autodown = True
     backend_utils.check_cluster_name_not_reserved(
         cluster, operation_str='Launching task on it')
     if backend_name is None:
@@ -1083,6 +1102,7 @@ def launch(
         detach_run=detach_run,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        teardown=autodown,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
@@ -1499,6 +1519,11 @@ def stop(
               is_flag=True,
               required=False,
               help='Cancel the auto-stopping.')
+@click.option('--down',
+            default=False, 
+            is_flag=True, 
+            required=False, 
+            help='Tear down the cluster instead of stopping it, when auto-stopping.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1512,6 +1537,7 @@ def autostop(
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
+    down: bool,
 ):
     """Schedule or cancel auto-stopping for cluster(s).
 
@@ -1548,7 +1574,7 @@ def autostop(
         idle_minutes = 5
     _terminate_or_stop_clusters(clusters,
                                 apply_to_all=all,
-                                terminate=False,
+                                terminate=down,
                                 no_confirm=yes,
                                 idle_minutes_to_autostop=idle_minutes)
 
@@ -1585,6 +1611,14 @@ def autostop(
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be auto-stopped.'))
 @click.option(
+    '--idle-minutes-to-autodown',
+    '-I',
+    default=None,
+    type=int,
+    required=False,
+    help=('Same as --idle-minutes-to-autostop, but tears down the cluster.'),
+)
+@click.option(
     '--retry-until-up',
     '-r',
     default=False,
@@ -1595,7 +1629,7 @@ def autostop(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(clusters: Tuple[str], all: bool, yes: bool,
-          idle_minutes_to_autostop: int, retry_until_up: bool):
+          idle_minutes_to_autostop: Optional[int], idle_minutes_to_autodown: Optional[int], retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1623,6 +1657,12 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
       sky start -a
 
     """
+    if idle_minutes_to_autostop is not None and idle_minutes_to_autodown is not None:
+        raise click.UsageError(
+            'Only one of --idle-minutes-to-autostop and --idle-minutes-to-autodown should be specified. '
+            f'autostop: {idle_minutes_to_autostop}, autodown: {idle_minutes_to_autodown}')
+    autodown = idle_minutes_to_autodown is not None
+
     to_start = []
 
     if not clusters and not all:
@@ -1711,7 +1751,7 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
 
     for name in to_start:
         try:
-            core.start(name, idle_minutes_to_autostop, retry_until_up)
+            core.start(name, idle_minutes_to_autostop, retry_until_up, autodown=autodown)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
@@ -1796,8 +1836,6 @@ def _terminate_or_stop_clusters(
     name is explicitly and uniquely specified (not via glob) and purge is set
     to True.
     """
-    assert idle_minutes_to_autostop is None or not terminate, (
-        idle_minutes_to_autostop, terminate)
     command = 'down' if terminate else 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
@@ -1807,7 +1845,8 @@ def _terminate_or_stop_clusters(
     operation = 'Terminating' if terminate else 'Stopping'
     if idle_minutes_to_autostop is not None:
         verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-        operation = f'{verb} auto-stop on'
+        down_str = f' (tear down)' if terminate else ''
+        operation = f'{verb} auto-stop{down_str} on'
 
     if len(names) > 0:
         reserved_clusters = [
@@ -1902,7 +1941,7 @@ def _terminate_or_stop_clusters(
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                core.autostop(name, idle_minutes_to_autostop)
+                core.autostop(name, idle_minutes_to_autostop, terminate)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)

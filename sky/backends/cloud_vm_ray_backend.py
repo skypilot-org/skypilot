@@ -2608,10 +2608,11 @@ class CloudVmRayBackend(backends.Backend):
     def set_autostop(self,
                      handle: ResourceHandle,
                      idle_minutes_to_autostop: Optional[int],
+                     teardown: bool = True,
                      stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
             code = autostop_lib.AutostopCodeGen.set_autostop(
-                idle_minutes_to_autostop, self.NAME)
+                idle_minutes_to_autostop, self.NAME, teardown)
             returncode, _, stderr = self.run_on_head(handle,
                                                      code,
                                                      require_outputs=True,

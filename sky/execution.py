@@ -214,7 +214,7 @@ def _execute(
 
         if stages is None or Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
-                backend.set_autostop(handle, idle_minutes_to_autostop)
+                backend.set_autostop(handle, idle_minutes_to_autostop, teardown=teardown)
 
         if stages is None or Stage.EXEC in stages:
             try:
@@ -225,7 +225,7 @@ def _execute(
                 backend.post_execute(handle, teardown)
 
         if stages is None or Stage.TEARDOWN in stages:
-            if teardown:
+            if teardown and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:

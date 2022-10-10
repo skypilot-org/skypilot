@@ -53,7 +53,8 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
 
 def _start(cluster_name: str,
            idle_minutes_to_autostop: Optional[int] = None,
-           retry_until_up: bool = False) -> backends.Backend.ResourceHandle:
+           retry_until_up: bool = False,
+           autodown: bool=False) -> backends.Backend.ResourceHandle:
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
@@ -79,13 +80,14 @@ def _start(cluster_name: str,
                                cluster_name=cluster_name,
                                retry_until_up=retry_until_up)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop)
+        backend.set_autostop(handle, idle_minutes_to_autostop, teardown=autodown)
     return handle
 
 
 def start(cluster_name: str,
           idle_minutes_to_autostop: Optional[int] = None,
-          retry_until_up: bool = False):
+          retry_until_up: bool = False,
+          autodown: bool = False):
     """Start the cluster.
 
     Please refer to the sky.cli.start for the document.
@@ -93,7 +95,7 @@ def start(cluster_name: str,
     Raises:
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    _start(cluster_name, idle_minutes_to_autostop, retry_until_up)
+    _start(cluster_name, idle_minutes_to_autostop, retry_until_up, autodown)
 
 
 def stop(cluster_name: str, purge: bool = False):
@@ -156,7 +158,7 @@ def down(cluster_name: str, purge: bool = False):
     backend.teardown(handle, terminate=True, purge=purge)
 
 
-def autostop(cluster_name: str, idle_minutes_to_autostop: int):
+def autostop(cluster_name: str, idle_minutes_to_autostop: int, terminate: bool=False):
     """Set the autostop time of the cluster.
 
     Please refer to the sky.cli.autostop for the document.
@@ -170,7 +172,8 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
     verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-    operation = f'{verb} auto-stop on'
+    down_str = f' (tear down)' if terminate else ''
+    operation = f'{verb} auto-stop{down_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '
@@ -202,7 +205,7 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
                 f'{colorama.Style.RESET_ALL}'
                 '\n  Auto-stop can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
-    backend.set_autostop(handle, idle_minutes_to_autostop)
+    backend.set_autostop(handle, idle_minutes_to_autostop, terminate)
 
 
 # ==================
