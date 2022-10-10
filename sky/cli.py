@@ -2403,10 +2403,10 @@ def admin_deploy(clusterspec_yaml: str):
         len(ips), sky.Resources(sky.Local()))
 
     # Check for Ray
-    click.secho(f'[{steps}/4] Checking on-premise environment\n',
+    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
                 fg='green',
                 nl=False)
-    onprem_utils.check_local_installation(ips, auth_config)
+    onprem_utils.check_and_install_local_env(ips, auth_config)
     steps += 1
 
     # Detect what GPUs the cluster has (which can be heterogeneous)
