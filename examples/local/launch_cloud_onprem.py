@@ -30,10 +30,10 @@ from sky.backends import onprem_utils
 from sky.utils import common_utils
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-n',
-                    '--local-cluster-name',
+parser.add_argument('name',
                     type=str,
-                    required=True,
+                    default='my-local-cluster',
+                    nargs='?',
                     help='Name of the local cluster.')
 args = parser.parse_args()
 
@@ -41,7 +41,7 @@ args = parser.parse_args()
 public_key = '~/.ssh/sky-key.pub'
 private_key = '~/.ssh/sky-key'
 
-local_cluster_name = args.local_cluster_name
+local_cluster_name = args.name
 
 # Sky Task YAML to setup the user 'test'
 sky_yaml_config = {
