@@ -155,7 +155,8 @@ def get_local_cluster_config_or_error(cluster_name: str) -> Dict[str, Any]:
 
 
 def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
-    """Checks if the Sky dependencies are properly installed on the machine.
+    """Checks if SkyPilot dependencies are present on the machine. Installs
+    them if not already installed.
 
     This function checks for the following dependencies on the root user:
         - Sky
@@ -208,7 +209,11 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
         # Checks for Sky installation. When Sky's job submission code is ran
         # on a user's account, Sky calls the Ray cluster to prepare the user's
         # job. Due to Ray's limitations, this is ran under the admin's
-        # environment, which requires Sky to be installed globally.
+        # environment, which requires Sky to be installed globally. NOTE: This
+        # package is installed from PyPI and may not contain any changes made
+        # since the last SkyPilot release. If required, please install
+        # skypilot from source on the onprem machine(s) before running sky
+        # admin deploy
         backend_utils.run_command_and_handle_ssh_failure(
             runner,
             'sky --help || (pip3 install skypilot)',
