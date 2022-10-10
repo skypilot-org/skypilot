@@ -999,10 +999,10 @@ def cli():
     default=False,
     is_flag=True,
     required=False,
-    help=(
-        'Terminate the cluster after execution (successfully or abnormally). If '
-        '--idle-minutes-to-autostop is set, the cluster will be torn down after '
-        'the idle time.'),
+    help=
+    ('Terminate the cluster after execution (successfully or abnormally). If '
+     '--idle-minutes-to-autostop is set, the cluster will be torn down after '
+     'the idle time.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1613,10 +1613,10 @@ def autostop(
     default=False,
     is_flag=True,
     required=False,
-    help=(
-        'Terminate the cluster after execution (successfully or abnormally). If '
-        '--idle-minutes-to-autostop is set, the cluster will be torn down after '
-        'the idle time.'),
+    help=
+    ('Terminate the cluster after execution (successfully or abnormally). If '
+     '--idle-minutes-to-autostop is set, the cluster will be torn down after '
+     'the idle time.'),
 )
 @click.option(
     '--retry-until-up',
