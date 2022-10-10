@@ -1,0 +1,25 @@
+#SkyPilot YAML to run stable diffusion web tool on 1 V100 GPU.
+
+resources:
+  cloud: gcp
+  accelerators: V100:1
+
+file_mounts:
+  /faster_stable_diffusion: .
+
+setup: |
+  sudo rm -r stable-diffusion-webui-docker
+  git clone https://github.com/AbdBarho/stable-diffusion-webui-docker.git
+  sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+  sudo chmod +x /usr/local/bin/docker-compose
+  cd stable-diffusion-webui-docker
+  git reset --hard 0d8b7d4ac8f9ba99e041ca332547eab9d65e6360
+  wget https://www.googleapis.com/storage/v1/b/aai-blog-files/o/sd-v1-4.ckpt?alt=media -P models
+  mv models/'sd-v1-4.ckpt?alt=media' models/model.ckpt
+  docker pull gcr.io/intercloud-320520/stable_diffusion_webui
+  rm docker-compose.yml
+  cp /faster_stable_diffusion/docker-compose.yml .
+
+run: |
+  cd stable-diffusion-webui-docker
+  docker-compose up
