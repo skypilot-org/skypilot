@@ -120,7 +120,7 @@ class AutostopEvent(SkyletEvent):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             self._replace_yaml_for_stopping(self.ray_yaml_path,
-                                            autostop_config.teardown)
+                                            autostop_config.terminate)
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
@@ -136,13 +136,13 @@ class AutostopEvent(SkyletEvent):
         else:
             raise NotImplementedError
 
-    def _replace_yaml_for_stopping(self, yaml_path: str, teardown: bool):
+    def _replace_yaml_for_stopping(self, yaml_path: str, terminate: bool):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
         # Update the number of workers to 0.
         yaml_str = self._NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
         yaml_str = self._UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
-        if teardown:
+        if terminate:
             yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: false',
                                              yaml_str)
         else:
