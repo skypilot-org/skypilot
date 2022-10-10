@@ -175,6 +175,7 @@ class SSHCommandRunner:
             process_stream: bool = True,
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -192,6 +193,7 @@ class SSHCommandRunner:
             check: Check the success of the command.
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
+            separate_stderr: Whether to separate stderr from stdout.
 
 
         Returns:
@@ -223,8 +225,9 @@ class SSHCommandRunner:
         command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
-            '2>&1',
         ]
+        if not separate_stderr:
+            command.append('2>&1')
         if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
             command += [
                 # A hack to remove the following bash warnings (twice):
