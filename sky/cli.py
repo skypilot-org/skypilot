@@ -207,6 +207,20 @@ def _interactive_node_cli_command(cli_func):
                               default=False,
                               required=False,
                               help='Skip confirmation prompt.')
+    idle_autostop = click.option('--idle-minutes-to-autostop',
+                                 '-i',
+                                 default=None,
+                                 type=int,
+                                 required=False,
+                                 help=('Automatically stop the cluster after '
+                                       'this many minutes of idleness, i.e. '
+                                       'no running or pending jobs in the '
+                                       'cluster\'s job queue. Idleness starts '
+                                       'counting after setup/file_mounts are '
+                                       'done; the clock gets reset whenever '
+                                       'there are running/pending jobs in the '
+                                       'job queue. If not set, the cluster '
+                                       'will not be auto-stopped.'))
     retry_until_up = click.option('--retry-until-up',
                                   '-r',
                                   is_flag=True,
@@ -227,20 +241,6 @@ def _interactive_node_cli_command(cli_func):
                                type=str,
                                required=False,
                                help='The zone to use.')
-    idle_autostop = click.option('--idle-minutes-to-autostop',
-                                 '-i',
-                                 default=None,
-                                 type=int,
-                                 required=False,
-                                 help=('Automatically stop the cluster after '
-                                       'this many minutes of idleness, i.e. '
-                                       'no running or pending jobs in the '
-                                       'cluster\'s job queue. Idleness starts '
-                                       'counting after setup/file_mounts are '
-                                       'done; the clock gets reset whenever '
-                                       'there are running/pending jobs in the '
-                                       'job queue. If not set, the cluster '
-                                       'will not be auto-stopped.'))
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
