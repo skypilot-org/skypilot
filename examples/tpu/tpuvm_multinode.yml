@@ -9,4 +9,5 @@ resources:
 num_nodes: 2
 
 run: |
+  echo My hostname: $(hostname)
   sleep 120

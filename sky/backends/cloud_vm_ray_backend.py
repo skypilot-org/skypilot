@@ -1250,6 +1250,10 @@ class RetryingVmProvisioner(object):
             backend_utils.do_filemounts_and_setup_on_local_workers(
                 cluster_config_file)
 
+        multinode_timeout = _NODES_LAUNCHING_PROGRESS_TIMEOUT
+        # TPU VM takes longer to be ready. Increase timeout by 3x.
+        if tpu_utils.is_tpu(resources):
+            multinode_timeout *= 3
         # FIXME(zongheng): the below requires ray processes are up on head. To
         # repro it failing: launch a 2-node cluster, log into head and ray
         # stop, then launch again.
@@ -1257,7 +1261,7 @@ class RetryingVmProvisioner(object):
             cluster_config_file,
             num_nodes,
             log_path=log_abs_path,
-            nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
+            nodes_launching_progress_timeout=multinode_timeout,
             is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
         if cluster_ready:
             cluster_status = self.GangSchedulingStatus.CLUSTER_READY
@@ -2448,16 +2452,16 @@ class CloudVmRayBackend(backends.Backend):
                     terminate_cmds = []
                     for tpu_id in stdout.splitlines():
                         terminate_cmds.append(
-                            f'gcloud compute tpus tpu-vm delete --zone={zone}'
-                            f' --quiet {tpu_id}')
+                            f'gcloud compute tpus tpu-vm delete --zone={zone} '
+                            f'--quiet {tpu_id}')
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='
                         f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zones={zone} --format=value\\(name\\)')
                     terminate_cmds = [
-                        (f'gcloud compute instances delete --zone={zone}'
-                         f' --quiet $({query_cmd})')
+                        (f'gcloud compute instances delete --zone={zone} '
+                         f'--quiet $({query_cmd})')
                     ]
             else:
                 with ux_utils.print_exception_no_traceback():
@@ -2953,7 +2957,6 @@ class CloudVmRayBackend(backends.Backend):
         if is_tpu_vm_pod:
             num_actual_nodes = tpu_utils.get_num_tpu_devices(
                 handle.launched_resources)
-            num_actual_nodes = task.num_nodes
         else:
             num_actual_nodes = task.num_nodes
 
