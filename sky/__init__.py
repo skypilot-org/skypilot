@@ -16,7 +16,7 @@ from sky.execution import launch, exec, spot_launch  # pylint: disable=redefined
 from sky.resources import Resources
 from sky.task import Task
 from sky.optimizer import Optimizer, OptimizeTarget
-from sky.data import Storage, StoreType
+from sky.data import Storage, StorageMode, StoreType
 from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
 from sky.core import (status, start, stop, down, autostop, queue, cancel,
@@ -43,6 +43,7 @@ __all__ = [
     'list_accelerators',
     '__root_dir__',
     'Storage',
+    'StorageMode',
     'StoreType',
     'ClusterStatus',
     'JobStatus',
