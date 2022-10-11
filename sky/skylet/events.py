@@ -80,7 +80,6 @@ class AutostopEvent(SkyletEvent):
     """Skylet event for autostop."""
     EVENT_INTERVAL_SECONDS = 60
 
-    _NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
     _UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
     _CATCH_NODES = re.compile(r'cache_stopped_nodes: (.*)')
 
@@ -125,7 +124,7 @@ class AutostopEvent(SkyletEvent):
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
             subprocess.run(
-                ['ray', 'up', '-y', '--restart-only', self.ray_yaml_path],
+                ['ray', 'up', '-y', '--restart-only', '--disable-usage-stats', self.ray_yaml_path],
                 check=True)
             # Stop the workers first to avoid orphan workers.
             subprocess.run(
@@ -139,8 +138,6 @@ class AutostopEvent(SkyletEvent):
     def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
-        # Update the number of workers to 0.
-        yaml_str = self._NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
         yaml_str = self._UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
         if down:
             yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: false',
@@ -154,4 +151,5 @@ class AutostopEvent(SkyletEvent):
         # Empty the file_mounts.
         config['file_mounts'] = dict()
         common_utils.dump_yaml(yaml_path, config)
-        logger.debug('Replaced worker num and upscaling speed to 0.')
+        logger.debug('Replaced upscaling speed to 0.')
+
