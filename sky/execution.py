@@ -426,6 +426,11 @@ def spot_launch(
 
 
 def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
+    """Translates any local->VM mounts into Storage->VM mounts.
+
+    This function eagerly uploads local->Storage first in order to make
+    Storage->VM work at task launch time.
+    """
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
@@ -434,10 +439,17 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
+    copy_mounts = task.get_local_to_remote_file_mounts()
+    if copy_mounts is None:
+        copy_mounts = {}
+
+    has_local_source_paths = (task.workdir is not None) or copy_mounts
+    if has_local_source_paths:
+        logger.info(
+            f'{colorama.Fore.YELLOW}Translating file_mounts with local '
+            f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+
     # Step 1: Translate the workdir to SkyPilot storage.
-    logger.info(
-        f'{colorama.Fore.YELLOW}Translating file_mounts with local '
-        f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
     new_storage_mounts = dict()
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
@@ -467,9 +479,6 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # TODO(zhwu): Optimize this by:
     # 1. Use the same bucket for all the mounts.
     # 2. When the src is the same, use the same bucket.
-    copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts is None:
-        copy_mounts = {}
     copy_mounts_with_file_in_src = dict()
     for i, (dst, src) in enumerate(copy_mounts.items()):
         task.file_mounts.pop(dst)
@@ -492,9 +501,6 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    original_storage_mounts = {}
-    if task.storage_mounts is not None:
-        original_storage_mounts = task.storage_mounts
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
@@ -533,8 +539,9 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # Upload the local source to a bucket. The task will not be executed
     # locally, so we need to upload the files/folders to the bucket manually
     # here before sending the task to the remote spot controller.
-    logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                f'{colorama.Style.RESET_ALL} See sky storage ls')
+    if new_storage_mounts:
+        logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
+                    f'{colorama.Style.RESET_ALL} See sky storage ls')
     task.sync_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
