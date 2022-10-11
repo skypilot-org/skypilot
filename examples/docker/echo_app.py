@@ -16,9 +16,8 @@ with sky.Dag() as dag:
     setup = 'docker build -t echo:v0 /echo_app'
 
     # The command to run - runs the container and mounts volumes
-    run = ('docker run --rm ',
-           '--volume="/inputs:/inputs:ro" ',
-           '--volume="/outputs:/outputs:rw" ',
+    run = ('docker run --rm --volume="/inputs:/inputs:ro" '
+           '--volume="/outputs:/outputs:rw" '
            'echo:v0 /inputs/README.md /outputs/output.txt')
 
     echo_app = sky.Task(
