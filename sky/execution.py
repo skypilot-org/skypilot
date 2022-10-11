@@ -541,7 +541,7 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # here before sending the task to the remote spot controller.
     if new_storage_mounts:
         logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                    f'{colorama.Style.RESET_ALL} See sky storage ls')
+                    f'{colorama.Style.RESET_ALL} See: sky storage ls')
     task.sync_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as
