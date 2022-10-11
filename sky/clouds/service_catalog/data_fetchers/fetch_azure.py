@@ -42,7 +42,7 @@ DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
-    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation', 'capabilities'
+    'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation'
 ]
 
 
