@@ -1138,10 +1138,10 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
                  f'\\(labels.ray-cluster-name={cluster_name}\\) '
                  f'--zone={zone} --format=value\\(name\\)')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
-                                                 '/dev/null',
-                                                 shell=True,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
+                                                      '/dev/null',
+                                                      shell=True,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
     if returncode != 0:
         failure_massage = ('Failed to run gcloud to get TPU VM IDs.\n'
                            '**** STDOUT ****\n'
@@ -1160,10 +1160,10 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
                      f'--zone {zone} --format="value[delimiter=\'\\n\']'
                      '(networkEndpoints.accessConfig.externalIp)"')
         returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                     '/dev/null',
-                                                     shell=True,
-                                                     stream_logs=False,
-                                                     require_outputs=True)
+                                                          '/dev/null',
+                                                          shell=True,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
         if returncode != 0:
             failure_massage = ('Failed to run gcloud to get TPU VM IPs.\n'
                                '**** STDOUT ****\n'
@@ -1883,10 +1883,10 @@ def check_gcp_cli_include_tpu_vm() -> None:
     # TPU VM API available with gcloud version >= 382.0.0
     version_cmd = 'gcloud version --format=json'
     returncode, stdout, stderr = log_lib.run_with_log(version_cmd,
-                                                 '/dev/null',
-                                                 shell=True,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
+                                                      '/dev/null',
+                                                      shell=True,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
 
     if returncode != 0:
         failure_massage = ('Failed to run "gcloud version".\n'
