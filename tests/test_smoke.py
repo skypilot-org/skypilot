@@ -542,6 +542,7 @@ def test_autodown():
             f'sky launch -y -d -c {name} --cloud gcp -i 2 --down examples/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud gcp examples/minimal.yaml',
+            'sleep 180',
             f's=$(sky status --refresh) && {{ echo $s | grep {name} | grep "was terminated"; }} || {{ echo $s | grep {name} && exit 1 || exit 0; }}',  # Ensure the cluster is DOWN.
         ],
         f'sky down -y {name}',
