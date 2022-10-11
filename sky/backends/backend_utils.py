@@ -1057,11 +1057,12 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
-                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 handle: Optional[backends.Backend.ResourceHandle],
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
 
+    assert handle is not None
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
     # won't work and we need to query the node IPs with gcloud as

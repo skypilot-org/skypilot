@@ -1720,11 +1720,6 @@ class CloudVmRayBackend(backends.Backend):
                 return
             cluster_config_file = config_dict['ray']
 
-            if 'tpu_name' in config_dict:
-                self._set_tpu_name(cluster_config_file,
-                                   config_dict['launched_nodes'],
-                                   config_dict['tpu_name'])
-
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
@@ -1733,6 +1728,12 @@ class CloudVmRayBackend(backends.Backend):
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+            if 'tpu_name' in config_dict:
+                self._set_tpu_name(cluster_config_file,
+                                   config_dict['launched_nodes'],
+                                   config_dict['tpu_name'],
+                                   handle=handle)
 
             if config_dict['launched_nodes'] == 1 and config_dict[
                     'head_ip'] is not None:
@@ -2693,9 +2694,9 @@ class CloudVmRayBackend(backends.Backend):
                                                        task.num_nodes)
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
-                      tpu_name: str) -> None:
+                      tpu_name: str, handle: backends.Backend.ResourceHandle) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
+        ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes, handle=handle)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_config_file)
 
