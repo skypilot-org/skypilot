@@ -13,8 +13,13 @@ project = 'SkyPilot'
 copyright = '2022, SkyPilot Team'
 author = 'the SkyPilot authors'
 
-release = '0.1.1'
-version = '0.1.1'
+# The version info for the project you're documenting, acts as replacement for
+# |version| and |release|, also used in various other places throughout the
+# built documents.
+from sky import __version__ as version
+
+# The full version, including alpha/beta/rc tags.
+release = version
 
 # -- General configuration
 
