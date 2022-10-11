@@ -301,6 +301,11 @@ class SSHCommandRunner:
             rsync_command.append(
                 RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
 
+        # rsync doesn't support '~' in a quoted target path. need to expand it.
+        source = str(resolved_source)
+        if resolved_source.is_dir():
+            source += '/'
+
         ssh_options = ' '.join(
             ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
