@@ -43,7 +43,7 @@ __all__ = [
     'list_accelerators',
     '__root_dir__',
     'Storage',
-    'StorageMode'
+    'StorageMode',
     'StoreType',
     'ClusterStatus',
     'JobStatus',
