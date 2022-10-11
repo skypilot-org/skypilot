@@ -961,12 +961,6 @@ def parallel_data_transfer_to_nodes(
     style = colorama.Style
 
     origin_source = source
-    if run_rsync:
-        # Do this for local src paths, not for cloud store URIs
-        # (otherwise we have '<abs path to cwd>/gs://.../object/').
-        full_src = os.path.abspath(os.path.expanduser(origin_source))
-        if not os.path.islink(full_src) and not os.path.isfile(full_src):
-            source = os.path.join(full_src, '')
 
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:
