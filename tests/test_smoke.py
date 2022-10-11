@@ -525,6 +525,29 @@ def test_autostop():
     )
     run_one_test(test)
 
+# ---------- Testing Autostopping ----------
+def test_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'autodown',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --cloud gcp examples/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1 min"',
+            'sleep 180',
+            # Ensure the cluster is STOPPED.
+            f's=$(sky status --refresh) && {{echo $s |grep {name} | grep "was terminated";}} || {{echo $s | grep {name} && exit 1 || exit 0;}}', # Ensure the cluster is DOWN.
+            f'sky launch -y -d -c {name} --cloud gcp -i 2 --down examples/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} examples/minimal.yaml',
+            f's=$(sky status --refresh) && {{echo $s |grep {name} | grep "was terminated";}} || {{echo $s | grep {name} && exit 1 || exit 0;}}', # Ensure the cluster is DOWN.
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
 
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
