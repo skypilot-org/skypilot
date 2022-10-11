@@ -38,6 +38,11 @@ US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
 REGIONS = US_REGIONS
 
+USEFUL_COLUMNS = [
+    'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
+    'GpuInfo', 'Price', 'SpotPrice', 'Region'
+]
+
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
 # only available in this region, but it serves pricing information for all regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'
@@ -168,6 +173,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
             axis='columns')
         # patch the GpuInfo for p4de.24xlarge
         df.loc[df['InstanceType'] == 'p4de.24xlarge', 'GpuInfo'] = 'A100-80GB'
+        df = df[USEFUL_COLUMNS]
     except Exception as e:
         print(f'{region} failed with {e}')
         return region
