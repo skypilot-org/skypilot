@@ -1,0 +1,27 @@
+# Runs the echo example app in a container with custom inputs and outputs
+#
+# The echo example ingests a file, prints the contents and writes it back out.
+# In this YAML, the output is mapped to a Sky Storage object, which writes to a
+# cloud bucket.
+#
+# Usage:
+#   sky launch -c myclus echo_app.yaml
+#   sky exec myclus echo_app.yaml
+#   sky down myclus
+
+file_mounts:
+  /inputs: ./echo_app
+  /echo_app: ./echo_app
+  /outputs:
+    name: # Set unique bucket name here!
+    mode: MOUNT
+
+setup: |
+  # Build docker image. If pushed to a registry, can also do docker pull here
+  docker build -t echo:v0 /echo_app
+
+run: |
+  docker run --rm \
+    --volume="/inputs:/inputs:ro" \
+    --volume="/outputs:/outputs:rw" \
+    echo:v0 /inputs/README.md /outputs/output.txt
