@@ -123,9 +123,11 @@ class AutostopEvent(SkyletEvent):
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
-            subprocess.run(
-                ['ray', 'up', '-y', '--restart-only', '--disable-usage-stats', self.ray_yaml_path],
-                check=True)
+            subprocess.run([
+                'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
+                self.ray_yaml_path
+            ],
+                           check=True)
             # Stop the workers first to avoid orphan workers.
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
@@ -152,4 +154,3 @@ class AutostopEvent(SkyletEvent):
         config['file_mounts'] = dict()
         common_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced upscaling speed to 0.')
-
