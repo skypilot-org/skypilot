@@ -93,6 +93,8 @@ Example file mounts:
 
 For more details, see `this example <https://github.com/skypilot-org/skypilot/blob/master/examples/using_file_mounts.yaml>`_ and :ref:`YAML Configuration <yaml-spec>`.
 
+If you have edited the ``file_mounts`` section and would like to have it reflected on an existing cluster without rerunning the ``setup`` commands, use ``sky launch --no-setup``.
+
 .. note::
 
     Items listed in a :code:`.gitignore` file (or a ``.git/info/exclude`` file)

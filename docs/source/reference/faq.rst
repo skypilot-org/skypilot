@@ -56,6 +56,27 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
+
+How to make SkyPilot clusters use my Weights & Biases credentials?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install the wandb library on your laptop and login to your account via ``wandb login``.
+Then, add the following lines in your task yaml file:
+
+.. code-block:: yaml
+
+  file_mounts:
+    ~/.netrc: ~/.netrc
+
+How to update an existing cluster's ``file_mounts`` without rerunning ``setup``?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you have edited the ``file_mounts`` section (e.g., by adding some files) and would like to have it reflected on an existing cluster, running ``sky launch -c <cluster> ..`` would work, but it would rerun the ``setup`` commands.
+
+To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
+
+
+
 (Advanced) How to edit or update the regions or pricing information used by SkyPilot?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -71,15 +92,3 @@ You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
-
-
-How to make SkyPilot clusters use my Weights & Biases credentials?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Install the wandb library on your laptop and login to your account via ``wandb login``.
-Then, add the following lines in your task yaml file:
-
-.. code-block:: yaml
-
-  file_mounts:
-    ~/.netrc: ~/.netrc
