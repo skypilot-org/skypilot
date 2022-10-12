@@ -406,6 +406,22 @@ def test_tpu_vm():
     )
     run_one_test(test)
 
+# ---------- Inferentia ----------
+def test_inferentia():
+    name = _get_cluster_name()
+    test = Test(
+        'inferentia',
+        [
+            # Ensure the inferentia instance can be launched, and the
+            # job can be scheduled.
+            f'sky launch -y -c {name} --gpus inferentia:1 echo hi',
+            'sleep 10',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
 
 # ---------- TPU VM Pod. ----------
 # Mark slow because it's expensive to run.
