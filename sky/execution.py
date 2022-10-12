@@ -43,7 +43,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 OptimizeTarget = optimizer.OptimizeTarget
-_MAX_SPOT_JOB_LENGTH = 10
 
 # Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
@@ -120,8 +119,8 @@ def _execute(
       dag: sky.Dag.
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
-      down: bool; whether to tear down the launched resources after
-        execution (successfully or abnormally). If idle_minutes_to_autostop
+      down: bool; whether to tear down the launched resources after all jobs
+        completed (successfully or abnormally). If idle_minutes_to_autostop
         is set, the cluster will be torn down after the specified idle time.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
@@ -157,17 +156,27 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
+    
+    stages = stages if stages is not None else list(Stage)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(backend, backends.CloudVmRayBackend
-                     ) and idle_minutes_to_autostop is not None:
-        # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                f'Backend {backend.NAME} does not support autostop, please try '
-                f'{backends.CloudVmRayBackend.NAME}')
+    if isinstance(backend, backends.CloudVmRayBackend):
+        if down:
+            # Set the idle minutes to >= 1 to avoid the cluster being torn
+            # down during the task submission.
+            idle_minutes_to_autostop = idle_minutes_to_autostop or 1
+        # Use auto-down to terminate the cluster after the task is done.
+        # Otherwise, the cluster will be immediately terminated when the user
+        # detach from the execution.
+        stages.remove(Stage.DOWN)
+    elif idle_minutes_to_autostop is not None:
+            # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Backend {backend.NAME} does not support autostop, please try '
+                    f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
+    if not cluster_exists and Stage.OPTIMIZE in stages:
         if task.best_resources is None:
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
@@ -187,7 +196,7 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
-        if stages is None or Stage.PROVISION in stages:
+        if Stage.PROVISION in stages:
             if handle is None:
                 handle = backend.provision(task,
                                            task.best_resources,
@@ -200,26 +209,26 @@ def _execute(
             logger.info('Dry run finished.')
             return
 
-        if stages is None or Stage.SYNC_WORKDIR in stages:
+        if Stage.SYNC_WORKDIR in stages:
             if task.workdir is not None:
                 backend.sync_workdir(handle, task.workdir)
 
-        if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
+        if Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
         if no_setup:
             logger.info('Setup commands skipped.')
-        elif stages is None or Stage.SETUP in stages:
+        elif Stage.SETUP in stages:
             backend.setup(handle, task)
 
-        if stages is None or Stage.PRE_EXEC in stages:
+        if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop,
                                      down=down)
 
-        if stages is None or Stage.EXEC in stages:
+        if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
                 backend.execute(handle, task, detach_run)
@@ -227,7 +236,7 @@ def _execute(
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
 
-        if stages is None or Stage.DOWN in stages:
+        if Stage.DOWN in stages:
             if down and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)

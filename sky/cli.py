@@ -1000,10 +1000,9 @@ def cli():
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after execution finishes (successfully or '
+    ('Tear down the cluster after all jobs completed (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the idle time, rather than immediately after execution'
-     ' finishes.'),
+     'be torn down after the specified idle time.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1622,10 +1621,9 @@ def autostop(
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after execution finishes (successfully or '
+    ('Tear down the cluster after all jobs completed (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the idle time, rather than immediately after execution'
-     ' finishes.'),
+     'be torn down after the specified idle time.'),
 )
 @click.option(
     '--retry-until-up',
