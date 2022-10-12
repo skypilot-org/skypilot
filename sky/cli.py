@@ -1780,7 +1780,7 @@ def start(
               '-a',
               default=None,
               is_flag=True,
-              help='Terminate all existing clusters.')
+              help='Tear down all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
