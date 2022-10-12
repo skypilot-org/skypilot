@@ -1117,10 +1117,6 @@ class RetryingVmProvisioner(object):
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
 
-            # Use environment variables to disable the ray usage collection (to
-            # avoid the 10 second wait for usage collection confirmation), as
-            # the ray version on the user's machine may be lower version that
-            # does not support the `--disable-usage-stats` flag.
             returncode, stdout, stderr = log_lib.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
                 # 'ray up' (sky launch) twice on a cluster with >1 node, the
@@ -1138,9 +1134,15 @@ class RetryingVmProvisioner(object):
                 line_processor=log_utils.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
-                env=dict(BOTO_MAX_RETRIES='5',
-                         RAY_USAGE_STATS_ENABLED='0',
-                         **os.environ),
+                env=dict(
+                    BOTO_MAX_RETRIES='5',
+                    # Use environment variables to disable the ray usage stats
+                    # (to avoid the 10 second wait for usage collection
+                    # confirmation), as the ray version on the user's machine
+                    # may be lower version that does not support the
+                    # `--disable-usage-stats` flag.
+                    RAY_USAGE_STATS_ENABLED='0',
+                    **os.environ),
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
@@ -1341,16 +1343,14 @@ class RetryingVmProvisioner(object):
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 
-        # Use environment variables to disable the ray usage collection (avoid
-        # the 10 second wait for usage collection confirmation), as the ray
-        # version on the user's machine may be lower version that does not
-        # support the `--disable-usage-stats` flag.
-        env = os.environ.copy()
-        env['RAY_USAGE_STATS_ENABLED'] = '0'
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=False,
+            # Use environment variables to disable the ray usage collection
+            # (avoid the 10 second wait for usage collection confirmation),
+            # as the ray version on the user's machine may be lower version
+            # that does not support the `--disable-usage-stats` flag.
             env=dict(RAY_USAGE_STATS_ENABLED='0', **os.environ),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
