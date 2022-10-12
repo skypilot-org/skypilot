@@ -13,10 +13,10 @@ Example usage:
   # Show the list of running clusters.
   >> sky status
 
-  # Terminate a specific cluster.
+  # Tear down a specific cluster.
   >> sky down cluster_name
 
-  # Terminate all existing clusters.
+  # Tear down all existing clusters.
   >> sky down -a
 
 TODO:
@@ -747,7 +747,7 @@ def _create_and_ssh_into_node(
     click.secho(f'sky {node_type}{option}', bold=True)
     click.echo('To stop the node:\t', nl=False)
     click.secho(f'sky stop {cluster_name}', bold=True)
-    click.echo('To terminate the node:\t', nl=False)
+    click.echo('To tear down the node:\t', nl=False)
     click.secho(f'sky down {cluster_name}', bold=True)
     click.echo('To upload a folder:\t', nl=False)
     click.secho(f'rsync -rP /local/path {cluster_name}:/remote/path', bold=True)
@@ -1000,7 +1000,7 @@ def cli():
     is_flag=True,
     required=False,
     help=
-    ('Terminate the cluster after execution finishes (successfully or '
+    ('Tear down the cluster after execution finishes (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
      'be torn down after the idle time, rather than immediately after execution'
      ' finishes.'),
@@ -1523,7 +1523,7 @@ def stop(
     default=False,
     is_flag=True,
     required=False,
-    help='Terminate the cluster instead of stopping it, when auto-stopping '
+    help='Tear down the cluster instead of stopping it, when auto-stopping '
     '(i.e., auto-down rather than auto-stop).')
 @click.option('--yes',
               '-y',
@@ -1545,7 +1545,7 @@ def autostop(
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
-    If --down is passed, autodown (terminate the cluster; non-restartable) is
+    If --down is passed, autodown (tear down the cluster; non-restartable) is
     used, rather than autostop (restartable).
 
     ``--idle-minutes`` is the number of minutes of idleness (no pending/running
@@ -1622,7 +1622,7 @@ def autostop(
     is_flag=True,
     required=False,
     help=
-    ('Terminate the cluster after execution finishes (successfully or '
+    ('Tear down the cluster after execution finishes (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
      'be torn down after the idle time, rather than immediately after execution'
      ' finishes.'),
@@ -1801,9 +1801,9 @@ def down(
     yes: bool,
     purge: bool,
 ):
-    """Terminate cluster(s).
+    """Tear down cluster(s).
 
-    CLUSTER is the name of the cluster (or glob pattern) to terminate.  If both
+    CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Terminating a cluster will delete all associated resources (all billing
@@ -1817,16 +1817,16 @@ def down(
 
     .. code-block:: bash
 
-      # Terminate a specific cluster.
+      # Tear down a specific cluster.
       sky down cluster_name
       \b
-      # Terminate multiple clusters.
+      # Tear down multiple clusters.
       sky down cluster1 cluster2
       \b
-      # Terminate all clusters matching glob pattern 'cluster*'.
+      # Tear down all clusters matching glob pattern 'cluster*'.
       sky down "cluster*"
       \b
-      # Terminate all existing clusters.
+      # Tear down all existing clusters.
       sky down -a
 
     """
@@ -3233,7 +3233,7 @@ def benchmark_down(
     clusters_to_exclude: List[str],
     yes: bool,
 ) -> None:
-    """Terminate all clusters belonging to a benchmark."""
+    """Tear down all clusters belonging to a benchmark."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
@@ -3259,7 +3259,7 @@ def benchmark_down(
               '-a',
               default=None,
               is_flag=True,
-              help='Terminate all existing clusters.')
+              help='Delete all benchmark reports from the history.')
 @click.option('--yes',
               '-y',
               is_flag=True,
