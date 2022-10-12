@@ -1806,7 +1806,7 @@ def down(
     CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
-    Terminating a cluster will delete all associated resources (all billing
+    Tearing down a cluster will delete all associated resources (all billing
     stops), and any data on the attached disks will be lost. For local clusters,
     `sky down` does not terminate the local cluster, but instead removes the
     cluster from `sky status` and terminates the calling user's running jobs.
