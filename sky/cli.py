@@ -1000,9 +1000,10 @@ def cli():
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after execution (successfully or abnormally). If '
-     '--idle-minutes-to-autostop is set, the cluster will be torn down after '
-     'the idle time.'),
+    ('Tear down the cluster after execution finishes (successfully or '
+     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
+     'be torn down after the idle time, rather than immediately after execution'
+     ' finishes.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1519,7 +1520,7 @@ def stop(
     is_flag=True,
     required=False,
     help='Tear down the cluster instead of stopping it, when auto-stopping '
-    '(i.e., autodown rather than autostop).')
+    '(i.e., auto-down rather than auto-stop).')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1535,10 +1536,13 @@ def autostop(
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
 ):
-    """Schedule or cancel auto-stopping for cluster(s).
+    """Schedule or cancel an auto-stop or auto-down for cluster(s).
 
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
+
+    If --down is passed, autodown (tear down the cluster; non-restartable) is
+    used, rather than autostop (restartable).
 
     ``--idle-minutes`` is the number of minutes of idleness (no pending/running
     jobs) after which the cluster will be stopped automatically.
@@ -1614,9 +1618,10 @@ def autostop(
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after execution (successfully or abnormally). If '
-     '--idle-minutes-to-autostop is set, the cluster will be torn down after '
-     'the idle time.'),
+    ('Tear down the cluster after execution finishes (successfully or '
+     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
+     'be torn down after the idle time, rather than immediately after execution'
+     ' finishes.'),
 )
 @click.option(
     '--retry-until-up',

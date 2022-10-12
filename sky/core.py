@@ -42,6 +42,8 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
                 'last_use': (int) timestamp of last use,
                 'status': (sky.ClusterStatus) cluster status,
                 'autostop': (int) idle time before autostop,
+                'to_down': (bool) whether to tear down the cluster after
+                            execution (autostop),
                 'metadata': (dict) metadata of the cluster,
             }
         ]
@@ -55,7 +57,7 @@ def _start(
         cluster_name: str,
         idle_minutes_to_autostop: Optional[int] = None,
         retry_until_up: bool = False,
-        down: bool = False,  #pylint: disable=redefined-outer-name
+        down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> backends.Backend.ResourceHandle:
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -90,7 +92,7 @@ def start(
         cluster_name: str,
         idle_minutes_to_autostop: Optional[int] = None,
         retry_until_up: bool = False,
-        down: bool = False,  #pylint: disable=redefined-outer-name
+        down: bool = False,  # pylint: disable=redefined-outer-name
 ):
     """Start the cluster.
 
@@ -165,7 +167,7 @@ def down(cluster_name: str, purge: bool = False):
 def autostop(
         cluster_name: str,
         idle_minutes_to_autostop: int,
-        down: bool = False,  #pylint: disable=redefined-outer-name
+        down: bool = False,  # pylint: disable=redefined-outer-name
 ):
     """Set the autostop time of the cluster.
 
@@ -180,7 +182,7 @@ def autostop(
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
     verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-    option_str = 'stop' if down else 'down'
+    option_str = 'down' if down else 'stop'
     operation = f'{verb} auto-{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
@@ -203,7 +205,7 @@ def autostop(
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} cluster '
                 f'{cluster_name!r}... skipped{colorama.Style.RESET_ALL}'
-                '\n  Auto-stopping is only supported by backend: '
+                f'\n  Auto-{option_str} is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         with ux_utils.print_exception_no_traceback():
@@ -211,7 +213,7 @@ def autostop(
                 f'{colorama.Fore.YELLOW}{operation} cluster '
                 f'{cluster_name!r} (status: {cluster_status.value})... skipped'
                 f'{colorama.Style.RESET_ALL}'
-                '\n  Auto-stop can only be set/unset for '
+                f'\n  Auto-{option_str} can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
     backend.set_autostop(handle, idle_minutes_to_autostop, down)
 

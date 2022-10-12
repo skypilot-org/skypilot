@@ -208,10 +208,17 @@ def _get_zone(cluster_status):
 
 
 def _get_autostop(cluster_status):
-    autostop_str = '-'
+    autostop_str = ''
+    separtion = ''
     if cluster_status['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
         autostop_str = str(cluster_status['autostop']) + ' min'
+        separtion = ' '
+
+    if cluster_status['to_down']:
+        autostop_str += f'{separtion}(down)'
+    if autostop_str == '':
+        autostop_str = '-'
     return autostop_str
 
 
