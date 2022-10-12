@@ -1057,7 +1057,7 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
-                 handle: Optional[backends.Backend.ResourceHandle],
+                 handle: backends.Backend.ResourceHandle,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
@@ -1548,7 +1548,9 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        ips = get_node_ips(handle.cluster_yaml,
+                           handle.launched_nodes,
+                           handle=handle)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
         if len(ips) == 0:
             raise exceptions.FetchIPError(

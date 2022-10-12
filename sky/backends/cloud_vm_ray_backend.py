@@ -2694,9 +2694,12 @@ class CloudVmRayBackend(backends.Backend):
                                                        task.num_nodes)
 
     def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
-                      tpu_name: str, handle: backends.Backend.ResourceHandle) -> None:
+                      tpu_name: str,
+                      handle: backends.Backend.ResourceHandle) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes, handle=handle)
+        ip_list = backend_utils.get_node_ips(cluster_config_file,
+                                             num_nodes,
+                                             handle=handle)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             cluster_config_file)
 
