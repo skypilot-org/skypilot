@@ -31,6 +31,7 @@ from ray.autoscaler._private import commands as ray_commands
 from ray.autoscaler._private import util as ray_util
 import rich.console as rich_console
 import rich.progress as rich_progress
+import yaml
 
 import sky
 from sky import authentication as auth
@@ -109,10 +110,20 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
+_RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {'Ebs'}
+
 
 def is_ip(s: str) -> bool:
     """Returns whether this string matches IP_ADDR_REGEX."""
     return len(re.findall(IP_ADDR_REGEX, s)) == 1
+
+
+def _get_yaml_path_from_cluster_name(cluster_name: str,
+                                     prefix: str = SKY_USER_FILE_PATH) -> str:
+    output_path = pathlib.Path(
+        prefix).expanduser().resolve() / f'{cluster_name}.yml'
+    os.makedirs(output_path.parents[0], exist_ok=True)
+    return str(output_path)
 
 
 def fill_template(template_name: str,
@@ -129,10 +140,8 @@ def fill_template(template_name: str,
     if output_path is None:
         assert ('cluster_name' in variables), ('cluster_name is required.')
         cluster_name = variables.get('cluster_name')
-        output_path = pathlib.Path(
-            output_prefix).expanduser() / f'{cluster_name}.yml'
-        os.makedirs(output_path.parents[0], exist_ok=True)
-        output_path = str(output_path)
+        output_path = _get_yaml_path_from_cluster_name(cluster_name,
+                                                       output_prefix)
     output_path = os.path.abspath(output_path)
 
     # Add yaml file path to the template variables.
@@ -655,6 +664,27 @@ class SSHConfigHelper(object):
                 break
 
 
+def _restore_original_block_for_yaml(new_yaml: str, old_yaml: str,
+                                     key_names: Set[str]) -> str:
+    """Restore the original block with key_name recursively."""
+
+    def _restore_block(new_block: Dict[str, Any], old_block: Dict[str, Any]):
+        for key, value in new_block.items():
+            if key in key_names:
+                if key in old_block:
+                    new_block[key] = old_block[key]
+                else:
+                    del new_block[key]
+            elif isinstance(value, dict):
+                if key in old_block:
+                    _restore_block(value, old_block[key])
+
+    new_config = yaml.safe_load(new_yaml)
+    old_config = yaml.safe_load(old_yaml)
+    _restore_block(new_config, old_config)
+    return common_utils.dump_yaml_str(new_config)
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(to_provision: 'resources.Resources',
@@ -699,6 +729,12 @@ def write_cluster_config(to_provision: 'resources.Resources',
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
     region_name = resources_vars.get('region')
+
+    yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
+    old_yaml_content = None
+    if os.path.exists(yaml_path):
+        with open(yaml_path, 'r') as f:
+            old_yaml_content = f.read()
 
     yaml_path = fill_template(
         cluster_config_template,
@@ -749,6 +785,16 @@ def write_cluster_config(to_provision: 'resources.Resources',
         # Only optimize the file mounts for public clouds now, as local has not
         # been fully tested yet.
         _optimize_file_mounts(yaml_path)
+
+    # Restore the old yaml content for backward compatibility.
+    if old_yaml_content is not None:
+        with open(yaml_path, 'r') as f:
+            new_yaml_content = f.read()
+        restored_yaml_content = _restore_original_block_for_yaml(
+            old_yaml_content, new_yaml_content,
+            _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY)
+        with open(yaml_path, 'w') as f:
+            f.write(restored_yaml_content)
 
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
