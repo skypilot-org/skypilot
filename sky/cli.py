@@ -1262,6 +1262,10 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
+    The autostop column indicates how long the cluster will be auto-stopped
+    after idling (no jobs running). If the time is followed by '(down)', e.g.
+    '1 min (down)', the cluster will be auto-downed, rather than auto-stopped.
+
     """
     cluster_records = core.status(all=all, refresh=refresh)
     local_clusters = onprem_utils.check_and_get_local_clusters(
