@@ -27,6 +27,7 @@ class TestStorageSpecLocalSource:
                 storage_lib.Storage(name='test', source=f.name)
         assert 'Storage source path cannot be a file' in str(e)
 
+
 class TestStorageSpecValidation:
     """Storage specification validation tests"""
 

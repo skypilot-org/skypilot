@@ -265,7 +265,8 @@ class Task:
                 storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
             except exceptions.StorageSourceError as e:
                 # Patch the error message to include the mount path, if included
-                e.args = (e.args[0].replace('<destination_path>', mount_path),) + e.args[1:]
+                e.args = (e.args[0].replace('<destination_path>',
+                                            mount_path),) + e.args[1:]
                 raise e
             task_storage_mounts[mount_path] = storage_obj
         task.set_storage_mounts(task_storage_mounts)

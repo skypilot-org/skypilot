@@ -472,11 +472,11 @@ class Storage(object):
                     raise exceptions.StorageSourceError(
                         'Storage source path cannot be a file - only '
                         'directories are supported as a source. '
-                        'To upload a single file, either\n1) Use regular file mounts by '
-                        f'writing <destination_path>: {source} in the '
-                        'file_mounts section of your YAML, or\n2) Place the file '
-                        'in a directory and specify the directory as the '
-                        'source.')
+                        'To upload a single file, either\n'
+                        '1) Use regular file mounts by writing '
+                        f'<destination_path>: {source} in the file_mounts '
+                        'section of your YAML, or\n2) Place the file in a '
+                        'directory and specify the directory as the source.')
             # Raise warning if user's path is a symlink
             elif os.path.islink(expanded_source):
                 logger.warning(f'Source path {source} is a symlink. '
