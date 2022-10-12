@@ -19,9 +19,13 @@ import json
 import subprocess
 import time
 
+import colorama
+
 from sky import clouds
 from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.backends import backend_utils
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -31,7 +35,7 @@ POLL_INTERVAL = 1
 
 def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
-    
+
     Can be viewed from: https://console.cloud.google.com/transfer/cloud
     it will block until the transfer is complete.
 
@@ -83,21 +87,25 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
                                                        'projectId': project_id
                                                    }).execute()
 
-    logger.info(f'AWS -> GCS Transfer Job: {json.dumps(operation, indent=4)}')
+    logger.info(f'{colorama.Fore.GREEN}Transfer job scheduled: '
+                f'{colorama.Style.RESET_ALL}'
+                f'AWS s3://{s3_bucket_name} -> GCS gs://{gs_bucket_name} ')
+    logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
-    for _ in range(MAX_POLLS):
-        result = (storagetransfer.transferOperations().get(
-            name=operation['name']).execute())
-        if 'error' in result:
-            raise Exception(result['error'])
+    with backend_utils.safe_console_status('Transferring'):
+        for _ in range(MAX_POLLS):
+            result = (storagetransfer.transferOperations().get(
+                name=operation['name']).execute())
+            if 'error' in result:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(result['error'])
 
-        if 'done' in result and result['done']:
-            logger.info('Operation done.')
-            break
-        logger.info('Waiting for the data transfer to be finished...')
-        time.sleep(POLL_INTERVAL)
-    logger.info(f'Transfer finished in {time.time() - start}')
+            if 'done' in result and result['done']:
+                logger.info('Operation done.')
+                break
+            time.sleep(POLL_INTERVAL)
+    logger.info(f'Transfer finished in {time.time() - start:.2f} seconds')
 
 
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
