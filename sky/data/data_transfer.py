@@ -89,7 +89,7 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
 
     logger.info(f'{colorama.Fore.GREEN}Transfer job scheduled: '
                 f'{colorama.Style.RESET_ALL}'
-                f'AWS s3://{s3_bucket_name} -> GCS gs://{gs_bucket_name} ')
+                f's3://{s3_bucket_name} -> gs://{gs_bucket_name} ')
     logger.debug(json.dumps(operation, indent=4))
     logger.info('Waiting for the transfer to finish')
     start = time.time()
@@ -102,7 +102,6 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
                     raise RuntimeError(result['error'])
 
             if 'done' in result and result['done']:
-                logger.info('Operation done.')
                 break
             time.sleep(POLL_INTERVAL)
     logger.info(f'Transfer finished in {time.time() - start:.2f} seconds')
@@ -130,4 +129,4 @@ def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
 
     bucket.set_iam_policy(policy)
 
-    logger.info(f'Added {member} with role {role} to {bucket_name}.')
+    logger.debug(f'Added {member} with role {role} to {bucket_name}.')
