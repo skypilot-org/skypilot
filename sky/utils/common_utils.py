@@ -246,6 +246,9 @@ def decode_payload(payload_str: str) -> Union[List, Dict]:
     Returns:
         A dict or list that is decoded from the payload string.
     """
-    payload_str = _PAYLOAD_PATTERN.match(payload_str).group(1)
+    matched = _PAYLOAD_PATTERN.match(payload_str)
+    if matched is None:
+        raise ValueError(f'Invalid payload string: \n{payload_str}')
+    payload_str = matched.group(1)
     payload = json.loads(payload_str)
     return payload
