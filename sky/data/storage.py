@@ -582,18 +582,18 @@ class Storage(object):
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
-            logger.error(f'Sky could not create {store_type} store '
+            logger.error(f'Could not create {store_type} store '
                          f'with name {self.name}.')
             global_user_state.set_storage_status(self.name,
                                                  StorageStatus.INIT_FAILED)
             raise
         except exceptions.StorageBucketGetError:
             # Bucket get failed, so this is not sky managed. Do not update state
-            logger.error(f'Sky could not get {store_type} store '
+            logger.error(f'Could not get {store_type} store '
                          f'with name {self.name}.')
             raise
         except exceptions.StorageInitError:
-            logger.error(f'Sky could not initialize {store_type} store with '
+            logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
 
@@ -669,7 +669,7 @@ class Storage(object):
         try:
             store.upload()
         except exceptions.StorageUploadError:
-            logger.error(f'Sky could not upload {self.source} to store '
+            logger.error(f'Could not upload {self.source} to store '
                          f'name {store.name}.')
             if store.is_sky_managed:
                 global_user_state.set_storage_status(
@@ -829,7 +829,7 @@ class S3Store(AbstractStore):
                         f'{source} s3://{self.name}/')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to s3://{self.name}/'):
+                f'[green]{self.source}[/] to [green]s3://{self.name}/[/]'):
             # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
             # to a log file.
             with subprocess.Popen(sync_command.split(' '),
@@ -846,7 +846,7 @@ class S3Store(AbstractStore):
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
                             raise PermissionError(
-                                'Sky Storage failed to upload files to '
+                                'Failed to upload files to '
                                 'the S3 bucket. The bucket does not have '
                                 'write permissions. It is possible that '
                                 'the bucket is public.')
@@ -1079,7 +1079,7 @@ class GcsStore(AbstractStore):
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to gs://{self.name}/'):
+                f'[green]{self.source}[/] to [green]gs://{self.name}/[/]'):
             with subprocess.Popen(sync_command.split(' '),
                                   stderr=subprocess.PIPE,
                                   stdout=subprocess.DEVNULL) as process:
@@ -1094,7 +1094,7 @@ class GcsStore(AbstractStore):
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
                             raise PermissionError(
-                                'Sky Storage failed to upload files to '
+                                'Failed to upload files to '
                                 'GCS. The bucket does not have '
                                 'write permissions. It is possible that '
                                 'the bucket is public.')
