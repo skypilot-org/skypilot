@@ -459,15 +459,15 @@ class Storage(object):
                         '(try "/mydir: /mydir" or "/myfile: /myfile"). '
                         f'Found source={source}')
             # Local path, check if it exists
-            expanded_source = os.path.abspath(os.path.expanduser(source))
+            full_src = os.path.abspath(os.path.expanduser(source))
             # Only check if local source exists if it is synced to the bucket
-            if not os.path.exists(expanded_source) and sync_on_reconstruction:
+            if not os.path.exists(full_src) and sync_on_reconstruction:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         'Local source path does not'
                         f' exist: {source}')
             # Check if source is a file - throw error if it is
-            if os.path.isfile(expanded_source):
+            if os.path.isfile(full_src):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         'Storage source path cannot be a file - only '
@@ -478,7 +478,7 @@ class Storage(object):
                         'section of your YAML, or\n2) Place the file in a '
                         'directory and specify the directory as the source.')
             # Raise warning if user's path is a symlink
-            elif os.path.islink(expanded_source):
+            elif os.path.islink(full_src):
                 logger.warning(f'Source path {source} is a symlink. '
                                'Referenced contents are uploaded, matching '
                                'the default behavior for S3 and GCS syncing.')
