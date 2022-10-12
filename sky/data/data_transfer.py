@@ -15,10 +15,9 @@ TODO:
 - All combinations of Azure Transfer
 - GCS -> S3
 """
-from datetime import datetime
 import json
 import subprocess
-from typing import Any
+import time
 
 from sky import clouds
 from sky import sky_logging
@@ -26,13 +25,15 @@ from sky.adaptors import aws, gcp
 
 logger = sky_logging.init_logger(__name__)
 
-S3Store = Any
-GcsStore = Any
+MAX_POLLS = 120000
+POLL_INTERVAL = 1
 
 
 def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     """Creates a one-time transfer from Amazon S3 to Google Cloud Storage.
+    
     Can be viewed from: https://console.cloud.google.com/transfer/cloud
+    it will block until the transfer is complete.
 
     Args:
       s3_bucket_name: str; Name of the Amazon S3 Bucket
@@ -56,24 +57,11 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
     _add_bucket_iam_member(gs_bucket_name, 'roles/storage.admin',
                            'serviceAccount:' + storage_account['accountEmail'])
 
-    starttime = datetime.utcnow()
     transfer_job = {
         'description': f'Transferring data from S3 Bucket \
         {s3_bucket_name} to GCS Bucket {gs_bucket_name}',
         'status': 'ENABLED',
         'projectId': project_id,
-        'schedule': {
-            'scheduleStartDate': {
-                'day': starttime.day,
-                'month': starttime.month,
-                'year': starttime.year,
-            },
-            'scheduleEndDate': {
-                'day': starttime.day,
-                'month': starttime.month,
-                'year': starttime.year,
-            },
-        },
         'transferSpec': {
             'awsS3DataSource': {
                 'bucketName': s3_bucket_name,
@@ -88,8 +76,28 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
         }
     }
 
-    result = storagetransfer.transferJobs().create(body=transfer_job).execute()
-    logger.info(f'AWS -> GCS Transfer Job: {json.dumps(result, indent=4)}')
+    response = storagetransfer.transferJobs().create(
+        body=transfer_job).execute()
+    operation = storagetransfer.transferJobs().run(jobName=response['name'],
+                                                   body={
+                                                       'projectId': project_id
+                                                   }).execute()
+
+    logger.info(f'AWS -> GCS Transfer Job: {json.dumps(operation, indent=4)}')
+    logger.info('Waiting for the transfer to finish')
+    start = time.time()
+    for _ in range(MAX_POLLS):
+        result = (storagetransfer.transferOperations().get(
+            name=operation['name']).execute())
+        if 'error' in result:
+            raise Exception(result['error'])
+
+        if 'done' in result and result['done']:
+            logger.info('Operation done.')
+            break
+        logger.info('Waiting for the data transfer to be finished...')
+        time.sleep(POLL_INTERVAL)
+    logger.info(f'Transfer finished in {time.time() - start}')
 
 
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
