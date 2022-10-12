@@ -60,6 +60,8 @@ describe all fields available.
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
+      # If you are using a custom image_id, this should be set to greater than
+      # or equal to the size of the image.
       disk_size: 256
 
       # Additional accelerator metadata (optional); only used for TPU node
@@ -86,6 +88,8 @@ describe all fields available.
       # Custom image id (optional, advanced). The image id used to boot the
       # instances. Only supported for AWS and GCP. If not specified, SkyPilot
       # will use the default debian-based image suitable for machine learning tasks.
+      # NOTE: If your image is larger than the default disk size (256 GB), you must also
+      # set the disk_size to be larger than the image size.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
