@@ -385,7 +385,7 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         return
 
-    task = _translate_local_file_mounts(task)
+    task = _maybe_translate_local_file_mounts_and_sync_up(task)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
@@ -425,11 +425,16 @@ def spot_launch(
         )
 
 
-def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
-    """Translates any local->VM mounts into Storage->VM mounts.
+def _maybe_translate_local_file_mounts_and_sync_up(
+        task: task_lib.Task) -> task_lib.Task:
+    """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
-    This function eagerly uploads local->Storage first in order to make
-    Storage->VM work at task launch time.
+    Eagerly syncing up local->Storage ensures Storage->VM would work at task
+    launch time.
+
+    If there are no local source paths to be translated, this function would
+    still sync up any storage mounts with local source paths (which do not
+    undergo translation).
     """
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
@@ -539,7 +544,9 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # Upload the local source to a bucket. The task will not be executed
     # locally, so we need to upload the files/folders to the bucket manually
     # here before sending the task to the remote spot controller.
-    if new_storage_mounts:
+    if task.storage_mounts:
+        # There may be existing (non-translated) storage mounts, so log this
+        # whenever task.storage_mounts is non-empty.
         logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
                     f'{colorama.Style.RESET_ALL} See: sky storage ls')
     task.sync_storage_mounts()
