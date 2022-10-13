@@ -1,5 +1,5 @@
 #!/bin/bash
-set -ex
+set -ev
 
 source ~/.bashrc 
 CLUSTER_NAME="test-back-compat-$USER"
