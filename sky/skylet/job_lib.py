@@ -633,8 +633,8 @@ class JobLibCodeGen:
 
     @classmethod
     def get_job_time_payload(cls,
-                     job_id: Optional[int] = None,
-                     is_end: bool = False) -> str:
+                             job_id: Optional[int] = None,
+                             is_end: bool = False) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
