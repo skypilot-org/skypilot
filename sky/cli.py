@@ -1264,8 +1264,9 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       ``sky start`` to restart the cluster.
 
     The autostop column indicates how long the cluster will be autostopped
-    after idling (no jobs running). If the time is followed by '(down)', e.g.
-    '1 min (down)', the cluster will be autodowned, rather than autostopped.
+    after minutes of idling (no jobs running). If the time is followed by
+    '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
+    autostopped.
     """
     cluster_records = core.status(all=all, refresh=refresh)
     local_clusters = onprem_utils.check_and_get_local_clusters(
