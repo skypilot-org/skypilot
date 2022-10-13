@@ -64,6 +64,7 @@ scripts, access checkpoints, etc.).
     $ # cluster1 will get the updated code.
     $ sky exec cluster1 task.yaml
 
+.. _file-mounts-example:
 
 Uploading files outside of workdir
 --------------------------------------
