@@ -924,7 +924,8 @@ class RetryingVmProvisioner(object):
                 self._wheel_hash,
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                force_overwrite=prev_cluster_status is None)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']

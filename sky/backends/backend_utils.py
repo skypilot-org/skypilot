@@ -110,7 +110,18 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
-_RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {'Ebs'}
+# Include the fields that will be used for generating tags that  distinguishes the
+# cluster in ray, to avoid the stopped cluster being discarded due to updates in
+# the yaml template.
+# Some notes on the fields:
+# - 'provider' fields will be used for bootstrapping and insert more new items in
+#   'node_config'.
+# - keeping the auth is not enough becuase the content of the key file will be used
+#   for calculating the hash.
+# TODO(zhwu): Keep in sync with the fields used in https://github.com/ray-project/ray/blob/e4ce38d001dbbe09cd21c497fedd03d692b2be3e/python/ray/autoscaler/_private/commands.py#L687-L701
+_RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
+    'provider', 'auth', 'node_config'
+}
 
 
 def is_ip(s: str) -> bool:
@@ -666,7 +677,12 @@ class SSHConfigHelper(object):
 
 def _restore_original_block_for_yaml(new_yaml: str, old_yaml: str,
                                      key_names: Set[str]) -> str:
-    """Restore the original block with key_name recursively."""
+    """Replaces 'new' with 'old' for all keys in key_names.
+
+    The replacement will be applied recursively and only for the blocks
+    with the key in key_names, and have the same ancestors in both 'new'
+    and 'old' YAML tree.
+    """
 
     def _restore_block(new_block: Dict[str, Any], old_block: Dict[str, Any]):
         for key, value in new_block.items():
@@ -696,7 +712,8 @@ def write_cluster_config(to_provision: 'resources.Resources',
                          region: Optional[clouds.Region] = None,
                          zones: Optional[List[clouds.Zone]] = None,
                          auth_config: Optional[Dict[str, str]] = None,
-                         dryrun: bool = False) -> Dict[str, str]:
+                         dryrun: bool = False,
+                         force_overwrite: bool = True) -> Dict[str, str]:
     """Fills in cluster configuration templates and writes them out.
 
     Returns: {provisioner: path to yaml, the provisioning spec}.
@@ -733,8 +750,11 @@ def write_cluster_config(to_provision: 'resources.Resources',
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
     old_yaml_content = None
     if os.path.exists(yaml_path):
-        with open(yaml_path, 'r') as f:
-            old_yaml_content = f.read()
+        if force_overwrite:
+            os.unlink(yaml_path)
+        else:
+            with open(yaml_path, 'r') as f:
+                old_yaml_content = f.read()
 
     yaml_path = fill_template(
         cluster_config_template,
