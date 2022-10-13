@@ -181,8 +181,11 @@ def autostop(
         sky.exceptions.NotSupportedError: the cluster is not supported.
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
-    verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
+    is_cancel = idle_minutes_to_autostop < 0
+    verb = 'Cancelling' if is_cancel else 'Scheduling'
     option_str = 'down' if down else 'stop'
+    if is_cancel:
+        option_str = 'stop(down)'
     operation = f'{verb} auto{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
