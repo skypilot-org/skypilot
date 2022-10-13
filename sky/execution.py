@@ -171,8 +171,10 @@ def _execute(
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
                 verb = 'torn down' if down else 'stopped'
-                logger.debug('Setting idle_minutes_to_autostop to 1, to avoid '
-                             f'cluster being {verb} during task submission.')
+                logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}Setting '
+                               'idle_minutes_to_autostop to 1, to avoid '
+                               f'cluster being {verb} during task submission.'
+                               f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
     elif idle_minutes_to_autostop is not None:
