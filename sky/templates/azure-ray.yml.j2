@@ -125,13 +125,13 @@ head_start_ray_commands:
   # Start skylet daemon. (Should not place it in the head_setup_commands, otherwise it will run before skypilot is installed.)
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
   - ((ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
-    ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}};
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
+    ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}};
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
+  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []
 {%- endif %}
