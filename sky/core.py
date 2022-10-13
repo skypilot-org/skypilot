@@ -15,6 +15,7 @@ from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.usage import usage_lib
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import subprocess_utils
@@ -25,8 +26,10 @@ logger = sky_logging.init_logger(__name__)
 # = Cluster Management =
 # ======================
 
-
 # pylint: disable=redefined-builtin
+
+
+@usage_lib.entrypoint
 def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
     """Get the cluster status in dict.
 
@@ -57,6 +60,8 @@ def _start(cluster_name: str,
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
+    if handle is None:
+        raise ValueError(f'Cluster {cluster_name!r} does not exist.')
     if cluster_status == global_user_state.ClusterStatus.UP:
         print(f'Cluster {cluster_name!r} is already up.')
         return
@@ -69,6 +74,11 @@ def _start(cluster_name: str,
         raise exceptions.NotSupportedError(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
+
+    # NOTE: if spot_status() calls _start() and hits here, that entrypoint
+    # would have a cluster name (the controller) filled in.
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+
     with dag.Dag():
         dummy_task = task.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
@@ -83,6 +93,7 @@ def _start(cluster_name: str,
     return handle
 
 
+@usage_lib.entrypoint
 def start(cluster_name: str,
           idle_minutes_to_autostop: Optional[int] = None,
           retry_until_up: bool = False):
@@ -91,13 +102,15 @@ def start(cluster_name: str,
     Please refer to the sky.cli.start for the document.
 
     Raises:
+        ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
     _start(cluster_name, idle_minutes_to_autostop, retry_until_up)
 
 
+@usage_lib.entrypoint
 def stop(cluster_name: str, purge: bool = False):
-    """Stop the cluster
+    """Stop the cluster.
 
     Please refer to the sky.cli.stop for the document.
 
@@ -132,11 +145,13 @@ def stop(cluster_name: str, purge: bool = False):
             'disks will be lost.\n'
             '  To terminate the cluster instead, run: '
             f'{colorama.Style.BRIGHT}sky down {cluster_name}')
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.teardown(handle, terminate=False, purge=purge)
 
 
+@usage_lib.entrypoint
 def down(cluster_name: str, purge: bool = False):
-    """Down the cluster
+    """Down the cluster.
 
     Please refer to the sky.cli.down for the document.
 
@@ -152,10 +167,12 @@ def down(cluster_name: str, purge: bool = False):
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
 
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
     backend.teardown(handle, terminate=True, purge=purge)
 
 
+@usage_lib.entrypoint
 def autostop(cluster_name: str, idle_minutes_to_autostop: int):
     """Set the autostop time of the cluster.
 
@@ -202,6 +219,7 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
                 f'{colorama.Style.RESET_ALL}'
                 '\n  Auto-stop can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes_to_autostop)
 
 
@@ -243,6 +261,7 @@ def _check_cluster_available(cluster_name: str,
     return handle
 
 
+@usage_lib.entrypoint
 def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
@@ -291,6 +310,7 @@ def queue(cluster_name: str,
     return jobs
 
 
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def cancel(cluster_name: str,
            all: bool = False,
@@ -331,6 +351,7 @@ def cancel(cluster_name: str,
     backend.cancel_jobs(handle, job_ids)
 
 
+@usage_lib.entrypoint
 def tail_logs(cluster_name: str, job_id: Optional[str], follow: bool = True):
     """Tail the logs of a job.
 
@@ -352,9 +373,11 @@ def tail_logs(cluster_name: str, job_id: Optional[str], follow: bool = True):
           f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
           f'{colorama.Style.RESET_ALL}')
 
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.tail_logs(handle, job_id, follow=follow)
 
 
+@usage_lib.entrypoint
 def download_logs(
         cluster_name: str,
         job_ids: Optional[List[str]],
@@ -374,6 +397,7 @@ def download_logs(
     if job_ids is not None and len(job_ids) == 0:
         return []
 
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
     print(f'{colorama.Fore.YELLOW}'
           'Syncing down logs to local...'
           f'{colorama.Style.RESET_ALL}')
@@ -381,6 +405,7 @@ def download_logs(
     return local_log_dirs
 
 
+@usage_lib.entrypoint
 def job_status(
         cluster_name: str,
         job_ids: Optional[List[str]],
@@ -407,6 +432,7 @@ def job_status(
           'Getting job status...'
           f'{colorama.Style.RESET_ALL}')
 
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
     statuses = backend.get_job_status(handle, job_ids, stream_logs=stream_logs)
     return statuses
 
@@ -436,6 +462,7 @@ def _is_spot_controller_up(
     return controller_status, handle
 
 
+@usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     """Get statuses of managed spot jobs.
 
@@ -503,6 +530,7 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     return jobs
 
 
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str] = None,
                 job_ids: Optional[Tuple[int]] = None,
@@ -556,6 +584,7 @@ def spot_cancel(name: Optional[str] = None,
                 'Please specify the job ID instead of the job name.')
 
 
+@usage_lib.entrypoint
 def spot_tail_logs(name: Optional[str], job_id: Optional[int], follow: bool):
     """Tail logs of managed spot jobs.
 
@@ -586,6 +615,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int], follow: bool):
 # ======================
 # = Storage Management =
 # ======================
+@usage_lib.entrypoint
 def storage_ls() -> List[Dict[str, Any]]:
     """Get the storages.
 
@@ -606,7 +636,8 @@ def storage_ls() -> List[Dict[str, Any]]:
     return storages
 
 
-def storage_delete(name: Optional[str] = None):
+@usage_lib.entrypoint
+def storage_delete(name: str):
     """Delete a storage.
 
     Raises:
