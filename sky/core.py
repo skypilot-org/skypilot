@@ -3,7 +3,7 @@ import colorama
 import getpass
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import dag
+from sky import dag, StoreType
 from sky import task
 from sky import backends
 from sky import data
@@ -20,6 +20,7 @@ from sky.utils import ux_utils
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
+
 
 # ======================
 # = Cluster Management =
@@ -54,7 +55,6 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
 def _start(cluster_name: str,
            idle_minutes_to_autostop: Optional[int] = None,
            retry_until_up: bool = False) -> backends.Backend.ResourceHandle:
-
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if cluster_status == global_user_state.ClusterStatus.UP:
@@ -417,7 +417,7 @@ def job_status(
 
 
 def _is_spot_controller_up(
-    stopped_message: str,
+        stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     controller_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -469,8 +469,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
         return []
 
     if (refresh and controller_status in [
-            global_user_state.ClusterStatus.STOPPED,
-            global_user_state.ClusterStatus.INIT
+        global_user_state.ClusterStatus.STOPPED,
+        global_user_state.ClusterStatus.INIT
     ]):
         print(f'{colorama.Fore.YELLOW}'
               'Restarting controller for latest status...'
@@ -621,3 +621,24 @@ def storage_delete(name: Optional[str] = None):
                                     source=handle.source,
                                     sync_on_reconstruction=False)
         store_object.delete()
+
+
+def storage_create(name: Optional[str] = None, source: Optional[str] = None, stores: Tuple[str] = None):
+    """"Create a storage.
+
+    """
+
+    storage = data.Storage(name, source)
+
+    stores = {} if stores is None else stores
+    stores = [storeType.upper() for storeType in stores]
+
+    # Add stores from tuple to storage object
+    if 'GCS' in stores:
+        storage.add_store(StoreType.GCS)
+    if 'AZURE' in stores:
+        storage.add_store(StoreType.AZURE)
+    if 'S3' in stores:
+        storage.add_store(StoreType.S3)
+
+    global_user_state.add_or_update_storage(name)

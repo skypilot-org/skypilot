@@ -2346,6 +2346,28 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
     for name in names:
         sky.storage_delete(name)
 
+@usage_lib.entrypoint
+@storage.command('create', cls=_DocumentedCodeCommand)
+@click.argument()
+@click.option()
+def storage_create(names: str, source: str, stores: Tuple[str]):
+    """Create a storage object.
+
+    Examples:
+
+    .. code-block:: bash
+        name: list of strings tuple
+        stores: comma separated list of stores
+        source:
+        mount or copy not required and persistence not required
+        TODO how to format cli input with list of strings, string, list of strings
+
+    """
+    sky.storage_create(name, source, stores)
+
+
+
+
 
 @cli.group(cls=_NaturalOrderGroup)
 def admin():
