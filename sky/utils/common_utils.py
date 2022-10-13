@@ -12,7 +12,7 @@ import socket
 import sys
 import time
 import uuid
-from typing import Any, Union
+from typing import Any
 import yaml
 
 from sky import sky_logging
