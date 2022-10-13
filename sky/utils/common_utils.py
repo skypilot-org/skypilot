@@ -252,9 +252,9 @@ def decode_payload(payload_str: str) -> Any:
     Returns:
         A str, dict or list that is decoded from the payload string.
     """
-    matched = _PAYLOAD_PATTERN.match(payload_str)
-    if matched is None:
+    matched = _PAYLOAD_PATTERN.findall(payload_str)
+    if not matched:
         raise ValueError(f'Invalid payload string: \n{payload_str}')
-    payload_str = matched.group(1)
+    payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload
