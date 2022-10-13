@@ -312,6 +312,7 @@ class SSHCommandRunner:
         ssh_options = ' '.join(
             ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
+        # To support spaces in the path, we need to quote source and target.
         if up:
             rsync_command.extend([
                 f'{full_source_str!r}',
