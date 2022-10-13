@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex
 
-CLUSTER_NAME="test-back-compat"
+CLUSTER_NAME="test-back-compat-$USER"
 . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
 
 git clone https://github.com/skypilot-org/skypilot.git sky-master || true
@@ -35,8 +35,10 @@ sky launch --cloud gcp -c ${CLUSTER_NAME} examples/minimal.yaml
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky exec --cloud gcp ${CLUSTER_NAME} examples/minimal.yaml
-sky launch --cloud gcp -c ${CLUSTER_NAME} examples/minimal.yaml
-sky queue
+s=$(sky launch --cloud gcp -d -c ${CLUSTER_NAME} examples/minimal.yaml)
+echo $s
+echo $s | grep "Job ID: 3"
+sky queue ${CLUSTER_NAME}
 
 # sky stop + sky start + sky exec
 conda activate sky-back-compat-master
@@ -46,7 +48,9 @@ conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
-sky exec --cloud gcp ${CLUSTER_NAME}-2 examples/minimal.yaml
+s=$(sky exec --cloud gcp -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
+echo $s
+echo $s | grep "Job ID: 2"
 
 # `sky autostop` + `sky status -r`
 conda activate sky-back-compat-master
