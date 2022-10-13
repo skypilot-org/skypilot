@@ -11,7 +11,6 @@ import time
 import traceback
 import typing
 from typing import Any, Dict, List, Optional, Union
-import uuid
 
 import requests
 
@@ -27,16 +26,6 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
-
-_run_id = None
-
-
-def _get_logging_run_id():
-    """Returns a unique run id for this logging."""
-    global _run_id
-    if _run_id is None:
-        _run_id = str(uuid.uuid4())
-    return _run_id
 
 
 def _get_current_timestamp_ns() -> int:
@@ -88,7 +77,7 @@ class UsageMessageToReport(MessageToReport):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
         self.user: str = _get_user_hash()
-        self.run_id: str = _get_logging_run_id()
+        self.run_id: str = common_utils.get_run_id()
         self.sky_version: str = sky.__version__
 
         # Entry
