@@ -122,6 +122,8 @@ def _execute(
       down: bool; whether to tear down the launched resources after all jobs
         completed (successfully or abnormally). If idle_minutes_to_autostop
         is set, the cluster will be torn down after the specified idle time.
+        Note that if errors occur during provisioning/data syncing/setting up,
+        the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
@@ -156,25 +158,29 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
-    
+
     stages = stages if stages is not None else list(Stage)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
-        if down:
-            # Set the idle minutes to >= 1 to avoid the cluster being torn
-            # down during the task submission.
-            idle_minutes_to_autostop = idle_minutes_to_autostop or 1
-        # Use auto-down to terminate the cluster after the task is done.
-        # Otherwise, the cluster will be immediately terminated when the user
-        # detach from the execution.
-        stages.remove(Stage.DOWN)
+        if down and idle_minutes_to_autostop is None:
+            # Use autostop(down) to terminate the cluster after the task is
+            # done. Otherwise, the cluster will be immediately terminated when
+            # the user detach from the execution.
+            idle_minutes_to_autostop = 0
+        if idle_minutes_to_autostop is not None:
+            if idle_minutes_to_autostop == 0:
+                verb = 'torn down' if down else 'stopped'
+                logger.debug('Setting idle_minutes_to_autostop to 1, to avoid '
+                             f'cluster being {verb} during task submission.')
+                idle_minutes_to_autostop = 1
+            stages.remove(Stage.DOWN)
     elif idle_minutes_to_autostop is not None:
-            # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Backend {backend.NAME} does not support autostop, please try '
-                    f'{backends.CloudVmRayBackend.NAME}')
+        # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'Backend {backend.NAME} does not support autostop, please try '
+                f'{backends.CloudVmRayBackend.NAME}')
 
     if not cluster_exists and Stage.OPTIMIZE in stages:
         if task.best_resources is None:
@@ -280,7 +286,7 @@ def launch(
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
             up.
-        idle_minutes_to_autostop: if provided, the cluster will be auto-stop
+        idle_minutes_to_autostop: if provided, the cluster will be autostop
             after this many minutes of idleness.
         no_setup: if true, the cluster will not re-run setup instructions
 

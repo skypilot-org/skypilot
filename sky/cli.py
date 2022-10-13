@@ -993,7 +993,7 @@ def cli():
           'job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
+          '. If not set, the cluster will not be autostopped.'))
 @click.option(
     '--down',
     default=False,
@@ -1002,7 +1002,9 @@ def cli():
     help=
     ('Tear down the cluster after all jobs completed (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the specified idle time.'),
+     'be torn down after the specified idle time. '
+     'Note that if errors occur during provisioning/data syncing/setting up, '
+     'the cluster will not be torn down for debugging purposes.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1261,10 +1263,9 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
-    The autostop column indicates how long the cluster will be auto-stopped
+    The autostop column indicates how long the cluster will be autostopped
     after idling (no jobs running). If the time is followed by '(down)', e.g.
-    '1 min (down)', the cluster will be auto-downed, rather than auto-stopped.
-
+    '1 min (down)', the cluster will be autodowned, rather than autostopped.
     """
     cluster_records = core.status(all=all, refresh=refresh)
     local_clusters = onprem_utils.check_and_get_local_clusters(
@@ -1511,19 +1512,19 @@ def stop(
               type=int,
               default=None,
               required=False,
-              help='Set the idle minutes before auto-stopping the cluster.')
+              help='Set the idle minutes before autostopping the cluster.')
 @click.option('--cancel',
               default=False,
               is_flag=True,
               required=False,
-              help='Cancel the auto-stopping.')
+              help='Cancel the autostopping.')
 @click.option(
     '--down',
     default=False,
     is_flag=True,
     required=False,
-    help='Tear down the cluster instead of stopping it, when auto-stopping '
-    '(i.e., auto-down rather than auto-stop).')
+    help='Use autodown (tear down the cluster; non-restartable), instead '
+    'of autostop (restartable).')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1539,7 +1540,7 @@ def autostop(
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
 ):
-    """Schedule or cancel an auto-stop or auto-down for cluster(s).
+    """Schedule or cancel an autostop or autodown for cluster(s).
 
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
@@ -1614,7 +1615,7 @@ def autostop(
           'job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
+          '. If not set, the cluster will not be autostopped.'))
 @click.option(
     '--down',
     default=False,
@@ -1858,7 +1859,7 @@ def _down_or_stop_clusters(
     if idle_minutes_to_autostop is not None:
         verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
         option_str = 'down' if down else 'stop'
-        operation = f'{verb} auto-{option_str} on'
+        operation = f'{verb} auto{option_str} on'
 
     if len(names) > 0:
         reserved_clusters = [
@@ -2838,7 +2839,7 @@ def bench():
     help=('Automatically stop the cluster after this many minutes '
           'of idleness after setup/file_mounts. This is equivalent to '
           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
-          'If not set, the cluster will not be auto-stopped.'))
+          'If not set, the cluster will not be autostopped.'))
 @click.option('--yes',
               '-y',
               is_flag=True,

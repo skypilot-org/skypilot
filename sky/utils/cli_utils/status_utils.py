@@ -34,7 +34,7 @@ class StatusColumn:
 
 def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
     """Compute cluster table values and display."""
-    # TODO(zhwu): Update the information for auto-stop clusters.
+    # TODO(zhwu): Update the information for autostop clusters.
 
     status_columns = [
         StatusColumn('NAME', _get_name),
@@ -212,7 +212,7 @@ def _get_autostop(cluster_status):
     separtion = ''
     if cluster_status['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
-        autostop_str = str(cluster_status['autostop']) + ' min'
+        autostop_str = str(cluster_status['autostop']) + 'm'
         separtion = ' '
 
     if cluster_status['to_down']:

@@ -42,8 +42,8 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
                 'last_use': (int) timestamp of last use,
                 'status': (sky.ClusterStatus) cluster status,
                 'autostop': (int) idle time before autostop,
-                'to_down': (bool) whether to tear down the cluster after
-                            execution (autostop),
+                'to_down': (bool) whether autodown is used instead of
+                    autostop,
                 'metadata': (dict) metadata of the cluster,
             }
         ]
@@ -183,7 +183,7 @@ def autostop(
     """
     verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
     option_str = 'down' if down else 'stop'
-    operation = f'{verb} auto-{option_str} on'
+    operation = f'{verb} auto{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '
@@ -205,7 +205,7 @@ def autostop(
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} cluster '
                 f'{cluster_name!r}... skipped{colorama.Style.RESET_ALL}'
-                f'\n  Auto-{option_str} is only supported by backend: '
+                f'\n  auto{option_str} is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         with ux_utils.print_exception_no_traceback():
@@ -213,7 +213,7 @@ def autostop(
                 f'{colorama.Fore.YELLOW}{operation} cluster '
                 f'{cluster_name!r} (status: {cluster_status.value})... skipped'
                 f'{colorama.Style.RESET_ALL}'
-                f'\n  Auto-{option_str} can only be set/unset for '
+                f'\n  auto{option_str} can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
     backend.set_autostop(handle, idle_minutes_to_autostop, down)
 
