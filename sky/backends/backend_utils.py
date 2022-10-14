@@ -242,8 +242,11 @@ def _optimize_file_mounts(yaml_path: str) -> None:
 
     # (For local) Move all runtime files, including the just-written yaml, to
     # local_runtime_files_dir/.
-    all_local_sources = ' '.join(
-        local_src for local_src in file_mounts.values())
+    all_local_sources = ''
+    for local_src in file_mounts.values():
+        full_local_src = str(pathlib.Path(local_src).expanduser())
+        # Add quotes for paths containing spaces.
+        all_local_sources += f'{full_local_src!r} '
     # Takes 10-20 ms on laptop incl. 3 clouds' credentials.
     subprocess.run(f'cp -r {all_local_sources} {local_runtime_files_dir}/',
                    shell=True,
