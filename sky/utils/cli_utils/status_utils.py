@@ -72,7 +72,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
         if pending_autostop:
             click.echo(
                 '\n'
-                f'You have {pending_autostop} clusters with autostop(down) '
+                f'You have {pending_autostop} clusters with auto{{stop,down}} '
                 'scheduled. Refresh statuses with: `sky status --refresh`.')
     else:
         click.echo('No existing clusters.')

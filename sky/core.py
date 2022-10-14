@@ -185,7 +185,7 @@ def autostop(
     verb = 'Cancelling' if is_cancel else 'Scheduling'
     option_str = 'down' if down else 'stop'
     if is_cancel:
-        option_str = 'stop(down)'
+        option_str = '{stop,down}'
     operation = f'{verb} auto{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(

@@ -120,8 +120,8 @@ def _execute(
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
       down: bool; whether to tear down the launched resources after all jobs
-        completed (successfully or abnormally). If idle_minutes_to_autostop
-        is set, the cluster will be torn down after the specified idle time.
+        finish (successfully or abnormally). If idle_minutes_to_autostop is
+        also set, the cluster will be torn down after the specified idle time.
         Note that if errors occur during provisioning/data syncing/setting up,
         the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
@@ -139,7 +139,7 @@ def _execute(
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
       detach_run: bool; whether to detach the process after the job submitted.
-      autostop_idle_minutes: int; if provided, the cluster will be set to
+      idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
     """
@@ -164,9 +164,8 @@ def _execute(
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
         if down and idle_minutes_to_autostop is None:
-            # Use autostop(down) to terminate the cluster after the task is
-            # done. Otherwise, the cluster will be immediately terminated when
-            # the user detach from the execution.
+            # Use auto{stop,down} to terminate the cluster after the task is
+            # done.
             idle_minutes_to_autostop = 0
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
@@ -288,8 +287,27 @@ def launch(
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
             up.
-        idle_minutes_to_autostop: if provided, the cluster will be autostop
-            after this many minutes of idleness.
+        idle_minutes_to_autostop: automatically stop the cluster after this
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness starts counting after
+            setup/file_mounts are done; the clock gets reset whenever there
+            are running/pending jobs in the job queue. Setting this flag is
+            equivalent to running ``sky.launch(..., detach_run=True, ...)``
+            and then ``sky.autostop(idle_minutes=<minutes>)``. If not set,
+            the cluster will not be autostopped.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually launch the cluster.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
+            OptimizeTarget.TIME.
+        detach_run: If True, run setup first (blocking), then detach from the
+            job's execution.
         no_setup: if true, the cluster will not re-run setup instructions
 
     Examples:

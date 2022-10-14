@@ -1000,7 +1000,7 @@ def cli():
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after all jobs completed (successfully or '
+    ('Tear down the cluster after all jobs finish (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
      'be torn down after the specified idle time. '
      'Note that if errors occur during provisioning/data syncing/setting up, '
@@ -1514,11 +1514,13 @@ def stop(
               default=None,
               required=False,
               help='Set the idle minutes before autostopping the cluster.')
-@click.option('--cancel',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel the autostopping.')
+@click.option(
+    '--cancel',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Cancel the currently active autostop/autodown setting for the '
+    'cluster.')
 @click.option(
     '--down',
     default=False,
@@ -1559,6 +1561,9 @@ def autostop(
 
     If ``--idle-minutes`` and ``--cancel`` are not specified, default to 5
     minutes.
+
+    When multiple configurations are specified for the same cluster, e.g. using
+    ``sky autostop`` or ``sky launch -i``, the last one takes precedence.
 
     Examples:
 
@@ -1623,7 +1628,7 @@ def autostop(
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after all jobs completed (successfully or '
+    ('Tear down the cluster after all jobs finish (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
      'be torn down after the specified idle time.'),
 )
@@ -1862,7 +1867,7 @@ def _down_or_stop_clusters(
         verb = 'Cancelling' if is_cancel else 'Scheduling'
         option_str = 'down' if down else 'stop'
         if is_cancel:
-            option_str = 'stop(down)'
+            option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
     if len(names) > 0:
