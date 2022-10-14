@@ -340,6 +340,7 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
+@usage_lib.entrypoint
 def spot_launch(
     dag: sky.Dag,
     name: Optional[str] = None,

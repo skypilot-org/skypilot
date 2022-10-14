@@ -44,7 +44,7 @@ class Backend:
                   retry_until_up: bool = False) -> ResourceHandle:
         if cluster_name is None:
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
-        usage_lib.messages.usage.update_cluster_name(cluster_name)
+        usage_lib.record_cluster_name_for_current_operation(cluster_name)
         usage_lib.messages.usage.update_actual_task(task)
         return self._provision(task, to_provision, dryrun, stream_logs,
                                cluster_name, retry_until_up)
@@ -76,7 +76,8 @@ class Backend:
     @usage_lib.messages.usage.update_runtime('execute')
     def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
                 detach_run: bool) -> None:
-        usage_lib.messages.usage.update_cluster_name(handle.get_cluster_name())
+        usage_lib.record_cluster_name_for_current_operation(
+            handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
         return self._execute(handle, task, detach_run)
 
