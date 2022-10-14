@@ -1787,7 +1787,6 @@ def get_clusters(
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
-
     def _refresh_cluster(cluster_name):
         record = _update_cluster_status(cluster_name,
                                         acquire_per_cluster_status_lock=True)
@@ -1798,7 +1797,7 @@ def get_clusters(
     with progress:
         updated_records = subprocess_utils.run_in_parallel(
             _refresh_cluster, cluster_names)
-        
+
     # Show information for removed clusters.
     autodown_clusters, remaining_clusters = [], []
     for i, record in enumerate(records):
@@ -1819,10 +1818,9 @@ def get_clusters(
     if remaining_clusters:
         plural = 's' if len(remaining_clusters) > 1 else ''
         cluster_str = ', '.join(name for name in remaining_clusters)
-        logger.warning(
-            f'{yellow}Cluster{plural} terminated on '
-            f'the cloud: {light}{cluster_str}{reset}')
-    
+        logger.warning(f'{yellow}Cluster{plural} terminated on '
+                       f'the cloud: {light}{cluster_str}{reset}')
+
     # Filter out removed clusters.
     updated_records = [
         record for record in updated_records if record is not None
