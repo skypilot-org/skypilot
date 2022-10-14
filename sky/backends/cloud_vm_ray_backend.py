@@ -924,7 +924,9 @@ class RetryingVmProvisioner(object):
                 self._wheel_hash,
                 region=region,
                 zones=zones,
-                dryrun=dryrun)
+                dryrun=dryrun,
+                keep_launch_fields_in_existing_config=prev_cluster_status
+                is not None)
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1883,8 +1885,6 @@ class CloudVmRayBackend(backends.Backend):
         else:
             assert os.path.isdir(
                 full_workdir), f'{full_workdir} should be a directory.'
-            # FIXME(zongheng): audit; why not give users control to add '/'?
-            workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
         dir_size = backend_utils.path_size_megabytes(full_workdir)

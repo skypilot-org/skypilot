@@ -94,7 +94,7 @@ file_mounts:
   # When the VM is initialized, the contents of the bucket are copied to
   # /datasets-storage. If the bucket already exists, it is fetched and re-used.
   /datasets-storage:
-    name: sky-dataset-romil # Make sure this name is unique or you own this bucket
+    name: sky-dataset-romilzz # Make sure this name is unique or you own this bucket
     source: ~/datasets
     store: s3 # Could be either of [s3, gcs]; default: None
     persistent: True  # Defaults to True, can be set to false.
@@ -110,7 +110,7 @@ file_mounts:
   # other storage mounts using the same bucket with MOUNT mode. Note that the
   # source is synced with the remote bucket everytime this task is run.
   /dataset-storage-mount:
-    name: sky-dataset-romil
+    name: sky-dataset-romilzz
     source: ~/datasets
     mode: MOUNT
 
@@ -137,7 +137,7 @@ file_mounts:
   # this approach can also be used to create a shared filesystem across workers.
   # See examples/storage/pingpong.yaml for an example.
   /outputs-mount:
-    name: romil-output-bucket
+    name: romil-output-bucketzz
     mode: MOUNT
 
 run: |

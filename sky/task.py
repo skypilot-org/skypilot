@@ -10,6 +10,7 @@ import yaml
 import sky
 from sky import check
 from sky import clouds
+from sky import exceptions
 from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
@@ -260,7 +261,13 @@ class Task:
             mount_path = storage[0]
             assert mount_path, \
                 'Storage mount path cannot be empty.'
-            storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+            try:
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+            except exceptions.StorageSourceError as e:
+                # Patch the error message to include the mount path, if included
+                e.args = (e.args[0].replace('<destination_path>',
+                                            mount_path),) + e.args[1:]
+                raise e
             task_storage_mounts[mount_path] = storage_obj
         task.set_storage_mounts(task_storage_mounts)
 

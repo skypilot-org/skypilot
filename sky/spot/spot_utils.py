@@ -114,7 +114,8 @@ def update_spot_job_status(job_id: Optional[int] = None):
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       get_end_time: bool) -> float:
     """Get the started/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_time(job_id=None, is_end=get_end_time)
+    code = job_lib.JobLibCodeGen.get_job_time_payload(job_id=None,
+                                                      is_end=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
@@ -123,6 +124,7 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     subprocess_utils.handle_returncode(returncode, code,
                                        'Failed to get job time.',
                                        stdout + stderr)
+    stdout = common_utils.decode_payload(stdout)
     return float(stdout)
 
 

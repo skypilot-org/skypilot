@@ -1411,7 +1411,7 @@ def logs(
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
-            sys.exit(0)
+            return
         else:
             if job_status is None:
                 id_str = '' if job_id is None else f'{job_id} '
@@ -1935,7 +1935,7 @@ def _down_or_stop_clusters(
             # should've been printed by _get_glob_clusters() above.
             continue
         clusters.append(name)
-    usage_lib.messages.usage.update_cluster_name(clusters)
+    usage_lib.record_cluster_name_for_current_operation(clusters)
 
     if not clusters:
         click.echo('\nCluster(s) not found (tip: see `sky status`).')
@@ -2459,15 +2459,15 @@ def admin_deploy(clusterspec_yaml: str):
     if not isinstance(ips, list):
         ips = [ips]
     local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.messages.usage.update_cluster_name(local_cluster_name)
+    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
     usage_lib.messages.usage.update_cluster_resources(
         len(ips), sky.Resources(sky.Local()))
 
     # Check for Ray
-    click.secho(f'[{steps}/4] Checking on-premise environment\n',
+    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
                 fg='green',
                 nl=False)
-    onprem_utils.check_local_installation(ips, auth_config)
+    onprem_utils.check_and_install_local_env(ips, auth_config)
     steps += 1
 
     # Detect what GPUs the cluster has (which can be heterogeneous)

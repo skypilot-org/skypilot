@@ -17,6 +17,12 @@ GCP_GPU_ZONES_URL = 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zone
 
 NOT_AVAILABLE_STR = 'Not available in this region'
 
+ALL_REGION_PREFIX = ''
+US_REGION_PREFIX = 'us-'
+REGION_PREFIX = US_REGION_PREFIX
+# Uncomment the following line to VM pricings from all regions.
+# REGION_PREFIX = ALL_REGION_PREFIX
+
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
 UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
 
@@ -35,7 +41,6 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 # FIXME(woosuk): This URL can change.
-A2_PRICING_URL = '/compute/vm-instance-pricing_04e9ea153c2ab1ea37254107b92dc081d4459ca9fe9a46ef5b39e5d63353f089.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
         'vCPUs': 12,
@@ -235,7 +240,7 @@ def get_vm_price_table(url):
     if 'InstanceType' in df.columns:
         # Price table for pre-defined instance types.
         instance_type = df['InstanceType'].iloc[0]
-        if instance_type == 'a2-highgpu-1g':
+        if instance_type in ['a2-highgpu-1g', 'a2-ultragpu-1g']:
             # The A2 price table includes the GPU cost.
             return None
 
@@ -259,6 +264,9 @@ def get_vm_price_table(url):
     else:
         # Others (e.g., per vCPU hour or per GB hour pricing rule table).
         df = df[['Item', 'Region', 'Price', 'SpotPrice']]
+        item = df['Item'].iloc[0]
+        if item == 'Predefined vCPUs':
+            df = get_a2_df(df)
     return df
 
 
@@ -294,13 +302,12 @@ def get_vm_zones(url):
     return df
 
 
-def get_a2_df():
-    a2_pricing = get_vm_price_table(GCP_URL + A2_PRICING_URL)
-    cpu_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined vCPUs']
-    memory_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined Memory']
+def get_a2_df(a2_pricing_df):
+    cpu_pricing = a2_pricing_df[a2_pricing_df['Item'] == 'Predefined vCPUs']
+    memory_pricing = a2_pricing_df[a2_pricing_df['Item'] == 'Predefined Memory']
 
     table = []
-    for region in a2_pricing['Region'].unique():
+    for region in a2_pricing_df['Region'].unique():
         per_cpu_price = cpu_pricing[cpu_pricing['Region'] ==
                                     region]['Price'].values[0]
         per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] ==
@@ -344,9 +351,7 @@ def get_vm_df():
         df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
     ]
 
-    # Handle A2 instance types separately.
-    a2_df = get_a2_df()
-    vm_df = pd.concat(vm_dfs + [a2_df])
+    vm_df = pd.concat(vm_dfs)
 
     vm_zones = get_vm_zones(GCP_VM_ZONES_URL)
     # Remove regions not in the pricing data.
@@ -370,7 +375,7 @@ def get_vm_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    vm_df = vm_df[vm_df['Region'].str.startswith('us-')]
+    vm_df = vm_df[vm_df['Region'].str.startswith(REGION_PREFIX)]
     return vm_df
 
 
@@ -526,7 +531,7 @@ def get_gpu_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    gpu_df = gpu_df[gpu_df['Region'].str.startswith('us-')]
+    gpu_df = gpu_df[gpu_df['Region'].str.startswith(REGION_PREFIX)]
     return gpu_df
 
 
