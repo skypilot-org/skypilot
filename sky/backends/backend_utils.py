@@ -812,7 +812,7 @@ def write_cluster_config(
         with open(yaml_path, 'r') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
-            old_yaml_content, new_yaml_content,
+            new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY)
         with open(yaml_path, 'w') as f:
             f.write(restored_yaml_content)

@@ -40,7 +40,7 @@ rm -r  ~/.sky/wheels || true
 sky exec --cloud gcp ${CLUSTER_NAME} examples/minimal.yaml
 s=$(sky launch --cloud gcp -d -c ${CLUSTER_NAME} examples/minimal.yaml)
 echo $s
-echo $s | grep "Job ID: 3"
+echo $s | grep "Job ID: 3" || exit 1
 sky queue ${CLUSTER_NAME}
 
 # sky stop + sky start + sky exec
@@ -53,7 +53,7 @@ sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
 s=$(sky exec --cloud gcp -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
 echo $s
-echo $s | grep "Job ID: 2"
+echo $s | grep "Job ID: 2" || exit 1
 
 # `sky autostop` + `sky status -r`
 mamba activate sky-back-compat-master
@@ -63,7 +63,7 @@ mamba activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky autostop -y -i0 ${CLUSTER_NAME}-3
 sleep 100
-sky status -r | grep ${CLUSTER_NAME}-3 | grep STOPPED
+sky status -r | grep ${CLUSTER_NAME}-3 | grep STOPPED || exit 1
 
 
 # (1 node) sky launch + sky exec + sky queue + sky logs
