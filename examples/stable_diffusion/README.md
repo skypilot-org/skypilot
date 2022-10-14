@@ -2,11 +2,11 @@
 
 1. Install skypilot package by following these [instructions](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
 
-2. Run: `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`.
+2. Run `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`.
 
-3. Run `sky launch -c stableDiffusion faster_stable_diffusion_docker.yaml`  
+3. Run `sky launch -c stableDiffusion stable_diffusion_docker.yaml`  
 
-4. Run `ssh -L 7860:localhost:7860 stableDiffusion`.
+4. Open a new terminal window and run `ssh -L 7860:localhost:7860 stableDiffusion`.
 
 5. Open [`http://localhost:7860/`](http://localhost:7860/) in browser.
 
@@ -14,7 +14,14 @@
 
 ![Stable Diffusion Web Tool UI](assets/stable_diffusion_ui.png)
 
-7. Once you are done, run `sky down stable-diffusion` to terminate the VM.
+7. Once you are done, run `sky stop stableDiffusion` to stop the VM.
+
+8. To restart VM, run `sky start stableDiffusion.`
+
+9. Then run `sky exec stableDiffusion stable_diffusion_docker.yaml`.
+
+10. Lastly, repeat step 4. 
+
 
 
 ## Usage Tips
@@ -37,3 +44,4 @@
    - "rap song album cover"
    - "Wall Street bull rodeo"
    - "Trump in minecraft"
+   

@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   model:
-    image: gcr.io/intercloud-320520/stable_diffusion_webui
+    image: berkeleyskypilot/sbtest
     restart: on-failure
     ports:
       - "7860:7860"
