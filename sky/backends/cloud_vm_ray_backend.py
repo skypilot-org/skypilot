@@ -1137,14 +1137,14 @@ class RetryingVmProvisioner(object):
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
                 env=dict(
+                    os.environ,
                     BOTO_MAX_RETRIES='5',
                     # Use environment variables to disable the ray usage stats
                     # (to avoid the 10 second wait for usage collection
                     # confirmation), as the ray version on the user's machine
                     # may be lower version that does not support the
                     # `--disable-usage-stats` flag.
-                    RAY_USAGE_STATS_ENABLED='0',
-                    **os.environ),
+                    RAY_USAGE_STATS_ENABLED='0'),
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
@@ -1353,7 +1353,7 @@ class RetryingVmProvisioner(object):
             # (avoid the 10 second wait for usage collection confirmation),
             # as the ray version on the user's machine may be lower version
             # that does not support the `--disable-usage-stats` flag.
-            env=dict(RAY_USAGE_STATS_ENABLED='0', **os.environ),
+            env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
             # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
