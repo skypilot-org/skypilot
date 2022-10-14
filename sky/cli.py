@@ -1519,7 +1519,7 @@ def stop(
     default=False,
     is_flag=True,
     required=False,
-    help='Cancel the currently active autostop/autodown setting for the '
+    help='Cancel the currently active auto{stop,down} setting for the '
     'cluster.')
 @click.option(
     '--down',
