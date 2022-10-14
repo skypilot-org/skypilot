@@ -169,11 +169,16 @@ def _execute(
             idle_minutes_to_autostop = 0
         if idle_minutes_to_autostop is not None:
             if idle_minutes_to_autostop == 0:
+                # idle_minutes_to_autostop=0 can cause the following problem:
+                # After we set the autostop in the PRE_EXEC stage with -i 0,
+                # it could be possible that the cluster immediately found
+                # itself have no task running and start the auto{stop,down}
+                # process, before the task is submitted in the EXEC stage.
                 verb = 'torn down' if down else 'stopped'
-                logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}Setting '
-                               'idle_minutes_to_autostop to 1, to avoid '
-                               f'cluster being {verb} during task submission.'
-                               f'{colorama.Style.RESET_ALL}')
+                logger.info(f'{colorama.Fore.LIGHTBLACK_EX}The cluster will '
+                            f'be {verb} after 1 minutes of idleness '
+                            '(after all jobs finish).'
+                            f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
     elif idle_minutes_to_autostop is not None:
