@@ -1976,7 +1976,8 @@ def _down_or_stop_clusters(
                     plural = 's' if idle_minutes_to_autostop != 1 else ''
                     message += (
                         f'\n  The cluster will be auto{option_str}\'ed after '
-                        f'{idle_minutes_to_autostop} minute{plural} of idleness.'
+                        f'{idle_minutes_to_autostop} minute{plural} of '
+                        'idleness.'
                         f'\n  To cancel the auto{option_str}, run: '
                         f'{colorama.Style.BRIGHT}'
                         f'sky autostop {name} --cancel'
