@@ -264,7 +264,7 @@ def path_size_megabytes(path: str) -> int:
         subprocess.check_output(
             f'rsync {command_runner.RSYNC_DISPLAY_OPTION} '
             f'{command_runner.RSYNC_FILTER_OPTION} '
-            f'{git_exclude_filter} --dry-run {path}',
+            f'{git_exclude_filter} --dry-run {path!r}',
             shell=True).splitlines()[-1])
     total_bytes = rsync_output.split(' ')[3].replace(',', '')
     return int(total_bytes) // 10**6
@@ -1030,12 +1030,6 @@ def parallel_data_transfer_to_nodes(
     style = colorama.Style
 
     origin_source = source
-    if run_rsync:
-        # Do this for local src paths, not for cloud store URIs
-        # (otherwise we have '<abs path to cwd>/gs://.../object/').
-        full_src = os.path.abspath(os.path.expanduser(origin_source))
-        if not os.path.islink(full_src) and not os.path.isfile(full_src):
-            source = os.path.join(full_src, '')
 
     def _sync_node(runner: 'command_runner.SSHCommandRunner') -> None:
         if cmd is not None:

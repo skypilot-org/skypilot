@@ -1870,8 +1870,6 @@ class CloudVmRayBackend(backends.Backend):
         else:
             assert os.path.isdir(
                 full_workdir), f'{full_workdir} should be a directory.'
-            # FIXME(zongheng): audit; why not give users control to add '/'?
-            workdir = os.path.join(workdir, '')  # Adds trailing / if needed.
 
         # Raise warning if directory is too large
         dir_size = backend_utils.path_size_megabytes(full_workdir)

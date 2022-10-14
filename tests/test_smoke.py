@@ -243,6 +243,7 @@ def test_file_mounts():
         [
             'touch ~/tmpfile',
             'mkdir -p ~/tmp-workdir',
+            'touch ~/tmp-workdir/tmp\ file',
             'touch ~/tmp-workdir/foo',
             'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
             f'sky launch -y -c {name} examples/using_file_mounts.yaml',
