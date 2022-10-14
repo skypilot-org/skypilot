@@ -1802,13 +1802,29 @@ def get_clusters(
         updated_records = subprocess_utils.run_in_parallel(
             _refresh_cluster, cluster_names)
     if terminated_clusters:
-        plural = 's were' if len(terminated_clusters) > 1 else ' was'
-        cluster_str = ', '.join(repr(name) for name in terminated_clusters)
+        autodown_clusters, remaining_clusters = [], []
+        for i, record in enumerate(records):
+            if updated_records[i] is None:
+                if record['to_down']:
+                    autodown_clusters.append(terminated_clusters[i])
+                else:
+                    remaining_clusters.append(terminated_clusters[i])
+
         yellow = colorama.Fore.YELLOW
+        light = colorama.Fore.LIGHTBLACK_EX
         reset = colorama.Style.RESET_ALL
-        logger.warning(f'{yellow}The following cluster{plural} terminated on '
-                       'the cloud and removed from the cluster table: '
-                       f'{cluster_str}{reset}')
+        if autodown_clusters:
+            plural = 's were' if len(autodown_clusters) > 1 else ' was'
+            cluster_str = ', '.join(autodown_clusters)
+            logger.info(f'The following cluster{plural} autodowned and removed '
+                        f'from the cluster table: {light}{cluster_str}{reset}')
+        if remaining_clusters:
+            plural = 's were' if len(remaining_clusters) > 1 else ' was'
+            cluster_str = ', '.join(repr(name) for name in remaining_clusters)
+            logger.warning(
+                f'{yellow}The following cluster{plural} terminated on '
+                'the cloud and removed from the cluster table: '
+                f'{light}{cluster_str}{reset}')
     updated_records = [
         record for record in updated_records if record is not None
     ]
