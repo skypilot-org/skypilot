@@ -141,7 +141,7 @@ class TestReservedClustersOperations:
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
-        assert ('Scheduling auto-stop on reserved cluster(s) '
+        assert ('Scheduling autostop on reserved cluster(s) '
                 f'\'{spot.SPOT_CONTROLLER_NAME}\' is not supported'
                 in result.output)
 

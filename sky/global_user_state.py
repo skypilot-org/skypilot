@@ -61,6 +61,8 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
                                  'TEXT DEFAULT "{}"')
 
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
+                                 'INTEGER DEFAULT 0')
     conn.commit()
 
 
@@ -114,7 +116,7 @@ def add_or_update_cluster(cluster_name: str,
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status, autostop) '
+        '(name, launched_at, handle, last_use, status, autostop, to_down) '
         'VALUES ('
         # name
         '?, '
@@ -132,7 +134,11 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old autostop value if it exists, otherwise set it to
         # default -1.
         'COALESCE('
-        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
+        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1), '
+        # Keep the old to_down value if it exists, otherwise set it to
+        # default 0.
+        'COALESCE('
+        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0)'
         ')',
         (
             # name
@@ -148,6 +154,8 @@ def add_or_update_cluster(cluster_name: str,
             # status
             status.value,
             # autostop
+            cluster_name,
+            ClusterStatus.STOPPED.value,
             cluster_name,
             ClusterStatus.STOPPED.value,
         ))
@@ -211,11 +219,14 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
-    _DB.cursor.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
-        idle_minutes,
-        cluster_name,
-    ))
+def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
+                               to_down: bool) -> None:
+    _DB.cursor.execute(
+        'UPDATE clusters SET autostop=(?), to_down=(?) WHERE name=(?)', (
+            idle_minutes,
+            int(to_down),
+            cluster_name,
+        ))
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
@@ -248,7 +259,8 @@ def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,))
-    for name, launched_at, handle, last_use, status, autostop, metadata in rows:
+    for (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down) in rows:
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -256,6 +268,7 @@ def get_cluster_from_name(
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
+            'to_down': bool(to_down),
             'metadata': json.loads(metadata),
         }
         return record
@@ -265,7 +278,8 @@ def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc')
     records = []
-    for name, launched_at, handle, last_use, status, autostop, metadata in rows:
+    for (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down) in rows:
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -274,6 +288,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
+            'to_down': bool(to_down),
             'metadata': json.loads(metadata),
         }
         records.append(record)

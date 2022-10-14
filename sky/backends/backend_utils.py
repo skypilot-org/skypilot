@@ -1650,7 +1650,9 @@ def _update_cluster_status_no_lock(
             backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit):  # pylint: disable=broad-except
             logger.debug('Failed to reset autostop.')
-        global_user_state.set_cluster_autostop_value(handle.cluster_name, -1)
+        global_user_state.set_cluster_autostop_value(handle.cluster_name,
+                                                     -1,
+                                                     to_down=False)
 
         # If the user starts part of a STOPPED cluster, we still need a status to
         # represent the abnormal status. For spot cluster, it can also represent

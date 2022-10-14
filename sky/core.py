@@ -45,6 +45,8 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
                 'last_use': (int) timestamp of last use,
                 'status': (sky.ClusterStatus) cluster status,
                 'autostop': (int) idle time before autostop,
+                'to_down': (bool) whether autodown is used instead of
+                    autostop,
                 'metadata': (dict) metadata of the cluster,
             }
         ]
@@ -54,9 +56,12 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
     return cluster_records
 
 
-def _start(cluster_name: str,
-           idle_minutes_to_autostop: Optional[int] = None,
-           retry_until_up: bool = False) -> backends.Backend.ResourceHandle:
+def _start(
+        cluster_name: str,
+        idle_minutes_to_autostop: Optional[int] = None,
+        retry_until_up: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+) -> backends.Backend.ResourceHandle:
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
@@ -89,14 +94,17 @@ def _start(cluster_name: str,
                                cluster_name=cluster_name,
                                retry_until_up=retry_until_up)
     if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop)
+        backend.set_autostop(handle, idle_minutes_to_autostop, down=down)
     return handle
 
 
 @usage_lib.entrypoint
-def start(cluster_name: str,
-          idle_minutes_to_autostop: Optional[int] = None,
-          retry_until_up: bool = False):
+def start(
+        cluster_name: str,
+        idle_minutes_to_autostop: Optional[int] = None,
+        retry_until_up: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+):
     """Start the cluster.
 
     Please refer to the sky.cli.start for the document.
@@ -105,7 +113,7 @@ def start(cluster_name: str,
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    _start(cluster_name, idle_minutes_to_autostop, retry_until_up)
+    _start(cluster_name, idle_minutes_to_autostop, retry_until_up, down)
 
 
 @usage_lib.entrypoint
@@ -173,7 +181,11 @@ def down(cluster_name: str, purge: bool = False):
 
 
 @usage_lib.entrypoint
-def autostop(cluster_name: str, idle_minutes_to_autostop: int):
+def autostop(
+        cluster_name: str,
+        idle_minutes_to_autostop: int,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+):
     """Set the autostop time of the cluster.
 
     Please refer to the sky.cli.autostop for the document.
@@ -186,8 +198,12 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
         sky.exceptions.NotSupportedError: the cluster is not supported.
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
-    verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-    operation = f'{verb} auto-stop on'
+    is_cancel = idle_minutes_to_autostop < 0
+    verb = 'Cancelling' if is_cancel else 'Scheduling'
+    option_str = 'down' if down else 'stop'
+    if is_cancel:
+        option_str = '{stop,down}'
+    operation = f'{verb} auto{option_str} on'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '
@@ -209,7 +225,7 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} cluster '
                 f'{cluster_name!r}... skipped{colorama.Style.RESET_ALL}'
-                '\n  Auto-stopping is only supported by backend: '
+                f'\n  auto{option_str} is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         with ux_utils.print_exception_no_traceback():
@@ -217,10 +233,10 @@ def autostop(cluster_name: str, idle_minutes_to_autostop: int):
                 f'{colorama.Fore.YELLOW}{operation} cluster '
                 f'{cluster_name!r} (status: {cluster_status.value})... skipped'
                 f'{colorama.Style.RESET_ALL}'
-                '\n  Auto-stop can only be set/unset for '
+                f'\n  auto{option_str} can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes_to_autostop)
+    backend.set_autostop(handle, idle_minutes_to_autostop, down)
 
 
 # ==================

@@ -43,7 +43,6 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 OptimizeTarget = optimizer.OptimizeTarget
-_MAX_SPOT_JOB_LENGTH = 10
 
 # Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
@@ -93,13 +92,13 @@ class Stage(enum.Enum):
     SETUP = enum.auto()
     PRE_EXEC = enum.auto()
     EXEC = enum.auto()
-    TEARDOWN = enum.auto()
+    DOWN = enum.auto()
 
 
 def _execute(
     dag: sky.Dag,
     dryrun: bool = False,
-    teardown: bool = False,
+    down: bool = False,
     stream_logs: bool = True,
     handle: Any = None,
     backend: Optional[backends.Backend] = None,
@@ -120,8 +119,11 @@ def _execute(
       dag: sky.Dag.
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
-      teardown: bool; whether to teardown the launched resources after
-        execution.
+      down: bool; whether to tear down the launched resources after all jobs
+        finish (successfully or abnormally). If idle_minutes_to_autostop is
+        also set, the cluster will be torn down after the specified idle time.
+        Note that if errors occur during provisioning/data syncing/setting up,
+        the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
@@ -137,7 +139,7 @@ def _execute(
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
       detach_run: bool; whether to detach the process after the job submitted.
-      autostop_idle_minutes: int; if provided, the cluster will be set to
+      idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
     """
@@ -157,16 +159,36 @@ def _execute(
             cluster_name)
         cluster_exists = existing_handle is not None
 
+    stages = stages if stages is not None else list(Stage)
+
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(backend, backends.CloudVmRayBackend
-                     ) and idle_minutes_to_autostop is not None:
+    if isinstance(backend, backends.CloudVmRayBackend):
+        if down and idle_minutes_to_autostop is None:
+            # Use auto{stop,down} to terminate the cluster after the task is
+            # done.
+            idle_minutes_to_autostop = 0
+        if idle_minutes_to_autostop is not None:
+            if idle_minutes_to_autostop == 0:
+                # idle_minutes_to_autostop=0 can cause the following problem:
+                # After we set the autostop in the PRE_EXEC stage with -i 0,
+                # it could be possible that the cluster immediately found
+                # itself have no task running and start the auto{stop,down}
+                # process, before the task is submitted in the EXEC stage.
+                verb = 'torn down' if down else 'stopped'
+                logger.info(f'{colorama.Fore.LIGHTBLACK_EX}The cluster will '
+                            f'be {verb} after 1 minutes of idleness '
+                            '(after all jobs finish).'
+                            f'{colorama.Style.RESET_ALL}')
+                idle_minutes_to_autostop = 1
+            stages.remove(Stage.DOWN)
+    elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
+    if not cluster_exists and Stage.OPTIMIZE in stages:
         if task.best_resources is None:
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
@@ -186,7 +208,7 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
-        if stages is None or Stage.PROVISION in stages:
+        if Stage.PROVISION in stages:
             if handle is None:
                 handle = backend.provision(task,
                                            task.best_resources,
@@ -199,33 +221,35 @@ def _execute(
             logger.info('Dry run finished.')
             return
 
-        if stages is None or Stage.SYNC_WORKDIR in stages:
+        if Stage.SYNC_WORKDIR in stages:
             if task.workdir is not None:
                 backend.sync_workdir(handle, task.workdir)
 
-        if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
+        if Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
         if no_setup:
             logger.info('Setup commands skipped.')
-        elif stages is None or Stage.SETUP in stages:
+        elif Stage.SETUP in stages:
             backend.setup(handle, task)
 
-        if stages is None or Stage.PRE_EXEC in stages:
+        if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
-                backend.set_autostop(handle, idle_minutes_to_autostop)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     down=down)
 
-        if stages is None or Stage.EXEC in stages:
+        if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
                 backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
-                backend.post_execute(handle, teardown)
+                backend.post_execute(handle, down)
 
-        if stages is None or Stage.TEARDOWN in stages:
-            if teardown:
+        if Stage.DOWN in stages:
+            if down and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
@@ -253,7 +277,7 @@ def launch(
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
-    teardown: bool = False,
+    down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
@@ -268,8 +292,27 @@ def launch(
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
             up.
-        idle_minutes_to_autostop: if provided, the cluster will be auto-stop
-            after this many minutes of idleness.
+        idle_minutes_to_autostop: automatically stop the cluster after this
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness starts counting after
+            setup/file_mounts are done; the clock gets reset whenever there
+            are running/pending jobs in the job queue. Setting this flag is
+            equivalent to running ``sky.launch(..., detach_run=True, ...)``
+            and then ``sky.autostop(idle_minutes=<minutes>)``. If not set,
+            the cluster will not be autostopped.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually launch the cluster.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
+            OptimizeTarget.TIME.
+        detach_run: If True, run setup first (blocking), then detach from the
+            job's execution.
         no_setup: if true, the cluster will not re-run setup instructions
 
     Examples:
@@ -290,7 +333,7 @@ def launch(
     _execute(
         dag=dag,
         dryrun=dryrun,
-        teardown=teardown,
+        down=down,
         stream_logs=stream_logs,
         handle=None,
         backend=backend,
@@ -308,7 +351,7 @@ def exec(  # pylint: disable=redefined-builtin
     dag: sky.Dag,
     cluster_name: str,
     dryrun: bool = False,
-    teardown: bool = False,
+    down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
@@ -327,7 +370,7 @@ def exec(  # pylint: disable=redefined-builtin
                              'Use `sky status` to check the status.')
     _execute(dag=dag,
              dryrun=dryrun,
-             teardown=teardown,
+             down=down,
              stream_logs=stream_logs,
              handle=handle,
              backend=backend,

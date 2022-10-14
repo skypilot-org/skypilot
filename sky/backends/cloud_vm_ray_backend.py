@@ -1118,6 +1118,7 @@ class RetryingVmProvisioner(object):
             # different order from directly running in the console. The
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
+
             returncode, stdout, stderr = log_lib.run_with_log(
                 # NOTE: --no-restart solves the following bug.  Without it, if
                 # 'ray up' (sky launch) twice on a cluster with >1 node, the
@@ -1135,7 +1136,15 @@ class RetryingVmProvisioner(object):
                 line_processor=log_utils.RayUpLineProcessor(),
                 # Reduce BOTO_MAX_RETRIES from 12 to 5 to avoid long hanging
                 # time during 'ray up' if insufficient capacity occurs.
-                env=dict(os.environ, BOTO_MAX_RETRIES='5'),
+                env=dict(
+                    os.environ,
+                    BOTO_MAX_RETRIES='5',
+                    # Use environment variables to disable the ray usage stats
+                    # (to avoid the 10 second wait for usage collection
+                    # confirmation), as the ray version on the user's machine
+                    # may be lower version that does not support the
+                    # `--disable-usage-stats` flag.
+                    RAY_USAGE_STATS_ENABLED='0'),
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
@@ -1335,10 +1344,16 @@ class RetryingVmProvisioner(object):
                 'of the local cluster. Check if ray[default]==1.13.0 '
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
+
         log_lib.run_with_log(
             ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
             log_abs_path,
             stream_logs=False,
+            # Use environment variables to disable the ray usage collection
+            # (avoid the 10 second wait for usage collection confirmation),
+            # as the ray version on the user's machine may be lower version
+            # that does not support the `--disable-usage-stats` flag.
+            env=dict(os.environ, RAY_USAGE_STATS_ENABLED='0'),
             # Disable stdin to avoid ray outputs mess up the terminal with
             # misaligned output when multithreading/multiprocessing is used.
             # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
@@ -2608,10 +2623,11 @@ class CloudVmRayBackend(backends.Backend):
     def set_autostop(self,
                      handle: ResourceHandle,
                      idle_minutes_to_autostop: Optional[int],
+                     down: bool = False,
                      stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
             code = autostop_lib.AutostopCodeGen.set_autostop(
-                idle_minutes_to_autostop, self.NAME)
+                idle_minutes_to_autostop, self.NAME, down)
             returncode, _, stderr = self.run_on_head(handle,
                                                      code,
                                                      require_outputs=True,
@@ -2622,7 +2638,7 @@ class CloudVmRayBackend(backends.Backend):
                                                stderr=stderr,
                                                stream_logs=stream_logs)
             global_user_state.set_cluster_autostop_value(
-                handle.cluster_name, idle_minutes_to_autostop)
+                handle.cluster_name, idle_minutes_to_autostop, down)
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
