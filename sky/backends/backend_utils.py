@@ -1102,8 +1102,9 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
+            full_cluster_yaml = str(pathlib.Path(cluster_yaml).expanduser())
             out = subprocess_utils.run(
-                f'ray get-head-ip {cluster_yaml}',
+                f'ray get-head-ip {full_cluster_yaml!r}',
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
@@ -1157,8 +1158,9 @@ def get_node_ips(cluster_yaml: str,
 
         for retry_cnt in range(worker_ip_max_attempts):
             try:
+                full_cluster_yaml = str(pathlib.Path(cluster_yaml).expanduser())
                 proc = subprocess_utils.run(
-                    f'ray get-worker-ips {cluster_yaml}',
+                    f'ray get-worker-ips {full_cluster_yaml!r}',
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE)
                 out = proc.stdout.decode()
