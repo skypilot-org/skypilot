@@ -31,6 +31,7 @@ _CREDENTIAL_FILES = [
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
+    'active_config',
 ]
 
 _IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
