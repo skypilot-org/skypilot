@@ -705,6 +705,24 @@ def test_spot_storage():
         run_one_test(test)
 
 
+# ---------- Testing spot TPU ----------
+def test_spot_tpu():
+    """Test managed spot on TPU."""
+    name = _get_cluster_name()
+    test = Test(
+        'test-spot-tpu',
+        [
+            f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
+            'sleep 5',
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
+            'sleep 600',  # TPU takes a while to launch
+            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
+        ],
+        f'sky spot cancel -y -n {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing env ----------
 def test_inline_env():
     """Test env"""
