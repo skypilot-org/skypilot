@@ -1648,8 +1648,8 @@ def _update_cluster_status_no_lock(
         try:
             backend = backends.CloudVmRayBackend()
             backend.set_autostop(handle, -1, stream_logs=False)
-        except (Exception, SystemExit):  # pylint: disable=broad-except
-            logger.debug('Failed to reset autostop.')
+        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            logger.debug(f'Failed to reset autostop. Due to {type(e)}: {e}')
         global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                      -1,
                                                      to_down=False)
@@ -1812,17 +1812,16 @@ def get_clusters(
     light = colorama.Fore.LIGHTBLACK_EX
     reset = colorama.Style.RESET_ALL
     if autodown_clusters:
-        plural = 's were' if len(autodown_clusters) > 1 else ' was'
+        plural = 's' if len(autodown_clusters) > 1 else ''
         cluster_str = ', '.join(autodown_clusters)
-        logger.info(f'The following cluster{plural} autodowned and removed '
-                    f'from the cluster table: {light}{cluster_str}{reset}')
+        logger.info(f'Autodowned cluster{plural}: '
+                    f'{light}{cluster_str}{reset}')
     if remaining_clusters:
-        plural = 's were' if len(remaining_clusters) > 1 else ' was'
-        cluster_str = ', '.join(repr(name) for name in remaining_clusters)
+        plural = 's' if len(remaining_clusters) > 1 else ''
+        cluster_str = ', '.join(name for name in remaining_clusters)
         logger.warning(
-            f'{yellow}The following cluster{plural} terminated on '
-            'the cloud and removed from the cluster table: '
-            f'{light}{cluster_str}{reset}')
+            f'{yellow}Cluster{plural} terminated on '
+            f'the cloud: {light}{cluster_str}{reset}')
     
     # Filter out removed clusters.
     updated_records = [
