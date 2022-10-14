@@ -1975,7 +1975,7 @@ def _down_or_stop_clusters(
                     option_str = 'down' if down else 'stop'
                     plural = 's' if idle_minutes_to_autostop != 1 else ''
                     message += (
-                        f'\n  The cluster will be stopped after '
+                        f'\n  The cluster will be auto{option_str}\'ed after '
                         f'{idle_minutes_to_autostop} minute{plural} of idleness.'
                         f'\n  To cancel the auto{option_str}, run: '
                         f'{colorama.Style.BRIGHT}'
