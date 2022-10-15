@@ -1972,10 +1972,14 @@ def _down_or_stop_clusters(
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
                 if idle_minutes_to_autostop >= 0:
+                    option_str = 'down' if down else 'stop'
+                    passive_str = 'downed' if down else 'stopped'
+                    plural = 's' if idle_minutes_to_autostop != 1 else ''
                     message += (
-                        f'\n  The cluster will be stopped after '
-                        f'{idle_minutes_to_autostop} minutes of idleness.'
-                        '\n  To cancel the autostop, run: '
+                        f'\n  The cluster will be auto{passive_str} after '
+                        f'{idle_minutes_to_autostop} minute{plural} of '
+                        'idleness.'
+                        f'\n  To cancel the auto{option_str}, run: '
                         f'{colorama.Style.BRIGHT}'
                         f'sky autostop {name} --cancel'
                         f'{colorama.Style.RESET_ALL}')
