@@ -1973,9 +1973,10 @@ def _down_or_stop_clusters(
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
                 if idle_minutes_to_autostop >= 0:
                     option_str = 'down' if down else 'stop'
+                    passive_str = 'downed' if down else 'stopped'
                     plural = 's' if idle_minutes_to_autostop != 1 else ''
                     message += (
-                        f'\n  The cluster will be auto{option_str}ed after '
+                        f'\n  The cluster will be auto{passive_str} after '
                         f'{idle_minutes_to_autostop} minute{plural} of '
                         'idleness.'
                         f'\n  To cancel the auto{option_str}, run: '
