@@ -175,7 +175,7 @@ def _execute(
                 # itself have no task running and start the auto{stop,down}
                 # process, before the task is submitted in the EXEC stage.
                 verb = 'torn down' if down else 'stopped'
-                logger.info(f'{colorama.Fore.LIGHTBLACK_EX}The cluster will '
+                logger.info(f'{colorama.Style.DIM}The cluster will '
                             f'be {verb} after 1 minutes of idleness '
                             '(after all jobs finish).'
                             f'{colorama.Style.RESET_ALL}')

@@ -1808,18 +1808,18 @@ def get_clusters(
                 remaining_clusters.append(cluster_names[i])
 
     yellow = colorama.Fore.YELLOW
-    light = colorama.Fore.LIGHTBLACK_EX
+    bright = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if autodown_clusters:
         plural = 's' if len(autodown_clusters) > 1 else ''
         cluster_str = ', '.join(autodown_clusters)
         logger.info(f'Autodowned cluster{plural}: '
-                    f'{light}{cluster_str}{reset}')
+                    f'{bright}{cluster_str}{reset}')
     if remaining_clusters:
         plural = 's' if len(remaining_clusters) > 1 else ''
         cluster_str = ', '.join(name for name in remaining_clusters)
         logger.warning(f'{yellow}Cluster{plural} terminated on '
-                       f'the cloud: {light}{cluster_str}{reset}')
+                       f'the cloud: {reset}{bright}{cluster_str}{reset}')
 
     # Filter out removed clusters.
     updated_records = [
@@ -1987,7 +1987,7 @@ def kill_children_processes():
 # Handle ctrl-c
 def interrupt_handler(signum, frame):
     del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+    logger.warning(f'{colorama.Style.DIM}The job will keep '
                    f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     with ux_utils.print_exception_no_traceback():
@@ -1997,7 +1997,7 @@ def interrupt_handler(signum, frame):
 # Handle ctrl-z
 def stop_handler(signum, frame):
     del signum, frame
-    logger.warning(f'{colorama.Fore.LIGHTBLACK_EX}The job will keep '
+    logger.warning(f'{colorama.Style.DIM}The job will keep '
                    f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
     with ux_utils.print_exception_no_traceback():
