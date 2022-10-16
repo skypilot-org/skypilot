@@ -12,7 +12,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import status_lib
-    from sky import resources
+    from sky import resources as resources_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -219,7 +219,7 @@ class Cloud:
 
     def make_deploy_resources_variables(
         self,
-        resources: 'resources.Resources',
+        resources: 'resources_lib.Resources',
         region: 'Region',
         zones: Optional[List['Zone']],
     ) -> Dict[str, Optional[str]]:
@@ -294,6 +294,11 @@ class Cloud:
 
         Launchable resources require a cloud and an instance type be assigned.
         """
+        if resources.is_launchable():
+            self._check_instance_type_accelerators_combination(resources)
+        return self._get_feasible_launchable_resources(resources)
+
+    def _get_feasible_launchable_resources(self, resources):
         raise NotImplementedError
 
     @classmethod
@@ -387,8 +392,8 @@ class Cloud:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
 
-    def need_cleanup_after_preemption(self,
-                                      resource: 'resources.Resources') -> bool:
+    def need_cleanup_after_preemption(
+            self, resource: 'resources_lib.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption.
 
         In most cases, spot resources do not need cleanup after preemption,
@@ -470,7 +475,46 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    # pylint: disable=unused-argument
+    def _check_instance_type_accelerators_combination(
+            cls, resources: 'resources_lib.Resources') -> None:
+        """Errors out if the accelerator is not supported by the instance type.
+
+        This function is overridden by GCP for host-accelerator logic.
+
+        Raises:
+            ResourcesMismatchError: If the accelerator is not supported.
+        """
+        assert resources.is_launchable(), resources
+
+        def _equal_accelerators(acc_requested, acc_from_instance_type):
+            if acc_requested is None:
+                return acc_from_instance_type is None
+            if acc_from_instance_type is None:
+                return False
+
+            for acc in acc_requested:
+                if acc not in acc_from_instance_type:
+                    return False
+                if acc_requested[acc] != acc_from_instance_type[acc]:
+                    return False
+            return True
+
+        acc_from_instance_type = (cls.get_accelerators_from_instance_type(
+            resources.instance_type))
+        if not _equal_accelerators(resources.accelerators,
+                                   acc_from_instance_type):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'Infeasible resource demands found:'
+                    '\n  Instance type requested: '
+                    f'{resources.instance_type}\n'
+                    f'  Accelerators for {resources.instance_type}: '
+                    f'{acc_from_instance_type}\n'
+                    f'  Accelerators requested: {resources.accelerators}\n'
+                    f'To fix: either only specify instance_type, or '
+                    'change the accelerators field to be consistent.')
+
+    @classmethod
     def check_quota_available(cls,
                               region: str,
                               instance_type: str,

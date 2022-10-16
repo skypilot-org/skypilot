@@ -4,6 +4,8 @@ import textwrap
 from click import testing as cli_testing
 
 import sky
+from sky import exceptions
+from sky import clouds
 import sky.cli as cli
 
 CLOUDS_TO_TEST = ['aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci']
@@ -54,7 +56,7 @@ def test_accelerator_mismatch(enable_all_clouds):
     def _capture_mismatch_gpus_spec(file_path, gpus: str):
         result = cli_runner.invoke(cli.launch,
                                    [file_path, '--gpus', gpus, '--dryrun'])
-        assert isinstance(result.exception, ValueError)
+        assert isinstance(result.exception, exceptions.ResourcesMismatchError)
         assert 'Infeasible resource demands found:' in str(result.exception)
 
     def _capture_match_gpus_spec(file_path, gpus: str):
@@ -70,11 +72,13 @@ def test_accelerator_mismatch(enable_all_clouds):
         _capture_mismatch_gpus_spec(f.name, 'T4:0.5')
         _capture_mismatch_gpus_spec(f.name, 'V100:2')
         _capture_mismatch_gpus_spec(f.name, 'v100:2')
+        _capture_mismatch_gpus_spec(f.name, 'V100:0.5')
 
         _capture_match_gpus_spec(f.name, 'V100:1')
         _capture_match_gpus_spec(f.name, 'v100:1')
         _capture_match_gpus_spec(f.name, 'V100:0.5')
         _capture_match_gpus_spec(f.name, 'V100')
+        _capture_match_gpus_spec(f.name, 'V100:0.5')
 
 
 def test_show_gpus():

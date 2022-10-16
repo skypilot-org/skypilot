@@ -162,8 +162,8 @@ class Lambda(clouds.Cloud):
             'region': region.name,
         }
 
-    def get_feasible_launchable_resources(self,
-                                          resources: 'resources_lib.Resources'):
+    def _get_feasible_launchable_resources(
+            self, resources: 'resources_lib.Resources'):
         if resources.use_spot or resources.disk_tier is not None:
             return ([], [])
         if resources.instance_type is not None:
