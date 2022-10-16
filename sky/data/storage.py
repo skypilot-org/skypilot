@@ -57,7 +57,7 @@ class StoreType(enum.Enum):
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
     @classmethod
-    def from_store(cls, store: 'Storage') -> 'StoreType':
+    def from_store(cls, store: 'AbstractStore') -> 'StoreType':
         if isinstance(store, S3Store):
             return StoreType.S3
         elif isinstance(store, GcsStore):

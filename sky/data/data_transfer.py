@@ -104,7 +104,16 @@ def s3_to_gcs(s3_bucket_name: str, gs_bucket_name: str) -> None:
             if 'done' in result and result['done']:
                 break
             time.sleep(POLL_INTERVAL)
-    logger.info(f'Transfer finished in {time.time() - start:.2f} seconds')
+        else:
+            # If we get here, we timed out.
+            logger.info(
+                f'Transfer timed out after {(time.time() - start) / 3600:.2f} '
+                'hours. Please check the status of the transfer job in the GCP '
+                'Storage Transfer Service console at '
+                'https://cloud.google.com/storage-transfer-service')
+            return
+    logger.info(
+        f'Transfer finished in {(time.time() - start) / 60:.2f} minutes.')
 
 
 def gcs_to_s3(gs_bucket_name: str, s3_bucket_name: str) -> None:
