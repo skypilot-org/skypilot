@@ -1007,17 +1007,6 @@ def cli():
      'the cluster will not be torn down for debugging purposes.'),
 )
 @click.option(
-    '--down',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=
-    ('Tear down the cluster after execution finishes (successfully or '
-     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the idle time, rather than immediately after execution'
-     ' finishes.'),
-)
-@click.option(
     '--retry-until-up',
     '-r',
     default=False,
@@ -1642,17 +1631,6 @@ def autostop(
     ('Tear down the cluster after all jobs finish (successfully or '
      'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
      'be torn down after the specified idle time.'),
-)
-@click.option(
-    '--down',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=
-    ('Tear down the cluster after execution finishes (successfully or '
-     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the idle time, rather than immediately after execution'
-     ' finishes.'),
 )
 @click.option(
     '--retry-until-up',
