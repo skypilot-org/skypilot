@@ -369,9 +369,22 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
 
 
+def _get_click_major_version():
+    return int(click.__version__.split('.')[0])
+
+
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
 _RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
+_COMPLETE_CLUSTER_ARGS = {}
+_COMPLETE_FILE_ARGS = {}
+_COMPLETE_STORAGE_ARGS = {}
+
+if _get_click_major_version() >= 8:
+    # The shell_complete argument is only valid on click >= 8.0.
+    _COMPLETE_CLUSTER_ARGS = dict(shell_complete=_complete_cluster_name)
+    _COMPLETE_FILE_ARGS = dict(shell_complete=_complete_file_name)
+    _COMPLETE_STORAGE_ARGS = dict(shell_complete=_complete_storage_name)
 
 
 def _install_shell_completion(ctx: click.Context, param: click.Parameter,
@@ -952,12 +965,13 @@ def cli():
                 required=False,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_file_name)
+                shell_complete=_complete_file_name,
+                **_COMPLETE_FILE_ARGS)
 @click.option('--cluster',
               '-c',
               default=None,
               type=str,
-              shell_complete=_complete_cluster_name,
+              **_COMPLETE_CLUSTER_ARGS,
               help=_CLUSTER_FLAG_HELP)
 @click.option('--dryrun',
               default=False,
@@ -1105,15 +1119,12 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('cluster',
-                required=True,
-                type=str,
-                shell_complete=_complete_cluster_name)
+@click.argument('cluster', required=True, type=str, **_COMPLETE_CLUSTER_ARGS)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_file_name)
+                **_COMPLETE_FILE_ARGS)
 @click.option('--detach-run',
               '-d',
               default=False,
@@ -1292,7 +1303,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 required=False,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_cluster_name)
+                **_COMPLETE_CLUSTER_ARGS)
 @usage_lib.entrypoint
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     """Show the job queue for cluster(s)."""
@@ -1354,10 +1365,7 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     default=True,
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
-@click.argument('cluster',
-                required=True,
-                type=str,
-                shell_complete=_complete_cluster_name)
+@click.argument('cluster', required=True, type=str, **_COMPLETE_CLUSTER_ARGS)
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
@@ -1422,10 +1430,7 @@ def logs(
 
 
 @cli.command()
-@click.argument('cluster',
-                required=True,
-                type=str,
-                shell_complete=_complete_cluster_name)
+@click.argument('cluster', required=True, type=str, **_COMPLETE_CLUSTER_ARGS)
 @click.option('--all',
               '-a',
               default=False,
@@ -1443,10 +1448,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters',
-                nargs=-1,
-                required=False,
-                shell_complete=_complete_cluster_name)
+@click.argument('clusters', nargs=-1, required=False, **_COMPLETE_CLUSTER_ARGS)
 @click.option('--all',
               '-a',
               default=None,
@@ -1499,10 +1501,7 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters',
-                nargs=-1,
-                required=False,
-                shell_complete=_complete_cluster_name)
+@click.argument('clusters', nargs=-1, required=False, **_COMPLETE_CLUSTER_ARGS)
 @click.option('--all',
               '-a',
               default=None,
@@ -1592,10 +1591,7 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters',
-                nargs=-1,
-                required=False,
-                shell_complete=_complete_cluster_name)
+@click.argument('clusters', nargs=-1, required=False, **_COMPLETE_CLUSTER_ARGS)
 @click.option('--all',
               '-a',
               default=False,
@@ -1777,10 +1773,7 @@ def start(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@click.argument('clusters',
-                nargs=-1,
-                required=False,
-                shell_complete=_complete_cluster_name)
+@click.argument('clusters', nargs=-1, required=False, **_COMPLETE_CLUSTER_ARGS)
 @click.option('--all',
               '-a',
               default=None,
@@ -2387,7 +2380,7 @@ def storage_ls():
                 required=False,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_storage_name)
+                **_COMPLETE_STORAGE_ARGS)
 @click.option('--all',
               '-a',
               default=False,
@@ -2531,7 +2524,7 @@ def spot():
                 required=True,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_file_name)
+                **_COMPLETE_FILE_ARGS)
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
@@ -2826,7 +2819,7 @@ def bench():
                 required=True,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_file_name)
+                **_COMPLETE_FILE_ARGS)
 @click.option('--benchmark',
               '-b',
               required=True,
