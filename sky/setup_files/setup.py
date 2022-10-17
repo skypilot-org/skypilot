@@ -58,7 +58,7 @@ install_requires = [
     'wheel',
     # NOTE: ray 1.13.0 requires click<=8.0.4,>=7.0; our use of shell_complete
     # requires >= 8.
-    'click>=8,<=8.0.4',
+    'click>=7.0,<=8.0.4',
     'colorama',
     'cryptography',
     'jinja2',
