@@ -6,14 +6,14 @@ Managed Spot Jobs
 SkyPilot supports managed spot jobs that can **automatically recover from preemptions**.
 This feature **saves significant cost** (e.g., up to 70\% for GPU VMs) by making preemptible spot instances practical for long-running jobs.
 
-To maximize availability, SkyPilot automatically finds available spot resources across regions and clouds.
-Here is an example of BERT training job failing over different regions across AWS and GCP.
+SkyPilot automatically finds available spot resources across regions and clouds to maximize availability.
+Here is an example of a BERT training job failing over different regions across AWS and GCP.
 
 .. image:: ../images/spot-training.png
   :width: 600
   :alt: BERT training on Spot V100
 
-Below are requirements for using managed spot jobs:
+Below are the requirements for using managed spot jobs:
 
 (1) **Working task YAML**: Managed Spot requires a YAML to describe the job, working with :code:`sky launch`.
 (2) **Checkpointing and resuming**: Application code can checkpoint periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. For job recovery, the program can reload the latest checkpoint from the same path when restarted.
@@ -26,7 +26,7 @@ To launch a spot job, you can simply reuse your previous task YAML.
 For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
 launch it with SkyPilot managed spot jobs. 
 
-We can simply launch it with:
+We can launch it with the following:
 
 .. code-block:: console
 
@@ -87,7 +87,7 @@ To resume from the last checkpoint, we need to add a few lines to support checkp
 Checkpointing and resuming
 --------------------------
 
-To allow spot recovery, a cloud bucket is typically needed for storing states of the job (e.g., model checkpoints).
+To allow spot recovery, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints).
 Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 .. code-block:: yaml
@@ -104,7 +104,7 @@ This is typically achieved by reloading the latest checkpoint at the beginning o
 An end-to-end example
 ---------------------
 
-Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
+Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
   :linenos:
@@ -174,7 +174,7 @@ the cost savings from spot instances without worrying about the job being interr
 
 
 .. note::
-  The environment variable :code:`$SKYPILOT_RUN_ID` can be used to identify the same job, i.e. it is kept identical across all
+  The environment variable :code:`$SKYPILOT_RUN_ID` can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job. It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
   the task whenever it is invoked.
