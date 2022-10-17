@@ -696,8 +696,6 @@ class Task:
         return d
 
     def __rshift__(self, b):
-        if b is None:
-            raise ValueError('Cannot add an edge to None')
         sky.dag.get_current_dag().add_edge(self, b)
 
     def __repr__(self):
