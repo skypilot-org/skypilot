@@ -1818,8 +1818,17 @@ def check_cluster_name_is_valid(cluster_name: str,
         return
     # GCP errors return this exact regex.  An informal description is at:
     # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+    cluster_name.lower()
+    if cluster_name[-1]=='-':
+        x=cluster_name[:-1]
+    else:
+        x=cluster_name
+    cluster_name=''
+    for ch in x:
+        if ch!='_':
+            cluster_name+=ch
     valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
-    if re.fullmatch(valid_regex, cluster_name) is None:
+    if re.fullmatch(valid_regex, cluster_name) is None or cluster_name.isnumeric():
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Cluster name "{cluster_name}" is invalid; '
