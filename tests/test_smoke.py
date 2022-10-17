@@ -243,6 +243,7 @@ def test_file_mounts():
         [
             'touch ~/tmpfile',
             'mkdir -p ~/tmp-workdir',
+            'touch ~/tmp-workdir/tmp\ file',
             'touch ~/tmp-workdir/foo',
             'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
             f'sky launch -y -c {name} examples/using_file_mounts.yaml',
@@ -528,7 +529,7 @@ def test_autostop():
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop -y {name} -i 1',
             # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1 min"',
+            f'sky status | grep {name} | grep "1m"',
             'sleep 180',
             # Ensure the cluster is STOPPED.
             f'sky status --refresh | grep {name} | grep STOPPED',
@@ -536,6 +537,38 @@ def test_autostop():
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+# ---------- Testing Autodowning ----------
+def test_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'autodown',
+        [
+            f'sky launch -y -d -c {name} --num-nodes 2 --cloud gcp examples/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 240',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo $s | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo $s | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} --cloud aws examples/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 240',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo $s | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo $s | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 240',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo $s | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -747,7 +780,7 @@ def test_inline_spot_env():
         [
             f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
             'sleep 10',
-            f'sky spot status | grep {name} | grep SUCCEEDED',
+            f's=$(sky spot status) && printf "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',
     )

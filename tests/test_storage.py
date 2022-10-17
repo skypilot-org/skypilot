@@ -1,6 +1,7 @@
 import time
 
 import pytest
+import tempfile
 
 from sky import exceptions
 from sky.data import storage as storage_lib
@@ -19,6 +20,12 @@ class TestStorageSpecLocalSource:
         with pytest.raises(exceptions.StorageSourceError) as e:
             storage_lib.Storage(name='test', source='/bin/')
         assert 'Storage source paths cannot end with a slash' in str(e)
+
+    def test_source_single_file(self):
+        with pytest.raises(exceptions.StorageSourceError) as e:
+            with tempfile.NamedTemporaryFile() as f:
+                storage_lib.Storage(name='test', source=f.name)
+        assert 'Storage source path cannot be a file' in str(e)
 
 
 class TestStorageSpecValidation:

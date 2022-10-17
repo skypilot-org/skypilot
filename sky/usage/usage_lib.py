@@ -430,3 +430,24 @@ def entrypoint(name_or_fn: str, fallback: bool = False):
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)
+
+
+# Convenience methods below.
+
+
+def record_cluster_name_for_current_operation(
+        cluster_name: Union[List[str], str]) -> None:
+    """Records cluster name(s) for the current operation.
+
+    Usage:
+
+       def op():  # CLI or programmatic API
+
+           ...validate errors...
+
+           usage_lib.record_cluster_name_for_current_operation(
+              <actual clusters being operated on>)
+
+           do_actual_op()
+    """
+    messages.usage.update_cluster_name(cluster_name)

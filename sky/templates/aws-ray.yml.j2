@@ -26,10 +26,15 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
+      # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
+            # use default Iops for gp3
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125 
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot
@@ -49,6 +54,9 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125 
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot

@@ -604,6 +604,7 @@ def _launch_with_confirm(
     detach_run: bool,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
     retry_until_up: bool = False,
     no_setup: bool = False,
     node_type: Optional[str] = None,
@@ -654,6 +655,7 @@ def _launch_with_confirm(
             detach_run=detach_run,
             backend=backend,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
             retry_until_up=retry_until_up,
             no_setup=no_setup,
         )
@@ -991,7 +993,19 @@ def cli():
           'job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
+          '. If not set, the cluster will not be autostopped.'))
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=
+    ('Tear down the cluster after all jobs finish (successfully or '
+     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
+     'be torn down after the specified idle time. '
+     'Note that if errors occur during provisioning/data syncing/setting up, '
+     'the cluster will not be torn down for debugging purposes.'),
+)
 @click.option(
     '--retry-until-up',
     '-r',
@@ -1033,6 +1047,7 @@ def launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
+    down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
@@ -1083,6 +1098,7 @@ def launch(
         detach_run=detach_run,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
@@ -1247,6 +1263,10 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     - STOPPED: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
+    The autostop column indicates how long the cluster will be autostopped
+    after minutes of idling (no jobs running). If the time is followed by
+    '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
+    autostopped.
     """
     cluster_records = core.status(all=all, refresh=refresh)
     local_clusters = onprem_utils.check_and_get_local_clusters(
@@ -1391,7 +1411,7 @@ def logs(
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
-            sys.exit(0)
+            return
         else:
             if job_status is None:
                 id_str = '' if job_id is None else f'{job_id} '
@@ -1431,7 +1451,7 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
               '-a',
               default=None,
               is_flag=True,
-              help='Tear down all existing clusters.')
+              help='Stop all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1472,10 +1492,10 @@ def stop(
       sky stop -a
 
     """
-    _terminate_or_stop_clusters(clusters,
-                                apply_to_all=all,
-                                terminate=False,
-                                no_confirm=yes)
+    _down_or_stop_clusters(clusters,
+                           apply_to_all=all,
+                           down=False,
+                           no_confirm=yes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1493,12 +1513,21 @@ def stop(
               type=int,
               default=None,
               required=False,
-              help='Set the idle minutes before auto-stopping the cluster.')
-@click.option('--cancel',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel the auto-stopping.')
+              help='Set the idle minutes before autostopping the cluster.')
+@click.option(
+    '--cancel',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Cancel the currently active auto{stop,down} setting for the '
+    'cluster.')
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Use autodown (tear down the cluster; non-restartable), instead '
+    'of autostop (restartable).')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1511,21 +1540,30 @@ def autostop(
     all: Optional[bool],  # pylint: disable=redefined-builtin
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
+    down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
 ):
-    """Schedule or cancel auto-stopping for cluster(s).
+    """Schedule or cancel an autostop or autodown for cluster(s).
 
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
+    If --down is passed, autodown (tear down the cluster; non-restartable) is
+    used, rather than autostop (restartable).
+
     ``--idle-minutes`` is the number of minutes of idleness (no pending/running
     jobs) after which the cluster will be stopped automatically.
+    Scheduling autostop twice on the same cluster will overwrite the previous
+    autostop schedule.
 
     ``--cancel`` will cancel the autostopping. If the cluster was not scheduled
     autostop, this will do nothing to autostop.
 
     If ``--idle-minutes`` and ``--cancel`` are not specified, default to 5
     minutes.
+
+    When multiple configurations are specified for the same cluster, e.g. using
+    ``sky autostop`` or ``sky launch -i``, the last one takes precedence.
 
     Examples:
 
@@ -1546,11 +1584,11 @@ def autostop(
         idle_minutes = -1
     elif idle_minutes is None:
         idle_minutes = 5
-    _terminate_or_stop_clusters(clusters,
-                                apply_to_all=all,
-                                terminate=False,
-                                no_confirm=yes,
-                                idle_minutes_to_autostop=idle_minutes)
+    _down_or_stop_clusters(clusters,
+                           apply_to_all=all,
+                           down=down,
+                           no_confirm=yes,
+                           idle_minutes_to_autostop=idle_minutes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1583,7 +1621,17 @@ def autostop(
           'job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
+          '. If not set, the cluster will not be autostopped.'))
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=
+    ('Tear down the cluster after all jobs finish (successfully or '
+     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
+     'be torn down after the specified idle time.'),
+)
 @click.option(
     '--retry-until-up',
     '-r',
@@ -1594,8 +1642,13 @@ def autostop(
           'if we fail to start the cluster due to unavailability errors.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def start(clusters: Tuple[str], all: bool, yes: bool,
-          idle_minutes_to_autostop: int, retry_until_up: bool):
+def start(
+        clusters: Tuple[str],
+        all: bool,
+        yes: bool,
+        idle_minutes_to_autostop: Optional[int],
+        down: bool,  # pylint: disable=redefined-outer-name
+        retry_until_up: bool):
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1623,6 +1676,9 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
       sky start -a
 
     """
+    if down and idle_minutes_to_autostop is None:
+        raise click.UsageError(
+            '--idle-minutes-to-autostop must be set if --down is set.')
     to_start = []
 
     if not clusters and not all:
@@ -1711,7 +1767,10 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
 
     for name in to_start:
         try:
-            core.start(name, idle_minutes_to_autostop, retry_until_up)
+            core.start(name,
+                       idle_minutes_to_autostop,
+                       retry_until_up,
+                       down=down)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
@@ -1752,7 +1811,7 @@ def down(
     CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
-    Terminating a cluster will delete all associated resources (all billing
+    Tearing down a cluster will delete all associated resources (all billing
     stops), and any data on the attached disks will be lost. For local clusters,
     `sky down` does not terminate the local cluster, but instead removes the
     cluster from `sky status` and terminates the calling user's running jobs.
@@ -1776,38 +1835,40 @@ def down(
       sky down -a
 
     """
-    _terminate_or_stop_clusters(clusters,
-                                apply_to_all=all,
-                                terminate=True,
-                                no_confirm=yes,
-                                purge=purge)
+    _down_or_stop_clusters(clusters,
+                           apply_to_all=all,
+                           down=True,
+                           no_confirm=yes,
+                           purge=purge)
 
 
-def _terminate_or_stop_clusters(
+def _down_or_stop_clusters(
         names: Tuple[str],
         apply_to_all: Optional[bool],
-        terminate: bool,
+        down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None) -> None:
-    """Terminates or (auto-)stops a cluster (or all clusters).
+    """Tears down or (auto-)stops a cluster (or all clusters).
 
     Reserved clusters (spot controller) can only be terminated if the cluster
     name is explicitly and uniquely specified (not via glob) and purge is set
     to True.
     """
-    assert idle_minutes_to_autostop is None or not terminate, (
-        idle_minutes_to_autostop, terminate)
-    command = 'down' if terminate else 'stop'
+    command = 'down' if down else 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
             f'sky {command} requires either a cluster name (see `sky status`) '
             'or --all.')
 
-    operation = 'Terminating' if terminate else 'Stopping'
+    operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
-        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-        operation = f'{verb} auto-stop on'
+        is_cancel = idle_minutes_to_autostop < 0
+        verb = 'Cancelling' if is_cancel else 'Scheduling'
+        option_str = 'down' if down else 'stop'
+        if is_cancel:
+            option_str = '{stop,down}'
+        operation = f'{verb} auto{option_str} on'
 
     if len(names) > 0:
         reserved_clusters = [
@@ -1819,7 +1880,7 @@ def _terminate_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
-        if not terminate:
+        if not down:
             local_clusters = onprem_utils.check_and_get_local_clusters()
             # Local clusters are allowed to `sky down`, but not
             # `sky start/stop`. `sky down` unregisters the local cluster
@@ -1836,7 +1897,7 @@ def _terminate_or_stop_clusters(
             if not purge:
                 msg = (f'{operation} reserved cluster(s) '
                        f'{reserved_clusters_str} is not supported.')
-                if terminate:
+                if down:
                     msg += (
                         '\nPlease specify --purge (-p) to force-terminate the '
                         'reserved cluster(s).')
@@ -1874,7 +1935,7 @@ def _terminate_or_stop_clusters(
             # should've been printed by _get_glob_clusters() above.
             continue
         clusters.append(name)
-    usage_lib.messages.usage.update_cluster_name(clusters)
+    usage_lib.record_cluster_name_for_current_operation(clusters)
 
     if not clusters:
         click.echo('\nCluster(s) not found (tip: see `sky status`).')
@@ -1898,11 +1959,11 @@ def _terminate_or_stop_clusters(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
 
-    def _terminate_or_stop(name: str):
+    def _down_or_stop(name: str):
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                core.autostop(name, idle_minutes_to_autostop)
+                core.autostop(name, idle_minutes_to_autostop, down)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -1911,16 +1972,20 @@ def _terminate_or_stop_clusters(
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
                 if idle_minutes_to_autostop >= 0:
+                    option_str = 'down' if down else 'stop'
+                    passive_str = 'downed' if down else 'stopped'
+                    plural = 's' if idle_minutes_to_autostop != 1 else ''
                     message += (
-                        f'\n  The cluster will be stopped after '
-                        f'{idle_minutes_to_autostop} minutes of idleness.'
-                        '\n  To cancel the autostop, run: '
+                        f'\n  The cluster will be auto{passive_str} after '
+                        f'{idle_minutes_to_autostop} minute{plural} of '
+                        'idleness.'
+                        f'\n  To cancel the auto{option_str}, run: '
                         f'{colorama.Style.BRIGHT}'
                         f'sky autostop {name} --cancel'
                         f'{colorama.Style.RESET_ALL}')
         else:
             try:
-                if terminate:
+                if down:
                     core.down(name, purge=purge)
                 else:
                     core.stop(name, purge=purge)
@@ -1935,7 +2000,7 @@ def _terminate_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
                     f'{colorama.Style.RESET_ALL}')
-                if not terminate:
+                if not down:
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
@@ -1947,7 +2012,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        subprocess_utils.run_in_parallel(_terminate_or_stop, clusters)
+        subprocess_utils.run_in_parallel(_down_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
@@ -2398,7 +2463,7 @@ def admin_deploy(clusterspec_yaml: str):
     if not isinstance(ips, list):
         ips = [ips]
     local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.messages.usage.update_cluster_name(local_cluster_name)
+    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
     usage_lib.messages.usage.update_cluster_resources(
         len(ips), sky.Resources(sky.Local()))
 
@@ -2787,7 +2852,7 @@ def bench():
     help=('Automatically stop the cluster after this many minutes '
           'of idleness after setup/file_mounts. This is equivalent to '
           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
-          'If not set, the cluster will not be auto-stopped.'))
+          'If not set, the cluster will not be autostopped.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3180,7 +3245,7 @@ def benchmark_down(
     clusters_to_exclude: List[str],
     yes: bool,
 ) -> None:
-    """Terminate all clusters belonging to a benchmark."""
+    """Tear down all clusters belonging to a benchmark."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
@@ -3194,10 +3259,10 @@ def benchmark_down(
             continue
         to_stop.append(cluster)
 
-    _terminate_or_stop_clusters(to_stop,
-                                apply_to_all=False,
-                                terminate=True,
-                                no_confirm=yes)
+    _down_or_stop_clusters(to_stop,
+                           apply_to_all=False,
+                           down=True,
+                           no_confirm=yes)
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
@@ -3206,7 +3271,7 @@ def benchmark_down(
               '-a',
               default=None,
               is_flag=True,
-              help='Tear down all existing clusters.')
+              help='Delete all benchmark reports from the history.')
 @click.option('--yes',
               '-y',
               is_flag=True,
