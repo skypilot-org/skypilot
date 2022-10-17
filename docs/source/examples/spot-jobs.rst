@@ -15,48 +15,79 @@ Here is an example of BERT training job failing over different regions across AW
 
 Below are requirements for using managed spot jobs:
 
-(1) **Mounting code and datasets**: Local file mounts/workdir are not supported. Cloud buckets should be used to hold code and datasets, which can be satisfied by using :ref:`SkyPilot Storage <sky-storage>`.
-
-(2) **Saving and loading checkpoints**: (For ML jobs) Application code should save checkpoints periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. For job recovery,  the program should try to reload a latest checkpoint from that path when it starts.
-
-We explain them in detail below.
+(1) **Working task YAML**: Managed Spot requires a YAML to describe the job, working with :code:`sky launch`.
+(2) **Checkpointing and resuming**: Application code can checkpoint periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. For job recovery, the program can reload the latest checkpoint from the same path when restarted.
 
 
-Mounting code and datasets
---------------------------------
+Working Task YAML
+-----------------
 
-To launch a spot job, users should upload their codebase and data to cloud buckets through :ref:`SkyPilot Storage <sky-storage>`.
-Note that the cloud buckets can be mounted to VMs in different regions/clouds and thus enable enables transparent job relaunching without user's intervention.
-The YAML below shows an example.
+To launch a spot job, you can simply reuse your previous task YAML.
+For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
+launch it with SkyPilot managed spot jobs. 
+
+We can simply launch it with:
+
+.. code-block:: console
+
+    $ sky spot launch -n bert-qa bert_qa.yaml
 
 .. code-block:: yaml
 
-  file_mounts:
-    /code:
-      name: # NOTE: Fill in your bucket name
-      source: /path/to/your/codebase
-      persistent: true
-      mode: COPY
+  # bert_qa.yaml
+  name: bert_qa
+  
+  resources:
+    accelerators: V100:1
 
-    # If data is stored locally
-    /data:
-      name: # NOTE: Fill in your bucket name
-      source: /path/to/your/dataset
-      persistent: true
-      mode: COPY
+  # Assume your working directory is under `~/transformers`.
+  # To make this example work, please run the following command:
+  # git clone https://github.com/huggingface/transformers.git ~/transformers
+  workdir: ~/transformers
 
-    # If data is already on S3
-    /data2: s3://your-s3-bucket-name
+  setup: |
+    # Fill in your wandb key: copy from https://wandb.ai/authorize
+    # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
+    # to pass the key in the command line, during `sky spot launch`.
+    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+
+    git checkout v4.18.0
+    pip install -e .
+    cd examples/pytorch/question-answering/
+    pip install -r requirements.txt
+    pip install wandb
+
+  run: |
+    cd ./examples/pytorch/question-answering/
+    python run_qa.py \
+    --model_name_or_path bert-base-uncased \
+    --dataset_name squad \
+    --do_train \
+    --do_eval \
+    --per_device_train_batch_size 12 \
+    --learning_rate 3e-5 \
+    --num_train_epochs 50 \
+    --max_seq_length 384 \
+    --doc_stride 128 \
+    --report_to wandb
 
 .. note::
 
-  Currently :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` are not
-  supported for spot jobs. You can convert them to :ref:`SkyPilot Storage <sky-storage>`.
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically translated to
+  :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created during the job running time, and cleaned up after the job
+  finishes.
 
-Saving and loading checkpoints
---------------------------------
+SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
+search for resources across regions and clouds to re-launch the job.
 
-To allow spot recovery, another cloud bucket is typically needed for storing states of the job (e.g., model checkpoints).
+In this example, the job will be restarted from scratch after every recovery.
+To resume from the last checkpoint, we need to add a few lines to support checkpointing and resuming.
+
+
+Checkpointing and resuming
+--------------------------
+
+To allow spot recovery, a cloud bucket is typically needed for storing states of the job (e.g., model checkpoints).
 Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 .. code-block:: yaml
@@ -71,36 +102,29 @@ Note that the application code should save program checkpoints periodically and 
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
 An end-to-end example
---------------------------------
+---------------------
 
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a bert model on a question answering task with HuggingFace.
 
 .. code-block:: yaml
+  :linenos:
+  :emphasize-lines: 12-15,42-45
 
   # bert_qa.yaml
   name: bert_qa
 
   resources:
     accelerators: V100:1
-    # NOTE: `use_spot` and `spot_recovery` are optional when using `sky spot launch`.
-    use_spot: true
-    # When a spot cluster is preempted, this strategy recovers by first waiting for
-    # the resources in the current region for a while (default: 3 minutes), and
-    # then failing over to other regions and clouds, until the resources are launched.
-    spot_recovery: FAILOVER
+
+  # Assume your working directory is under `~/transformers`.
+  # To make this example work, please run the following command:
+  # git clone https://github.com/huggingface/transformers.git ~/transformers
+  workdir: ~/transformers
 
   file_mounts:
     /checkpoint:
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
-    /code:
-      name: # NOTE: Fill in your bucket name
-      # Assume your working directory is under `~/transformers`.
-      # To make this example work, please run the following command:
-      # git clone https://github.com/huggingface/transformers.git ~/transformers
-      source: ~/transformers
-      persistent: false
-      mode: COPY
 
   setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
@@ -108,14 +132,14 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     # to pass the key in the command line, during `sky spot launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    cd /code && git checkout v4.18.0
+    git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt
     pip install wandb
 
   run: |
-    cd /code/examples/pytorch/question-answering/
+    cd ./examples/pytorch/question-answering/
     python run_qa.py \
     --model_name_or_path bert-base-uncased \
     --dataset_name squad \
@@ -126,9 +150,9 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     --num_train_epochs 50 \
     --max_seq_length 384 \
     --doc_stride 128 \
-    --output_dir /checkpoint/bert_qa/ \
     --report_to wandb \
     --run_name $SKYPILOT_RUN_ID \
+    --output_dir /checkpoint/bert_qa/ \
     --save_total_limit 10 \
     --save_steps 1000
 
@@ -141,21 +165,23 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
 .. note::
   You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
-With the above changes, you are ready to launch a spot job with ``sky spot launch``!
+With the above changes, the managed spot job can now resume training after preemption with ``sky spot launch``! We can enjoy the benefits of
+the cost savings from spot instances without worrying about the job being interrupted and losing progress.
 
 .. code-block:: console
 
     $ sky spot launch -n bert-qa bert_qa.yaml
 
-SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
-search for resources across regions and clouds to re-launch the job. 
 
 .. note::
-  To identify the same job across multiple recoveries, use the environment variable :code:`$SKYPILOT_RUN_ID` in the task's
-  :code:`run` commands or directly in the program itself (e.g., access via :code:`os.environ` and pass to Weights & Biases
-  for tracking purposes in your training script). It is made available to the task whenever it is invoked. The run ID
-  is kept identical across all recoveries of the same spot job.
+  The environment variable :code:`$SKYPILOT_RUN_ID` can be used to identify the same job, i.e. it is kept identical across all
+  recoveries of the job. It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
+  via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
+  the task whenever it is invoked.
 
+
+Useful CLIs
+-----------
 
 Here are some commands for managed spot jobs. Check :code:`sky spot --help` for more details.
 
