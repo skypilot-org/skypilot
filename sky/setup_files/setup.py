@@ -96,7 +96,7 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
-    'azure': ['azure-cli==2.39.0', 'azure-core'],
+    'azure': ['azure-cli==2.31.0', 'azure-core'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
 }

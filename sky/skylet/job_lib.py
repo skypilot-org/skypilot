@@ -20,7 +20,7 @@ from sky.utils import db_utils
 from sky.utils import log_utils
 
 if typing.TYPE_CHECKING:
-    from ray.dashboard.modules.job.pydantic_models import JobDetails
+    from ray.dashboard.modules.job import pydantic_models as ray_pydantic
 
 logger = sky_logging.init_logger(__name__)
 
@@ -347,12 +347,12 @@ def update_job_status(job_owner: str,
     job_client = _create_ray_job_submission_client()
 
     # In ray 2.0.0, job_client.list_jobs returns a list of JobDetails,
-    # which contains the  job status (str) and submission_id (str).
-    job_details_list: List['JobDetails'] = job_client.list_jobs()
+    # which contains the job status (str) and submission_id (str).
+    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
     job_details = dict()
     ray_job_ids_set = set(ray_job_ids)
-    for job_detail in job_details_list:
+    for job_detail in job_detail_lists:
         if job_detail.submission_id in ray_job_ids_set:
             job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(ray_job_ids)

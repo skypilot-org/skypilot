@@ -36,6 +36,7 @@ SECURITY_GROUP_TEMPLATE = RAY + "-{}"
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
 
 # Obtained from https://aws.amazon.com/marketplace/pp/B07Y43P7X5 on 6/10/2022.
+# NOTE(skypilot): these are not used; skypilot instead uses the default AMIs in aws.py.
 DEFAULT_AMI = {
     "us-east-1": "ami-0dd6adfad4ad37eec",  # US East (N. Virginia)
     "us-east-2": "ami-0c77cd5ca05bf1281",  # US East (Ohio)
