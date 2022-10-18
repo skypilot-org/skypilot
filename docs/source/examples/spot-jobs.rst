@@ -16,7 +16,7 @@ Here is an example of a BERT training job failing over different regions across 
 Below are the requirements for using managed spot jobs:
 
 (1) **Task YAML**: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
-(2) **Checkpointing and recovery**(optional): For job recovery with less progress loss, application code can checkpoint periodically to a
+(2) **Checkpointing and recovery** (optional): For job recovery with less progress resuming, application code can checkpoint periodically to a
 :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. The program can reload the latest checkpoint when restarted.
 
 
