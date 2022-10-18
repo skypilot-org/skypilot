@@ -893,7 +893,7 @@ class S3Store(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
-                        f' Consider using {command} to debug.') from e
+                        f' To debug, consider using {command}.') from e
 
         if self.source is not None and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
@@ -1149,7 +1149,7 @@ class GcsStore(AbstractStore):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
-                        f' Consider using {command} to debug.') from e
+                        f' To debug, consider using {command}.') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
