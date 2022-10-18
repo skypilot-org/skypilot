@@ -82,7 +82,7 @@ SkyPilot will launch and start monitoring the spot job. When a preemption happen
 search for resources across regions and clouds to re-launch the job.
 
 In this example, the job will be restarted from scratch after each preemption recovery.
-To resume the job from previous states, user's application needs to implement checkpointing and recovery
+To resume the job from previous states, user's application needs to implement checkpointing and recovery.
 
 
 Checkpointing and recovery
@@ -203,14 +203,15 @@ Here are some commands for managed spot jobs. Check :code:`sky spot --help` for 
     $ sky spot cancel -n bert-qa
 
 
-Advanced note (spot controller)
+Spot controller [Advanced]
 -------------------------------
 
-There will be a single spot controller cluster (a small on-demand CPU VM) running in the background to manage all the spot jobs.
-It will be autostopped after 30 minutes of inactivity. Normally, **no user intervention** is needed. 
-You can find the cluster with :code:`sky status -a`, and refresh the status with :code:`sky status -ar`.
+There will be a single spot controller VM (a small on-demand CPU VM) running in the background to manage all the spot jobs.
+It will be autostopped after all spot jobs finished and no new spot job is submitted for 30 minutes. Typically **no user intervention** is needed. 
+You can find the controller with :code:`sky status -a`, and refresh the status with :code:`sky status -ar`.
 
-Although, the cost of the stopped spot controller is negligible (less than $0.1 per day), you can still tear it down manually with 
+Although, the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped), 
+you can still tear it down manually with 
 :code:`sky down -p sky-spot-controller-<hash>`, where the ``<hash>`` can be found in the output of :code:`sky status -a`.
 
 .. note::
