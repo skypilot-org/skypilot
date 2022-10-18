@@ -15,14 +15,15 @@ Here is an example of a BERT training job failing over different regions across 
 
 Below are the requirements for using managed spot jobs:
 
-(1) **Working task YAML**: Managed Spot requires a YAML to describe the job, working with :code:`sky launch`.
-(2) **Checkpointing and resuming**: Application code can checkpoint periodically to a :ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. For job recovery, the program can reload the latest checkpoint from the same path when restarted.
+(1) **Task YAML**: Managed Spot requires a YAML to describe the job, tested with :code:`sky launch`.
+(2) **Checkpointing and recovery**(optional): For job recovery with less progress loss, application code can checkpoint periodically to a
+:ref:`SkyPilot Storage <sky-storage>`-mounted cloud bucket. The program can reload the latest checkpoint when restarted.
 
 
-Working Task YAML
------------------
+Task YAML
+---------
 
-To launch a spot job, you can simply reuse your previous task YAML.
+To launch a spot job, you can simply reuse your task YAML (recommended to test it with :code:`sky launch` first).
 For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
 launch it with SkyPilot managed spot jobs. 
 
@@ -73,18 +74,18 @@ We can launch it with the following:
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically translated to
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to
   :ref:`SkyPilot Storage <sky-storage>`. Cloud bucket will be created during the job running time, and cleaned up after the job
   finishes.
 
 SkyPilot will launch and start monitoring the spot job. When a preemption happens, SkyPilot will automatically
 search for resources across regions and clouds to re-launch the job.
 
-In this example, the job will be restarted from scratch after every recovery.
-To resume from the last checkpoint, we need to add a few lines to support checkpointing and resuming.
+In this example, the job will be restarted from scratch after each preemption recovery.
+To resume the job from previous states, user's application needs to implement checkpointing and recovery
 
 
-Checkpointing and resuming
+Checkpointing and recovery
 --------------------------
 
 To allow spot recovery, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints).
@@ -166,7 +167,7 @@ As HuggingFace has built-in support for periodically checkpointing, we only need
   You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
 With the above changes, the managed spot job can now resume training after preemption with ``sky spot launch``! We can enjoy the benefits of
-the cost savings from spot instances without worrying about the job being interrupted and losing progress.
+cost savings from spot instances without worrying about preemption or losing progress.
 
 .. code-block:: console
 
@@ -200,4 +201,18 @@ Here are some commands for managed spot jobs. Check :code:`sky spot --help` for 
 
     # Cancel a spot job by name
     $ sky spot cancel -n bert-qa
+
+
+Advanced note (spot controller)
+-------------------------------
+
+There will be a single spot controller cluster (a small on-demand CPU VM) running in the background to manage all the spot jobs.
+It will be autostopped after 30 minutes of inactivity. Normally, **no user intervention** is needed. 
+You can find the cluster with :code:`sky status -a`, and refresh the status with :code:`sky status -ar`.
+
+Although, the cost of the stopped spot controller is negligible (less than $0.1 per day), you can still tear it down manually with 
+:code:`sky down -p sky-spot-controller-<hash>`, where the ``<hash>`` can be found in the output of :code:`sky status -a`.
+
+.. note::
+  Tearing down the spot controller when there are still spot jobs running will cause resource leakage of those spot VMs.
 
