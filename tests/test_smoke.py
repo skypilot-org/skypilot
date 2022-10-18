@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
+import urllib.parse
 import uuid
 
 import colorama
@@ -1013,8 +1014,11 @@ class TestStorageWithCredentials:
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match='the bucket name is taken'):
+        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @staticmethod
