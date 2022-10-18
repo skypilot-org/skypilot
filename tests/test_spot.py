@@ -97,7 +97,8 @@ class TestReservedClustersOperations:
     def test_down_spot_controller(self, _mock_cluster_state):
         cli_runner = cli_testing.CliRunner()
 
-        result = cli_runner.invoke(cli.down, [spot.SPOT_CONTROLLER_NAME], input='n')
+        result = cli_runner.invoke(cli.down, [spot.SPOT_CONTROLLER_NAME],
+                                   input='n')
         assert 'WARNING: Tearing down a SkyPilot reserved cluster.' in result.output
         assert isinstance(result.exception, SystemExit), result.exception
 
