@@ -95,6 +95,8 @@ _MAX_RAY_UP_RETRY = 5
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 
+_SPECIALIZED_HARDWARE = {'tpu', 'inferentia'}
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -231,8 +233,9 @@ class RayCodeGen:
             # gpu_dict should be empty when the accelerator is not GPU.
             # FIXME: This is a hack to make sure that we do not reserve
             # GPU when requesting TPU.
-            if 'tpu' in acc_name.lower():
-                gpu_dict = dict()
+            for acc in _SPECIALIZED_HARDWARE:
+                if acc in acc_name.lower():
+                    gpu_dict = dict()
             for bundle in bundles:
                 bundle.update({
                     **accelerator_dict,
@@ -340,8 +343,9 @@ class RayCodeGen:
             # `num_gpus` should be empty when the accelerator is not GPU.
             # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]
-            if 'tpu' in resources_key.lower():
-                num_gpus_str = ''
+            for acc in _SPECIALIZED_HARDWARE:
+                if acc in resources_key.lower():
+                    num_gpus_str = ''
         resources_str += ', placement_group=pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
 

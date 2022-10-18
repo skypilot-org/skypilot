@@ -112,18 +112,16 @@ class AWS(clouds.Cloud):
                 return amis[region_name]
             if acc_name == 'Inferentia':
                 # Deep Learning AMI Fetched with:
-                # aws ec2 describe-images --region {region} --owners amazon \
-                # --filters 'Name=name,Values=Deep Learning AMI (Ubuntu 18.04) \
-                # Version ??.?' 'Name=state,Values=available' \
-                # --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId'\
-                # --output text
+                # aws ec2 describe-images --region us-east-1 --owners amazon --filters \
+                # 'Name=name,Values=Deep Learning Base Neuron AMI (Ubuntu 20.04) ????????' \
+                # 'Name=state,Values=available' --query \
+                # 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' --output text
                 # Inferentia accelerator requires original deep learning AMI
                 amis = {
-                    'us-east-1': 'ami-008a77bad7b109354',
-                    'us-east-2': 'ami-0ae37980d60476156',
-                    # This AMI is 20210623 as aws does not provide a newer one.
-                    'us-west-1': 'ami-0b3e9bf6217f84af6',
-                    'us-west-2': 'ami-08c47b9efd307c86a',
+                    'us-east-1': 'ami-0e3b85964d35d9ddc',
+                    'us-east-2': 'ami-042fc9c0ad6224c0d',
+                    'us-west-1': 'ami-0fb668425f5604579',
+                    'us-west-2': 'ami-0c721d3b0027558d0',
                 }
                 assert region_name in amis, region_name
                 return amis[region_name]
@@ -250,8 +248,6 @@ class AWS(clouds.Cloud):
             'region': region_name,
             'zones': ','.join(zones),
             'image_id': image_id,
-            'num_gpus': list(acc_dict.values())[0]
-                        if acc_dict is not None else 0
         }
 
     def get_feasible_launchable_resources(self,
