@@ -1268,11 +1268,19 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
     autostopped.
     """
-    cluster_records = core.status(all=all, refresh=refresh)
+    cluster_records = core.status(refresh=refresh)
+    filtered_cluster_records = []
+    reserved_clusters = []
+    for cluster_record in cluster_records:
+        if cluster_record['name'] in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            reserved_clusters.append(cluster_record)
+        else:
+            filtered_cluster_records.append(cluster_record)
     local_clusters = onprem_utils.check_and_get_local_clusters(
         suppress_error=True)
-    status_utils.show_status_table(cluster_records, all)
+    status_utils.show_status_table(filtered_cluster_records, all)
     status_utils.show_local_status_table(local_clusters)
+    status_utils.show_status_table(reserved_clusters, all, is_reserved=True)
 
 
 @cli.command()
@@ -1894,14 +1902,21 @@ def _down_or_stop_clusters(
         # Make sure the reserved clusters are explicitly specified without other
         # normal clusters and purge is True.
         if len(reserved_clusters) > 0:
-            if not purge:
-                msg = (f'{operation} reserved cluster(s) '
-                       f'{reserved_clusters_str} is not supported.')
-                if down:
-                    msg += (
-                        '\nPlease specify --purge (-p) to force-terminate the '
-                        'reserved cluster(s).')
-                raise click.UsageError(msg)
+            if not down:
+                raise click.UsageError(
+                    f'{operation} reserved cluster(s) '
+                    f'{reserved_clusters_str} is not supported.')
+            else:
+                click.secho(
+                    'WARNING: Tearing down a SkyPilot reserved cluster. If '
+                    'any related job had not finished, resources leakage '
+                    'could happen.',
+                    fg='yellow')
+                click.confirm('Do you want to continue?',
+                              default=False,
+                              abort=True,
+                              show_default=True)
+                no_confirm = True
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(

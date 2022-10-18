@@ -32,7 +32,9 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
+def show_status_table(cluster_records: List[Dict[str, Any]],
+                      show_all: bool,
+                      is_reserved: bool = False):
     """Compute cluster table values and display."""
     # TODO(zhwu): Update the information for autostop clusters.
 
@@ -68,12 +70,23 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
         pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
+        name = 'Clusters'
+        if is_reserved:
+            click.echo()
+            name = 'Reserved Clusters'
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{name}: '
+                   f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-        if pending_autostop:
+        if is_reserved:
+            click.echo(
+                f'{colorama.Style.DIM}Reserved clusters will be autostopped '
+                'when inactive. Refresh statuses with: sky status --refresh'
+                f'{colorama.Style.RESET_ALL}')
+        elif pending_autostop:
             click.echo(
                 '\n'
                 f'You have {pending_autostop} clusters with auto{{stop,down}} '
-                'scheduled. Refresh statuses with: `sky status --refresh`.')
+                'scheduled. Refresh statuses with: sky status --refresh')
     else:
         click.echo('No existing clusters.')
 
