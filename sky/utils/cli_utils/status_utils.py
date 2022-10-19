@@ -34,7 +34,7 @@ class StatusColumn:
 
 def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
     """Compute cluster table values and display."""
-    # TODO(zhwu): Update the information for auto-stop clusters.
+    # TODO(zhwu): Update the information for autostop clusters.
 
     status_columns = [
         StatusColumn('NAME', _get_name),
@@ -72,8 +72,8 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
         if pending_autostop:
             click.echo(
                 '\n'
-                f'You have {pending_autostop} clusters with autostop scheduled.'
-                ' Refresh statuses with: `sky status --refresh`.')
+                f'You have {pending_autostop} clusters with auto{{stop,down}} '
+                'scheduled. Refresh statuses with: `sky status --refresh`.')
     else:
         click.echo('No existing clusters.')
 
@@ -208,10 +208,17 @@ def _get_zone(cluster_status):
 
 
 def _get_autostop(cluster_status):
-    autostop_str = '-'
+    autostop_str = ''
+    separtion = ''
     if cluster_status['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
-        autostop_str = str(cluster_status['autostop']) + ' min'
+        autostop_str = str(cluster_status['autostop']) + 'm'
+        separtion = ' '
+
+    if cluster_status['to_down']:
+        autostop_str += f'{separtion}(down)'
+    if autostop_str == '':
+        autostop_str = '-'
     return autostop_str
 
 

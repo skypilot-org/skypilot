@@ -31,6 +31,7 @@ _CREDENTIAL_FILES = [
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
+    'active_config',
 ]
 
 _IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
@@ -246,7 +247,12 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
+                if acc == 'A100-80GB':
+                    # A100-80GB has a different name pattern.
+                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                else:
+                    resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
+                        acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 if acc == 'K80':
                     # CUDA driver version 470.57.02, CUDA Library 11.4

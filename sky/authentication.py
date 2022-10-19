@@ -22,7 +22,6 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-colorama.init()
 logger = sky_logging.init_logger(__name__)
 
 # TODO: Should tolerate if gcloud is not installed. Also,

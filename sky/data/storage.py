@@ -34,15 +34,36 @@ _GCS_RM_MAX_OBJS = 256
 
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     'Failed to connect to an existing bucket {name!r}.\n'
-    'Please check if:\n  1) the bucket name is taken and/or '
-    '\n  2) the bucket permissions are not setup correctly. '
-    'Consider using {command} to debug.')
+    'Please check if:\n  1. the bucket name is taken and/or '
+    '\n  2. the bucket permissions are not setup correctly.')
 
 
 class StoreType(enum.Enum):
+    """Enum for the different types of stores."""
     S3 = 'S3'
     GCS = 'GCS'
     AZURE = 'AZURE'
+
+    @classmethod
+    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
+        if isinstance(cloud, clouds.AWS):
+            return StoreType.S3
+        elif isinstance(cloud, clouds.GCP):
+            return StoreType.GCS
+        elif isinstance(cloud, clouds.Azure):
+            return StoreType.AZURE
+
+        raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
+
+    @classmethod
+    def from_store(cls, store: 'AbstractStore') -> 'StoreType':
+        if isinstance(store, S3Store):
+            return StoreType.S3
+        elif isinstance(store, GcsStore):
+            return StoreType.GCS
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {store}')
 
 
 class StorageMode(enum.Enum):
@@ -74,16 +95,6 @@ def get_store_prefix(storetype: StoreType) -> str:
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown store type: {storetype}')
-
-
-def _get_storetype_from_store(store: 'Storage') -> StoreType:
-    if isinstance(store, S3Store):
-        return StoreType.S3
-    elif isinstance(store, GcsStore):
-        return StoreType.GCS
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {store}')
 
 
 class AbstractStore:
@@ -312,11 +323,11 @@ class Storage(object):
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             self.sky_stores[storetype] = store.get_metadata()
 
         def remove_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
@@ -459,15 +470,26 @@ class Storage(object):
                         '(try "/mydir: /mydir" or "/myfile: /myfile"). '
                         f'Found source={source}')
             # Local path, check if it exists
-            source = os.path.abspath(os.path.expanduser(source))
+            full_src = os.path.abspath(os.path.expanduser(source))
             # Only check if local source exists if it is synced to the bucket
-            if not os.path.exists(source) and sync_on_reconstruction:
+            if not os.path.exists(full_src) and sync_on_reconstruction:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         'Local source path does not'
                         f' exist: {source}')
+            # Check if source is a file - throw error if it is
+            if os.path.isfile(full_src):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Storage source path cannot be a file - only '
+                        'directories are supported as a source. '
+                        'To upload a single file, either\n'
+                        '1) Use regular file mounts by writing '
+                        f'<destination_path>: {source} in the file_mounts '
+                        'section of your YAML, or\n2) Place the file in a '
+                        'directory and specify the directory as the source.')
             # Raise warning if user's path is a symlink
-            elif os.path.islink(source):
+            elif os.path.islink(full_src):
                 logger.warning(f'Source path {source} is a symlink. '
                                'Referenced contents are uploaded, matching '
                                'the default behavior for S3 and GCS syncing.')
@@ -582,18 +604,18 @@ class Storage(object):
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
-            logger.error(f'Sky could not create {store_type} store '
+            logger.error(f'Could not create {store_type} store '
                          f'with name {self.name}.')
             global_user_state.set_storage_status(self.name,
                                                  StorageStatus.INIT_FAILED)
             raise
         except exceptions.StorageBucketGetError:
             # Bucket get failed, so this is not sky managed. Do not update state
-            logger.error(f'Sky could not get {store_type} store '
+            logger.error(f'Could not get {store_type} store '
                          f'with name {self.name}.')
             raise
         except exceptions.StorageInitError:
-            logger.error(f'Sky could not initialize {store_type} store with '
+            logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
 
@@ -607,7 +629,7 @@ class Storage(object):
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
-        store_type = _get_storetype_from_store(store)
+        store_type = StoreType.from_store(store)
         self.stores[store_type] = store
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:
@@ -669,7 +691,7 @@ class Storage(object):
         try:
             store.upload()
         except exceptions.StorageUploadError:
-            logger.error(f'Sky could not upload {self.source} to store '
+            logger.error(f'Could not upload {self.source} to store '
                          f'name {store.name}.')
             if store.is_sky_managed:
                 global_user_state.set_storage_status(
@@ -829,7 +851,7 @@ class S3Store(AbstractStore):
                         f'{source} s3://{self.name}/')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to s3://{self.name}/'):
+                f'[green]{self.source}[/] to [green]s3://{self.name}/[/]'):
             # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
             # to a log file.
             with subprocess.Popen(sync_command.split(' '),
@@ -846,7 +868,7 @@ class S3Store(AbstractStore):
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
                             raise PermissionError(
-                                'Sky Storage failed to upload files to '
+                                'Failed to upload files to '
                                 'the S3 bucket. The bucket does not have '
                                 'write permissions. It is possible that '
                                 'the bucket is public.')
@@ -893,8 +915,8 @@ class S3Store(AbstractStore):
                 command = f'aws s3 ls {self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name, command=command)) from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
         if self.source is not None and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
@@ -1079,7 +1101,7 @@ class GcsStore(AbstractStore):
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to gs://{self.name}/'):
+                f'[green]{self.source}[/] to [green]gs://{self.name}/[/]'):
             with subprocess.Popen(sync_command.split(' '),
                                   stderr=subprocess.PIPE,
                                   stdout=subprocess.DEVNULL) as process:
@@ -1094,7 +1116,7 @@ class GcsStore(AbstractStore):
                         process.kill()
                         with ux_utils.print_exception_no_traceback():
                             raise PermissionError(
-                                'Sky Storage failed to upload files to '
+                                'Failed to upload files to '
                                 'GCS. The bucket does not have '
                                 'write permissions. It is possible that '
                                 'the bucket is public.')
@@ -1145,20 +1167,12 @@ class GcsStore(AbstractStore):
                 # Check if bucket can be listed/read from
                 next(bucket.list_blobs())
                 return bucket, False
-            except gcp.not_found_exception() as e:
+            except (gcp.not_found_exception(), ValueError) as e:
                 command = f'gsutil ls gs://{self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name, command=command)) from e
-            except ValueError as e:
-                ex = exceptions.StorageBucketGetError(
-                    f'Attempted to access a private external bucket {self.name}'
-                    '\nCheck if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                with ux_utils.print_exception_no_traceback():
-                    raise ex from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.

@@ -56,22 +56,6 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-(Advanced) How to edit or update the regions or pricing information used by SkyPilot?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-SkyPilot stores regions and pricing information for different cloud resource types in CSV files known as "service catalogs".
-These catalogs are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
-Check out your schema version by running the following command:
-
-.. code-block:: bash
-
-  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
-
-You can customize the catalog files to your needs.
-For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
-Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
-SkyPilot will automatically download the latest catalog in the next run.
-
 
 How to make SkyPilot clusters use my Weights & Biases credentials?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -83,3 +67,29 @@ Then, add the following lines in your task yaml file:
 
   file_mounts:
     ~/.netrc: ~/.netrc
+
+How to update an existing cluster's ``file_mounts`` without rerunning ``setup``?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you have edited the ``file_mounts`` section (e.g., by adding some files) and would like to have it reflected on an existing cluster, running ``sky launch -c <cluster> ..`` would work, but it would rerun the ``setup`` commands.
+
+To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
+
+
+
+(Advanced) How to edit or update the regions or pricing information used by SkyPilot?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+SkyPilot stores regions and pricing information for different cloud resource types in CSV files known as
+`"service catalogs" <https://github.com/skypilot-org/skypilot-catalog>`_.
+These catalogs are cached in the ``~/.sky/catalogs/<schema-version>/`` directory.
+Check out your schema version by running the following command:
+
+.. code-block:: bash
+
+  python -c "from sky.clouds import service_catalog; print(service_catalog.CATALOG_SCHEMA_VERSION)"
+
+You can customize the catalog files to your needs.
+For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
+Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
+SkyPilot will automatically download the latest catalog in the next run.

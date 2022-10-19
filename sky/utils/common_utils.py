@@ -12,7 +12,7 @@ import socket
 import sys
 import time
 import uuid
-from typing import Dict, List, Union
+from typing import Any
 import yaml
 
 from sky import sky_logging
@@ -223,11 +223,17 @@ def retry(method, max_retries=3, initial_backoff=1):
     return method_with_retries
 
 
-def encode_payload(payload: Union[List, Dict]) -> str:
+def encode_payload(payload: Any) -> str:
     """Encode a payload to make it more robust for parsing.
 
+    The make the message transfer more robust to any additional
+    strings added to the message during transfering.
+
+    An example message that is polluted by the system warning:
+    "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # pylint: disable=line-too-long
+
     Args:
-        payload: A dict or list to be encoded.
+        payload: A str, dict or list to be encoded.
 
     Returns:
         A string that is encoded from the payload.
@@ -237,15 +243,18 @@ def encode_payload(payload: Union[List, Dict]) -> str:
     return payload_str
 
 
-def decode_payload(payload_str: str) -> Union[List, Dict]:
+def decode_payload(payload_str: str) -> Any:
     """Decode a payload string.
 
     Args:
         payload_str: A string that is encoded from a payload.
 
     Returns:
-        A dict or list that is decoded from the payload string.
+        A str, dict or list that is decoded from the payload string.
     """
-    payload_str = _PAYLOAD_PATTERN.match(payload_str).group(1)
+    matched = _PAYLOAD_PATTERN.findall(payload_str)
+    if not matched:
+        raise ValueError(f'Invalid payload string: \n{payload_str}')
+    payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload

@@ -26,10 +26,15 @@ available_node_types:
     node_config:
       InstanceType: {{instance_type}}
       ImageId: {{image_id}}  # Deep Learning AMI (Ubuntu 18.04); see aws.py.
+      # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
+            # use default Iops for gp3
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125 
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot
@@ -49,6 +54,9 @@ available_node_types:
         - DeviceName: /dev/sda1
           Ebs:
             VolumeSize: {{disk_size}}
+            VolumeType: gp3
+            Iops: 3000
+            Throughput: 125 
       {% if use_spot %}
       InstanceMarketOptions:
           MarketType: spot
@@ -121,13 +129,13 @@ head_start_ray_commands:
   # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
   # all the sessions to be reloaded. This is a workaround.
   - ((ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
-    ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}};
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
+    ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 
 {%- if num_nodes > 1 %}
 worker_start_ray_commands:
-  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}};
-    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id; done;
+  - ray stop; ray start --disable-usage-stats --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
+    which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 {%- else %}
 worker_start_ray_commands: []
 {%- endif %}
