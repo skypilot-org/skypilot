@@ -15,7 +15,7 @@ Interactive nodes are normal SkyPilot clusters.  They allow fast access to insta
 without requiring a task YAML specification.
 
 Workflow
--------------------------------
+--------
 
 Use :code:`sky gpunode` to get a node with GPU(s):
 

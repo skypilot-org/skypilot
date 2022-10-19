@@ -1,10 +1,10 @@
 .. _benchmark-cli:
 
 CLI
-=============
+===
 
 Workflow
---------------------------------
+--------
 
 You can use SkyPilot Benchmark by simply replacing your ``sky launch`` command with ``sky bench launch``:
 
