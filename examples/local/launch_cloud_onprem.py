@@ -2,16 +2,18 @@
 
 The script allocates a cloud cluster and setups up the cloud cluster to run an
 'onprem' cluster on the cloud. It performs the following steps:
-    1) Launches a cluster on the cloud with `sky launch -c on-prem-cluster-[ID]`.
-     The Sky yaml sets up another user named `test`.
+    1) Launches a cluster on the cloud with `sky launch -c
+       on-prem-cluster-[ID]`. The Sky yaml sets up another user named `test`.
     2) Setups Sky dependencies for the admin user via `sky admin deploy ..`.
-    3) Creates the local cluster config for the regular user, stored in `~/.sky/local/...`
-To clean up the local cluster, run `sky down [LOCAL_CLUSTER]` and remove the corresponding
-local cluster config file.
+    3) Creates the local cluster config for the regular user, stored in
+       `~/.sky/local/...`.
+To clean up the local cluster and the launched cloud cluster, run `sky down
+[LOCAL_CLUSTER] onprem-cluster-[ID]` and remove the corresponding local
+cluster config file.
 
 Usage:
     # Creates a Sky on-premise cluster named `my-local-cluster`
-    python examples/local/launch_cloud_onprem.py -n my-local-cluster
+    python examples/local/launch_cloud_onprem.py my-local-cluster
 """
 
 import argparse
@@ -100,5 +102,5 @@ common_utils.dump_yaml(os.path.expanduser(local_config_path), local_config)
 print((
     f'Sky onprem cluster {local_cluster_name} is now ready for use! '
     f'You can launch jobs with `sky launch -c {local_cluster_name}  -- [CMD]. '
-    f'After you are done, shut down the cluster by running `sky down {local_cluster_name}` '
+    f'After you are done, shut down the cluster by running `sky down {local_cluster_name} {onprem_name}` '
     f'and removing the local cluster config in {local_config_path}.'))
