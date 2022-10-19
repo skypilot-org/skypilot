@@ -203,7 +203,7 @@ Here are some commands for managed spot jobs. Check :code:`sky spot --help` for 
     $ sky spot cancel -n bert-qa
 
 
-Spot controller [Advanced]
+Spot controller (Advanced)
 -------------------------------
 
 There will be a single spot controller VM (a small on-demand CPU VM) running in the background to manage all the spot jobs.
