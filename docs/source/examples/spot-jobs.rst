@@ -155,12 +155,22 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     --save_total_limit 10 \
     --save_steps 1000
 
+
+
 As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up 
 the output directory and frequency of checkpointing (see more 
 on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
+You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
+
+We also set :code:`--run_name` to :code:`$SKYPILOT_RUN_ID` so that the loggings will be saved
+to the same run in Weights & Biases.
 
 .. note::
-  You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
+  The environment variable :code:`$SKYPILOT_RUN_ID` can be used to identify the same job, i.e., it is kept identical across all
+  recoveries of the job.
+  It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
+  via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
+  the task whenever it is invoked.
 
 With the highlighted changes, the managed spot job can now resume training after preemption with ``sky spot launch``! We can enjoy the benefits of
 cost savings from spot instances without worrying about preemption or losing progress.
@@ -168,13 +178,6 @@ cost savings from spot instances without worrying about preemption or losing pro
 .. code-block:: console
 
     $ sky spot launch -n bert-qa bert_qa.yaml
-
-
-.. note::
-  The environment variable :code:`$SKYPILOT_RUN_ID` can be used to identify the same job, i.e., it is kept identical across all
-  recoveries of the job. It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
-  via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to
-  the task whenever it is invoked.
 
 
 Useful CLIs
