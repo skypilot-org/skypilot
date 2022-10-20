@@ -1907,7 +1907,7 @@ def _hints_for_down_spot_controller(controller_name: str):
         if (cluster_status == global_user_state.ClusterStatus.UP and
                 non_terminal_jobs):
             msg += ('\n * In-progress spot jobs found, their resources '
-                    'will not be terminated and require manual cleanup'
+                    'will not be terminated and require manual cleanup '
                     '(sky spot cancel --all):\n')
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
