@@ -1,5 +1,5 @@
 """Utilities for sky status."""
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 import click
 import colorama
 
@@ -34,8 +34,12 @@ class StatusColumn:
 
 def show_status_table(cluster_records: List[Dict[str, Any]],
                       show_all: bool,
-                      is_reserved: bool = False):
-    """Compute cluster table values and display."""
+                      reserved_group_name: Optional[str] = None) -> int:
+    """Compute cluster table values and display.
+
+    Returns:
+        Number of pending autostop clusters.
+    """
     # TODO(zhwu): Update the information for autostop clusters.
 
     status_columns = [
@@ -70,25 +74,19 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
-        name = 'Clusters'
-        if is_reserved:
-            click.echo()
-            name = 'Reserved Clusters'
-        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}{name}: '
-                   f'{colorama.Style.RESET_ALL}')
-        click.echo(cluster_table)
-        if is_reserved:
+        if reserved_group_name is not None:
             click.echo(
-                f'{colorama.Style.DIM}Reserved clusters will be autostopped '
-                'when inactive. Refresh statuses with: sky status --refresh'
+                f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                f'{reserved_group_name}: {colorama.Style.RESET_ALL}'
+                f'{colorama.Style.DIM}(will be autostopped when inactive)'
                 f'{colorama.Style.RESET_ALL}')
-        elif pending_autostop:
-            click.echo(
-                '\n'
-                f'You have {pending_autostop} clusters with auto{{stop,down}} '
-                'scheduled. Refresh statuses with: sky status --refresh')
+        else:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters: '
+                       f'{colorama.Style.RESET_ALL}')
+        click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')
+    return pending_autostop
 
 
 def show_local_status_table(local_clusters: List[str]):

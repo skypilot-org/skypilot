@@ -52,7 +52,8 @@ def status(refresh: bool) -> List[Dict[str, Any]]:
         ]
 
     """
-    cluster_records = backend_utils.get_clusters(True, refresh)
+    cluster_records = backend_utils.get_clusters(include_reserved=True,
+                                                 refresh=refresh)
     return cluster_records
 
 

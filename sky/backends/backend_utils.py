@@ -101,7 +101,9 @@ _MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
+SKY_RESERVED_CLUSTER_NAMES = {
+    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
+}
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
