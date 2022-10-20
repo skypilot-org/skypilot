@@ -6,6 +6,7 @@ import sys
 import tempfile
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
+import urllib.parse
 import uuid
 
 import colorama
@@ -284,11 +285,15 @@ def test_job_queue():
         'job_queue',
         [
             f'sky launch -y -c {name} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky logs {name} 2',
-            f'sky queue {name}',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
         ],
         f'sky down -y {name}',
     )
@@ -301,12 +306,15 @@ def test_n_node_job_queue():
         'job_queue_multinode',
         [
             f'sky launch -y -c {name} examples/job_queue/cluster_multinode.yaml',
-            f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-3 -d examples/job_queue/job_multinode.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
             f'sky cancel {name} 1',
-            f'sky logs {name} 2',
-            f'sky queue {name}',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
         ],
         f'sky down -y {name}',
     )
@@ -318,7 +326,7 @@ def test_large_job_queue():
     test = Test(
         'large_job_queue',
         [
-            f'sky launch -y -c {name} --cloud gcp ""',
+            f'sky launch -y -c {name} --cloud gcp',
             f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
             f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 20',
@@ -1013,8 +1021,11 @@ class TestStorageWithCredentials:
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match='the bucket name is taken'):
+        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @staticmethod

@@ -1,7 +1,7 @@
 .. _benchmark-yaml:
 
 YAML Configuration
-===================
+==================
 
 The resources to benchmark can be configured in the SkyPilot YAML interface.
 Below we provide an example:

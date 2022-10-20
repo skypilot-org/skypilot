@@ -34,9 +34,8 @@ _GCS_RM_MAX_OBJS = 256
 
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     'Failed to connect to an existing bucket {name!r}.\n'
-    'Please check if:\n  1) the bucket name is taken and/or '
-    '\n  2) the bucket permissions are not setup correctly. '
-    'Consider using {command} to debug.')
+    'Please check if:\n  1. the bucket name is taken and/or '
+    '\n  2. the bucket permissions are not setup correctly.')
 
 
 class StoreType(enum.Enum):
@@ -916,8 +915,8 @@ class S3Store(AbstractStore):
                 command = f'aws s3 ls {self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name, command=command)) from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
         if self.source is not None and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
@@ -1168,20 +1167,12 @@ class GcsStore(AbstractStore):
                 # Check if bucket can be listed/read from
                 next(bucket.list_blobs())
                 return bucket, False
-            except gcp.not_found_exception() as e:
+            except (gcp.not_found_exception(), ValueError) as e:
                 command = f'gsutil ls gs://{self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name, command=command)) from e
-            except ValueError as e:
-                ex = exceptions.StorageBucketGetError(
-                    f'Attempted to access a private external bucket {self.name}'
-                    '\nCheck if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                with ux_utils.print_exception_no_traceback():
-                    raise ex from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
