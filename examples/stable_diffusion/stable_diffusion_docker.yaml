@@ -16,7 +16,7 @@ setup: |
   git reset --hard 0d8b7d4ac8f9ba99e041ca332547eab9d65e6360
   wget https://www.googleapis.com/storage/v1/b/aai-blog-files/o/sd-v1-4.ckpt?alt=media -P models
   mv models/'sd-v1-4.ckpt?alt=media' models/model.ckpt
-  docker pull berkeleyskypilot/sbtest
+  docker pull berkeleyskypilot/stable-diffusion
   rm docker-compose.yml
   cp /stable_diffusion/docker-compose.yml .
 

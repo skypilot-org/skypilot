@@ -14,9 +14,9 @@
 
 7. Run `cd skypilot/examples/stable_diffusion` and `docker build Dockerfile`
 
-8. Run `docker tag stable-diffusion-webui-docker_model gcr.io/(my-project)/stable_diffusion`.
+8. Run `docker tag stable-diffusion-webui-docker_model gcr.io/(my-project)/stable-diffusion`.
 
-9. Run `docker push gcr.io/(my-project)/stable_diffusion` and verify on GCR that the image is there.
+9. Run `docker push gcr.io/(my-project)/stable-diffusion` and verify on GCR that the image is there.
 
 ## DockerHub
 
@@ -26,9 +26,9 @@
 
 3. Run `cd skypilot/examples/stable_diffusion` and `docker build Dockerfile`
 
-4. Run `docker tag stable-diffusion-webui-docker_model (my-dockerhub-username)/stable_diffusion`.
+4. Run `docker tag stable-diffusion-webui-docker_model (my-dockerhub-username)/stable-diffusion`.
 
-5. Run `docker push (my-dockerhub-username)/stable_diffusion` and verify on Dockerhub that the image is there.
+5. Run `docker push (my-dockerhub-username)/stable-diffusion` and verify on Dockerhub that the image is there.
 
 
 

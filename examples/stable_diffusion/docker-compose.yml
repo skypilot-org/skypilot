@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   model:
-    image: berkeleyskypilot/sbtest
+    image: berkeleyskypilot/stable-diffusion
     restart: on-failure
     ports:
       - "7860:7860"
