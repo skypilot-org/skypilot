@@ -1951,16 +1951,20 @@ def _down_or_stop_clusters(
                     click.echo(
                         'Managed spot controller has already been torn down.')
                     return
+
+                cnt = 1
                 msg = (
                     f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
-                    f'spot controller ({status.value}). Please be aware of the '
-                    'following:'
-                    '\n\t- All logs and status information of the spot jobs '
-                    'will be lost.')
+                    f'spot controller ({cluster_status.value}). Please be '
+                    f'aware of the following:{colorama.Style.RESET_ALL}'
+                    f'\n {cnt}. All logs and status information of the spot '
+                    'jobs will be lost.')
+                cnt += 1
                 if cluster_status == global_user_state.ClusterStatus.INIT:
                     msg += (
-                        '\n\t- Resource leakage may happen caused by spot jobs '
-                        'being submitted, and unfinished spot jobs.')
+                        f'\n {cnt}. Resource leakage may happen caused by '
+                        'spot jobs being submitted, and in-progress spot jobs.')
+                    cnt += 1
                 elif cluster_status == global_user_state.ClusterStatus.UP:
                     spot_jobs = core.spot_status(refresh=False)
                     non_terminal_jobs = [
@@ -1969,10 +1973,15 @@ def _down_or_stop_clusters(
                     ]
                     if non_terminal_jobs:
                         msg += (
-                            '\n\t- Resource leakage may happen caused by the '
-                            'following unfinished spot jobs:')
-                        spot_lib.format_job_table(non_terminal_jobs,
-                                                  show_all=False)
+                            f'\n {cnt}. Resource leakage may happen caused by '
+                            'the following in-progress spot jobs:\n')
+                        job_table = spot_lib.format_job_table(non_terminal_jobs,
+                                                              show_all=False)
+                        msg += '\n'.join([
+                            '    ' + line
+                            for line in job_table.split('\n')
+                            if line != ''
+                        ])
                 click.echo(msg)
 
                 click.confirm('Do you want to continue?',
