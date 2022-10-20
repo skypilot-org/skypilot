@@ -38,7 +38,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
     """Compute cluster table values and display.
 
     Returns:
-        Number of pending autostop clusters.
+        Number of pending auto{stop,down} clusters.
     """
     # TODO(zhwu): Update the information for autostop clusters.
 
@@ -78,7 +78,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
             click.echo(
                 f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                 f'{reserved_group_name}: {colorama.Style.RESET_ALL}'
-                f'{colorama.Style.DIM}(will be autostopped when inactive)'
+                f'{colorama.Style.DIM}(will be autostopped if idle for 30min)'
                 f'{colorama.Style.RESET_ALL}')
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters: '
