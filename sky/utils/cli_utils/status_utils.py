@@ -77,11 +77,11 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         if reserved_group_name is not None:
             click.echo(
                 f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                f'{reserved_group_name}: {colorama.Style.RESET_ALL}'
-                f'{colorama.Style.DIM}(will be autostopped if idle for 30min)'
+                f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                f'{colorama.Style.DIM} (will be autostopped if idle for 30min)'
                 f'{colorama.Style.RESET_ALL}')
         else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters: '
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
     else:

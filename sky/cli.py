@@ -1302,9 +1302,9 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     if num_pending_autostop > 0:
         click.echo(
             '\n'
-            f'{colorama.Style.DIM}You have {num_pending_autostop} clusters '
-            'with auto{stop,down} scheduled. Refresh statuses with: '
-            f'sky status --refresh{colorama.Style.RESET_ALL}')
+            f'{num_pending_autostop} clusters have '
+            'auto{stop,down} scheduled. Refresh statuses with: '
+            f'sky status --refresh')
     status_utils.show_local_status_table(local_clusters)
 
 
