@@ -4,6 +4,7 @@ import click
 import colorama
 
 from sky import backends
+from sky import spot
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils
@@ -75,11 +76,12 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
 
     if cluster_records:
         if reserved_group_name is not None:
-            click.echo(
-                f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                f'{reserved_group_name}{colorama.Style.RESET_ALL}'
-                f'{colorama.Style.DIM} (will be autostopped if idle for 30min)'
-                f'{colorama.Style.RESET_ALL}')
+            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{autostop_minutes}min)'
+                       f'{colorama.Style.RESET_ALL}')
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')

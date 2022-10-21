@@ -1300,11 +1300,14 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         num_pending_autostop += status_utils.show_status_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
     if num_pending_autostop > 0:
-        click.echo(
-            '\n'
-            f'{num_pending_autostop} clusters have '
-            'auto{stop,down} scheduled. Refresh statuses with: '
-            f'sky status --refresh')
+        plural = ' has'
+        if num_pending_autostop > 1:
+            plural = 's have'
+        click.echo('\n'
+                   f'{num_pending_autostop} cluster{plural} '
+                   'auto{stop,down} scheduled. Refresh statuses with: '
+                   f'{colorama.Style.BRIGHT}sky status --refresh'
+                   f'{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
 
 
