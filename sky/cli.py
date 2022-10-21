@@ -1011,9 +1011,9 @@ def cli():
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after all jobs finish (successfully or '
-     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the specified idle time. '
+    ('Autodown the cluster: tear down the cluster after all jobs finish '
+     '(successfully or abnormally). If --idle-minutes-to-autostop is also set, '
+     'the cluster will be torn down after the specified idle time. '
      'Note that if errors occur during provisioning/data syncing/setting up, '
      'the cluster will not be torn down for debugging purposes.'),
 )
@@ -1244,12 +1244,13 @@ def exec(
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.option('--refresh',
-              '-r',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Query cluster status from the cloud provider.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest cluster statuses from the cloud provider(s).')
 @usage_lib.entrypoint
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """Show clusters.
@@ -1506,8 +1507,8 @@ def stop(
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
-    the instances will stop while the disks will still be charged.  Those disks
-    will be reattached when restarting the cluster.
+    the instances will stop, while the disks will still be charged.  Those
+    disks will be reattached when restarting the cluster.
 
     Currently, spot instance clusters cannot be stopped.
 
@@ -1664,9 +1665,9 @@ def autostop(
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after all jobs finish (successfully or '
-     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the specified idle time.'),
+    ('Autodown the cluster: tear down the cluster after specified minutes of '
+     'idle time after all jobs finish (successfully or abnormally). Requires '
+     ' --idle-minutes-to-autostop to be set.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1692,11 +1693,11 @@ def start(
     start the cluster.  (In the second case, any failed setup steps are not
     performed and only a request to start the machines is attempted.)
 
-    Auto-failover provisioning is not used when restarting stopped
-    clusters. They will be started on the same cloud and region that was chosen
-    before.
+    Auto-failover provisioning is not used when restarting a stopped
+    cluster. It will be started on the same cloud, region, and zone that were
+    chosen before.
 
-    If a cluster is already in the UP status, this command has no effect on it.
+    If a cluster is already in the UP status, this command has no effect.
 
     Examples:
 

@@ -30,27 +30,32 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(refresh: bool) -> List[Dict[str, Any]]:
-    """Get the cluster status in dict.
+def status(refresh: bool = False) -> List[Dict[str, Any]]:
+    """Get all cluster statuses.
 
-    Please refer to the sky.cli.status for the document.
+    Each returned value has the following fields:
+
+    .. code-block:: python
+
+        {
+            'name': (str) cluster name,
+            'launched_at': (int) timestamp of last launch on this cluster,
+            'handle': (ResourceHandle) an internal handle to the cluster,
+            'last_use': (str) the last command/entrypoint that affected this
+              cluster,
+            'status': (sky.ClusterStatus) cluster status,
+            'autostop': (int) idle time before autostop,
+            'to_down': (bool) whether autodown is used instead of autostop,
+            'metadata': (dict) metadata of the cluster,
+        }
+
+    Args:
+        refresh: whether to query the latest cluster statuses from the cloud
+            provider(s).
 
     Returns:
-        A list of dicts, each dict contains the information of a cluster.
-
-        [
-            {
-                'name': (str) cluster name,
-                'launched_at': (int) timestamp of launched,
-                'last_use': (int) timestamp of last use,
-                'status': (sky.ClusterStatus) cluster status,
-                'autostop': (int) idle time before autostop,
-                'to_down': (bool) whether autodown is used instead of
-                    autostop,
-                'metadata': (dict) metadata of the cluster,
-            }
-        ]
-
+        A list of dicts, with each dict containing the information of a
+        cluster.
     """
     cluster_records = backend_utils.get_clusters(include_reserved=True,
                                                  refresh=refresh)
@@ -105,28 +110,68 @@ def start(
         idle_minutes_to_autostop: Optional[int] = None,
         retry_until_up: bool = False,
         down: bool = False,  # pylint: disable=redefined-outer-name
-):
-    """Start a cluster.
+) -> None:
+    """Restart a cluster.
 
-    Please refer to the sky.cli.start for the document.
+    If a cluster is previously stopped (status is STOPPED) or failed in
+    provisioning/runtime setup (status is INIT), this function will attempt to
+    start the cluster.  (In the second case, any failed setup steps are not
+    performed and only a request to start the machines is attempted.)
+
+    Auto-failover provisioning is not used when restarting a stopped
+    cluster. It will be started on the same cloud, region, and zone that were
+    chosen before.
+
+    If a cluster is already in the UP status, this function has no effect.
+
+    Args:
+        cluster_name: name of the cluster to start.
+        idle_minutes_to_autostop: automatically stop the cluster after this
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness starts counting after
+            setup/file_mounts are done; the clock gets reset whenever there
+            are running/pending jobs in the job queue. Setting this flag is
+            equivalent to running ``sky.launch(..., detach_run=True, ...)``
+            and then ``sky.autostop(idle_minutes=<minutes>)``. If not set,
+            the cluster will not be autostopped.
+        retry_until_up: whether to retry launching the cluster until it is
+            up.
+        down: Autodown the cluster: tear down the cluster after specified
+            minutes of idle time after all jobs finish (successfully or
+            abnormally). Requires ``idle_minutes_to_autostop`` to be set.
 
     Raises:
-        ValueError: cluster does not exist.
-        sky.exceptions.NotSupportedError: the cluster is not supported.
+        ValueError: the specified cluster does not exist; or if ``down`` is set
+          to True but ``idle_minutes_to_autostop`` is None.
+        sky.exceptions.NotSupportedError: if the cluster to restart was
+          launched using a non-default backend that does not support this
+          operation.
     """
+    if down and idle_minutes_to_autostop is None:
+        raise ValueError(
+            '`idle_minutes_to_autostop` must be set if `down` is True.')
     _start(cluster_name, idle_minutes_to_autostop, retry_until_up, down)
 
 
 @usage_lib.entrypoint
-def stop(cluster_name: str, purge: bool = False):
+def stop(cluster_name: str, purge: bool = False) -> None:
     """Stop a cluster.
 
-    Please refer to the sky.cli.stop for the document.
+    Data on attached disks is not lost when a cluster is stopped.  Billing for
+    the instances will stop, while the disks will still be charged.  Those
+    disks will be reattached when restarting the cluster.
+
+    Currently, spot instance clusters cannot be stopped.
+
+    Args:
+        cluster_name: name of the cluster to stop.
+        purge: whether to ignore cloud provider errors (if any).
 
     Raises:
-        ValueError: cluster does not exist.
-        RuntimeError: Fail to stop the cluster.
-        sky.exceptions.NotSupportedError: the cluster is not supported.
+        ValueError: the specified cluster does not exist.
+        RuntimeError: failed to stop the cluster.
+        sky.exceptions.NotSupportedError: if the specified cluster is a spot
+          cluster, or a TPU VM Pod cluster, or the managed spot controller.
     """
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
@@ -159,14 +204,25 @@ def stop(cluster_name: str, purge: bool = False):
 
 
 @usage_lib.entrypoint
-def down(cluster_name: str, purge: bool = False):
-    """Down a cluster.
+def down(cluster_name: str, purge: bool = False) -> None:
+    """Tear down a cluster.
 
-    Please refer to the sky.cli.down for the document.
+    Tearing down a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost. For local
+    clusters, this function does not terminate the local cluster, but instead
+    removes the cluster from `sky status` and terminates the calling user's
+    running jobs.
+
+    Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
+
+    Args:
+        cluster_name: name of the cluster to down.
+        purge: whether to ignore cloud provider errors (if any).
 
     Raises:
-        ValueError: cluster does not exist.
-        sky.exceptions.NotSupportedError: the cluster is not supported.
+        ValueError: the specified cluster does not exist.
+        sky.exceptions.NotSupportedError: the specified cluster is the managed
+          spot controller.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
@@ -180,22 +236,30 @@ def down(cluster_name: str, purge: bool = False):
 @usage_lib.entrypoint
 def autostop(
         cluster_name: str,
-        idle_minutes_to_autostop: int,
+        idle_minutes: int,
         down: bool = False,  # pylint: disable=redefined-outer-name
-):
-    """Set the autostop time of a cluster.
+) -> None:
+    """Schedule or cancel an autostop/autodown for a cluster.
 
-    Please refer to the sky.cli.autostop for the document.
+    When multiple configurations are specified for the same cluster (e.g., this
+    function is called multiple times), the last one takes precedence.
 
     Args:
-        cluster_name (str): name of the cluster.
-        autostop_time (int): autostop time in minutes.
+        cluster_name: name of the cluster.
+        idle_minutes: the number of minutes of idleness (no pending/running
+          jobs) after which the cluster will be stopped automatically. Setting
+          to a negative number means cancel any autostop/autodown setting.
+        down: if true, use autodown (tear down the cluster; non-restartable),
+          rather than autostop (restartable).
+
     Raises:
-        ValueError: cluster does not exist.
-        sky.exceptions.NotSupportedError: the cluster is not supported.
+        ValueError: the specified cluster does not exist.
+        sky.exceptions.NotSupportedError: if the specified cluster is a TPU VM
+          Pod cluster, or the managed spot controller, or was launched using a
+          non-default backend.
         sky.exceptions.ClusterNotUpError: the cluster is not UP.
     """
-    is_cancel = idle_minutes_to_autostop < 0
+    is_cancel = idle_minutes < 0
     verb = 'Cancelling' if is_cancel else 'Scheduling'
     option_str = 'down' if down else 'stop'
     if is_cancel:
@@ -233,7 +297,7 @@ def autostop(
                 f'\n  auto{option_str} can only be set/unset for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.')
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.set_autostop(handle, idle_minutes_to_autostop, down)
+    backend.set_autostop(handle, idle_minutes, down)
 
 
 # ==================
@@ -327,7 +391,7 @@ def queue(cluster_name: str,
 # pylint: disable=redefined-builtin
 def cancel(cluster_name: str,
            all: bool = False,
-           job_ids: Optional[List[int]] = None):
+           job_ids: Optional[List[int]] = None) -> None:
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
@@ -365,7 +429,9 @@ def cancel(cluster_name: str,
 
 
 @usage_lib.entrypoint
-def tail_logs(cluster_name: str, job_id: Optional[str], follow: bool = True):
+def tail_logs(cluster_name: str,
+              job_id: Optional[str],
+              follow: bool = True) -> None:
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
@@ -547,7 +613,7 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 # pylint: disable=redefined-builtin
 def spot_cancel(name: Optional[str] = None,
                 job_ids: Optional[Tuple[int]] = None,
-                all: bool = False):
+                all: bool = False) -> None:
     """Cancel managed spot jobs
 
     Please refer to the sky.cli.spot_cancel for the document.
@@ -598,7 +664,8 @@ def spot_cancel(name: Optional[str] = None,
 
 
 @usage_lib.entrypoint
-def spot_tail_logs(name: Optional[str], job_id: Optional[int], follow: bool):
+def spot_tail_logs(name: Optional[str], job_id: Optional[int],
+                   follow: bool) -> None:
     """Tail logs of managed spot jobs.
 
     Please refer to the sky.cli.spot_logs for the document.
@@ -650,7 +717,7 @@ def storage_ls() -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def storage_delete(name: str):
+def storage_delete(name: str) -> None:
     """Delete a storage.
 
     Raises:

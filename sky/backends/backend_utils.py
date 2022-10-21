@@ -1746,17 +1746,17 @@ def get_clusters(
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
-    Combs through the Sky database (in ~/.sky/state.db) to get a list of records
+    Combs through the database (in ~/.sky/state.db) to get a list of records
     corresponding to launched clusters.
 
     Args:
-        include_reserved: Whether to include sky-reserved clusters, e.g. spot
+        include_reserved: Whether to include reserved clusters, e.g. spot
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
-            state. Supports three values, 'all' for all clouds, 'public' for public
-            clouds only, and 'local' for only local clouds.
+            state. Supports three values, 'all' for all clouds, 'public' for
+            public clouds only, and 'local' for only local clouds.
 
     Returns:
         A list of cluster records.
