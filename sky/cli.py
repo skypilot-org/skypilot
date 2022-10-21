@@ -1300,11 +1300,14 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         num_pending_autostop += status_utils.show_status_table(
             [cluster_record], all, reserved_group_name=cluster_group_name)
     if num_pending_autostop > 0:
-        click.echo(
-            '\n'
-            f'{colorama.Style.DIM}You have {num_pending_autostop} clusters '
-            'with auto{stop,down} scheduled. Refresh statuses with: '
-            f'sky status --refresh{colorama.Style.RESET_ALL}')
+        plural = ' has'
+        if num_pending_autostop > 1:
+            plural = 's have'
+        click.echo('\n'
+                   f'{num_pending_autostop} cluster{plural} '
+                   'auto{stop,down} scheduled. Refresh statuses with: '
+                   f'{colorama.Style.BRIGHT}sky status --refresh'
+                   f'{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
 
 
@@ -1887,7 +1890,7 @@ def _hint_for_down_spot_controller(controller_name: str):
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
-           'jobs (output of sky spot status) will be lost.')
+           'jobs (output of `sky spot status`) will be lost.')
     if cluster_status == global_user_state.ClusterStatus.UP:
         try:
             spot_jobs = core.spot_status(refresh=False)
