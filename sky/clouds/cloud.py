@@ -162,6 +162,16 @@ class Cloud:
     def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
+    def get_feasible_resources(
+        self, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.Resource']:
+        raise NotImplementedError
+
+    def get_fuzzy_match_resources(
+        self, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.Resource']:
+        raise NotImplementedError
+
     def get_feasible_launchable_resources(self, resources):
         """Returns a list of feasible and launchable resources.
 

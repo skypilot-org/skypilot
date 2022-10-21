@@ -15,6 +15,168 @@ logger = sky_logging.init_logger(__name__)
 _DEFAULT_DISK_SIZE_GB = 256
 
 
+class Accelerator:
+
+    # FIXME: float?
+    def __init__(self, name: str, count: int, args: Dict[str, str]) -> None:
+        self.name = accelerator_registry.canonicalize_accelerator_name(name)
+        self.count = count
+        self.args = args
+
+    def __repr__(self) -> str:
+        return f'<Accelerator: {self.name} x {self.count}> {self.args}'
+
+    def __eq__(self, other) -> bool:
+        return (self.name == other.name and self.count == other.count and
+                self.args == other.args)
+
+
+class ResourceFilter:
+    """A user-specified resource filter."""
+
+    def __init__(
+        self,
+        num_nodes: Optional[int] = None,
+        cloud: Optional[clouds.Cloud] = None,
+        region: Optional[str] = None,
+        zone: Optional[str] = None,
+        instance_type: Optional[str] = None,
+        instance_family: Optional[str] = None,
+        num_vcpus: Union[None, float, str] = None,
+        memory_size: Union[None, float, str] = None,
+        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerator_args: Optional[Dict[str, str]] = None,
+        use_spot: Optional[bool] = None,
+        spot_recovery: Optional[str] = None,
+        disk_size: Optional[int] = None,
+        image_id: Optional[str] = None,
+    ) -> None:
+        self.num_nodes = num_nodes
+
+        # Configured by the generator and optimizer.
+        self.cloud = cloud
+        self.region = region
+        self.zone = zone
+        self.instance_type = instance_type
+        self.instance_family = instance_family
+        self.num_vcpus = num_vcpus
+        self.memory_size = memory_size
+        self._accelerators = accelerators
+
+        # Configured by the user.
+        self._accelerator_args = accelerator_args
+        self.use_spot = use_spot
+        self.spot_recovery = spot_recovery
+        self.disk_size = disk_size
+        self.image_id = image_id
+
+        self.accelerator = None
+
+        self._check_syntax()
+        self._canonicalize()
+        self._check_semantics()
+
+    def _check_syntax(self) -> None:
+        if self.cloud is None and (self.region is not None or
+                                   self.zone is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify region/zone without cloud.')
+        if self._accelerators is None and self._accelerator_args is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify accelerator_args without accelerators.')
+        if (self.use_spot is None or
+                not self.use_spot) and self.spot_recovery is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify spot_recovery without use_spot set to True.'
+                )
+        if self.image_id is not None and (self.region is None and
+                                          self.zone is None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Must specify region/zone when specifying image_id.')
+
+    def _canonicalize(self) -> None:
+        if self.disk_size is None:
+            self.disk_size = _DEFAULT_DISK_SIZE_GB
+        if self.spot_recovery is not None:
+            self.spot_recovery = self.spot_recovery.upper()
+
+        if self._accelerators is None:
+            return
+
+        # Parse accelerators.
+        accelerators = self._accelerators
+        if isinstance(accelerators, str):
+            if ':' not in accelerators:
+                accelerators = {accelerators: 1}
+            else:
+                splits = accelerators.split(':')
+                parse_error = ('The "accelerators" field as a str '
+                               'should be <name> or <name>:<cnt>. '
+                               f'Found: {accelerators!r}')
+                if len(splits) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(parse_error)
+                try:
+                    # NOTE: accelerator count must be an integer.
+                    num = int(splits[1])
+                    accelerators = {splits[0]: num}
+                except ValueError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(parse_error) from None
+
+        assert len(accelerators) == 1, accelerators
+        acc, acc_count = list(self._accelerators.items())[0]
+        self.accelerator = Accelerator(name=acc,
+                                       count=acc_count,
+                                       args=self._accelerator_args)
+
+    def _check_semantics(self) -> None:
+        if self.spot_recovery not in spot.SPOT_STRATEGIES:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid spot_recovery strategy: {self.spot_recovery}.')
+        if self.disk_size < 50:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'OS disk size must be larger than 50GB. Got {self.disk_size} GB.'
+                )
+
+
+class Resource:
+    """SkyPilot's internal representation of cloud resources."""
+
+    def __init__(
+        self,
+        num_nodes: int,
+        cloud: clouds.Cloud,
+        region: str,
+        zone: str,
+        instance_type: str,
+        num_vcpus: float,
+        memory_size: float,
+        accelerator: Accelerator,
+        use_spot: bool,
+        spot_recovery: str,
+        disk_size: int,
+        image_id: str,
+    ) -> None:
+        self.num_nodes = num_nodes
+        self.cloud = cloud
+        self.region = region
+        self.zone = zone
+        self.instance_type = instance_type
+        self.num_vcpus = num_vcpus
+        self.memory_size = memory_size
+        self.accelerator = accelerator
+        self.use_spot = use_spot
+        self.spot_recovery = spot_recovery
+        self.disk_size = disk_size
+        self.image_id = image_id
+
+
 class Resources:
     """A cloud resource bundle.
 
