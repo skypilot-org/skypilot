@@ -14,7 +14,6 @@ import filelock
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
 
@@ -503,21 +502,22 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     else:
         job_records = _get_jobs_by_ids(jobs)
 
-    jobs = [make_ray_job_id(job['job_id'], job_owner) for job in job_records]
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     job_client = _create_ray_job_submission_client()
 
-    def stop_job(job: str):
+    # Sequentially cancel the jobs to avoid the resource number bug caused by
+    # ray cluster (tracked in #1262).
+    for job in job_records:
+        job_id = make_ray_job_id(job['job_id'], job_owner)
         try:
-            job_client.stop_job(job)
+            job_client.stop_job(job_id)
         except RuntimeError as e:
             # If the job does not exist or if the request to the
             # job server fails.
             logger.warning(str(e))
+            continue
 
-    subprocess_utils.run_in_parallel(stop_job, jobs)
-    for job in job_records:
         if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
