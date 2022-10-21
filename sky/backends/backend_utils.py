@@ -761,7 +761,9 @@ def write_cluster_config(
         with open(yaml_path, 'r') as f:
             old_yaml_content = f.read()
 
-    yaml_path = fill_template(
+    # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
+    tmp_yaml_path = yaml_path + '.tmp'
+    tmp_yaml_path = fill_template(
         cluster_config_template,
         dict(
             resources_vars,
@@ -799,17 +801,18 @@ def write_cluster_config(
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
             }),
+        output_path=tmp_yaml_path
     )
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
         return config_dict
-    _add_auth_to_cluster_config(cloud, yaml_path)
+    _add_auth_to_cluster_config(cloud, tmp_yaml_path)
     # Delay the optimization of the config until the authentication files is added.
     if not isinstance(cloud, clouds.Local):
         # Only optimize the file mounts for public clouds now, as local has not
         # been fully tested yet.
-        _optimize_file_mounts(yaml_path)
+        _optimize_file_mounts(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
     if old_yaml_content is not None:
@@ -820,6 +823,9 @@ def write_cluster_config(
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY)
         with open(yaml_path, 'w') as f:
             f.write(restored_yaml_content)
+
+    # Rename the tmp file to the final YAML path.
+    os.rename(tmp_yaml_path, yaml_path)
 
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
