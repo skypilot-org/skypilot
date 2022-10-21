@@ -801,8 +801,7 @@ def write_cluster_config(
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
             }),
-        output_path=tmp_yaml_path
-    )
+        output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
