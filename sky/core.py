@@ -106,7 +106,7 @@ def start(
         retry_until_up: bool = False,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ):
-    """Start the cluster.
+    """Start a cluster.
 
     Please refer to the sky.cli.start for the document.
 
@@ -119,7 +119,7 @@ def start(
 
 @usage_lib.entrypoint
 def stop(cluster_name: str, purge: bool = False):
-    """Stop the cluster.
+    """Stop a cluster.
 
     Please refer to the sky.cli.stop for the document.
 
@@ -160,7 +160,7 @@ def stop(cluster_name: str, purge: bool = False):
 
 @usage_lib.entrypoint
 def down(cluster_name: str, purge: bool = False):
-    """Down the cluster.
+    """Down a cluster.
 
     Please refer to the sky.cli.down for the document.
 
@@ -183,7 +183,7 @@ def autostop(
         idle_minutes_to_autostop: int,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ):
-    """Set the autostop time of the cluster.
+    """Set the autostop time of a cluster.
 
     Please refer to the sky.cli.autostop for the document.
 
@@ -278,7 +278,7 @@ def _check_cluster_available(cluster_name: str,
 def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
-    """Get the job queue in List[dict].
+    """Get the job queue of a cluster.
 
     Please refer to the sky.cli.queue for the document.
 
@@ -328,7 +328,7 @@ def queue(cluster_name: str,
 def cancel(cluster_name: str,
            all: bool = False,
            job_ids: Optional[List[int]] = None):
-    """Cancel jobs.
+    """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
 

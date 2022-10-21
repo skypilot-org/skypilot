@@ -284,7 +284,14 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
 ):
-    """Launch a sky.DAG (rerun setup if cluster exists).
+    """Launch a task.
+
+    Currently, only single-node DAGs are supported. (Support for
+    pipelines/general DAGs are in experimental branches.)
+
+    The task's setup and run commands are executed under the task's workdir
+    (when specified, it is synced to remote cluster).  The task undergoes job
+    queue scheduling on the cluster.
 
     Args:
         dag: sky.DAG to launch.
@@ -313,9 +320,9 @@ def launch(
             OptimizeTarget.TIME.
         detach_run: If True, run setup first (blocking), then detach from the
             job's execution.
-        no_setup: if true, the cluster will not re-run setup instructions
+        no_setup: if True, do not re-run setup commands.
 
-    Examples:
+    Example:
         >>> import sky
         >>> with sky.Dag() as dag:
         >>>     task = sky.Task(run='echo hello SkyPilot')

@@ -1,6 +1,6 @@
 .. _cli:
 
-CLI Reference
+Command Line Interface
 =============
 
 Core CLI
