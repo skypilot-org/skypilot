@@ -1890,7 +1890,7 @@ def _hint_for_down_spot_controller(controller_name: str):
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
-           'jobs (output of sky spot status) will be lost.')
+           'jobs (output of `sky spot status`) will be lost.')
     if cluster_status == global_user_state.ClusterStatus.UP:
         try:
             spot_jobs = core.spot_status(refresh=False)
