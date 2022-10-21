@@ -1875,7 +1875,7 @@ def down(
                            purge=purge)
 
 
-def _hints_for_down_spot_controller(controller_name: str):
+def _hint_for_down_spot_controller(controller_name: str):
     # spot_jobs will be empty when the spot cluster is not running.
     cluster_status, _ = backend_utils.refresh_cluster_status_handle(
         controller_name)
@@ -1887,7 +1887,7 @@ def _hints_for_down_spot_controller(controller_name: str):
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
-           'jobs will be lost.')
+           'jobs (output of sky spot status) will be lost.')
     if cluster_status == global_user_state.ClusterStatus.UP:
         try:
             spot_jobs = core.spot_status(refresh=False)
@@ -1907,8 +1907,7 @@ def _hints_for_down_spot_controller(controller_name: str):
         if (cluster_status == global_user_state.ClusterStatus.UP and
                 non_terminal_jobs):
             msg += ('\n * In-progress spot jobs found, their resources '
-                    'will not be terminated and require manual cleanup '
-                    '(sky spot cancel --all):\n')
+                    'will not be terminated and require manual cleanup:\n')
             job_table = spot_lib.format_job_table(non_terminal_jobs,
                                                   show_all=False)
             # Add prefix to each line to align with the bullet point.
@@ -1987,7 +1986,7 @@ def _down_or_stop_clusters(
                 # TODO(zhwu): We can only have one reserved cluster (spot
                 # controller).
                 assert len(reserved_clusters) == 1, reserved_clusters
-                _hints_for_down_spot_controller(reserved_clusters[0])
+                _hint_for_down_spot_controller(reserved_clusters[0])
 
                 click.confirm('Proceed?',
                               default=False,
