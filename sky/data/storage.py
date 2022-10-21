@@ -1250,7 +1250,8 @@ class GcsStore(AbstractStore):
             with backend_utils.safe_console_status(
                     f'[bold cyan]Deleting [green]bucket {bucket_name}'):
                 if num_files >= _GCS_RM_MAX_OBJS:
-                    remove_obj_command = f'gsutil -m rm -a gs://{bucket_name}/*'
+                    remove_obj_command = ('gsutil -m rm -a'
+                                          f' gs://{bucket_name}/**')
                     subprocess.check_output(remove_obj_command.split(' '))
                 bucket.delete(force=True)
         except subprocess.CalledProcessError as e:
