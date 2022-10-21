@@ -101,7 +101,11 @@ _MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-SKY_RESERVED_CLUSTER_NAMES = [spot_lib.SPOT_CONTROLLER_NAME]
+# Mapping from reserved cluster names to the corresponding group name (logging purpose).
+# NOTE: each group can only have one reserved cluster name for now.
+SKY_RESERVED_CLUSTER_NAMES = {
+    spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
+}
 
 # Filelocks for the cluster status change.
 CLUSTER_STATUS_LOCK_PATH = os.path.expanduser('~/.sky/.{}.lock')
@@ -1927,13 +1931,11 @@ def check_cluster_name_not_reserved(
     If the cluster name is reserved, return the error message. Otherwise,
     return None.
     """
-    usage = 'internal use'
-    if cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
-        usage = 'spot controller'
-    msg = f'Cluster {cluster_name!r} is reserved for {usage}.'
-    if operation_str is not None:
-        msg += f' {operation_str} is not allowed.'
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
+        msg = (f'Cluster {cluster_name!r} is reserved for '
+               f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
+        if operation_str is not None:
+            msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
             raise ValueError(msg)
 

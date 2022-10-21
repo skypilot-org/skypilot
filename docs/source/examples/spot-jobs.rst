@@ -206,13 +206,13 @@ Spot controller (Advanced)
 -------------------------------
 
 There will be a single spot controller VM (a small on-demand CPU VM) running in the background to manage all the spot jobs.
-It will be autostopped after all spot jobs finished and no new spot job is submitted for 30 minutes. Typically **no user intervention** is needed. 
-You can find the controller with :code:`sky status -a`, and refresh the status with :code:`sky status -ar`.
+It will be autostopped after all spot jobs finished and no new spot job is submitted for 10 minutes. Typically **no user intervention** is needed. 
+You can find the controller with :code:`sky status`, and refresh the status with :code:`sky status -r`.
 
 Although, the cost of the spot controller is negligible (~$0.4/hour when running and less than $0.004/hour when stopped), 
 you can still tear it down manually with 
-:code:`sky down -p sky-spot-controller-<hash>`, where the ``<hash>`` can be found in the output of :code:`sky status -a`.
+:code:`sky down <spot-controller-name>`, where the ``<spot-controller-name>`` can be found in the output of :code:`sky status`.
 
 .. note::
-  Tearing down the spot controller when there are still spot jobs running will cause resource leakage of those spot VMs.
+  Tearing down the spot controller will lose all logs and status information for the spot jobs and can cause resource leakage when there are still in-progress spot jobs.
 

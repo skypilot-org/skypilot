@@ -30,7 +30,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
+def status(refresh: bool) -> List[Dict[str, Any]]:
     """Get the cluster status in dict.
 
     Please refer to the sky.cli.status for the document.
@@ -52,7 +52,8 @@ def status(all: bool, refresh: bool) -> List[Dict[str, Any]]:
         ]
 
     """
-    cluster_records = backend_utils.get_clusters(all, refresh)
+    cluster_records = backend_utils.get_clusters(include_reserved=True,
+                                                 refresh=refresh)
     return cluster_records
 
 
@@ -167,10 +168,6 @@ def down(cluster_name: str, purge: bool = False):
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the cluster is not supported.
     """
-    if (cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES and not purge):
-        raise exceptions.NotSupportedError(
-            f'Tearing down sky reserved cluster {cluster_name!r} '
-            f'is not supported.')
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')

@@ -1279,10 +1279,32 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
     autostopped.
     """
-    cluster_records = core.status(all=all, refresh=refresh)
+    cluster_records = core.status(refresh=refresh)
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
     local_clusters = onprem_utils.check_and_get_local_clusters(
         suppress_error=True)
-    status_utils.show_status_table(cluster_records, all)
+
+    num_pending_autostop = 0
+    num_pending_autostop += status_utils.show_status_table(
+        nonreserved_cluster_records, all)
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        num_pending_autostop += status_utils.show_status_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
+    if num_pending_autostop > 0:
+        click.echo(
+            '\n'
+            f'{colorama.Style.DIM}You have {num_pending_autostop} clusters '
+            'with auto{stop,down} scheduled. Refresh statuses with: '
+            f'sky status --refresh{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
 
 
@@ -1853,6 +1875,50 @@ def down(
                            purge=purge)
 
 
+def _hint_for_down_spot_controller(controller_name: str):
+    # spot_jobs will be empty when the spot cluster is not running.
+    cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+        controller_name)
+    if cluster_status is None:
+        click.echo('Managed spot controller has already been torn down.')
+        return
+
+    msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+           f'spot controller ({cluster_status.value}). Please be '
+           f'aware of the following:{colorama.Style.RESET_ALL}'
+           '\n * All logs and status information of the spot '
+           'jobs (output of sky spot status) will be lost.')
+    if cluster_status == global_user_state.ClusterStatus.UP:
+        try:
+            spot_jobs = core.spot_status(refresh=False)
+        except exceptions.ClusterNotUpError:
+            # The spot controller cluster status changed during querying
+            # the spot jobs, use the latest cluster status, so that the
+            # message for INIT and STOPPED states will be correctly
+            # added to the message.
+            cluster_status = backend_utils.refresh_cluster_status_handle(
+                controller_name)
+            spot_jobs = []
+
+        # Find in-progress spot jobs, and hint users to cancel them.
+        non_terminal_jobs = [
+            job for job in spot_jobs if not job['status'].is_terminal()
+        ]
+        if (cluster_status == global_user_state.ClusterStatus.UP and
+                non_terminal_jobs):
+            msg += ('\n * In-progress spot jobs found, their resources '
+                    'will not be terminated and require manual cleanup:\n')
+            job_table = spot_lib.format_job_table(non_terminal_jobs,
+                                                  show_all=False)
+            # Add prefix to each line to align with the bullet point.
+            msg += '\n'.join(
+                ['   ' + line for line in job_table.split('\n') if line != ''])
+    if cluster_status == global_user_state.ClusterStatus.INIT:
+        msg += ('\n * If there are pending/in-progress spot jobs, those '
+                'resources will not be terminated and require manual cleanup.')
+    click.echo(msg)
+
+
 def _down_or_stop_clusters(
         names: Tuple[str],
         apply_to_all: Optional[bool],
@@ -1903,16 +1969,8 @@ def _down_or_stop_clusters(
                     '`sky stop/autostop`.'))
             ]
         # Make sure the reserved clusters are explicitly specified without other
-        # normal clusters and purge is True.
+        # normal clusters.
         if len(reserved_clusters) > 0:
-            if not purge:
-                msg = (f'{operation} reserved cluster(s) '
-                       f'{reserved_clusters_str} is not supported.')
-                if down:
-                    msg += (
-                        '\nPlease specify --purge (-p) to force-terminate the '
-                        'reserved cluster(s).')
-                raise click.UsageError(msg)
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
@@ -1920,6 +1978,21 @@ def _down_or_stop_clusters(
                     f'{reserved_clusters_str} with multiple other cluster(s) '
                     f'{names_str} is not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
+            if not down:
+                raise click.UsageError(
+                    f'{operation} reserved cluster(s) '
+                    f'{reserved_clusters_str} is not supported.')
+            else:
+                # TODO(zhwu): We can only have one reserved cluster (spot
+                # controller).
+                assert len(reserved_clusters) == 1, reserved_clusters
+                _hint_for_down_spot_controller(reserved_clusters[0])
+
+                click.confirm('Proceed?',
+                              default=False,
+                              abort=True,
+                              show_default=True)
+                no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
