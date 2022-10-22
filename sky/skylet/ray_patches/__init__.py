@@ -27,6 +27,8 @@ Example workflow:
 import os
 import subprocess
 
+import pkg_resources
+
 from sky.skylet import constants
 
 
@@ -34,11 +36,12 @@ def _to_absolute(pwd_file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), pwd_file)
 
 
-def _run_patch(target_file, patch_file):
+def _run_patch(target_file,
+               patch_file,
+               version=constants.SKY_REMOTE_RAY_VERSION):
     """Applies a patch if it has not been applied already."""
     # .orig is the original file that is not patched.
-    orig_file = os.path.abspath(
-        f'{target_file}-v{constants.SKY_REMOTE_RAY_VERSION}.orig')
+    orig_file = os.path.abspath(f'{target_file}-v{version}.orig')
     script = f"""\
     which patch >/dev/null 2>&1 || sudo yum install -y patch || true
     which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
@@ -86,6 +89,8 @@ def patch() -> None:
     try:
         import azure
         from azure.identity._credentials import azure_cli
-        _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'))
+        version = pkg_resources.get_distribution('azure-cli').version
+        _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'),
+                   version)
     except ImportError:
         pass
