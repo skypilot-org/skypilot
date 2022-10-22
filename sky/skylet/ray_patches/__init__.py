@@ -86,7 +86,6 @@ def patch() -> None:
     try:
         import azure
         from azure.identity._credentials import azure_cli
-        # Applying the patch multiple times is fine.
         _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'))
     except ImportError:
         pass
