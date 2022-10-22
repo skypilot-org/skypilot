@@ -78,3 +78,18 @@ def patch() -> None:
     from ray.autoscaler._private import resource_demand_scheduler
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
+
+    # Fix the Azure get-access-token (used by ray azure node_provider) timeout issue, 
+    # by increasing the timeout.
+    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+    # Only patch it if azure cli is installed.
+    try:
+        import azure
+        from azure.identity._credentials import azure_cli
+        # Applying the patch multiple times is fine.
+        subprocess.run(
+            f'sed -i \'s/kwargs\["timeout"\] = 10/kwargs["timeout"] = 30/g\' {azure_cli.__file__}',
+            shell=True,
+            check=True)
+    except ImportError:
+        pass
