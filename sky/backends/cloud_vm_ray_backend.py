@@ -299,16 +299,15 @@ class RayCodeGen:
             f'run_fn = {run_fn_name}',
         ]
 
-    def add_ray_task(
-        self,
-        bash_script: str,
-        task_name: Optional[str],
-        ray_resources_dict: Optional[Dict[str, float]],
-        log_path: str,
-        env_vars: Dict[str, str] = None,
-        gang_scheduling_id: int = 0,
-        use_sudo: bool = False,
-    ) -> None:
+    def add_ray_task(self,
+                     bash_script: str,
+                     task_name: Optional[str],
+                     ray_resources_dict: Optional[Dict[str, float]],
+                     log_path: str,
+                     env_vars: Dict[str, str] = None,
+                     gang_scheduling_id: int = 0,
+                     use_sudo: bool = False,
+                     ip_rank_map: Dict[str, str] = None) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
             'Call add_gang_schedule_placement_group() before add_ray_task().')
@@ -363,7 +362,11 @@ class RayCodeGen:
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
-            sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
+            if {ip_rank_map!r}:
+                ip = ip_list[{gang_scheduling_id!r}]
+                sky_env_vars_dict['SKY_NODE_RANK'] = {ip_rank_map!r}[ip]
+            else:
+                sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
@@ -3004,6 +3007,12 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(num_actual_nodes,
                                                     accelerator_dict)
 
+        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
+                                             handle.launched_nodes,
+                                             handle=handle,
+                                             get_internal_ips=True)
+        ip_rank_map = {ip: i for i, ip in enumerate(ip_list)}
+
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
@@ -3026,6 +3035,7 @@ class CloudVmRayBackend(backends.Backend):
                 log_path=log_path,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,
+                ip_rank_map=ip_rank_map,
             )
 
         codegen.add_epilogue()
