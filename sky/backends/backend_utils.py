@@ -1125,7 +1125,8 @@ def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
                  handle: Optional[backends.Backend.ResourceHandle] = None,
                  head_ip_max_attempts: int = 1,
-                 worker_ip_max_attempts: int = 1) -> List[str]:
+                 worker_ip_max_attempts: int = 1,
+                 get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster."""
 
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
@@ -1141,6 +1142,14 @@ def get_node_ips(cluster_yaml: str,
     if (expected_num_nodes == 1 and handle is not None and
             handle.head_ip is not None):
         return [handle.head_ip]
+
+    # If get_internal_ips is True, we create a temporary config file
+    # with config[provider][use_internal_ips] set to True.
+    if get_internal_ips:
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+            ray_config['provider']['use_internal_ips'] = True
+            yaml.dump(ray_config, f)
+            cluster_yaml = f.name
 
     # Check the network connection first to avoid long hanging time for
     # ray get-head-ip below, if a long-lasting network connection failure
