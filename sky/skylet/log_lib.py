@@ -244,6 +244,7 @@ def make_task_bash_script(codegen: str,
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
+    # PYTHONUNBUFFERED is used to disable python output buffering.
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
@@ -251,6 +252,7 @@ def make_task_bash_script(codegen: str,
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
+            export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
     if env_vars is not None:
