@@ -1,9 +1,10 @@
 """Utilities for sky status."""
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 import click
 import colorama
 
 from sky import backends
+from sky import spot
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils
@@ -32,8 +33,14 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
-    """Compute cluster table values and display."""
+def show_status_table(cluster_records: List[Dict[str, Any]],
+                      show_all: bool,
+                      reserved_group_name: Optional[str] = None) -> int:
+    """Compute cluster table values and display.
+
+    Returns:
+        Number of pending auto{stop,down} clusters.
+    """
     # TODO(zhwu): Update the information for autostop clusters.
 
     status_columns = [
@@ -68,14 +75,20 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
         pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
+        if reserved_group_name is not None:
+            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{autostop_minutes}min)'
+                       f'{colorama.Style.RESET_ALL}')
+        else:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                       f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-        if pending_autostop:
-            click.echo(
-                '\n'
-                f'You have {pending_autostop} clusters with auto{{stop,down}} '
-                'scheduled. Refresh statuses with: `sky status --refresh`.')
     else:
         click.echo('No existing clusters.')
+    return pending_autostop
 
 
 def show_local_status_table(local_clusters: List[str]):
