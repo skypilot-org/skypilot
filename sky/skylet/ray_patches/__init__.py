@@ -87,9 +87,6 @@ def patch() -> None:
         import azure
         from azure.identity._credentials import azure_cli
         # Applying the patch multiple times is fine.
-        subprocess.run(
-            f'sed -i \'s/kwargs\["timeout"\] = 10/kwargs["timeout"] = 30/g\' {azure_cli.__file__}',
-            shell=True,
-            check=True)
+        _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'))
     except ImportError:
         pass
