@@ -114,9 +114,9 @@ def start(
     """Restart a cluster.
 
     If a cluster is previously stopped (status is STOPPED) or failed in
-    provisioning/runtime setup (status is INIT), this function will attempt to
-    start the cluster.  (In the second case, any failed setup steps are not
-    performed and only a request to start the machines is attempted.)
+    provisioning/runtime installation (status is INIT), this function will
+    attempt to start the cluster.  In the latter case, provisioning and runtime
+    installation will be retried.
 
     Auto-failover provisioning is not used when restarting a stopped
     cluster. It will be started on the same cloud, region, and zone that were
