@@ -13,14 +13,15 @@ setup = """\
     set -e
     pip install --upgrade pip
     conda init bash
-    conda activate resnet
-    if [ $? -ne 0 ]; then
+    conda activate resnet && exists=1 || exists=0
+    if [ $exists -ne 0 ]; then
         conda create -n resnet python=3.7 -y
         conda activate resnet
         conda install cudatoolkit=11.0 -y
         pip install tensorflow==2.4.0 pyyaml
         pip install protobuf==3.20
         cd models && pip install -e .
+    fi
     """
 
 # The command to run.  Will be run under the working directory.
