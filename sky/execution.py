@@ -78,8 +78,9 @@ def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
     if isinstance(entrypoint, str):
         raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
     elif isinstance(entrypoint, sky.Dag):
-        return entrypoint
+        return copy.deepcopy(entrypoint)
     elif isinstance(entrypoint, task_lib.Task):
+        entrypoint = copy.deepcopy(entrypoint)
         with sky.Dag() as dag:
             dag.add(entrypoint)
         return dag
