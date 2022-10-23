@@ -936,9 +936,8 @@ class _NaturalOrderWithAliasesGroup(click.Group):
             for alias in aliases:
                 if params is not None:
                     f.__click_params__ = copy.copy(params)
-                alias_cmd = super_cls.command(alias, *new_args,
-                                              **kwargs)(deprecate(f, alias))
-                alias_cmd = self.add_command(alias_cmd)
+                super_cls.command(alias, *new_args,
+                                  **kwargs)(deprecate(f, alias))
             return cmd
 
         return _decorator
