@@ -284,6 +284,7 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
 ) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task.
 
     The task's setup and run commands are executed under the task's workdir
@@ -363,6 +364,7 @@ def exec(  # pylint: disable=redefined-builtin
     backend: Optional[backends.Backend] = None,
     detach_run: bool = False,
 ) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task on an existing cluster.
 
     This function performs two actions:
@@ -437,6 +439,7 @@ def spot_launch(
     detach_run: bool = False,
     retry_until_up: bool = False,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed spot job.
 
     Please refer to the sky.cli.spot_launch for the document.

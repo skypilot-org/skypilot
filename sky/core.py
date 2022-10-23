@@ -31,6 +31,7 @@ logger = sky_logging.init_logger(__name__)
 
 @usage_lib.entrypoint
 def status(refresh: bool = False) -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster statuses.
 
     Each returned value has the following fields:
@@ -111,6 +112,7 @@ def start(
         retry_until_up: bool = False,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart a cluster.
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -155,6 +157,7 @@ def start(
 
 @usage_lib.entrypoint
 def stop(cluster_name: str, purge: bool = False) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stop a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
@@ -205,6 +208,7 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
 @usage_lib.entrypoint
 def down(cluster_name: str, purge: bool = False) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down a cluster.
 
     Tearing down a cluster will delete all associated resources (all billing
@@ -239,6 +243,7 @@ def autostop(
         idle_minutes: int,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop/autodown for a cluster.
 
     When multiple configurations are specified for the same cluster (e.g., this
@@ -342,6 +347,7 @@ def _check_cluster_available(cluster_name: str,
 def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the job queue of a cluster.
 
     Please refer to the sky.cli.queue for the document.
@@ -392,6 +398,7 @@ def queue(cluster_name: str,
 def cancel(cluster_name: str,
            all: bool = False,
            job_ids: Optional[List[int]] = None) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
@@ -432,6 +439,7 @@ def cancel(cluster_name: str,
 def tail_logs(cluster_name: str,
               job_id: Optional[str],
               follow: bool = True) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
@@ -461,6 +469,7 @@ def download_logs(
         cluster_name: str,
         job_ids: Optional[List[str]],
         local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Download the logs of jobs.
 
     Args:
@@ -489,6 +498,7 @@ def job_status(
         cluster_name: str,
         job_ids: Optional[List[str]],
         stream_logs: bool = False) -> Dict[str, Optional[job_lib.JobStatus]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the status of jobs.
 
     Args:
@@ -543,6 +553,7 @@ def _is_spot_controller_up(
 
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
     Please refer to the sky.cli.spot_status for the document.
@@ -614,7 +625,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 def spot_cancel(name: Optional[str] = None,
                 job_ids: Optional[Tuple[int]] = None,
                 all: bool = False) -> None:
-    """Cancel managed spot jobs
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Cancel managed spot jobs.
 
     Please refer to the sky.cli.spot_cancel for the document.
 
@@ -666,6 +678,7 @@ def spot_cancel(name: Optional[str] = None,
 @usage_lib.entrypoint
 def spot_tail_logs(name: Optional[str], job_id: Optional[int],
                    follow: bool) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed spot jobs.
 
     Please refer to the sky.cli.spot_logs for the document.
@@ -697,6 +710,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
 # ======================
 @usage_lib.entrypoint
 def storage_ls() -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get the storages.
 
     Returns:
@@ -718,6 +732,7 @@ def storage_ls() -> List[Dict[str, Any]]:
 
 @usage_lib.entrypoint
 def storage_delete(name: str) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Delete a storage.
 
     Raises:

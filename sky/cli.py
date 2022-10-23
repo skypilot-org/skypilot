@@ -1063,6 +1063,7 @@ def launch(
     yes: bool,
     no_setup: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1150,6 +1151,7 @@ def exec(
     image_id: Optional[str],
     env: List[Dict[str, str]],
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1253,6 +1255,7 @@ def exec(
     help='Query the latest cluster statuses from the cloud provider(s).')
 @usage_lib.entrypoint
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
     The following fields for each cluster are recorded: cluster name, time
@@ -1332,6 +1335,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     show_local_clusters = False
@@ -1405,6 +1409,7 @@ def logs(
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
 
     If JOB_ID is not provided, the latest job on the cluster will be used.
@@ -1472,6 +1477,7 @@ def logs(
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
     try:
         core.cancel(cluster, all, jobs)
@@ -1501,6 +1507,7 @@ def stop(
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stop cluster(s).
 
     CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
@@ -1580,6 +1587,7 @@ def autostop(
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop or autodown for cluster(s).
 
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
@@ -1686,6 +1694,7 @@ def start(
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
         retry_until_up: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
@@ -1843,6 +1852,7 @@ def down(
     yes: bool,
     purge: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
 
     CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
