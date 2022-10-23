@@ -1849,11 +1849,12 @@ def down(
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Tearing down a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost. For local clusters,
-    `sky down` does not terminate the local cluster, but instead removes the
-    cluster from `sky status` and terminates the calling user's running jobs.
+    stops), and any data on the attached disks will be lost.  Accelerators
+    (e.g., TPUs) that are part of the cluster will be deleted too.
 
-    Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
+    For local on-prem clusters, this command does not terminate the local
+    cluster, but instead removes the cluster from the status table and
+    terminates the calling user's running jobs.
 
     Examples:
 

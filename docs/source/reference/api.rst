@@ -27,20 +27,15 @@ sky.exec
 
 .. autofunction:: sky.exec
 
-
-
-
-sky.start
-~~~~~~~~~~~~~
-
-.. autofunction:: sky.start
-
-
 sky.stop
 ~~~~~~~~~
 
 .. autofunction:: sky.stop
 
+sky.start
+~~~~~~~~~~~~~
+
+.. autofunction:: sky.start
 
 sky.down
 ~~~~~~~~~
@@ -52,12 +47,10 @@ sky.status
 
 .. autofunction:: sky.status
 
-
 sky.autostop
 ~~~~~~~~~~~~~
 
 .. autofunction:: sky.autostop
-
 
 .. _sky-dag-ref:
 

@@ -14,12 +14,12 @@ Core CLI
    :prog: sky exec
    :nested: full
 
-.. click:: sky.cli:start
-   :prog: sky start
-   :nested: full
-
 .. click:: sky.cli:stop
    :prog: sky stop
+   :nested: full
+
+.. click:: sky.cli:start
+   :prog: sky start
    :nested: full
 
 .. click:: sky.cli:down
