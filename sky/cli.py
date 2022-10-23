@@ -920,8 +920,9 @@ class _DocumentedCodeCommand(click.Command):
         ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
         return super().get_help(ctx)
 
+
 def _deprecation_warning(f, original_name, alias_name):
-    
+
     @functools.wraps(f)
     def wrapper(self, *args, **kwargs):
         click.secho(
@@ -933,17 +934,18 @@ def _deprecation_warning(f, original_name, alias_name):
 
     return wrapper
 
+
 def _add_command_alias_to_group(group, command, name, hidden):
     """Add a alias of a command to a group."""
     new_command = copy.deepcopy(command)
     new_command.hidden = hidden
     new_command.name = name
-    new_command.invoke = _deprecation_warning(new_command.invoke, command.name, name)
-    group.add_command(new_command, name=name)    
+    new_command.invoke = _deprecation_warning(new_command.invoke, command.name,
+                                              name)
+    group.add_command(new_command, name=name)
 
-    
-@click.group(cls=_NaturalOrderGroup,
-             context_settings=_CONTEXT_SETTINGS)
+
+@click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
               callback=_install_shell_completion,
@@ -2777,7 +2779,9 @@ def spot_queue(all: bool, refresh: bool):
     spot_lib.dump_job_table_cache(job_table)
     click.echo(f'Managed spot jobs:\n{job_table}')
 
+
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
+
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
