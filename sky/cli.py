@@ -916,7 +916,7 @@ def _start_cluster(cluster_name: str,
 
 
 class _NaturalOrderWithAliasesGroup(click.Group):
-    """Lists commands in the order they are defined in this script.
+    """Lists commands in the order defined in this script and support aliases.
 
     Reference: https://github.com/pallets/click/issues/513
     """
@@ -924,15 +924,17 @@ class _NaturalOrderWithAliasesGroup(click.Group):
     def command(self, *args, **kwargs):
         """Support `aliases` as a list in kwargs."""
 
+        super_cls = super()
+
         def decorator(f):
             name = args[0] if args else f.__name__
             remaining_args = args[1:] if args else []
             aliases = kwargs.pop('aliases', None)
             if aliases:
                 for alias in aliases:
-                    cmd = super().command(alias, *remaining_args, **kwargs)(f)
+                    cmd = super_cls.command(alias, *remaining_args, **kwargs)(f)
                     cmd.short_help = f'(Deprecated) Alias of {name}.'
-            return super().command(name, *remaining_args, **kwargs)(f)
+            return super_cls.command(name, *remaining_args, **kwargs)(f)
 
         return decorator
 
