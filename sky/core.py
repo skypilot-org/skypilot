@@ -478,8 +478,10 @@ def _is_spot_controller_up(
 
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
-    print(f'{colorama.Fore.YELLOW}WARNING: spot_status is deprecated. '
-        f'Please use spot_queue.{colorama.Style.RESET_ALL}', file=sys.stderr)
+    print(
+        f'{colorama.Fore.YELLOW}WARNING: `spot_status` is deprecated. '
+        f'Instead, use: spot_queue{colorama.Style.RESET_ALL}',
+        file=sys.stderr)
     return spot_queue(refresh=refresh)
 
 

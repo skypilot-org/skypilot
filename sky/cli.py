@@ -896,26 +896,6 @@ def _make_dag_from_entrypoint_with_overrides(
     return dag
 
 
-def _start_cluster(cluster_name: str,
-                   idle_minutes_to_autostop: Optional[int] = None,
-                   retry_until_up: bool = False):
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    with sky.Dag():
-        dummy_task = sky.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name,
-                               retry_until_up=retry_until_up)
-    if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop)
-    return handle
-
-
 class _NaturalOrderWithAliasesGroup(click.Group):
     """Lists commands in the order defined in this script and support aliases.
 
@@ -940,10 +920,24 @@ class _NaturalOrderWithAliasesGroup(click.Group):
             new_args = args[1:] if args else []
 
             f.__doc__ = f'[Deprecated] Alias for `{cmd.name}`.'
+
+            def deprecate(f, alias):
+
+                @functools.wraps(f)
+                def wrapper(*args, **kwargs):
+                    click.secho(
+                        f'WARNING: `{self.name} {alias}` is deprecated. '
+                        f'Instead, use: {self.name} {cmd.name}\n',
+                        fg='yellow')
+                    return f(*args, **kwargs)
+
+                return wrapper
+
             for alias in aliases:
                 if params is not None:
                     f.__click_params__ = copy.copy(params)
-                alias_cmd = super_cls.command(alias, *new_args, **kwargs)(f)
+                alias_cmd = super_cls.command(alias, *new_args,
+                                              **kwargs)(deprecate(f, alias))
                 alias_cmd = self.add_command(alias_cmd)
             return cmd
 
