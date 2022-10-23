@@ -20,7 +20,7 @@ from sky.data import Storage, StorageMode, StoreType
 from sky.global_user_state import ClusterStatus
 from sky.skylet.job_lib import JobStatus
 from sky.core import (status, start, stop, down, autostop, queue, cancel,
-                      tail_logs, download_logs, job_status, spot_status,
+                      tail_logs, download_logs, job_status, spot_queue,
                       spot_cancel, storage_ls, storage_delete)
 
 # Aliases.
@@ -68,7 +68,7 @@ __all__ = [
     'download_logs',
     'job_status',
     # core APIs Spot Job Management
-    'spot_status',
+    'spot_queue',
     'spot_cancel',
     # core APIs Storage Management
     'storage_ls',

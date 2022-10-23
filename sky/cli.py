@@ -915,11 +915,26 @@ def _start_cluster(cluster_name: str,
     return handle
 
 
-class _NaturalOrderGroup(click.Group):
+class _NaturalOrderWithAliasesGroup(click.Group):
     """Lists commands in the order they are defined in this script.
 
     Reference: https://github.com/pallets/click/issues/513
     """
+
+    def command(self, *args, **kwargs):
+        """Support `aliases` as a list in kwargs."""
+
+        def decorator(f):
+            name = args[0] if args else f.__name__
+            remaining_args = args[1:] if args else []
+            aliases = kwargs.pop('aliases', None)
+            if aliases:
+                for alias in aliases:
+                    cmd = super().command(alias, *remaining_args, **kwargs)(f)
+                    cmd.short_help = f'(Deprecated) Alias of {name}.'
+            return super().command(name, *remaining_args, **kwargs)(f)
+
+        return decorator
 
     def list_commands(self, ctx):
         return self.commands.keys()
@@ -940,7 +955,8 @@ class _DocumentedCodeCommand(click.Command):
         return super().get_help(ctx)
 
 
-@click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
+@click.group(cls=_NaturalOrderWithAliasesGroup,
+             context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
               callback=_install_shell_completion,
@@ -1890,10 +1906,10 @@ def _hint_for_down_spot_controller(controller_name: str):
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
-           'jobs (output of `sky spot status`) will be lost.')
+           'jobs (output of `sky spot queue`) will be lost.')
     if cluster_status == global_user_state.ClusterStatus.UP:
         try:
-            spot_jobs = core.spot_status(refresh=False)
+            spot_jobs = core.spot_queue(refresh=False)
         except exceptions.ClusterNotUpError:
             # The spot controller cluster status changed during querying
             # the spot jobs, use the latest cluster status, so that the
@@ -2454,7 +2470,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         click.echo()
 
 
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderWithAliasesGroup)
 def storage():
     """Storage related commands."""
     pass
@@ -2511,7 +2527,7 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         sky.storage_delete(name)
 
 
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderWithAliasesGroup)
 def admin():
     """Sky administrator commands for local clusters."""
     pass
@@ -2607,7 +2623,7 @@ def _is_spot_controller_up(
     return controller_status, handle
 
 
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderWithAliasesGroup)
 def spot():
     """Managed spot instances related commands."""
     pass
@@ -2707,7 +2723,7 @@ def spot_launch(
                     retry_until_up=retry_until_up)
 
 
-@spot.command('status', cls=_DocumentedCodeCommand)
+@spot.command('queue', aliases=['status'], cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -2724,7 +2740,7 @@ def spot_launch(
 )
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_status(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2751,11 +2767,11 @@ def spot_status(all: bool, refresh: bool):
 
     .. code-block:: bash
 
-      watch -n60 sky spot status
+      watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
-        job_table = core.spot_status(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh)
     except exceptions.ClusterNotUpError:
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
@@ -2902,7 +2918,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     return candidates
 
 
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderWithAliasesGroup)
 def bench():
     """Sky Benchmark related commands."""
     pass

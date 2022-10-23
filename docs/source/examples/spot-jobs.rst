@@ -188,7 +188,7 @@ Here are some commands for managed spot jobs. Check :code:`sky spot --help` for 
 .. code-block:: console
 
     # Check the status of the spot jobs
-    $ sky spot status
+    $ sky spot queue
     Fetching managed spot job status...
     Managed spot jobs:
     ID NAME     RESOURCES     SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS

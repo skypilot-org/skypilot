@@ -109,7 +109,7 @@ class TestReservedClustersOperations:
             'sky.backends.backend_utils.refresh_cluster_status_handle',
             mock_cluster_refresh_up)
 
-        monkeypatch.setattr('sky.core.spot_status', lambda refresh: [])
+        monkeypatch.setattr('sky.core.spot_queue', lambda refresh: [])
 
         cli_runner = cli_testing.CliRunner()
         result = cli_runner.invoke(cli.down, [spot.SPOT_CONTROLLER_NAME],
