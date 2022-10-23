@@ -896,51 +896,11 @@ def _make_dag_from_entrypoint_with_overrides(
     return dag
 
 
-class _NaturalOrderWithAliasesGroup(click.Group):
-    """Lists commands in the order defined in this script and support aliases.
+class _NaturalOrderGroup(click.Group):
+    """Lists commands in the order defined in this script.
 
     Reference: https://github.com/pallets/click/issues/513
     """
-
-    def command(self, *args, **kwargs):
-        """Support `aliases` as a list in kwargs."""
-
-        aliases = kwargs.pop('aliases', [])
-        super_cls = super()
-        if not aliases:
-            return super_cls.command(*args, **kwargs)
-
-        def _decorator(f):
-            params = None
-            if hasattr(f, '__click_params__'):
-                params = copy.copy(f.__click_params__)
-            cmd = super_cls.command(*args, **kwargs)(f)
-
-            kwargs.pop('name', None)
-            new_args = args[1:] if args else []
-
-            f.__doc__ = f'[Deprecated] Alias for `{cmd.name}`.'
-
-            def deprecate(f, alias):
-
-                @functools.wraps(f)
-                def wrapper(*args, **kwargs):
-                    click.secho(
-                        f'WARNING: `{self.name} {alias}` is deprecated. '
-                        f'Instead, use: {self.name} {cmd.name}\n',
-                        fg='yellow')
-                    return f(*args, **kwargs)
-
-                return wrapper
-
-            for alias in aliases:
-                if params is not None:
-                    f.__click_params__ = copy.copy(params)
-                super_cls.command(alias, *new_args,
-                                  **kwargs)(deprecate(f, alias))
-            return cmd
-
-        return _decorator
 
     def list_commands(self, ctx):
         return self.commands.keys()
@@ -960,8 +920,29 @@ class _DocumentedCodeCommand(click.Command):
         ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
         return super().get_help(ctx)
 
+def _deprecation_warning(f, original_name, alias_name):
+    
+    @functools.wraps(f)
+    def wrapper(self, *args, **kwargs):
+        click.secho(
+            f'WARNING: `{alias_name}` is deprecated and will be removed in a'
+            f'future release. Please use `{original_name}` instead.\n',
+            err=True,
+            fg='yellow')
+        return f(self, *args, **kwargs)
 
-@click.group(cls=_NaturalOrderWithAliasesGroup,
+    return wrapper
+
+def _add_command_alias_to_group(group, command, name, hidden):
+    """Add a alias of a command to a group."""
+    new_command = copy.deepcopy(command)
+    new_command.hidden = hidden
+    new_command.name = name
+    new_command.invoke = _deprecation_warning(new_command.invoke, command.name, name)
+    group.add_command(new_command, name=name)    
+
+    
+@click.group(cls=_NaturalOrderGroup,
              context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
@@ -2476,7 +2457,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         click.echo()
 
 
-@cli.group(cls=_NaturalOrderWithAliasesGroup)
+@cli.group(cls=_NaturalOrderGroup)
 def storage():
     """Storage related commands."""
     pass
@@ -2533,7 +2514,7 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
         sky.storage_delete(name)
 
 
-@cli.group(cls=_NaturalOrderWithAliasesGroup)
+@cli.group(cls=_NaturalOrderGroup)
 def admin():
     """Sky administrator commands for local clusters."""
     pass
@@ -2629,7 +2610,7 @@ def _is_spot_controller_up(
     return controller_status, handle
 
 
-@cli.group(cls=_NaturalOrderWithAliasesGroup)
+@cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Managed spot instances related commands."""
     pass
@@ -2729,7 +2710,7 @@ def spot_launch(
                     retry_until_up=retry_until_up)
 
 
-@spot.command('queue', aliases=['status'], cls=_DocumentedCodeCommand)
+@spot.command('queue', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -2744,7 +2725,7 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
-# @usage_lib.entrypoint
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_queue(all: bool, refresh: bool):
     """Show managed spot job queue.
@@ -2796,6 +2777,7 @@ def spot_queue(all: bool, refresh: bool):
     spot_lib.dump_job_table_cache(job_table)
     click.echo(f'Managed spot jobs:\n{job_table}')
 
+_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
@@ -2924,7 +2906,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
     return candidates
 
 
-@cli.group(cls=_NaturalOrderWithAliasesGroup)
+@cli.group(cls=_NaturalOrderGroup)
 def bench():
     """Sky Benchmark related commands."""
     pass

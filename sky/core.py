@@ -489,7 +489,7 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
     """Get statuses of managed spot jobs.
 
-    Please refer to the sky.cli.spot_queue for the document.
+    Please refer to the sky.cli.spot_queue for the documentation.
 
     Returns:
         [

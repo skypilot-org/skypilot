@@ -2095,16 +2095,16 @@ class CloudVmRayBackend(backends.Backend):
             if name == spot_lib.SPOT_CONTROLLER_NAME:
                 logger.info(f'{fore.CYAN}Spot Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                            '\nTo cancel the job:\t'
+                            '\nTo cancel the job:\t\t'
                             f'{backend_utils.BOLD}sky spot cancel {job_id}'
                             f'{backend_utils.RESET_BOLD}'
-                            '\nTo stream the logs:\t'
+                            '\nTo stream the logs:\t\t'
                             f'{backend_utils.BOLD}sky spot logs {job_id}'
                             f'{backend_utils.RESET_BOLD}'
-                            f'\nTo stream debug logs:\t'
+                            f'\nTo stream controller logs:\t'
                             f'{backend_utils.BOLD}sky logs {name} {job_id}'
                             f'{backend_utils.RESET_BOLD}'
-                            '\nTo view all spot jobs:\t'
+                            '\nTo view all spot jobs:\t\t'
                             f'{backend_utils.BOLD}sky spot queue'
                             f'{backend_utils.RESET_BOLD}')
             else:
@@ -2206,12 +2206,12 @@ class CloudVmRayBackend(backends.Backend):
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task, job_id, detach_run)
 
-    def _post_execute(self, handle: ResourceHandle) -> None:
+    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         colorama.init()
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
-        if name == spot_lib.SPOT_CONTROLLER_NAME:
+        if name == spot_lib.SPOT_CONTROLLER_NAME or down:
             return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'

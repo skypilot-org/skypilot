@@ -246,7 +246,7 @@ def _execute(
                 backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
-                backend.post_execute(handle)
+                backend.post_execute(handle, down)
 
         if Stage.DOWN in stages:
             if down and idle_minutes_to_autostop is None:
