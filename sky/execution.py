@@ -283,8 +283,16 @@ def launch(
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
     no_setup: bool = False,
-):
-    """Launch a sky.DAG (rerun setup if cluster exists).
+) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Launch a task.
+
+    The task's setup and run commands are executed under the task's workdir
+    (when specified, it is synced to remote cluster).  The task undergoes job
+    queue scheduling on the cluster.
+
+    Currently, the first argument must be a single-node DAG (i.e., a single
+    task). Support for pipelines/general DAGs are in experimental branches.
 
     Args:
         dag: sky.DAG to launch.
@@ -313,9 +321,9 @@ def launch(
             OptimizeTarget.TIME.
         detach_run: If True, run setup first (blocking), then detach from the
             job's execution.
-        no_setup: if true, the cluster will not re-run setup instructions
+        no_setup: if True, do not re-run setup commands.
 
-    Examples:
+    Example:
         >>> import sky
         >>> with sky.Dag() as dag:
         >>>     task = sky.Task(run='echo hello SkyPilot')
@@ -354,9 +362,50 @@ def exec(  # pylint: disable=redefined-builtin
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
-):
+) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Execute a task on an existing cluster.
+
+    This function performs two actions:
+
+    (1) workdir syncing, if the task has a workdir specified;
+    (2) executing the task's ``run`` commands.
+
+    All other steps (provisioning, setup commands, file mounts syncing) are
+    skipped.  If any of those specifications changed in the task, this function
+    will not reflect those changes.  To ensure a cluster's setup is up to date,
+    use ``sky.launch()`` instead.
+
+    Execution and scheduling behavior:
+
+    - The task will undergo job queue scheduling, respecting any specified
+      resource requirement. It can be executed on any node of the cluster with
+      enough resources.
+    - The task is run under the workdir (if specified).
+    - The task is run non-interactively (without a pseudo-terminal or
+      pty), so interactive commands such as ``htop`` do not work.
+      Use ``ssh my_cluster`` instead.
+
+    Args:
+        dag: sky.DAG containing the task to execute.
+        cluster_name: name of an existing cluster to execute the task.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually execute the task.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        detach_run: if True, detach from logging once the task has been
+            submitted.
+
+    Raises:
+        ValueError: if the specified cluster does not exist or is not in UP
+            status.
+    """
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
@@ -374,7 +423,6 @@ def exec(  # pylint: disable=redefined-builtin
              stream_logs=stream_logs,
              handle=handle,
              backend=backend,
-             optimize_target=optimize_target,
              stages=[
                  Stage.SYNC_WORKDIR,
                  Stage.EXEC,
@@ -391,6 +439,7 @@ def spot_launch(
     detach_run: bool = False,
     retry_until_up: bool = False,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed spot job.
 
     Please refer to the sky.cli.spot_launch for the document.
