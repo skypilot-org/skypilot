@@ -925,7 +925,7 @@ def _deprecation_warning(f, original_name, alias_name):
     @functools.wraps(f)
     def wrapper(self, *args, **kwargs):
         click.secho(
-            f'WARNING: `{alias_name}` is deprecated and will be removed in a'
+            f'WARNING: `{alias_name}` is deprecated and will be removed in the '
             f'future release. Please use `{original_name}` instead.\n',
             err=True,
             fg='yellow')
