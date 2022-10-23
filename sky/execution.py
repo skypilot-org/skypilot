@@ -463,7 +463,7 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
-            dag=spot_dag,
+            dag_or_task=spot_dag,
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,

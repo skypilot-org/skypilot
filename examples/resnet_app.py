@@ -4,9 +4,7 @@ import sky
 
 # The working directory contains all code and will be synced to remote.
 workdir = '~/Downloads/tpu'
-subprocess.run(f'cd {workdir} && git checkout 222cc86',
-                shell=True,
-                check=True)
+subprocess.run(f'cd {workdir} && git checkout 222cc86', shell=True, check=True)
 
 # The setup command.  Will be run under the working directory.
 setup = """\
@@ -14,7 +12,7 @@ setup = """\
     pip install --upgrade pip
     conda init bash
     conda activate resnet && exists=1 || exists=0
-    if [ $exists -ne 0 ]; then
+    if [ $exists -eq 0 ]; then
         conda create -n resnet python=3.7 -y
         conda activate resnet
         conda install cudatoolkit=11.0 -y
@@ -56,7 +54,7 @@ task = sky.Task(
 task.set_file_mounts(file_mounts)
 # TODO: allow option to say (or detect) no download/egress cost.
 task.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
-                    estimated_size_gigabytes=70)
+                estimated_size_gigabytes=70)
 task.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
 task.set_resources({
     ##### Fully specified
@@ -86,5 +84,5 @@ task.set_resources({
 # Optionally, specify a time estimator: Resources -> time in seconds.
 # task.set_time_estimator(time_estimators.resnet50_estimate_runtime)
 
-# sky.launch(dag, dryrun=True)
+# sky.launch(task, dryrun=True)
 sky.launch(task)
