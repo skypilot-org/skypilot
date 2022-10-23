@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
 import colorama
 import getpass
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag
@@ -477,7 +478,8 @@ def _is_spot_controller_up(
 
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
-    logger.warning('spot_status is deprecated. Please use spot_queue.')
+    print(f'{colorama.Fore.YELLOW}WARNING: spot_status is deprecated. '
+        f'Please use spot_queue.{colorama.Style.RESET_ALL}', file=sys.stderr)
     return spot_queue(refresh=refresh)
 
 

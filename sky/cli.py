@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import copy
 import datetime
 import functools
 import getpass
@@ -924,19 +925,29 @@ class _NaturalOrderWithAliasesGroup(click.Group):
     def command(self, *args, **kwargs):
         """Support `aliases` as a list in kwargs."""
 
+        aliases = kwargs.pop('aliases', [])
         super_cls = super()
+        if not aliases:
+            return super_cls.command(*args, **kwargs)
 
-        def decorator(f):
-            name = args[0] if args else f.__name__
-            remaining_args = args[1:] if args else []
-            aliases = kwargs.pop('aliases', None)
-            if aliases:
-                for alias in aliases:
-                    cmd = super_cls.command(alias, *remaining_args, **kwargs)(f)
-                    cmd.short_help = f'(Deprecated) Alias of {name}.'
-            return super_cls.command(name, *remaining_args, **kwargs)(f)
+        def _decorator(f):
+            params = None
+            if hasattr(f, '__click_params__'):
+                params = copy.copy(f.__click_params__)
+            cmd = super_cls.command(*args, **kwargs)(f)
 
-        return decorator
+            kwargs.pop('name', None)
+            new_args = args[1:] if args else []
+
+            f.__doc__ = f'[Deprecated] Alias for `{cmd.name}`.'
+            for alias in aliases:
+                if params is not None:
+                    f.__click_params__ = copy.copy(params)
+                alias_cmd = super_cls.command(alias, *new_args, **kwargs)(f)
+                alias_cmd = self.add_command(alias_cmd)
+            return cmd
+
+        return _decorator
 
     def list_commands(self, ctx):
         return self.commands.keys()
@@ -2740,10 +2751,10 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
-@usage_lib.entrypoint
+# @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_queue(all: bool, refresh: bool):
-    """Show statuses of managed spot jobs.
+    """Show managed spot job queue.
 
     \b
     Each spot job can have one of the following statuses:
@@ -2763,7 +2774,7 @@ def spot_queue(all: bool, refresh: bool):
 
     If the job failed, either due to user code or spot unavailability, the error
     log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
-    Please find your exact spot controller name with ``sky status -a``.
+    Please find your exact spot controller name with ``sky status``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
