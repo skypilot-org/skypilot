@@ -248,9 +248,11 @@ def _execute(
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
 
+        if task.storage_mounts is not None:
+            backend.teardown_ephemeral_storage(task)
+
         if Stage.DOWN in stages:
             if down and idle_minutes_to_autostop is None:
-                backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
         if cluster_name != spot.SPOT_CONTROLLER_NAME:
