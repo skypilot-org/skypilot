@@ -63,6 +63,9 @@ sky.Task
 
 .. autoclass:: sky.Task
     :members:
+    :exclude-members: estimate_runtime
+
+    .. automethod:: __init__
 
 sky.Dag
 ~~~~~~~~~

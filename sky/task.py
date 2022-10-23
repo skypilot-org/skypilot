@@ -70,7 +70,7 @@ def _is_valid_env_var(name: str) -> bool:
 
 
 class Task:
-    """Task: a coarse-grained stage in an application."""
+    """Task: a coarse-grained stage in an application DAG."""
 
     def __init__(
         self,
@@ -86,35 +86,48 @@ class Task:
     ):
         """Initializes a Task.
 
-        All fields are optional.  `Task.run` is the actual program: either a
+        All fields are optional.  ``Task.run`` is the actual program: either a
         shell command to run (str) or a command generator for different nodes
         (lambda; see below).
 
-        Before executing a Task, it is required to call Task.set_resources() to
-        assign resource requirements to this task.
+        Optionally, call ``Task.set_resources()`` to set the resource
+        requirements for this task.  If not set, a default CPU-only requirement
+        is assumed (the same as ``sky cpunode``).
+
+        Example:
+            >>> # A Task that will sync up local workdir '.', containing
+            >>> # requirements.txt and train.py.
+            >>> sky.Task(setup='pip install requirements.txt',
+            >>>          run='python train.py',
+            >>>          workdir='.')
+            >>>
+            >>> # A Task for provisioning a cluster.
+            >>> sky.Task(num_nodes=n).set_resources(...)
 
         Args:
-          name: A string name for the Task.
-          setup: A setup command, run under 'workdir' and before actually
-            executing the run command, 'run'.
-          run: Either a shell command (str) or a command generator (callable).
-            If latter, it must take a node rank and a list of node addresses as
-            input and return a shell command (str) (valid to return None for
-            some nodes, in which case no commands are run on them).  Commands
-            will be run under 'workdir'. Note the command generator should be
-            self-contained.
+          name: A string name for the Task for display purposes.
+          setup: A setup command, which will be run before executing the run
+            commands ``run``, and executed under ``workdir``.
+          run: The actual command for the task. If not None, either a shell
+            command (str) or a command generator (callable).  If latter, it
+            must take a node rank and a list of node addresses as input and
+            return a shell command (str) (valid to return None for some nodes,
+            in which case no commands are run on them).  Run commands will be
+            run under ``workdir``. Note the command generator should be a
+            self-contained lambda.
           envs: A dictionary of environment variables to set before running the
-            setup and run command.
-          workdir: The local working directory.  This directory and its files
-            will be synced to a location on the remote VM(s), and 'setup' and
-            'run' commands will be run under that location (thus, they can rely
-            on relative paths when invoking binaries).
+            setup and run commands.
+          workdir: The local working directory.  This directory will be synced
+            to a location on the remote VM(s), and ``setup`` and ``run``
+            commands will be run under that location (thus, they can rely on
+            relative paths when invoking binaries).
           num_nodes: The number of nodes to provision for this Task.  If None,
             treated as 1 node.  If > 1, each node will execute its own
-            setup/run command; 'run' can either be a str, meaning all nodes get
-            the same command, or a lambda, as documented above.
-          docker_image: The base docker image that this Task will be built on.
-            In effect when LocalDockerBackend is used.  Defaults to
+            setup/run command, where ``run`` can either be a str, meaning all
+            nodes get the same command, or a lambda, with the semantics
+            documented above.
+          docker_image: (Only in effect when LocalDockerBackend is used.) The
+            base docker image that this Task will be built on.  Defaults to
             'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
         """
         self.name = name
@@ -207,7 +220,8 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml(yaml_path):
+    def from_yaml(yaml_path: str) -> 'Task':
+        """Initializes a task from a task YAML."""
         with open(os.path.expanduser(yaml_path), 'r') as f:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
@@ -344,8 +358,10 @@ class Task:
     def envs(self) -> Dict[str, str]:
         return self._envs
 
-    def set_envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str,
-                                                                      str]]):
+    def set_envs(
+            self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str,
+                                                                 str]]) -> None:
+        """Sets the environment variables for the setup and run commands."""
         if envs is None:
             self._envs = None
             return
