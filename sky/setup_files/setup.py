@@ -56,7 +56,7 @@ def parse_footnote(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray 1.13.0 requires click<=8.0.4,>=7.0; We disable the
+    # NOTE: ray 2.0.1 requires click<=8.0.4,>=7.0; We disable the
     # shell completion for click<8.0 for backward compatibility.
     'click<=8.0.4,>=7.0',
     'colorama',
