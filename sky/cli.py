@@ -940,8 +940,8 @@ def _add_command_alias_to_group(group, command, name, hidden):
     new_command = copy.deepcopy(command)
     new_command.hidden = hidden
     new_command.name = name
-    new_command.invoke = _with_deprecation_warning(new_command.invoke, command.name,
-                                              name)
+    new_command.invoke = _with_deprecation_warning(new_command.invoke,
+                                                   command.name, name)
     group.add_command(new_command, name=name)
 
 
@@ -1016,9 +1016,9 @@ def cli():
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after all jobs finish (successfully or '
-     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the specified idle time. '
+    ('Autodown the cluster: tear down the cluster after all jobs finish '
+     '(successfully or abnormally). If --idle-minutes-to-autostop is also set, '
+     'the cluster will be torn down after the specified idle time. '
      'Note that if errors occur during provisioning/data syncing/setting up, '
      'the cluster will not be torn down for debugging purposes.'),
 )
@@ -1068,6 +1068,7 @@ def launch(
     yes: bool,
     no_setup: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1155,6 +1156,7 @@ def exec(
     image_id: Optional[str],
     env: List[Dict[str, str]],
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1249,14 +1251,16 @@ def exec(
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.option('--refresh',
-              '-r',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Query cluster status from the cloud provider.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest cluster statuses from the cloud provider(s).')
 @usage_lib.entrypoint
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
     The following fields for each cluster are recorded: cluster name, time
@@ -1336,6 +1340,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     show_local_clusters = False
@@ -1409,6 +1414,7 @@ def logs(
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
 
     If JOB_ID is not provided, the latest job on the cluster will be used.
@@ -1476,6 +1482,7 @@ def logs(
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
     try:
         core.cancel(cluster, all, jobs)
@@ -1505,14 +1512,15 @@ def stop(
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stop cluster(s).
 
     CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
-    the instances will stop while the disks will still be charged.  Those disks
-    will be reattached when restarting the cluster.
+    the instances will stop, while the disks will still be charged.  Those
+    disks will be reattached when restarting the cluster.
 
     Currently, spot instance clusters cannot be stopped.
 
@@ -1584,6 +1592,7 @@ def autostop(
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop or autodown for cluster(s).
 
     CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
@@ -1669,9 +1678,9 @@ def autostop(
     is_flag=True,
     required=False,
     help=
-    ('Tear down the cluster after all jobs finish (successfully or '
-     'abnormally). If --idle-minutes-to-autostop is also set, the cluster will '
-     'be torn down after the specified idle time.'),
+    ('Autodown the cluster: tear down the cluster after specified minutes of '
+     'idle time after all jobs finish (successfully or abnormally). Requires '
+     ' --idle-minutes-to-autostop to be set.'),
 )
 @click.option(
     '--retry-until-up',
@@ -1690,18 +1699,19 @@ def start(
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
         retry_until_up: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
-    provisioning/runtime setup (status is INIT), this command will attempt to
-    start the cluster.  (In the second case, any failed setup steps are not
-    performed and only a request to start the machines is attempted.)
+    provisioning/runtime installation (status is INIT), this command will
+    attempt to start the cluster.  In the latter case, provisioning and runtime
+    installation will be retried.
 
-    Auto-failover provisioning is not used when restarting stopped
-    clusters. They will be started on the same cloud and region that was chosen
-    before.
+    Auto-failover provisioning is not used when restarting a stopped
+    cluster. It will be started on the same cloud, region, and zone that were
+    chosen before.
 
-    If a cluster is already in the UP status, this command has no effect on it.
+    If a cluster is already in the UP status, this command has no effect.
 
     Examples:
 
@@ -1847,17 +1857,19 @@ def down(
     yes: bool,
     purge: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
 
     CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Tearing down a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost. For local clusters,
-    `sky down` does not terminate the local cluster, but instead removes the
-    cluster from `sky status` and terminates the calling user's running jobs.
+    stops), and any data on the attached disks will be lost.  Accelerators
+    (e.g., TPUs) that are part of the cluster will be deleted too.
 
-    Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
+    For local on-prem clusters, this command does not terminate the local
+    cluster, but instead removes the cluster from the status table and
+    terminates the calling user's running jobs.
 
     Examples:
 
