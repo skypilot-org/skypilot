@@ -17,7 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import colorama
 
@@ -48,38 +48,46 @@ OptimizeTarget = optimizer.OptimizeTarget
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
 _ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
-Expected a sky.Dag but received a string.
+Expected a sky.Task or sky.Dag but received a string.
 
-If you meant to run a command, make it a Task's run command and wrap as a Dag:
+If you meant to run a command, make it a Task's run command:
 
-  def to_dag(command, gpu=None):
-      with sky.Dag() as dag:
-          sky.Task(run=command).set_resources(
-              sky.Resources(accelerators=gpu))
-      return dag
+    task = sky.Task(run=command)
 
 The command can then be run as:
 
-  sky.exec(to_dag(cmd), cluster_name=..., ...)
+  sky.exec(task, cluster_name=..., ...)
   # Or use {'V100': 1}, 'V100:0.5', etc.
-  sky.exec(to_dag(cmd, gpu='V100'), cluster_name=..., ...)
+  task.set_resources(sky.Resources(accelerators='V100:1'))
+  sky.exec(task, cluster_name=..., ...)
 
-  sky.launch(to_dag(cmd), ...)
+  sky.launch(task, ...)
 
-  sky.spot_launch(to_dag(cmd), ...)
+  sky.spot_launch(task, ...)
 """.strip()
 
 
-def _type_check_dag(dag):
-    """Raises TypeError if 'dag' is not a 'sky.Dag'."""
+def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
+    """Convert the entrypoint to a sky.Dag.
+
+    Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
+    """
     # Not suppressing stacktrace: when calling this via API user may want to
     # see their own program in the stacktrace. Our CLI impl would not trigger
     # these errors.
-    if isinstance(dag, str):
+    if isinstance(entrypoint, str):
         raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
-    elif not isinstance(dag, sky.Dag):
-        raise TypeError('Expected a sky.Dag but received argument of type: '
-                        f'{type(dag)}')
+    elif isinstance(entrypoint, sky.Dag):
+        return copy.deepcopy(entrypoint)
+    elif isinstance(entrypoint, task_lib.Task):
+        entrypoint = copy.deepcopy(entrypoint)
+        with sky.Dag() as dag:
+            dag.add(entrypoint)
+        return dag
+    else:
+        raise TypeError(
+            'Expected a sky.Task or sky.Dag but received argument of type: '
+            f'{type(entrypoint)}')
 
 
 class Stage(enum.Enum):
@@ -96,7 +104,7 @@ class Stage(enum.Enum):
 
 
 def _execute(
-    dag: sky.Dag,
+    entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
     down: bool = False,
     stream_logs: bool = True,
@@ -110,13 +118,13 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
 ) -> None:
-    """Runs a DAG.
+    """Execute a entrypoint.
 
-    If the DAG has not been optimized yet, this will call sky.optimize() for
-    the caller.
+    If sky.Task is given or DAG has not been optimized yet, this will call
+    sky.optimize() for the caller.
 
     Args:
-      dag: sky.Dag.
+      entrypoint: sky.Task or sky.Dag.
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
       down: bool; whether to tear down the launched resources after all jobs
@@ -143,7 +151,7 @@ def _execute(
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
     """
-    _type_check_dag(dag)
+    dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -272,7 +280,7 @@ def _execute(
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-    dag: sky.Dag,
+    task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
@@ -291,11 +299,12 @@ def launch(
     (when specified, it is synced to remote cluster).  The task undergoes job
     queue scheduling on the cluster.
 
-    Currently, the first argument must be a single-node DAG (i.e., a single
-    task). Support for pipelines/general DAGs are in experimental branches.
+    Currently, the first argument must be a sky.Task, or (more advanced usage)
+    a sky.Dag; in the latter case, currently it must be a single task).
+    Support for pipelines/general DAGs are in experimental branches.
 
     Args:
-        dag: sky.DAG to launch.
+        task: sky.Task or sky.Dag to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
@@ -325,21 +334,21 @@ def launch(
 
     Example:
         >>> import sky
-        >>> with sky.Dag() as dag:
-        >>>     task = sky.Task(run='echo hello SkyPilot')
-        >>>     task.set_resources(
-        ...             sky.Resources(
-        ...                 cloud=sky.AWS(),
-        ...                 accelerators='V100:4'
-        ...             )
-        ...     )
-        >>> sky.launch(dag, cluster_name='my-cluster')
+        >>> task = sky.Task(run='echo hello SkyPilot')
+        >>> task.set_resources(
+        ...         sky.Resources(
+        ...             cloud=sky.AWS(),
+        ...             accelerators='V100:4'
+        ...         )
+        ... )
+        >>> sky.launch(task, cluster_name='my-cluster')
 
     """
+    entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
     _execute(
-        dag=dag,
+        entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
         stream_logs=stream_logs,
@@ -356,7 +365,7 @@ def launch(
 
 @usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
-    dag: sky.Dag,
+    task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,
     down: bool = False,
@@ -388,7 +397,7 @@ def exec(  # pylint: disable=redefined-builtin
       Use ``ssh my_cluster`` instead.
 
     Args:
-        dag: sky.DAG containing the task to execute.
+        task: sky.Task or sky.Dag containing the task to execute.
         cluster_name: name of an existing cluster to execute the task.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -406,6 +415,12 @@ def exec(  # pylint: disable=redefined-builtin
         ValueError: if the specified cluster does not exist or is not in UP
             status.
     """
+    entrypoint = task
+    if isinstance(entrypoint, sky.Dag):
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
+            'deprecated. Pass sky.Task instead.'
+            f'{colorama.Style.RESET_ALL}')
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
@@ -417,7 +432,7 @@ def exec(  # pylint: disable=redefined-builtin
         if status != global_user_state.ClusterStatus.UP:
             raise ValueError(f'Cluster {cluster_name!r} is not up.  '
                              'Use `sky status` to check the status.')
-    _execute(dag=dag,
+    _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,
              stream_logs=stream_logs,
@@ -433,7 +448,7 @@ def exec(  # pylint: disable=redefined-builtin
 
 @usage_lib.entrypoint
 def spot_launch(
-    dag: sky.Dag,
+    task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
@@ -445,7 +460,7 @@ def spot_launch(
     Please refer to the sky.cli.spot_launch for the document.
 
     Args:
-        dag: DAG to launch.
+        task: sky.Task or sky.Dag to launch as a managed spot job.
         name: Name of the spot job.
         detach_run: Whether to detach the run.
 
@@ -453,10 +468,11 @@ def spot_launch(
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
+    entrypoint = task
     if name is None:
         name = backend_utils.generate_cluster_name()
 
-    _type_check_dag(dag)
+    dag = _convert_to_dag(entrypoint)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
                                  dag)
     task = dag.tasks[0]
@@ -499,16 +515,15 @@ def spot_launch(
                 'retry_until_up': retry_until_up,
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
-        with sky.Dag() as spot_dag:
-            controller_task = task_lib.Task.from_yaml(yaml_path)
-            controller_task.spot_task = task
-            assert len(controller_task.resources) == 1
+        controller_task = task_lib.Task.from_yaml(yaml_path)
+        controller_task.spot_task = task
+        assert len(controller_task.resources) == 1
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
-            dag=spot_dag,
+            entrypoint=controller_task,
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,

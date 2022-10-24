@@ -25,40 +25,37 @@ with sky.Dag() as dag:
 sky.launch(dag, cluster_name='tb', detach_run=True)
 
 # Run the training task.
-with sky.Dag() as dag:
+# The command to run.  Will be run under the working directory.
+run = 'conda activate resnet && mkdir -p resnet-model-dir && \
+    export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
+    python -u models/official/resnet/resnet_main.py --use_tpu=False \
+    --mode=train --train_batch_size=256 --train_steps=250 \
+    --iterations_per_loop=125 \
+    --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
+    --model_dir=resnet-model-dir \
+    --amp --xla --loss_scale=128'
 
-    # The command to run.  Will be run under the working directory.
-    run = 'conda activate resnet && mkdir -p resnet-model-dir && \
-        export XLA_FLAGS=\'--xla_gpu_cuda_data_dir=/usr/local/cuda/\' && \
-        python -u models/official/resnet/resnet_main.py --use_tpu=False \
-        --mode=train --train_batch_size=256 --train_steps=250 \
-        --iterations_per_loop=125 \
-        --data_dir=gs://cloud-tpu-test-datasets/fake_imagenet \
-        --model_dir=resnet-model-dir \
-        --amp --xla --loss_scale=128'
+train = sky.Task(
+    'train',
+    workdir=workdir,
+    run=run,
+)
 
-    train = sky.Task(
-        'train',
-        workdir=workdir,
-        run=run,
-    )
-
-    train.set_resources({
-        sky.Resources(accelerators='V100'),
-    })
-sky.exec(dag, cluster_name='tb', detach_run=True)
+train.set_resources({
+    sky.Resources(accelerators='V100'),
+})
+sky.exec(train, cluster_name='tb', detach_run=True)
 
 # Run the tensorboard task.
-with sky.Dag() as dag:
-    # Use 'ssh -L 4650:localhost:4650 <cluster_name>' to forward port to local.
-    # 'ssh -L 4650:localhost:4650 tb'
-    tensorboard = sky.Task(
-        'tensorboard',
-        workdir=workdir,
-        setup=setup,
-        run='conda activate resnet && \
-            tensorboard --logdir resnet-model-dir --port 4650',
-    )
-    tensorboard.set_resources(sky.Resources())
+# Use 'ssh -L 4650:localhost:4650 <cluster_name>' to forward port to local.
+# 'ssh -L 4650:localhost:4650 tb'
+tensorboard = sky.Task(
+    'tensorboard',
+    workdir=workdir,
+    setup=setup,
+    run='conda activate resnet && \
+        tensorboard --logdir resnet-model-dir --port 4650',
+)
+tensorboard.set_resources(sky.Resources())
 
-sky.exec(dag, cluster_name='tb', detach_run=True)
+sky.exec(tensorboard, cluster_name='tb', detach_run=True)

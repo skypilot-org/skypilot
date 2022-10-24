@@ -608,7 +608,7 @@ def _check_resources_match(backend: backends.Backend,
 
 
 def _launch_with_confirm(
-    dag: sky.Dag,
+    task: sky.Task,
     backend: backends.Backend,
     cluster: str,
     *,
@@ -622,7 +622,9 @@ def _launch_with_confirm(
     node_type: Optional[str] = None,
     is_local_cloud: Optional[bool] = False,
 ):
-    """Launch a cluster with a DAG."""
+    """Launch a cluster with a Task."""
+    with sky.Dag() as dag:
+        dag.add(task)
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
@@ -702,17 +704,17 @@ def _create_and_ssh_into_node(
         raise click.BadParameter(
             f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
-    with sky.Dag() as dag:
-        # TODO: Add conda environment replication
-        # should be setup =
-        # 'conda env export | grep -v "^prefix: " > environment.yml'
-        # && conda env create -f environment.yml
-        task = sky.Task(
-            node_type,
-            workdir=None,
-            setup=None,
-        )
-        task.set_resources(resources)
+
+    # TODO: Add conda environment replication
+    # should be setup =
+    # 'conda env export | grep -v "^prefix: " > environment.yml'
+    # && conda env create -f environment.yml
+    task = sky.Task(
+        node_type,
+        workdir=None,
+        setup=None,
+    )
+    task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
@@ -727,7 +729,7 @@ def _create_and_ssh_into_node(
             f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
     _launch_with_confirm(
-        dag,
+        task,
         backend,
         cluster_name,
         dryrun=False,
@@ -813,7 +815,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
     return is_yaml, config
 
 
-def _make_dag_from_entrypoint_with_overrides(
+def _make_task_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -831,69 +833,68 @@ def _make_dag_from_entrypoint_with_overrides(
     env: List[Dict[str, str]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Dag:
+) -> sky.Task:
     entrypoint = ' '.join(entrypoint)
-    with sky.Dag() as dag:
-        is_yaml, yaml_config = _check_yaml(entrypoint)
-        if is_yaml:
-            # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+    is_yaml, yaml_config = _check_yaml(entrypoint)
+    if is_yaml:
+        # Treat entrypoint as a yaml.
+        click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        click.secho(entrypoint, bold=True)
+    else:
+        if not entrypoint:
+            entrypoint = None
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
+
+    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
+        cloud = 'local'
+
+    if is_yaml:
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
+    override_params = _parse_override_params(cloud=cloud,
+                                             region=region,
+                                             zone=zone,
+                                             gpus=gpus,
+                                             instance_type=instance_type,
+                                             use_spot=use_spot,
+                                             image_id=image_id,
+                                             disk_size=disk_size)
+    # Spot launch specific.
+    if spot_recovery is not None:
+        if spot_recovery.lower() == 'none':
+            override_params['spot_recovery'] = None
         else:
-            if not entrypoint:
-                entrypoint = None
-            else:
-                # Treat entrypoint as a bash command.
-                click.secho('Task from command: ', fg='yellow', nl=False)
-                click.secho(entrypoint, bold=True)
+            override_params['spot_recovery'] = spot_recovery
 
-        if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
-            cloud = 'local'
+    assert len(task.resources) == 1
+    old_resources = list(task.resources)[0]
+    new_resources = old_resources.copy(**override_params)
 
-        if is_yaml:
-            usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-            task = sky.Task.from_yaml(entrypoint)
-        else:
-            task = sky.Task(name='sky-cmd', run=entrypoint)
-            task.set_resources({sky.Resources()})
+    task.set_resources({new_resources})
 
-        # Override.
-        if workdir is not None:
-            task.workdir = workdir
-
-        override_params = _parse_override_params(cloud=cloud,
-                                                 region=region,
-                                                 zone=zone,
-                                                 gpus=gpus,
-                                                 instance_type=instance_type,
-                                                 use_spot=use_spot,
-                                                 image_id=image_id,
-                                                 disk_size=disk_size)
-        # Spot launch specific.
-        if spot_recovery is not None:
-            if spot_recovery.lower() == 'none':
-                override_params['spot_recovery'] = None
-            else:
-                override_params['spot_recovery'] = spot_recovery
-
-        assert len(task.resources) == 1
-        old_resources = list(task.resources)[0]
-        new_resources = old_resources.copy(**override_params)
-
-        task.set_resources({new_resources})
-
-        if num_nodes is not None:
-            task.num_nodes = num_nodes
-        if name is not None:
-            task.name = name
-        task.set_envs(env)
-        # TODO(wei-lin): move this validation into Python API.
-        if new_resources.accelerators is not None:
-            acc, _ = list(new_resources.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster is not supported. '
-                                 f'Got num_nodes={task.num_nodes}.')
-    return dag
+    if num_nodes is not None:
+        task.num_nodes = num_nodes
+    if name is not None:
+        task.name = name
+    task.set_envs(env)
+    # TODO(wei-lin): move this validation into Python API.
+    if new_resources.accelerators is not None:
+        acc, _ = list(new_resources.accelerators.items())[0]
+        if acc.startswith('tpu-') and task.num_nodes > 1:
+            raise ValueError('Multi-node TPU cluster is not supported. '
+                             f'Got num_nodes={task.num_nodes}.')
+    return task
 
 
 class _NaturalOrderGroup(click.Group):
@@ -1082,7 +1083,7 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
-    dag = _make_dag_from_entrypoint_with_overrides(
+    task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1108,7 +1109,7 @@ def launch(
             raise ValueError(f'{backend_name} backend is not supported.')
 
     _launch_with_confirm(
-        dag,
+        task,
         backend,
         cluster,
         dryrun=dryrun,
@@ -1224,7 +1225,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    dag = _make_dag_from_entrypoint_with_overrides(
+    task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1241,7 +1242,7 @@ def exec(
     )
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
 @cli.command()
@@ -2696,7 +2697,7 @@ def spot_launch(
     else:
         backend_utils.check_cluster_name_is_valid(name)
 
-    dag = _make_dag_from_entrypoint_with_overrides(
+    task = _make_task_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -2718,7 +2719,7 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.spot_launch(dag,
+    sky.spot_launch(task,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
