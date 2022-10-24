@@ -198,7 +198,7 @@ class RayCodeGen:
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
         if spot_task is not None:
-            # Add the spot job to spot status table.
+            # Add the spot job to spot queue table.
             resources_str = backend_utils.get_task_resources_str(spot_task)
             self._code += [
                 'from sky.spot import spot_state',
@@ -2092,17 +2092,33 @@ class CloudVmRayBackend(backends.Backend):
                     self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            logger.info(f'{fore.CYAN}Job ID: '
-                        f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                        '\nTo cancel the job:\t'
-                        f'{backend_utils.BOLD}sky cancel {name} {job_id}'
-                        f'{backend_utils.RESET_BOLD}'
-                        '\nTo stream the logs:\t'
-                        f'{backend_utils.BOLD}sky logs {name} {job_id}'
-                        f'{backend_utils.RESET_BOLD}'
-                        '\nTo view the job queue:\t'
-                        f'{backend_utils.BOLD}sky queue {name}'
-                        f'{backend_utils.RESET_BOLD}')
+            if name == spot_lib.SPOT_CONTROLLER_NAME:
+                logger.info(f'{fore.CYAN}Spot Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            '\nTo cancel the job:\t\t'
+                            f'{backend_utils.BOLD}sky spot cancel {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo stream the logs:\t\t'
+                            f'{backend_utils.BOLD}sky spot logs {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            f'\nTo stream controller logs:\t'
+                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo view all spot jobs:\t\t'
+                            f'{backend_utils.BOLD}sky spot queue'
+                            f'{backend_utils.RESET_BOLD}')
+            else:
+                logger.info(f'{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            '\nTo cancel the job:\t'
+                            f'{backend_utils.BOLD}sky cancel {name} {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo stream the logs:\t'
+                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo view the job queue:\t'
+                            f'{backend_utils.BOLD}sky queue {name}'
+                            f'{backend_utils.RESET_BOLD}')
 
     def _setup_and_create_job_cmd_on_local_head(
         self,
@@ -2190,31 +2206,32 @@ class CloudVmRayBackend(backends.Backend):
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task, job_id, detach_run)
 
-    def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         colorama.init()
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
+        if name == spot_lib.SPOT_CONTROLLER_NAME or down:
+            return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
                     f'{backend_utils.RESET_BOLD}')
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             stop_str = ''
-        if not teardown:
-            logger.info(f'\n{fore.CYAN}Cluster name: '
-                        f'{style.BRIGHT}{name}{style.RESET_ALL}'
-                        '\nTo log into the head VM:\t'
-                        f'{backend_utils.BOLD}ssh {name}'
-                        f'{backend_utils.RESET_BOLD}'
-                        '\nTo submit a job:'
-                        f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
-                        f'{backend_utils.RESET_BOLD}'
-                        f'{stop_str}'
-                        '\nTo teardown the cluster:'
-                        f'\t{backend_utils.BOLD}sky down {name}'
-                        f'{backend_utils.RESET_BOLD}')
-            if handle.tpu_delete_script is not None:
-                logger.info('Tip: `sky down` will delete launched TPU(s) too.')
+        logger.info(f'\n{fore.CYAN}Cluster name: '
+                    f'{style.BRIGHT}{name}{style.RESET_ALL}'
+                    '\nTo log into the head VM:\t'
+                    f'{backend_utils.BOLD}ssh {name}'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo submit a job:'
+                    f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
+                    f'{backend_utils.RESET_BOLD}'
+                    f'{stop_str}'
+                    '\nTo teardown the cluster:'
+                    f'\t{backend_utils.BOLD}sky down {name}'
+                    f'{backend_utils.RESET_BOLD}')
+        if handle.tpu_delete_script is not None:
+            logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
     def _teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
         storage_mounts = task.storage_mounts

@@ -81,9 +81,10 @@ Use the clouds **easily** and **cost effectively**, without needing cloud infra 
 
 .. toctree::
    :maxdepth: 1
-   :caption: SkyPilot CLI
+   :caption: API References
 
    reference/cli
+   reference/api
 
 
 .. .. toctree::
