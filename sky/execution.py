@@ -299,8 +299,9 @@ def launch(
     (when specified, it is synced to remote cluster).  The task undergoes job
     queue scheduling on the cluster.
 
-    Currently, the first argument must be a single-node DAG (i.e., a single
-    task). Support for pipelines/general DAGs are in experimental branches.
+    Currently, the first argument must be a sky.Task, or (more advanced usage)
+    a sky.Dag; in the latter case, currently it must be a single task).
+    Support for pipelines/general DAGs are in experimental branches.
 
     Args:
         task: sky.Task or sky.Dag to launch.
@@ -417,8 +418,8 @@ def exec(  # pylint: disable=redefined-builtin
     entrypoint = task
     if isinstance(entrypoint, sky.Dag):
         logger.warning(
-            f'{colorama.Fore.YELLOW}Use a sky.Dag as an entrypoint in '
-            '`sky.exec` is deprecated. Please use sky.Task instead.'
+            f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
+            'deprecated. Pass sky.Task instead.'
             f'{colorama.Style.RESET_ALL}')
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
