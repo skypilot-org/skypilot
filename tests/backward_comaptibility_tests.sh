@@ -1,6 +1,8 @@
 #!/bin/bash
 set -ev
 
+need_launch=${1:-0}
+
 source ~/.bashrc 
 CLUSTER_NAME="test-back-compat-$USER"
 source $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
@@ -37,10 +39,14 @@ sky launch --cloud gcp -y -c ${CLUSTER_NAME} examples/minimal.yaml
 
 mamba activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
+if [ "$need_launch" -eq "1" ]; then
+  sky launch --cloud gcp -y -c ${CLUSTER_NAME}
+fi
 sky exec --cloud gcp ${CLUSTER_NAME} examples/minimal.yaml
 s=$(sky launch --cloud gcp -d -c ${CLUSTER_NAME} examples/minimal.yaml)
 echo $s
-echo $s | grep "Job ID: 3" || exit 1
+# remove color and find the job id
+echo $s | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 3" || exit 1
 sky queue ${CLUSTER_NAME}
 
 # sky stop + sky start + sky exec
@@ -53,7 +59,7 @@ sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
 s=$(sky exec --cloud gcp -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
 echo $s
-echo $s | grep "Job ID: 2" || exit 1
+echo $s | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 2" || exit 1
 
 # `sky autostop` + `sky status -r`
 mamba activate sky-back-compat-master
