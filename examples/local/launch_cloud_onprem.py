@@ -101,6 +101,6 @@ common_utils.dump_yaml(os.path.expanduser(local_config_path), local_config)
 
 print((
     f'Sky onprem cluster {local_cluster_name} is now ready for use! '
-    f'You can launch jobs with `sky launch -c {local_cluster_name}  -- [CMD]. '
+    f'You can launch jobs with `sky launch -c {local_cluster_name} -- [CMD].` '
     f'After you are done, shut down the cluster by running `sky down {local_cluster_name} {onprem_name}` '
     f'and removing the local cluster config in {local_config_path}.'))
