@@ -2224,7 +2224,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2299,7 +2300,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2372,7 +2374,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
-    user_requested_resources = not (instance_type is None and tpus is None and
+    user_requested_resources = not (region is None and zone is None and
+                                    instance_type is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
