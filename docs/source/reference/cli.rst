@@ -86,8 +86,8 @@ Managed Spot Jobs CLI
    :prog: sky spot launch
    :nested: full
 
-.. click:: sky.cli:spot_status
-   :prog: sky spot status
+.. click:: sky.cli:spot_queue
+   :prog: sky spot queue
    :nested: full
 
 .. click:: sky.cli:spot_cancel

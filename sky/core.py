@@ -1,6 +1,7 @@
 """SDK functions for cluster/job management."""
 import colorama
 import getpass
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag
@@ -87,7 +88,7 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
-    # NOTE: if spot_status() calls _start() and hits here, that entrypoint
+    # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
     # would have a cluster name (the controller) filled in.
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
@@ -553,10 +554,20 @@ def _is_spot_controller_up(
 
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
+    """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
+    print(
+        f'{colorama.Fore.YELLOW}WARNING: `spot_status()` is deprecated. '
+        f'Instead, use: spot_queue(){colorama.Style.RESET_ALL}',
+        file=sys.stderr)
+    return spot_queue(refresh=refresh)
+
+
+@usage_lib.entrypoint
+def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
-    Please refer to the sky.cli.spot_status for the document.
+    Please refer to the sky.cli.spot_queue for the documentation.
 
     Returns:
         [
@@ -579,7 +590,7 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
     stop_msg = ''
     if not refresh:
-        stop_msg = 'To view the latest job table: sky spot status --refresh'
+        stop_msg = 'To view the latest job table: sky spot queue --refresh'
     controller_status, handle = _is_spot_controller_up(stop_msg)
 
     if controller_status is None:

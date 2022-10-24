@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import copy
 import datetime
 import functools
 import getpass
@@ -895,28 +896,8 @@ def _make_dag_from_entrypoint_with_overrides(
     return dag
 
 
-def _start_cluster(cluster_name: str,
-                   idle_minutes_to_autostop: Optional[int] = None,
-                   retry_until_up: bool = False):
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    with sky.Dag():
-        dummy_task = sky.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name,
-                               retry_until_up=retry_until_up)
-    if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop)
-    return handle
-
-
 class _NaturalOrderGroup(click.Group):
-    """Lists commands in the order they are defined in this script.
+    """Lists commands in the order defined in this script.
 
     Reference: https://github.com/pallets/click/issues/513
     """
@@ -938,6 +919,30 @@ class _DocumentedCodeCommand(click.Command):
         help_str = ctx.command.help
         ctx.command.help = help_str.replace('.. code-block:: bash\n', '\b')
         return super().get_help(ctx)
+
+
+def _with_deprecation_warning(f, original_name, alias_name):
+
+    @functools.wraps(f)
+    def wrapper(self, *args, **kwargs):
+        click.secho(
+            f'WARNING: `{alias_name}` is deprecated and will be removed in a '
+            f'future release. Please use `{original_name}` instead.\n',
+            err=True,
+            fg='yellow')
+        return f(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _add_command_alias_to_group(group, command, name, hidden):
+    """Add a alias of a command to a group."""
+    new_command = copy.deepcopy(command)
+    new_command.hidden = hidden
+    new_command.name = name
+    new_command.invoke = _with_deprecation_warning(new_command.invoke,
+                                                   command.name, name)
+    group.add_command(new_command, name=name)
 
 
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
@@ -1902,10 +1907,10 @@ def _hint_for_down_spot_controller(controller_name: str):
            f'spot controller ({cluster_status.value}). Please be '
            f'aware of the following:{colorama.Style.RESET_ALL}'
            '\n * All logs and status information of the spot '
-           'jobs (output of `sky spot status`) will be lost.')
+           'jobs (output of `sky spot queue`) will be lost.')
     if cluster_status == global_user_state.ClusterStatus.UP:
         try:
-            spot_jobs = core.spot_status(refresh=False)
+            spot_jobs = core.spot_queue(refresh=False)
         except exceptions.ClusterNotUpError:
             # The spot controller cluster status changed during querying
             # the spot jobs, use the latest cluster status, so that the
@@ -2719,7 +2724,7 @@ def spot_launch(
                     retry_until_up=retry_until_up)
 
 
-@spot.command('status', cls=_DocumentedCodeCommand)
+@spot.command('queue', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -2736,7 +2741,7 @@ def spot_launch(
 )
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_status(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2757,17 +2762,17 @@ def spot_status(all: bool, refresh: bool):
 
     If the job failed, either due to user code or spot unavailability, the error
     log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
-    Please find your exact spot controller name with ``sky status -a``.
+    Please find your exact spot controller name with ``sky status``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
     .. code-block:: bash
 
-      watch -n60 sky spot status
+      watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
-        job_table = core.spot_status(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh)
     except exceptions.ClusterNotUpError:
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
@@ -2785,6 +2790,9 @@ def spot_status(all: bool, refresh: bool):
     # Dump cache
     spot_lib.dump_job_table_cache(job_table)
     click.echo(f'Managed spot jobs:\n{job_table}')
+
+
+_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
