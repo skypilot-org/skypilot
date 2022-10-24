@@ -229,14 +229,14 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     task_name = spot_state.get_task_name_by_job_id(job_id)
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
-    spot_queue = spot_state.get_status(job_id)
-    while not spot_queue.is_terminal():
-        if spot_queue != spot_state.SpotStatus.RUNNING:
+    spot_status = spot_state.get_status(job_id)
+    while not spot_status.is_terminal():
+        if spot_status != spot_state.SpotStatus.RUNNING:
             logger.info(f'INFO: The log is not ready yet, as the spot job '
-                        f'is {spot_queue.value}. '
+                        f'is {spot_status.value}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-            spot_queue = spot_state.get_status(job_id)
+            spot_status = spot_state.get_status(job_id)
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle,
@@ -261,9 +261,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         # a while to make sure the spot state is updated by the controller, and
         # check the spot queue again.
         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
-        spot_queue = spot_state.get_status(job_id)
+        spot_status = spot_state.get_status(job_id)
     else:
-        # The spot_queue is in terminal state.
+        # The spot_status is in terminal state.
         logger.info(f'Logs finished for job {job_id} '
                     f'(status: {spot_state.get_status(job_id).value}).')
     return ''

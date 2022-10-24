@@ -921,12 +921,12 @@ class _DocumentedCodeCommand(click.Command):
         return super().get_help(ctx)
 
 
-def _deprecation_warning(f, original_name, alias_name):
+def _with_deprecation_warning(f, original_name, alias_name):
 
     @functools.wraps(f)
     def wrapper(self, *args, **kwargs):
         click.secho(
-            f'WARNING: `{alias_name}` is deprecated and will be removed in the '
+            f'WARNING: `{alias_name}` is deprecated and will be removed in a '
             f'future release. Please use `{original_name}` instead.\n',
             err=True,
             fg='yellow')
@@ -940,7 +940,7 @@ def _add_command_alias_to_group(group, command, name, hidden):
     new_command = copy.deepcopy(command)
     new_command.hidden = hidden
     new_command.name = name
-    new_command.invoke = _deprecation_warning(new_command.invoke, command.name,
+    new_command.invoke = _with_deprecation_warning(new_command.invoke, command.name,
                                               name)
     group.add_command(new_command, name=name)
 
@@ -2730,7 +2730,7 @@ def spot_launch(
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_queue(all: bool, refresh: bool):
-    """Show managed spot job queue.
+    """Show statuses of managed spot jobs.
 
     \b
     Each spot job can have one of the following statuses:
