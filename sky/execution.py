@@ -120,7 +120,7 @@ def _execute(
 ) -> None:
     """Execute a entrypoint.
 
-    If sky.Task is given or DAG has not been optimized yet, this will call 
+    If sky.Task is given or DAG has not been optimized yet, this will call
     sky.optimize() for the caller.
 
     Args:
@@ -303,7 +303,7 @@ def launch(
     task). Support for pipelines/general DAGs are in experimental branches.
 
     Args:
-        task: sky.Task or sky.DAG to launch.
+        task: sky.Task or sky.Dag to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
@@ -343,10 +343,11 @@ def launch(
         >>> sky.launch(task, cluster_name='my-cluster')
 
     """
+    entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
     _execute(
-        entrypoint=task,
+        entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
         stream_logs=stream_logs,
@@ -395,7 +396,7 @@ def exec(  # pylint: disable=redefined-builtin
       Use ``ssh my_cluster`` instead.
 
     Args:
-        task: sky.Task or sky.DAG containing the task to execute.
+        task: sky.Task or sky.Dag containing the task to execute.
         cluster_name: name of an existing cluster to execute the task.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -513,16 +514,15 @@ def spot_launch(
                 'retry_until_up': retry_until_up,
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
-        with sky.Dag() as spot_dag:
-            controller_task = task_lib.Task.from_yaml(yaml_path)
-            controller_task.spot_task = task
-            assert len(controller_task.resources) == 1
+        controller_task = task_lib.Task.from_yaml(yaml_path)
+        controller_task.spot_task = task
+        assert len(controller_task.resources) == 1
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
-            task=spot_dag,
+            entrypoint=controller_task,
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
