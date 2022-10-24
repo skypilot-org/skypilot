@@ -268,7 +268,8 @@ class LocalDockerBackend(backends.Backend):
 
         self._execute_task_one_node(handle, task)
 
-    def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
+        del down  # unused
         colorama.init()
         style = colorama.Style
         container = self.containers[handle]

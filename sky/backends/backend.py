@@ -82,9 +82,9 @@ class Backend:
         return self._execute(handle, task, detach_run)
 
     @timeline.event
-    def post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+    def post_execute(self, handle: ResourceHandle, down: bool) -> None:
         """Post execute(): e.g., print helpful inspection messages."""
-        return self._post_execute(handle, teardown)
+        return self._post_execute(handle, down)
 
     @timeline.event
     def teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
@@ -130,7 +130,7 @@ class Backend:
                  detach_run: bool) -> None:
         raise NotImplementedError
 
-    def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         raise NotImplementedError
 
     def _teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:

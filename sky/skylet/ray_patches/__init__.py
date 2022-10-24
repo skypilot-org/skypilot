@@ -27,6 +27,8 @@ Example workflow:
 import os
 import subprocess
 
+import pkg_resources
+
 from sky.skylet import constants
 
 
@@ -34,11 +36,12 @@ def _to_absolute(pwd_file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), pwd_file)
 
 
-def _run_patch(target_file, patch_file):
+def _run_patch(target_file,
+               patch_file,
+               version=constants.SKY_REMOTE_RAY_VERSION):
     """Applies a patch if it has not been applied already."""
     # .orig is the original file that is not patched.
-    orig_file = os.path.abspath(
-        f'{target_file}-v{constants.SKY_REMOTE_RAY_VERSION}.orig')
+    orig_file = os.path.abspath(f'{target_file}-v{version}.orig')
     script = f"""\
     which patch >/dev/null 2>&1 || sudo yum install -y patch || true
     which patch >/dev/null 2>&1 || (echo "`patch` is not found. Failed to setup ray." && exit 1)
@@ -78,3 +81,16 @@ def patch() -> None:
     from ray.autoscaler._private import resource_demand_scheduler
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
+
+    # Fix the Azure get-access-token (used by ray azure node_provider) timeout issue,
+    # by increasing the timeout.
+    # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
+    # Only patch it if azure cli is installed.
+    try:
+        import azure
+        from azure.identity._credentials import azure_cli
+        version = pkg_resources.get_distribution('azure-cli').version
+        _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'),
+                   version)
+    except ImportError:
+        pass
