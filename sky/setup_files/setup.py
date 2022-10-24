@@ -70,14 +70,14 @@ install_requires = [
     'PrettyTable',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.0',
+    'ray[default]>=1.9.0,<=2.0.1',
     'rich',
     'tabulate',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
-    'grpcio<=1.43.0',
+    'grpcio>=1.32.0,<=1.43.0',
     'packaging',
     # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
     # fix.

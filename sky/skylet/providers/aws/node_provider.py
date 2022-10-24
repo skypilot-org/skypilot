@@ -11,7 +11,7 @@ from boto3.resources.base import ServiceResource
 try:
     import ray._private.ray_constants as ray_constants
 except ImportError:
-    # SkyPilot: for local ray version lower than 2.0.0
+    # SkyPilot: for local ray version lower than 2.0.1
     import ray.ray_constants as ray_constants
 from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
     CloudwatchHelper,

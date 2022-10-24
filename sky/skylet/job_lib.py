@@ -345,7 +345,7 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    # In ray 2.0.0, job_client.list_jobs returns a list of JobDetails,
+    # In ray 2.0.1, job_client.list_jobs returns a list of JobDetails,
     # which contains the job status (str) and submission_id (str).
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
