@@ -118,10 +118,10 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
 ) -> None:
-    """Execute an entrypoint.
+    """Execute a entrypoint.
 
-    If the DAG has not been optimized yet, this will call sky.optimize() for
-    the caller.
+    If sky.Task is given or DAG has not been optimized yet, this will call 
+    sky.optimize() for the caller.
 
     Args:
       entrypoint: sky.Task or sky.Dag.
@@ -280,7 +280,7 @@ def _execute(
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-    entrypoint: Union['sky.Task', 'sky.Dag'],
+    task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
@@ -292,10 +292,10 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
 ):
-    """Launch an entrypoint (sky.Task or sky.Dag; rerun setup if cluster exists)
+    """Launch a sky.Task or sky.Dag (rerun setup if cluster exists).
 
     Args:
-        entrypoint: sky.Task or sky.DAG to launch.
+        task: sky.Task or sky.DAG to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
@@ -338,7 +338,7 @@ def launch(
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
     _execute(
-        entrypoint=entrypoint,
+        entrypoint=task,
         dryrun=dryrun,
         down=down,
         stream_logs=stream_logs,
@@ -355,7 +355,7 @@ def launch(
 
 @usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
-    entrypoint: Union['sky.Task', 'sky.Dag'],
+    task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,
     down: bool = False,
@@ -364,6 +364,7 @@ def exec(  # pylint: disable=redefined-builtin
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
 ):
+    entrypoint = task
     if isinstance(entrypoint, sky.Dag):
         logger.warning(
             f'{colorama.Fore.YELLOW}Use a sky.Dag as an entrypoint in '
@@ -380,7 +381,7 @@ def exec(  # pylint: disable=redefined-builtin
         if status != global_user_state.ClusterStatus.UP:
             raise ValueError(f'Cluster {cluster_name!r} is not up.  '
                              'Use `sky status` to check the status.')
-    _execute(entrypoint=entrypoint,
+    _execute(task=entrypoint,
              dryrun=dryrun,
              down=down,
              stream_logs=stream_logs,
@@ -397,7 +398,7 @@ def exec(  # pylint: disable=redefined-builtin
 
 @usage_lib.entrypoint
 def spot_launch(
-    entrypoint: Union['sky.Task', 'sky.Dag'],
+    task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
@@ -416,6 +417,7 @@ def spot_launch(
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
+    entrypoint = task
     if name is None:
         name = backend_utils.generate_cluster_name()
 
@@ -471,7 +473,7 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
-            entrypoint=spot_dag,
+            task=spot_dag,
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
