@@ -815,12 +815,12 @@ def write_cluster_config(
 
     # Restore the old yaml content for backward compatibility.
     if old_yaml_content is not None:
-        with open(yaml_path, 'r') as f:
+        with open(tmp_yaml_path, 'r') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY)
-        with open(yaml_path, 'w') as f:
+        with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
 
     # Rename the tmp file to the final YAML path.
