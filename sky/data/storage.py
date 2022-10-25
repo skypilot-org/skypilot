@@ -108,6 +108,7 @@ class AbstractStore:
     _STAT_CACHE_TTL = '5s'
     _STAT_CACHE_CAPACITY = 4096
     _TYPE_CACHE_TTL = '5s'
+    _RENAME_DIR_LIMIT = 10000
 
     class StoreMetadata:
         """A pickle-able representation of Store
@@ -1190,6 +1191,7 @@ class GcsStore(AbstractStore):
                      f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+                     f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
                      f'{self.bucket.name} {mount_path}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
