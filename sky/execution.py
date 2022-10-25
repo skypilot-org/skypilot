@@ -299,12 +299,12 @@ def launch(
     (when specified, it is synced to remote cluster).  The task undergoes job
     queue scheduling on the cluster.
 
-    Currently, the first argument must be a sky.Task, or (more advanced usage)
-    a sky.Dag; in the latter case, currently it must be a single task).
-    Support for pipelines/general DAGs are in experimental branches.
+    Currently, the first argument must be a sky.Task, or (EXPERIMENTAL advanced
+    usage) a sky.Dag. In the latter case, currently it must contain a single
+    task; support for pipelines/general DAGs are in experimental branches.
 
     Args:
-        task: sky.Task or sky.Dag to launch.
+        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
@@ -397,7 +397,8 @@ def exec(  # pylint: disable=redefined-builtin
       Use ``ssh my_cluster`` instead.
 
     Args:
-        task: sky.Task or sky.Dag containing the task to execute.
+        task: sky.Task, or sky.Dag (experimental; 1-task only) containing the
+          task to execute.
         cluster_name: name of an existing cluster to execute the task.
         down: Tear down the cluster after all jobs finish (successfully or
             abnormally). If --idle-minutes-to-autostop is also set, the
@@ -460,7 +461,8 @@ def spot_launch(
     Please refer to the sky.cli.spot_launch for the document.
 
     Args:
-        task: sky.Task or sky.Dag to launch as a managed spot job.
+        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
+          managed spot job.
         name: Name of the spot job.
         detach_run: Whether to detach the run.
 
