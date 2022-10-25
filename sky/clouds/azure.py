@@ -237,9 +237,10 @@ class Azure(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='azure')
+        ) = service_catalog.get_instance_type_for_resources(acc,
+                                                            acc_count,
+                                                            cpus=resources.cpus,
+                                                            clouds='azure')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)

@@ -43,17 +43,19 @@ def get_accelerators_from_instance_type(
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 
-def get_instance_type_for_accelerator(
+def get_instance_type_for_resources(
     acc_name: str,
     acc_count: int,
+    cpus: Optional[float] = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return common.get_instance_type_for_accelerator_impl(df=_df,
-                                                         acc_name=acc_name,
-                                                         acc_count=acc_count)
+    return common.get_instance_type_for_resources_impl(df=_df,
+                                                       acc_name=acc_name,
+                                                       acc_count=acc_count,
+                                                       cpus=cpus)
 
 
 def get_region_zones_for_instance_type(instance_type: str,

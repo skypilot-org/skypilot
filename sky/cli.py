@@ -318,6 +318,12 @@ _TASK_OPTIONS = [
 ]
 _EXTRA_RESOURCES_OPTIONS = [
     click.option(
+        '--cpus',
+        required=False,
+        type=str,
+        help=('Number of CPUs to use. Overrides the "resources.cpus" config '
+              'in the YAML if both are supplied.')),
+    click.option(
         '--gpus',
         required=False,
         type=str,
@@ -493,6 +499,7 @@ def _add_click_options(options: List[click.Option]):
 def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            zone: Optional[str] = None,
+                           cpus: Optional[str] = None,
                            gpus: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
@@ -515,6 +522,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['zone'] = None
         else:
             override_params['zone'] = zone
+    if cpus is not None:
+        if cpus.lower() == 'none':
+            override_params['cpus'] = None
+        else:
+            override_params['cpus'] = float(cpus)
     if gpus is not None:
         if gpus.lower() == 'none':
             override_params['accelerators'] = None
@@ -810,6 +822,7 @@ def _make_dag_from_entrypoint_with_overrides(
     cloud: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    cpus: Optional[str] = None,
     gpus: Optional[str] = None,
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
@@ -852,6 +865,7 @@ def _make_dag_from_entrypoint_with_overrides(
         override_params = _parse_override_params(cloud=cloud,
                                                  region=region,
                                                  zone=zone,
+                                                 cpus=cpus,
                                                  gpus=gpus,
                                                  instance_type=instance_type,
                                                  use_spot=use_spot,
@@ -1039,6 +1053,7 @@ def launch(
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
+    cpus: Optional[str],
     gpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
@@ -1073,6 +1088,7 @@ def launch(
         cloud=cloud,
         region=region,
         zone=zone,
+        cpus=cpus,
         gpus=gpus,
         instance_type=instance_type,
         num_nodes=num_nodes,
@@ -1132,6 +1148,7 @@ def exec(
     region: Optional[str],
     zone: Optional[str],
     workdir: Optional[str],
+    cpus: Optional[float],
     gpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
@@ -2574,6 +2591,7 @@ def spot_launch(
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
+    cpus: Optional[str],
     gpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
@@ -2599,6 +2617,7 @@ def spot_launch(
         cloud=cloud,
         region=region,
         zone=zone,
+        cpus=cpus,
         gpus=gpus,
         instance_type=instance_type,
         num_nodes=num_nodes,

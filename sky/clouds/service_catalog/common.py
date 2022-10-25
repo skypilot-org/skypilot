@@ -191,24 +191,35 @@ def get_accelerators_from_instance_type_impl(
     return {acc_name: int(acc_count)}
 
 
-def get_instance_type_for_accelerator_impl(
+def get_instance_type_for_resources_impl(
     df: pd.DataFrame,
-    acc_name: str,
-    acc_count: int,
+    acc_name: Optional[str],
+    acc_count: Optional[int],
+    cpus: Optional[int],
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
-    accelerators with sorted prices and a list of candidates with fuzzy search.
+    accelerators and cpus with sorted prices and a list of candidates with
+    fuzzy search.
     """
-    result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
-                (df['AcceleratorCount'] == acc_count)]
+    result = df
+    if acc_name is not None:
+        result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
+                    (df['AcceleratorCount'] == acc_count)]
+    if cpus is not None:
+        result = result[result['vCPUs'] == cpus]
+
     if len(result) == 0:
-        fuzzy_result = df[
-            (df['AcceleratorName'].str.contains(acc_name, case=False)) &
-            (df['AcceleratorCount'] >= acc_count)]
-        fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
-        fuzzy_result = fuzzy_result[['AcceleratorName',
-                                     'AcceleratorCount']].drop_duplicates()
+        fuzzy_result = df
+        if acc_name is not None:
+            fuzzy_result = df[
+                (df['AcceleratorName'].str.contains(acc_name, case=False)) &
+                (df['AcceleratorCount'] >= acc_count)]
+            fuzzy_result = fuzzy_result.sort_values('Price', ascending=True)
+            fuzzy_result = fuzzy_result[['AcceleratorName',
+                                        'AcceleratorCount']].drop_duplicates()
+        if cpus is not None:
+            fuzzy_result = fuzzy_result[fuzzy_result['vCPUs'] >= cpus]
         fuzzy_candidate_list = []
         if len(fuzzy_result) > 0:
             for _, row in fuzzy_result.iterrows():

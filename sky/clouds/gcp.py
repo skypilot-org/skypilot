@@ -278,27 +278,28 @@ class GCP(clouds.Cloud):
         host_vm_type = GCP.get_default_instance_type()
         acc_dict = None
         # Find instance candidates to meet user's requirements
+        acc, acc_count = None, None
         if resources.accelerators is not None:
             assert len(resources.accelerators.items(
             )) == 1, 'cannot handle more than one accelerator candidates.'
             acc, acc_count = list(resources.accelerators.items())[0]
-            (instance_list, fuzzy_candidate_list
-            ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                                  acc_count,
-                                                                  clouds='gcp')
+            
+        (instance_list, fuzzy_candidate_list
+        ) = service_catalog.get_instance_type_for_resources(
+            acc, acc_count, cpus=resources.cpus, clouds='gcp')
 
-            if instance_list is None:
-                return ([], fuzzy_candidate_list)
-            assert len(
-                instance_list
-            ) == 1, f'More than one instance type matched, {instance_list}'
+        if instance_list is None:
+            return ([], fuzzy_candidate_list)
+        assert len(
+            instance_list
+        ) == 1, f'More than one instance type matched, {instance_list}'
 
-            host_vm_type = instance_list[0]
-            acc_dict = {acc: acc_count}
-            if resources.accelerator_args is not None:
-                use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
-                if use_tpu_vm:
-                    host_vm_type = 'TPU-VM'
+        host_vm_type = instance_list[0]
+        acc_dict = {acc: acc_count}
+        if resources.accelerator_args is not None:
+            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+            if use_tpu_vm:
+                host_vm_type = 'TPU-VM'
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,

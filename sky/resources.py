@@ -49,7 +49,7 @@ class Resources:
     def __init__(
         self,
         cloud: Optional[clouds.Cloud] = None,
-        vcpus: Optional[int] = None,
+        cpus: Optional[int] = None,
         instance_type: Optional[str] = None,
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
@@ -91,12 +91,12 @@ class Resources:
         self._image_id = image_id
 
         # TODO(zhwu): Make this able to specify CPU type.
-        self._vcpus = vcpus
+        self._cpus = cpus
         self._set_accelerators(accelerators, accelerator_args)
 
         self._try_validate_local()
         self._try_validate_instance_type()
-        self._try_validate_vcpus()
+        self._try_validate_cpus()
         self._try_validate_accelerators()
         self._try_validate_spot()
         self._try_validate_image_id()
@@ -140,9 +140,9 @@ class Resources:
         return self._instance_type
 
     @property
-    def vcpus(self) -> Optional[int]:
-        return self._vcpus
-    
+    def cpus(self) -> Optional[int]:
+        return self._cpus
+
     @property
     def accelerators(self) -> Optional[Dict[str, int]]:
         """Returns the accelerators field directly or by inferring.
@@ -307,25 +307,24 @@ class Resources:
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
 
-    def _try_validate_vcpus(self) -> None:
-        """Validate vCPUs against the instance type and region/zone."""
-        vcpus_requested = self._vcpus
-        if vcpus_requested is None:
+    def _try_validate_cpus(self) -> None:
+        """Validate CPUs against the instance type and region/zone."""
+        cpus_requested = self._cpus
+        if cpus_requested is None:
             return
         if self.is_launchable():
-            vcpus_from_instance_type = self.cloud.get_vcpus_from_instance_type(self._instance_type)
-            if not Resources(vcpus=vcpus_requested).less_demanding_than(
-                Resources(vcpus=vcpus_from_instance_type)):
+            cpus_from_instance_type = self.cloud.get_vcpus_from_instance_type(
+                self._instance_type)
+            if not Resources(cpus=cpus_requested).less_demanding_than(
+                    Resources(cpus=cpus_from_instance_type)):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Infeasible resource demands found:\n'
                         f'  Instance type requested: {self._instance_type}\n'
-                        f'  vCPUs for {self._instance_type}: {vcpus_from_instance_type}\n'
-                        f'  vCPUs requested: {vcpus_requested}\n'
+                        f'  CPUs for {self._instance_type}: {cpus_from_instance_type}\n'
+                        f'  CPUs requested: {cpus_requested}\n'
                         f'To fix: either only specify instance_type, or change '
-                        'the vcpus field to be consistent.')
-
-
+                        'the cpus field to be consistent.')
 
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
@@ -465,9 +464,9 @@ class Resources:
             return False
         # self._instance_type == other.instance_type
 
-        if self._vcpus != other.vcpus:
+        if self._cpus != other.cpus:
             return False
-        # self._vcpus == other.vcpus
+        # self._cpus == other.cpus
 
         other_accelerators = other.accelerators
         accelerators = self.accelerators
@@ -519,9 +518,10 @@ class Resources:
             return False
         # self._instance_type <= other.instance_type
 
-        if self._vcpus is not None and (other._vcpus is None or self._vcpus > other._vcpus):
-                return False
-        # self._vcpus <= other._vcpus
+        if self._cpus is not None and (other._cpus is None or
+                                       self._cpus > other._cpus):
+            return False
+        # self._cpus <= other._cpus
 
         other_accelerators = other.accelerators
         if self.accelerators is not None:
@@ -570,7 +570,7 @@ class Resources:
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
-            vcpus=override.pop('vcpus', self.vcpus),
+            cpus=override.pop('cpus', self.cpus),
             accelerators=override.pop('accelerators', self.accelerators),
             accelerator_args=override.pop('accelerator_args',
                                           self.accelerator_args),
@@ -598,8 +598,8 @@ class Resources:
                 config.pop('cloud'))
         if config.get('instance_type') is not None:
             resources_fields['instance_type'] = config.pop('instance_type')
-        if config.get('vcpus') is not None:
-            resources_fields['vcpus'] = float(config.pop('vcpus'))
+        if config.get('cpus') is not None:
+            resources_fields['cpus'] = float(config.pop('cpus'))
         if config.get('accelerators') is not None:
             resources_fields['accelerators'] = config.pop('accelerators')
         if config.get('accelerator_args') is not None:
@@ -633,7 +633,7 @@ class Resources:
 
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
-        add_if_not_none('vcpus', self.vcpus)
+        add_if_not_none('cpus', self.cpus)
         add_if_not_none('accelerators', self.accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
@@ -692,9 +692,8 @@ class Resources:
                     acc_count for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
-        
-        if version < 7:
-            self._vcpus = None
 
+        if version < 7:
+            self._cpus = None
 
         self.__dict__.update(state)

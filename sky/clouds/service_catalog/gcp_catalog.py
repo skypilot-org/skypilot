@@ -162,16 +162,20 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
-def get_instance_type_for_accelerator(
-        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
+def get_instance_type_for_resources(
+        acc_name: Optional[str],
+        acc_count: Optional[int],
+        cpus: Optional[int] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
 
     Return: a list with a single matched instance type and a list of candidates
     with fuzzy search (should be empty as it must have already been generated in
     caller).
     """
+
+    # Not pass cpus, as the accelerator and instance type are separate entities.
     (instance_list,
-     fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
+     fuzzy_candidate_list) = common.get_instance_type_for_resources_impl(
          df=_df, acc_name=acc_name, acc_count=acc_count)
     if instance_list is None:
         return None, fuzzy_candidate_list
@@ -179,11 +183,16 @@ def get_instance_type_for_accelerator(
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
-        return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
+        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        if (cpus is not None and
+                cpus != get_vcpus_from_instance_type(instance_type)):
+            # Check if the number of CPUs is valid.
+            return None, [instance_type]
+        return [instance_type], []
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
-    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
+    num_cpus = cpus or _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
     # The (acc_name, acc_count) should be validated in the caller.
     assert num_cpus is not None, (acc_name, acc_count)
     mem_type = 'highmem'
@@ -197,8 +206,14 @@ def get_instance_type_for_accelerator(
     else:
         if num_cpus > 80:
             mem_type = 'standard'
+    instance_type = f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'
+    if len(_df[_df['InstanceType'] == instance_type]) == 0:
+        cpu_df = _df[_df['InstanceType'].str.startswith(
+            f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-') &
+                     _df['vCPUs'] >= num_cpus].sort_values('vCPUs')
+        return None, [f'cpus: {cpu}' for cpu in cpu_df['vCPUs']]
     # The fuzzy candidate should have already been fetched in the caller.
-    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
+    return [instance_type], []
 
 
 def validate_region_zone(region: Optional[str], zone: Optional[str]):

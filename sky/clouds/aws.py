@@ -259,7 +259,7 @@ class AWS(clouds.Cloud):
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
-        if accelerators is None:
+        if resources.cpus is None and accelerators is None:
             # No requirements to filter, so just return a default VM type.
             return (_make([AWS.get_default_instance_type()]),
                     fuzzy_candidate_list)
@@ -267,9 +267,10 @@ class AWS(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='aws')
+        ) = service_catalog.get_instance_type_for_resources(acc,
+                                                            acc_count,
+                                                            cpus=resources.cpus,
+                                                            clouds='aws')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)

@@ -151,17 +151,18 @@ def get_accelerators_from_instance_type(
                                instance_type)
 
 
-def get_instance_type_for_accelerator(
-    acc_name: str,
-    acc_count: int,
+def get_instance_type_for_resources(
+    acc_name: Optional[str],
+    acc_count: Optional[int],
+    cpus: Optional[float] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
-                               acc_name, acc_count)
+    return _map_clouds_catalog(clouds, 'get_instance_type_for_resources',
+                               acc_name, acc_count, cpus)
 
 
 def get_accelerator_hourly_cost(
@@ -241,7 +242,7 @@ __all__ = [
     'get_region_zones_for_instance_type',
     'get_hourly_cost',
     'get_accelerators_from_instance_type',
-    'get_instance_type_for_accelerator',
+    'get_instance_type_for_resources',
     'get_accelerator_hourly_cost',
     'get_region_zones_for_accelerators',
     'get_common_gpus',
