@@ -82,6 +82,9 @@ def patch() -> None:
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
 
+    from ray.autoscaler._private import updater
+    _run_patch(updater.__file__, _to_absolute('updater.py.patch'))
+
     # Fix the Azure get-access-token (used by ray azure node_provider) timeout issue,
     # by increasing the timeout.
     # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
