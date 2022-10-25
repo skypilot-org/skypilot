@@ -229,6 +229,10 @@ class Task:
     def from_yaml(yaml_path: str) -> 'Task':
         """Initializes a task from a task YAML.
 
+        Example:
+
+            >>> task = sky.Task.from_yaml('/path/to/task.yaml')
+
         Args:
           yaml_path: file path to a valid task yaml file.
 
@@ -336,6 +340,10 @@ class Task:
                               Dict[str, str]]) -> 'Task':
         """Sets the environment variables for use inside the setup/run commands.
 
+        Args:
+          envs: (optional) either a list of ``(env_name, value)`` or a dict
+            ``{env_name: value}``.
+
         Returns:
           self: The current task, with envs set.
 
@@ -426,8 +434,8 @@ class Task:
 
         Args:
           resources: either a sky.Resources, or a set of them.  The latter case
-            is EXPERIMENTAL and indicates asking the optimizer to "pick any one
-            of these resources" to run this task.
+            is EXPERIMENTAL and indicates asking the optimizer to "pick the
+            best of these resources" to run this task.
 
         Returns:
           self: The current task, with resources set.
@@ -440,7 +448,8 @@ class Task:
     def get_resources(self):
         return self.resources
 
-    def set_time_estimator(self, func) -> 'Task':
+    def set_time_estimator(self, func: Callable[['sky.Resources'],
+                                                int]) -> 'Task':
         """Sets a func mapping resources to estimated time (secs).
 
         This is EXPERIMENTAL.
@@ -576,7 +585,8 @@ class Task:
 
         Example:
             >>> task.set_storage_mounts({
-            >>>     '/tmp/imagenet/': sky.Storage(source='/data/imagenet'),
+            >>>     '/remote/imagenet/': sky.Storage(name='my-bucket',
+            >>>                                      source='/local/imagenet'),
             >>> })
 
         Args:
@@ -729,6 +739,8 @@ class Task:
 
         Any cloud object store URIs (gs://, s3://, etc.), either as source or
         destination, are not included.
+
+        INTERNAL: this method is internal-facing.
         """
         if self.file_mounts is None:
             return None
@@ -744,6 +756,8 @@ class Task:
 
         Local-to-remote file mounts are excluded (handled by
         get_local_to_remote_file_mounts()).
+
+        INTERNAL: this method is internal-facing.
         """
         if self.file_mounts is None:
             return None
@@ -755,7 +769,10 @@ class Task:
         return d
 
     def to_yaml_config(self) -> Dict[str, Any]:
-        """Returns a yaml-style dict representation of the task."""
+        """Returns a yaml-style dict representation of the task.
+
+        INTERNAL: this method is internal-facing.
+        """
         config = dict()
 
         def add_if_not_none(key, value):
