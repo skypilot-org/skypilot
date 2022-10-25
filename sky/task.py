@@ -132,9 +132,9 @@ class Task:
             setup/run command, where ``run`` can either be a str, meaning all
             nodes get the same command, or a lambda, with the semantics
             documented above.
-          docker_image: (Only in effect when LocalDockerBackend is used.) The
-            base docker image that this Task will be built on.  Defaults to
-            'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+          docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
+            is used.) The base docker image that this Task will be built on.
+            Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
         """
         self.name = name
         self.run = run
@@ -323,47 +323,6 @@ class Task:
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
-    def to_yaml_config(self) -> Dict[str, Any]:
-        """Returns a yaml-style dict representation of the task."""
-        config = dict()
-
-        def add_if_not_none(key, value):
-            if value is not None:
-                config[key] = value
-
-        add_if_not_none('name', self.name)
-
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
-            add_if_not_none('resources', resources.to_yaml_config())
-        add_if_not_none('num_nodes', self.num_nodes)
-
-        if self.inputs is not None:
-            add_if_not_none('inputs',
-                            {self.inputs: self.estimated_inputs_size_gigabytes})
-        if self.outputs is not None:
-            add_if_not_none(
-                'outputs',
-                {self.outputs: self.estimated_outputs_size_gigabytes})
-
-        add_if_not_none('setup', self.setup)
-        add_if_not_none('workdir', self.workdir)
-        add_if_not_none('run', self.run)
-        add_if_not_none('envs', self.envs)
-
-        add_if_not_none('file_mounts', dict())
-
-        if self.file_mounts is not None:
-            config['file_mounts'].update(self.file_mounts)
-
-        if self.storage_mounts is not None:
-            config['file_mounts'].update({
-                mount_path: storage.to_yaml_config()
-                for mount_path, storage in self.storage_mounts.items()
-            })
-        return config
-
     @property
     def num_nodes(self) -> int:
         return self._num_nodes
@@ -375,7 +334,7 @@ class Task:
     def set_envs(
             self, envs: Union[None, Tuple[Tuple[str, str]],
                               Dict[str, str]]) -> 'Task':
-        """Sets the environment variables for the setup and run commands.
+        """Sets the environment variables for use inside the setup/run commands.
 
         Returns:
           self: The current task, with envs set.
@@ -499,6 +458,107 @@ class Task:
                 'Node [{}] does not have a cost model set; '
                 'call set_time_estimator() first'.format(self))
         return self.time_estimator_func(resources)
+
+    def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
+        """Sets the file mounts for this task.
+
+        Useful for syncing datasets, dotfiles, etc.
+
+        File mounts are a dictionary: ``{remote_path: local_path/cloud URI}``.
+        Local (or cloud) files/directories will be synced to the specified
+        paths on the remote VM(s) where this Task will run.
+
+        Neither source or destimation paths can end with a slash.
+
+        Example:
+
+            >>> task.set_file_mounts({
+            >>>     '~/.dotfile': '/local/.dotfile',
+            >>>     # /remote/dir/ will contain the contents of /local/dir/.
+            >>>     '/remote/dir': '/local/dir',
+            >>> })
+
+        Args:
+          file_mounts: an optional dict of ``{remote_path: local_path/cloud
+            URI}``, where remote means the VM(s) on which this Task will
+            eventually run on, and local means the node from which the task is
+            launched.
+
+        Returns:
+          self: the current task, with file mounts set.
+
+        Raises:
+          ValueError: if input paths are invalid.
+        """
+        if file_mounts is None:
+            self.file_mounts = None
+            return self
+        for target, source in file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'File mount paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found: target={target} source={source}')
+            if data_utils.is_cloud_store_url(target):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'File mount destination paths cannot be cloud storage')
+            if not data_utils.is_cloud_store_url(source):
+                if not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'File mount source {source!r} does not exist '
+                            'locally. To fix: check if it exists, and correct '
+                            'the path.')
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
+
+        self.file_mounts = file_mounts
+        return self
+
+    def update_file_mounts(self, file_mounts: Dict[str, str]) -> 'Task':
+        """Updates the file mounts for this task.
+
+        Different from set_file_mounts(), this function updates into the
+        existing file_mounts (calls ``dict.update()``), rather than
+        overwritting it.
+
+        This should be called before provisioning in order to take effect.
+
+        Example:
+
+            >>> task.update_file_mounts({
+            >>>     '~/.config': '~/Documents/config',
+            >>>     '/tmp/workdir': '/local/workdir/cnn-cifar10',
+            >>> })
+
+        Args:
+          file_mounts: a dict of ``{remote_path: local_path/cloud URI}``, where
+            remote means the VM(s) on which this Task will eventually run on,
+            and local means the node from which the task is launched.
+
+        Returns:
+          self: the current task, with file mounts updated.
+
+        Raises:
+          ValueError: if input paths are invalid.
+        """
+        if self.file_mounts is None:
+            self.file_mounts = {}
+        self.file_mounts.update(file_mounts)
+        # For validation logic:
+        return self.set_file_mounts(self.file_mounts)
 
     def set_storage_mounts(
         self,
@@ -664,107 +724,6 @@ class Task:
                         raise ValueError(f'Storage Type {store_type} '
                                          'does not exist!')
 
-    def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
-        """Sets the file mounts for this task.
-
-        Useful for syncing datasets, dotfiles, etc.
-
-        File mounts are a dictionary: ``{remote_path: local_path/cloud URI}``.
-        Local (or cloud) files/directories will be synced to the specified
-        paths on the remote VM(s) where this Task will run.
-
-        Neither source or destimation paths can end with a slash.
-
-        Example:
-
-            >>> task.set_file_mounts({
-            >>>     '~/.dotfile': '/local/.dotfile',
-            >>>     # /remote/dir/ will contain the contents of /local/dir/.
-            >>>     '/remote/dir': '/local/dir',
-            >>> })
-
-        Args:
-          file_mounts: an optional dict of ``{remote_path: local_path/cloud
-            URI}``, where remote means the VM(s) on which this Task will
-            eventually run on, and local means the node from which the task is
-            launched.
-
-        Returns:
-          self: the current task, with file mounts set.
-
-        Raises:
-          ValueError: if input paths are invalid.
-        """
-        if file_mounts is None:
-            self.file_mounts = None
-            return self
-        for target, source in file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
-            if data_utils.is_cloud_store_url(target):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount destination paths cannot be cloud storage')
-            if not data_utils.is_cloud_store_url(source):
-                if not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'File mount source {source!r} does not exist '
-                            'locally. To fix: check if it exists, and correct '
-                            'the path.')
-            # TODO(zhwu): /home/username/sky_workdir as the target path need
-            # to be filtered out as well.
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
-                        'destination path of a file mount, as it will be used '
-                        'by the workdir. If uploading a file/folder to the '
-                        'workdir is needed, please specify the full path to '
-                        'the file/folder.')
-
-        self.file_mounts = file_mounts
-        return self
-
-    def update_file_mounts(self, file_mounts: Dict[str, str]) -> 'Task':
-        """Updates the file mounts for this task.
-
-        Different from set_file_mounts(), this function updates into the
-        existing file_mounts (calls ``dict.update()``), rather than
-        overwritting it.
-
-        This should be called before provisioning in order to take effect.
-
-        Example:
-
-            >>> task.update_file_mounts({
-            >>>     '~/.config': '~/Documents/config',
-            >>>     '/tmp/workdir': '/local/workdir/cnn-cifar10',
-            >>> })
-
-        Args:
-          file_mounts: a dict of ``{remote_path: local_path/cloud URI}``, where
-            remote means the VM(s) on which this Task will eventually run on,
-            and local means the node from which the task is launched.
-
-        Returns:
-          self: the current task, with file mounts updated.
-
-        Raises:
-          ValueError: if input paths are invalid.
-        """
-        if self.file_mounts is None:
-            self.file_mounts = {}
-        self.file_mounts.update(file_mounts)
-        # For validation logic:
-        return self.set_file_mounts(self.file_mounts)
-
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
 
@@ -794,6 +753,47 @@ class Task:
                     k) and data_utils.is_cloud_store_url(v):
                 d[k] = v
         return d
+
+    def to_yaml_config(self) -> Dict[str, Any]:
+        """Returns a yaml-style dict representation of the task."""
+        config = dict()
+
+        def add_if_not_none(key, value):
+            if value is not None:
+                config[key] = value
+
+        add_if_not_none('name', self.name)
+
+        if self.resources is not None:
+            assert len(self.resources) == 1
+            resources = list(self.resources)[0]
+            add_if_not_none('resources', resources.to_yaml_config())
+        add_if_not_none('num_nodes', self.num_nodes)
+
+        if self.inputs is not None:
+            add_if_not_none('inputs',
+                            {self.inputs: self.estimated_inputs_size_gigabytes})
+        if self.outputs is not None:
+            add_if_not_none(
+                'outputs',
+                {self.outputs: self.estimated_outputs_size_gigabytes})
+
+        add_if_not_none('setup', self.setup)
+        add_if_not_none('workdir', self.workdir)
+        add_if_not_none('run', self.run)
+        add_if_not_none('envs', self.envs)
+
+        add_if_not_none('file_mounts', dict())
+
+        if self.file_mounts is not None:
+            config['file_mounts'].update(self.file_mounts)
+
+        if self.storage_mounts is not None:
+            config['file_mounts'].update({
+                mount_path: storage.to_yaml_config()
+                for mount_path, storage in self.storage_mounts.items()
+            })
+        return config
 
     def __rshift__(self, b):
         sky.dag.get_current_dag().add_edge(self, b)
