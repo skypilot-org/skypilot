@@ -13,7 +13,7 @@ import pathlib
 import pickle
 import time
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
 from sky import clouds
 from sky.utils import db_utils
@@ -166,8 +166,6 @@ def add_or_update_cluster(cluster_name: str,
     if not metadata:
         metadata = {}
         metadata['usage_intervals'] = []
-        metadata['cost_before_start'] = 0
-        metadata['latest_queried_cost'] = 0
 
     _DB.conn.commit()
     set_cluster_metadata(cluster_name, metadata)
@@ -180,21 +178,14 @@ def update_last_use(cluster_name: str):
     _DB.conn.commit()
 
 
-def remove_cluster(cluster_name: str, terminate: bool) -> float:
+def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
     handle = get_handle_from_cluster_name(cluster_name)
-    total_cost = 0
+    metadata = get_cluster_metadata(cluster_name)
 
-    if handle:
-        metadata = get_cluster_metadata(cluster_name)
-        cost_before_start = metadata['cost_before_start']
+    if handle and metadata:
         start_time = get_cluster_launch_time(cluster_name)
         end_time = int(time.time())
-        cost_from_start_to_now = get_cost_for_time_interval(
-            handle, start_time, end_time)
-        total_cost = cost_before_start + cost_from_start_to_now
-        metadata['cost_before_start'] = total_cost
-        metadata['latest_queried_cost'] = 0
         metadata['usage_intervals'].append((start_time, end_time))
         set_cluster_metadata(cluster_name, metadata)
 
@@ -203,7 +194,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
                            (cluster_name,))
     else:
         if handle is None:
-            return total_cost
+            return
         # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
@@ -215,8 +206,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
                 cluster_name,
             ))
     _DB.conn.commit()
-
-    return float(total_cost)
 
 
 def get_handle_from_cluster_name(
@@ -311,27 +300,7 @@ def get_cluster_from_name(
         return record
 
 
-def update_cost_of_clusters():
-    rows = _DB.cursor.execute(
-        'select * from clusters order by launched_at desc')
-    status_time = int(time.time())
-    for (name, launched_at, handle, _, status, _, metadata, _) in rows:
-        handle = pickle.loads(handle)
-        metadata = json.loads(metadata)
-
-        if handle and metadata:
-            cost_before_start = metadata['cost_before_start']
-            cost_from_start_to_now = 0
-            if ClusterStatus[status] == ClusterStatus.UP:
-                cost_from_start_to_now = get_cost_for_time_interval(
-                    handle, launched_at, status_time)
-            latest_cost = cost_before_start + cost_from_start_to_now
-            metadata['latest_queried_cost'] = latest_cost
-            set_cluster_metadata(name, metadata)
-
-
 def get_clusters() -> List[Dict[str, Any]]:
-    update_cost_of_clusters()
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc')
     records = []
@@ -470,13 +439,39 @@ def get_storage() -> List[Dict[str, Any]]:
     return records
 
 
-def get_cost_for_time_interval(
-        handle: Optional['backends.Backend.ResourceHandle'], start_time: str,
-        end_time: str) -> float:
+def get_cost_for_cluster(cluster_name: str,) -> float:
 
-    start_time, end_time = int(start_time), int(end_time)
-    interval_duration = end_time - start_time
-    cost = (handle.launched_resources.get_cost(interval_duration) *
+    handle = get_handle_from_cluster_name(cluster_name)
+    metadata = get_cluster_metadata(cluster_name)
+
+    usage_intervals = metadata['usage_intervals']
+
+    # the case where cluster is torn-down after launch
+    if not usage_intervals:
+        start_time = get_cluster_launch_time(cluster_name)
+        query_time = int(time.time())
+        cost_from_start_to_query = get_cost_for_usage_intervals(
+            handle, [(start_time, query_time)])
+        return cost_from_start_to_query
+
+    return get_cost_for_usage_intervals(handle, usage_intervals)
+
+
+def get_cost_for_usage_intervals(
+    handle: Optional['backends.Backend.ResourceHandle'],
+    usage_intervals: List[Tuple[int, int]],
+) -> float:
+
+    if not handle:
+        return 0
+
+    total_duration = 0
+
+    for start_time, end_time in usage_intervals:
+        start_time, end_time = int(start_time), int(end_time)
+        total_duration += end_time - start_time
+
+    cost = (handle.launched_resources.get_cost(total_duration) *
             handle.launched_nodes)
 
     return cost

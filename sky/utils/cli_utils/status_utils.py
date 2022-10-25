@@ -2,9 +2,11 @@
 from typing import Any, Callable, Dict, List, Optional
 import click
 import colorama
+import time
 
 from sky import backends
 from sky import spot
+from sky import global_user_state
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils
@@ -245,9 +247,26 @@ def _get_price(cluster_status):
 
 
 def _get_total_cost(cluster_status):
-    if cluster_status['metadata']:
-        cost = cluster_status['metadata']['latest_queried_cost']
-        cost_str = f'$ {cost:.3f}'
+    handle = cluster_status['handle']
+    metadata = cluster_status['metadata']
+    cluster_name = cluster_status['name']
+    status = cluster_status['status']
+
+    if handle and metadata:
+        usage_intervals = metadata['usage_intervals']
+        cost_before_start = global_user_state.get_cost_for_usage_intervals(
+            handle, usage_intervals)
+
+        start_time = global_user_state.get_cluster_launch_time(cluster_name)
+        query_time = int(time.time())
+        cost_to_query = 0
+
+        if status == global_user_state.ClusterStatus.UP:
+            cost_to_query = global_user_state.get_cost_for_usage_intervals(
+                handle, [(start_time, query_time)])
+
+        total_cost = cost_before_start + cost_to_query
+        cost_str = f'$ {total_cost:.3f}'
         return cost_str
     return '-'
 

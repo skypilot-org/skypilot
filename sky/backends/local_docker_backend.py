@@ -309,8 +309,10 @@ class LocalDockerBackend(backends.Backend):
             container = self.containers[handle]
             container.remove(force=True)
         cluster_name = handle.get_cluster_name()
-        cluster_cost = global_user_state.remove_cluster(cluster_name,
-                                                        terminate=True)
+
+        cluster_cost = global_user_state.get_cost_for_cluster(
+            handle.cluster_name)
+        global_user_state.remove_cluster(cluster_name, terminate=True)
         if cluster_cost:
             logger.info(f'Total cost of cluster is $ {cluster_cost:.3f}')
 

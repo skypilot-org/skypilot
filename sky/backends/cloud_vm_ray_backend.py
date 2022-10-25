@@ -2621,8 +2621,12 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
-        cluster_cost = global_user_state.remove_cluster(handle.cluster_name,
-                                                        terminate=terminate)
+
+        cluster_cost = global_user_state.get_cost_for_cluster(
+            handle.cluster_name)
+        global_user_state.remove_cluster(handle.cluster_name,
+                                         terminate=terminate)
+
         if cluster_cost:
             logger.info(f'Total cost of cluster is $ {cluster_cost:.3f}')
 
