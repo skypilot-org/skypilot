@@ -18,7 +18,7 @@ Core API
 -----------
 
 sky.launch
-~~~~~~~~
+~~~~~~~~~~
 
 .. autofunction:: sky.launch
 
@@ -54,21 +54,11 @@ sky.autostop
 
 .. _sky-dag-ref:
 
-Task and DAG
+Task
 -----------------
-
-
-sky.Task
-~~~~~~~~~
 
 .. autoclass:: sky.Task
     :members:
-    :exclude-members: estimate_runtime
+    :exclude-members: estimate_runtime, get_inputs_cloud, set_time_estimator, sync_storage_mounts
 
     .. automethod:: __init__
-
-sky.Dag
-~~~~~~~~~
-
-.. autoclass:: sky.Dag
-    :members:
