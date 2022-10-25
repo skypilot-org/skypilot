@@ -222,6 +222,19 @@ def _interactive_node_cli_command(cli_func):
                                        'there are running/pending jobs in the '
                                        'job queue. If not set, the cluster '
                                        'will not be auto-stopped.'))
+    autodown = click.option('--down',
+                            default=False,
+                            is_flag=True,
+                            required=False,
+                            help=('Autodown the cluster: tear down the '
+                                  'cluster after all jobs finish '
+                                  '(successfully or abnormally). If '
+                                  '--idle-minutes-to-autostop is also set, '
+                                  'the cluster will be torn down after the '
+                                  'specified idle time. Note that if errors '
+                                  'occur during provisioning/data syncing/'
+                                  'setting up, the cluster will not be torn '
+                                  'down for debugging purposes.'))
     retry_until_up = click.option('--retry-until-up',
                                   '-r',
                                   is_flag=True,
@@ -249,6 +262,7 @@ def _interactive_node_cli_command(cli_func):
         no_confirm,
         port_forward_option,
         idle_autostop,
+        autodown,
         retry_until_up,
 
         # Resource options
@@ -692,15 +706,16 @@ def _launch_with_confirm(
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
+
+        # We do not sky.launch if interactive node is already up, so we need
+        # to update idle timeout and autodown here.
+        elif idle_minutes_to_autostop is not None:
+            core.autostop(cluster, idle_minutes_to_autostop, down)
+        elif down:
+            core.autostop(cluster, 1, down)
+
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
-
-    if node_type is not None and idle_minutes_to_autostop is not None \
-            and maybe_status == global_user_state.ClusterStatus.UP:
-        # We do not sky.launch if interactive node is already up, so we need
-        # to update idle timeout here.
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        backend.set_autostop(handle, idle_minutes_to_autostop)
 
     if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
@@ -729,6 +744,7 @@ def _create_and_ssh_into_node(
     user_requested_resources: Optional[bool] = False,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
     retry_until_up: bool = False,
 ):
     """Creates and attaches to an interactive node.
@@ -747,6 +763,9 @@ def _create_and_ssh_into_node(
                                   starts counting after setup/file_mounts are
                                   done; the clock gets reset whenever there
                                   are running/pending jobs in the job queue.
+        down: If true, autodown the cluster after all jobs finish. If
+              idle_minutes_to_autostop is also set, the cluster will be torn
+              down after the specified idle time.
         retry_until_up: Whether to retry provisioning infinitely until the
                         cluster is up if we fail to launch due to
                         unavailability errors.
@@ -789,6 +808,7 @@ def _create_and_ssh_into_node(
         detach_run=True,
         no_confirm=no_confirm,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
         retry_until_up=retry_until_up,
         node_type=node_type,
     )
@@ -2187,7 +2207,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], retry_until_up: bool):
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2252,6 +2273,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
         retry_until_up=retry_until_up,
     )
 
@@ -2264,7 +2286,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             instance_type: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            retry_until_up: bool):
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2325,6 +2347,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
         retry_until_up=retry_until_up,
     )
 
@@ -2338,7 +2361,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            retry_until_up: bool):
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2406,6 +2429,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
         retry_until_up=retry_until_up,
     )
 
