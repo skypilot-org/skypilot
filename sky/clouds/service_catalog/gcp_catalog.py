@@ -3,12 +3,15 @@
 For now this service catalog is manually coded. In the future it should be
 queried from GCP API.
 """
+from collections import defaultdict
 import typing
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from sky import exceptions
 from sky.clouds.service_catalog import common
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -28,116 +31,20 @@ _DEFAULT_HOST_VM_FAMILY = 'n1'
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
 # count -> vm type
-_A100_INSTANCE_TYPES = {
-    1: 'a2-highgpu-1g',
-    2: 'a2-highgpu-2g',
-    4: 'a2-highgpu-4g',
-    8: 'a2-highgpu-8g',
-    16: 'a2-megagpu-16g',
-}
-# count -> host memory
-_A100_HOST_MEMORY = {
-    1: 85,
-    2: 170,
-    4: 340,
-    8: 680,
-    16: 1360,
-}
-
-# Pricing.  All info assumes us-central1.
-# In general, query pricing from the cloud.
-_ON_DEMAND_PRICES = {
-    # VMs: https://cloud.google.com/compute/all-pricing.
-    # N1 standard
-    'n1-standard-1': 0.04749975,
-    'n1-standard-2': 0.0949995,
-    'n1-standard-4': 0.189999,
-    'n1-standard-8': 0.379998,
-    'n1-standard-16': 0.759996,
-    'n1-standard-32': 1.519992,
-    'n1-standard-64': 3.039984,
-    'n1-standard-96': 4.559976,
-    # N1 highmem
-    'n1-highmem-2': 0.118303,
-    'n1-highmem-4': 0.236606,
-    'n1-highmem-8': 0.473212,
-    'n1-highmem-16': 0.946424,
-    'n1-highmem-32': 1.892848,
-    'n1-highmem-64': 3.785696,
-    'n1-highmem-96': 5.678544,
-    # n2 standard
-    'n2-standard-2': 0.097118,
-    'n2-standard-4': 0.194236,
-    'n2-standard-8': 0.388472,
-    'n2-standard-16': 0.776944,
-    'n2-standard-32': 1.553888,
-    'n2-standard-48': 2.330832,
-    'n2-standard-64': 3.107776,
-    'n2-standard-80': 3.88472,
-    'n2-standard-96': 4.661664,
-    'n2-standard-128': 6.215552,
-    # n2 highmem
-    'n2-highmem-2': 0.147546,
-    'n2-highmem-4': 0.295092,
-    'n2-highmem-8': 0.590184,
-    'n2-highmem-16': 1.180368,
-    'n2-highmem-32': 2.360736,
-    'n2-highmem-48': 3.541104,
-    'n2-highmem-64': 4.721472,
-    'n2-highmem-80': 5.90184,
-    # A2 highgpu for A100
-    'a2-highgpu-1g': 0.749750,
-    'a2-highgpu-2g': 1.499500,
-    'a2-highgpu-4g': 2.998986,
-    'a2-highgpu-8g': 5.997986,
-    'a2-megagpu-16g': 8.919152,
-}
-
-_SPOT_PRICES = {
-    # VMs: https://cloud.google.com/compute/all-pricing.
-    # N1 standard
-    'n1-standard-1': 0.01,
-    'n1-standard-2': 0.02,
-    'n1-standard-4': 0.04,
-    'n1-standard-8': 0.08,
-    'n1-standard-16': 0.16,
-    'n1-standard-32': 0.32,
-    'n1-standard-64': 0.64,
-    'n1-standard-96': 0.96,
-    # N1 highmem
-    'n1-highmem-2': 0.024906,
-    'n1-highmem-4': 0.049812,
-    'n1-highmem-8': 0.099624,
-    'n1-highmem-16': 0.199248,
-    'n1-highmem-32': 0.398496,
-    'n1-highmem-64': 0.796992,
-    'n1-highmem-96': 1.195488,
-    # n2 standard
-    'n2-standard-2': 0.02354,
-    'n2-standard-4': 0.04708,
-    'n2-standard-8': 0.09416,
-    'n2-standard-16': 0.18832,
-    'n2-standard-32': 0.37664,
-    'n2-standard-48': 0.56496,
-    'n2-standard-64': 0.75328,
-    'n2-standard-80': 0.9416,
-    'n2-standard-96': 1.12992,
-    'n2-standard-128': 1.50656,
-    # n2 highmem
-    'n2-highmem-2': 0.03392,
-    'n2-highmem-4': 0.06784,
-    'n2-highmem-8': 0.13568,
-    'n2-highmem-16': 0.27136,
-    'n2-highmem-32': 0.54272,
-    'n2-highmem-48': 0.81408,
-    'n2-highmem-64': 1.08544,
-    'n2-highmem-80': 1.3568,
-    # A2 highgpu for A100
-    'a2-highgpu-1g': 0.224930,
-    'a2-highgpu-2g': 0.449847,
-    'a2-highgpu-4g': 0.899694,
-    'a2-highgpu-8g': 1.799388,
-    'a2-megagpu-16g': 2.675750,
+_A100_INSTANCE_TYPE_DICTS = {
+    'A100': {
+        1: 'a2-highgpu-1g',
+        2: 'a2-highgpu-2g',
+        4: 'a2-highgpu-4g',
+        8: 'a2-highgpu-8g',
+        16: 'a2-megagpu-16g',
+    },
+    'A100-80GB': {
+        1: 'a2-ultragpu-1g',
+        2: 'a2-ultragpu-2g',
+        4: 'a2-ultragpu-4g',
+        8: 'a2-ultragpu-8g',
+    }
 }
 
 # Number of CPU cores per GPU based on the AWS setting.
@@ -183,6 +90,38 @@ _NUM_ACC_TO_NUM_CPU = {
     },
 }
 
+# num_gpus -> (max_num_cpus, max_memory_gb)
+# Refer to: https://cloud.google.com/compute/docs/gpus
+_NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
+    'K80': {
+        1: (8, 52),
+        2: (16, 104),
+        4: (32, 208),
+        8: (64, 208),  # except for asia-east1-a, us-east1-d
+    },
+    'V100': {
+        1: (12, 78),
+        2: (24, 156),
+        4: (48, 312),
+        8: (96, 624),
+    },
+    'T4': {
+        1: (48, 312),
+        2: (48, 312),
+        4: (96, 624),
+    },
+    'P4': {
+        1: (24, 156),
+        2: (48, 312),
+        4: (96, 624),
+    },
+    'P100': {
+        1: (16, 104),
+        2: (32, 208),
+        4: (96, 624),  # except for us-east1-c, europe-west1-d, europe-west1-b
+    }
+}
+
 
 def _is_power_of_two(x: int) -> bool:
     """Returns true if x is a power of two."""
@@ -199,19 +138,28 @@ def _closest_power_of_two(x: int) -> int:
 
 def instance_type_exists(instance_type: str) -> bool:
     """Check the existence of the instance type."""
-    return instance_type in _ON_DEMAND_PRICES
+    if instance_type == 'TPU-VM':
+        return True
+    return common.instance_type_exists_impl(_df, instance_type)
 
 
 def get_hourly_cost(
     instance_type: str,
-    region: str,
+    region: Optional[str] = None,
     use_spot: bool = False,
 ) -> float:
     """Returns the hourly price for a given instance type and region."""
-    del region  # unused
-    if use_spot:
-        return _SPOT_PRICES[instance_type]
-    return _ON_DEMAND_PRICES[instance_type]
+    if instance_type == 'TPU-VM':
+        # Currently the host VM of TPU does not cost extra.
+        return 0
+    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+
+
+def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+    # The number of vCPUs provided with a TPU VM is not officially documented.
+    if instance_type == 'TPU-VM':
+        return None
+    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
 def get_instance_type_for_accelerator(
@@ -222,10 +170,16 @@ def get_instance_type_for_accelerator(
     with fuzzy search (should be empty as it must have already been generated in
     caller).
     """
-    if acc_name == 'A100':
+    (instance_list,
+     fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
+         df=_df, acc_name=acc_name, acc_count=acc_count)
+    if instance_list is None:
+        return None, fuzzy_candidate_list
+
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
-        return [_A100_INSTANCE_TYPES[acc_count]], []
+        return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
@@ -247,8 +201,22 @@ def get_instance_type_for_accelerator(
     return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
-def region_exists(region: str) -> bool:
-    return common.region_exists_impl(_df, region)
+def validate_region_zone(region: Optional[str], zone: Optional[str]):
+    return common.validate_region_zone_impl(_df, region, zone)
+
+
+def accelerator_in_region_or_zone(acc_name: str,
+                                  acc_count: int,
+                                  region: Optional[str] = None,
+                                  zone: Optional[str] = None) -> bool:
+    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+                                                     region, zone)
+
+
+def get_region_zones_for_instance_type(instance_type: str,
+                                       use_spot: bool) -> List['cloud.Region']:
+    df = _df[_df['InstanceType'] == instance_type]
+    return common.get_region_zones(df, use_spot)
 
 
 def _get_accelerator(
@@ -293,27 +261,45 @@ def get_accelerator_hourly_cost(accelerator: str,
 def list_accelerators(
     gpus_only: bool,
     name_filter: Optional[str] = None,
+    case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
-    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter)
+    results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
+                                            case_sensitive)
 
-    # TODO(zongheng): fix A100 info directly in catalog.
-    a100_infos = results.get('A100', None)
-    if a100_infos is not None:
-        new_infos = []
-        for info in a100_infos:
-            assert pd.isna(info.instance_type) and info.memory == 0, a100_infos
-            a100_host_vm_type = _A100_INSTANCE_TYPES[info.accelerator_count]
-            new_infos.append(
-                info._replace(
-                    instance_type=a100_host_vm_type,
-                    memory=_A100_HOST_MEMORY[info.accelerator_count],
-                    # total cost = VM instance + GPU.
-                    price=info.price + _ON_DEMAND_PRICES[a100_host_vm_type],
-                    spot_price=info.spot_price +
-                    _SPOT_PRICES[a100_host_vm_type],
-                ))
-        results['A100'] = new_infos
+    a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
+    if not a100_infos:
+        return results
+
+    # Unlike other GPUs that can be attached to different sizes of N1 VMs,
+    # A100 GPUs can only be attached to fixed-size A2 VMs.
+    # Thus, we can show their exact cost including the host VM prices.
+    new_infos = defaultdict(list)
+    for info in a100_infos:
+        assert pd.isna(info.instance_type) and pd.isna(info.memory), a100_infos
+        a100_host_vm_type = _A100_INSTANCE_TYPE_DICTS[info.accelerator_name][
+            info.accelerator_count]
+        df = _df[_df['InstanceType'] == a100_host_vm_type]
+        cpu_count = df['vCPUs'].iloc[0]
+        memory = df['MemoryGiB'].iloc[0]
+        vm_price = common.get_hourly_cost_impl(_df,
+                                               a100_host_vm_type,
+                                               None,
+                                               use_spot=False)
+        vm_spot_price = common.get_hourly_cost_impl(_df,
+                                                    a100_host_vm_type,
+                                                    None,
+                                                    use_spot=True)
+        new_infos[info.accelerator_name].append(
+            info._replace(
+                instance_type=a100_host_vm_type,
+                cpu_count=cpu_count,
+                memory=memory,
+                # total cost = VM instance + GPU.
+                price=info.price + vm_price,
+                spot_price=info.spot_price + vm_spot_price,
+            ))
+    results.update(new_infos)
     return results
 
 
@@ -325,3 +311,131 @@ def get_region_zones_for_accelerators(
     """Returns a list of regions for a given accelerators."""
     df = _get_accelerator(_df, accelerator, count, region=None)
     return common.get_region_zones(df, use_spot)
+
+
+def check_host_accelerator_compatibility(
+        instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
+    """Check if the instance type is compatible with the accelerators.
+
+    This function ensures that TPUs and GPUs except A100 are attached to N1,
+    and A100 GPUs are attached to A2 machines.
+    """
+    if accelerators is None:
+        if instance_type.startswith('a2-'):
+            # NOTE: While it is allowed to use A2 machines as CPU-only nodes,
+            # we exclude this case as it is uncommon and undesirable.
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'A2 instance types should be used with A100 GPUs. '
+                    'Either use other instance types or specify the '
+                    'accelerators as A100.')
+        return
+
+    acc = list(accelerators.items())
+    assert len(acc) == 1, acc
+    acc_name, _ = acc[0]
+
+    # Check if the accelerator is supported by GCP.
+    if not list_accelerators(gpus_only=False, name_filter=acc_name):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesUnavailableError(
+                f'{acc_name} is not available in GCP. '
+                'See \'sky show-gpus --cloud gcp\'')
+
+    if acc_name.startswith('tpu-'):
+        if instance_type != 'TPU-VM' and not instance_type.startswith('n1-'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    'TPU Nodes can be only used with N1 machines. '
+                    'Please refer to: '
+                    'https://cloud.google.com/compute/docs/general-purpose-machines#n1_machines')  # pylint: disable=line-too-long
+        return
+
+    # Treat A100 as a special case.
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        # A100 must be attached to A2 instance type.
+        if not instance_type.startswith('a2-'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'A100 GPUs cannot be attached to {instance_type}. '
+                    f'Use A2 machines instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
+        return
+
+    # Other GPUs must be attached to N1 machines.
+    # Refer to: https://cloud.google.com/compute/docs/machine-types#gpus
+    if not instance_type.startswith('n1-'):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesMismatchError(
+                f'{acc_name} GPUs cannot be attached to {instance_type}. '
+                'Use N1 instance types instead. Please refer to: '
+                'https://cloud.google.com/compute/docs/machine-types#gpus')
+
+
+def check_accelerator_attachable_to_host(instance_type: str,
+                                         accelerators: Optional[Dict[str, int]],
+                                         zone: Optional[str] = None) -> None:
+    """Check if the accelerators can be attached to the host.
+
+    This function checks the max CPU count and memory of the host that
+    the accelerators can be attached to.
+    """
+    if accelerators is None:
+        return
+
+    acc = list(accelerators.items())
+    assert len(acc) == 1, acc
+    acc_name, acc_count = acc[0]
+
+    if acc_name.startswith('tpu-'):
+        # TODO(woosuk): Check max vcpus and memory for each TPU type.
+        assert instance_type == 'TPU-VM' or instance_type.startswith('n1-')
+        return
+
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        valid_counts = list(_A100_INSTANCE_TYPE_DICTS[acc_name].keys())
+    else:
+        valid_counts = list(_NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name].keys())
+    if acc_count not in valid_counts:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesMismatchError(
+                f'{acc_name}:{acc_count} is not launchable on GCP. '
+                f'The valid {acc_name} counts are {valid_counts}.')
+
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        a100_instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        if instance_type != a100_instance_type:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesMismatchError(
+                    f'A100:{acc_count} cannot be attached to {instance_type}. '
+                    f'Use {a100_instance_type} instead. Please refer to '
+                    'https://cloud.google.com/compute/docs/gpus#a100-gpus')
+        return
+
+    # Check maximum vCPUs and memory.
+    max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
+    if acc_name == 'K80' and acc_count == 8:
+        if zone in ['asia-east1-a', 'us-east1-d']:
+            max_memory = 416
+    elif acc_name == 'P100' and acc_count == 4:
+        if zone in ['us-east1-c', 'europe-west1-d', 'europe-west1-b']:
+            max_cpus = 64
+            max_memory = 208
+
+    # vCPU counts and memory sizes of N1 machines.
+    df = _df[_df['InstanceType'] == instance_type]
+    num_cpus = df['vCPUs'].iloc[0]
+    memory = df['MemoryGiB'].iloc[0]
+
+    if num_cpus > max_cpus:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesMismatchError(
+                f'{acc_name}:{acc_count} cannot be attached to '
+                f'{instance_type}. The maximum number of vCPUs is {max_cpus}. '
+                'Please refer to: https://cloud.google.com/compute/docs/gpus')
+    if memory > max_memory:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesMismatchError(
+                f'{acc_name}:{acc_count} cannot be attached to '
+                f'{instance_type}. The maximum CPU memory is {max_memory} GB. '
+                'Please refer to: https://cloud.google.com/compute/docs/gpus')

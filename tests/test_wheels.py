@@ -1,17 +1,20 @@
 import os
 import time
 import shutil
+
 from sky.backends import wheel_utils
 
 
 def test_build_wheels():
     shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)
     start = time.time()
-    assert wheel_utils.build_sky_wheel().exists()
+    wheel_path, _ = wheel_utils.build_sky_wheel()
+    assert wheel_path.exists()
     duration = time.time() - start
 
     start = time.time()
-    assert wheel_utils.build_sky_wheel().exists()
+    wheel_path, _ = wheel_utils.build_sky_wheel()
+    assert wheel_path.exists()
     duration_cached = time.time() - start
 
     assert duration_cached < duration
@@ -24,6 +27,7 @@ def test_build_wheels():
     for root, _, _ in os.walk(str(wheel_utils.WHEEL_DIR)):
         # set file date to 1970-01-01 00:00 UTC
         os.utime(root, (0, 0))
-    assert wheel_utils.build_sky_wheel().exists()
+    wheel_path, _ = wheel_utils.build_sky_wheel()
+    assert wheel_path.exists()
 
     shutil.rmtree(wheel_utils.WHEEL_DIR, ignore_errors=True)

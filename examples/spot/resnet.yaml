@@ -1,4 +1,5 @@
-# Distributed training example with sky spot + automatic checkpoint/restore
+# Distributed training example with managed spot job + automatic
+# checkpoint/restore.
 #
 # Creates a shared s3 mount across workers that is used to read and write
 # checkpoints. Save checkpoints every 10 epochs.

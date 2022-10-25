@@ -2,7 +2,7 @@ GPU-backed Jupyter Notebooks
 ============================
 
 Jupyter notebooks are a useful tool for interactive development, debugging, and
-visualization. Sky makes the process of running a GPU-backed Jupyter notebook
+visualization. SkyPilot makes the process of running a GPU-backed Jupyter notebook
 simple by automatically managing provisioning and port forwarding.
 
 To get a machine with a GPU attached, we recommend using an interactive **GPU node**.
@@ -20,11 +20,11 @@ You can read more about interactive nodes :ref:`here <interactive-nodes>`.
 
 The above command will automatically log in to the cluster once the cluster is provisioned (or re-use an existing one).
 
-On the VM, you can run the following command to start a Jupyter session:
+Inside the VM, you can run the following commands to start a Jupyter session:
 
 .. code-block:: bash
 
-   # Start a Jupyter notebook
+   pip install jupyter
    jupyter notebook
 
 In your local browser, you should now be able to access :code:`localhost:8888` and see the following screen:
@@ -45,13 +45,15 @@ You can verify that this notebook is running on the GPU-backed instance using :c
   :width: 100%
   :alt: nvidia-smi in notebook
 
-Notebooks in Sky tasks
------------------------
-Jupyter notebooks can also be used in Sky tasks, allowing access to the full
-range of Sky's features including :ref:`mounted storage <sky-storage>` and
+The GPU node is a normal SkyPilot cluster, so you can use the usual CLI commands on it.  For example, run ``sky down/stop`` to terminate or stop it, and ``sky exec`` to execute a task.
+
+Notebooks in SkyPilot tasks
+---------------------------
+Jupyter notebooks can also be used in SkyPilot tasks, allowing access to the full
+range of SkyPilot's features including :ref:`mounted storage <sky-storage>` and
 :ref:`autostop <auto-stop>`.
 
-The following :code:`jupyter.yaml` is an example of a task specification that can launch notebooks with Sky.
+The following :code:`jupyter.yaml` is an example of a task specification that can launch notebooks with SkyPilot.
 
 .. code:: yaml
 

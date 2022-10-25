@@ -1,11 +1,10 @@
-"""The Sky optimizer: assigns best resources to user tasks."""
+"""Optimizer: assigns best resources to user tasks."""
 import collections
-import colorama
 import enum
-import sys
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import colorama
 import numpy as np
 import prettytable
 
@@ -16,7 +15,9 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
-from sky.skylet.utils import log_utils
+from sky.utils import env_options
+from sky.utils import ux_utils
+from sky.utils import log_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
@@ -25,8 +26,8 @@ logger = sky_logging.init_logger(__name__)
 
 Task = task_lib.Task
 
-_DUMMY_SOURCE_NAME = 'sky-dummy-source'
-_DUMMY_SINK_NAME = 'sky-dummy-sink'
+_DUMMY_SOURCE_NAME = 'skypilot-dummy-source'
+_DUMMY_SINK_NAME = 'skypilot-dummy-sink'
 
 # task -> resources -> estimated cost or time.
 _TaskToCostMap = Dict[Task, Dict[resources_lib.Resources, float]]
@@ -53,7 +54,7 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
 
 
 class Optimizer:
-    """The Sky optimizer: assigns best resources to user tasks."""
+    """Optimizer: assigns best resources to user tasks."""
 
     @staticmethod
     def _egress_cost(src_cloud: clouds.Cloud, dst_cloud: clouds.Cloud,
@@ -91,7 +92,7 @@ class Optimizer:
                  minimize=OptimizeTarget.COST,
                  blocked_launchable_resources: Optional[List[
                      resources_lib.Resources]] = None,
-                 raise_error: bool = False):
+                 quiet: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
@@ -100,7 +101,7 @@ class Optimizer:
                 dag,
                 minimize_cost=minimize == OptimizeTarget.COST,
                 blocked_launchable_resources=blocked_launchable_resources,
-                raise_error=raise_error)
+                quiet=quiet)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
             # optimization fails.
@@ -202,7 +203,6 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
-        raise_error: bool = False,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -254,11 +254,8 @@ class Optimizer:
                         'Hint: \'sky show-gpus --all\' '
                         'to list available accelerators.\n'
                         '      \'sky check\' to check the enabled clouds.')
-                    if raise_error:
+                    with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(error_msg)
-                    else:
-                        logger.error(error_msg)
-                        sys.exit(1)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')
@@ -410,9 +407,9 @@ class Optimizer:
         import pulp  # pylint: disable=import-outside-toplevel
 
         if minimize_cost:
-            prob = pulp.LpProblem('Sky-Cost-Optimization', pulp.LpMinimize)
+            prob = pulp.LpProblem('Cost-Optimization', pulp.LpMinimize)
         else:
-            prob = pulp.LpProblem('Sky-Runtime-Optimization', pulp.LpMinimize)
+            prob = pulp.LpProblem('Runtime-Optimization', pulp.LpMinimize)
 
         # Prepare the constants.
         V = topo_order  # pylint: disable=invalid-name
@@ -614,7 +611,7 @@ class Optimizer:
                 ordered_best_plan[node] = best_plan[node]
 
         is_trivial = all(len(v) == 1 for v in node_to_cost_map.values())
-        if not is_trivial and not sky_logging.MINIMIZE_LOGGING:
+        if not is_trivial and not env_options.Options.MINIMIZE_LOGGING.get():
             metric_str = 'cost' if minimize_cost else 'run time'
             logger.info(
                 f'{colorama.Style.BRIGHT}Target:{colorama.Style.RESET_ALL}'
@@ -645,14 +642,24 @@ class Optimizer:
             elif isinstance(accelerators, dict) and len(accelerators) == 1:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
-
+            spot = '[Spot]' if resources.use_spot else ''
+            cloud = resources.cloud
+            vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
+            if vcpus is None:
+                vcpus = '-'
+            elif vcpus.is_integer():
+                vcpus = str(int(vcpus))
+            else:
+                vcpus = f'{vcpus:.1f}'
             return [
-                str(resources.cloud), resources.instance_type,
-                str(accelerators)
+                str(cloud),
+                resources.instance_type + spot,
+                vcpus,
+                str(accelerators),
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'ACCELERATORS']
+        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS']
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]
@@ -681,9 +688,9 @@ class Optimizer:
             rows = []
             for resources, cost in v.items():
                 if minimize_cost:
-                    cost = round(cost, 2)
+                    cost = f'{cost:.2f}'
                 else:
-                    cost = round(cost / 3600, 2)
+                    cost = f'{cost / 3600:.2f}'
 
                 row = [*_get_resources_element_list(resources), cost, '']
                 if resources == best_plan[task]:
@@ -733,7 +740,7 @@ class Optimizer:
         minimize_cost: bool = True,
         blocked_launchable_resources: Optional[List[
             resources_lib.Resources]] = None,
-        raise_error: bool = False,
+        quiet: bool = False,
     ) -> Dict[Task, resources_lib.Resources]:
         """Finds the optimal task-resource mapping for the entire DAG.
 
@@ -751,8 +758,7 @@ class Optimizer:
             Optimizer._estimate_nodes_cost_or_time(
                 topo_order,
                 minimize_cost,
-                blocked_launchable_resources,
-                raise_error)
+                blocked_launchable_resources)
 
         if dag.is_chain():
             best_plan, best_total_objective = Optimizer._optimize_by_dp(
@@ -770,11 +776,12 @@ class Optimizer:
             total_cost = Optimizer._compute_total_cost(graph, topo_order,
                                                        best_plan)
 
-        Optimizer.print_optimized_plan(graph, topo_order, best_plan, total_time,
-                                       total_cost, node_to_cost_map,
-                                       minimize_cost)
-        if not sky_logging.MINIMIZE_LOGGING:
-            Optimizer._print_candidates(node_to_candidate_map)
+        if not quiet:
+            Optimizer.print_optimized_plan(graph, topo_order, best_plan,
+                                           total_time, total_cost,
+                                           node_to_cost_map, minimize_cost)
+            if not env_options.Options.MINIMIZE_LOGGING.get():
+                Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
 
 
@@ -834,15 +841,30 @@ def _fill_in_launchable_resources(
                 check.check(quiet=True)
                 return _fill_in_launchable_resources(
                     task, blocked_launchable_resources, False)
-            raise exceptions.ResourcesUnavailableError(
-                f'Task {task} requires {resources.cloud} which is not '
-                'enabled. Run `sky check` to enable access to it, '
-                'or change the cloud requirement.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.ResourcesUnavailableError(
+                    f'Task {task} requires {resources.cloud} which is not '
+                    'enabled. Run `sky check` to enable access to it, '
+                    'or change the cloud requirement.')
         elif resources.is_launchable():
+            if isinstance(resources.cloud, clouds.GCP):
+                # Check if the host VM satisfies the max vCPU and memory limits.
+                clouds.GCP.check_accelerator_attachable_to_host(
+                    resources.instance_type, resources.accelerators,
+                    resources.zone)
             launchable[resources] = [resources]
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds
+            # Hack: When >=2 cloud candidates, always remove local cloud from
+            # possible candidates. This is so the optimizer will consider
+            # public clouds, except local. Local will be included as part of
+            # optimizer in a future PR.
+            # TODO(mluo): Add on-prem to cloud spillover.
+            if len(clouds_list) >= 2:
+                clouds_list = [
+                    c for c in clouds_list if not isinstance(c, clouds.Local)
+                ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list

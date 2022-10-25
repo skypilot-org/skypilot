@@ -1,4 +1,4 @@
-# sharedfs-pingpong - a demo to illustrate sky.Storage's mounting feature.
+# sharedfs-pingpong - a demo to illustrate SkyPilot Storage's mounting feature.
 #
 # This program implements coordination between processes using a shared file
 # system they can access. Each process reads data from <process-id>.txt, prints
@@ -11,15 +11,16 @@
 
 name: pingpong
 
-num_nodes: 5
+num_nodes: 2
 
 resources:
-  cloud: aws
+  cloud: gcp
 
 file_mounts:
     /sharedfs:
-        name: sky-sharedfs-romilb2
+        name: sky-sharedfs-romilbgcs
         mode: MOUNT
+        store: gcs
 
 setup: |
   rm -rf sharedfs-pingpong

@@ -1,18 +1,28 @@
-"""Module to enable a single Sky key for all Sky VMs in each cloud."""
+"""Module to enable a single SkyPilot key for all VMs in each cloud."""
 import copy
 import functools
 import hashlib
 import os
 import pathlib
+import re
+import subprocess
+import sys
 import time
 import uuid
 
+import colorama
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.backends import default_backend
-from Crypto.PublicKey import RSA
 
+from sky import clouds
+from sky import sky_logging
 from sky.adaptors import aws, gcp
+from sky.utils import common_utils
+from sky.utils import subprocess_utils
+from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # TODO: Should tolerate if gcloud is not installed. Also,
 # https://pypi.org/project/google-api-python-client/ recommends
@@ -82,6 +92,7 @@ def get_or_generate_keys(private_key_path: str, public_key_path: str):
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
 def setup_aws_authentication(config):
+    from Crypto.PublicKey import RSA  # pylint: disable=import-outside-toplevel
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
     if private_key_path is None:
@@ -137,9 +148,38 @@ def setup_aws_authentication(config):
     return config
 
 
+# Reference:
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
+def _wait_for_compute_global_operation(project_name, operation_name, compute):
+    """Poll for global compute operation until finished."""
+    logger.debug('wait_for_compute_global_operation: '
+                 'Waiting for operation {} to finish...'.format(operation_name))
+    max_polls = 10
+    poll_interval = 5
+    for _ in range(max_polls):
+        result = compute.globalOperations().get(
+            project=project_name,
+            operation=operation_name,
+        ).execute()
+        if 'error' in result:
+            raise Exception(result['error'])
+
+        if result['status'] == 'DONE':
+            logger.debug('wait_for_compute_global_operation: '
+                         'Operation done.')
+            break
+        time.sleep(poll_interval)
+    return result
+
+
 # Snippets of code inspired from
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
+# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
 # Takes in config, a yaml dict and outputs a postprocessed dict
+# TODO(weilin): refactor the implementation to incorporate Ray autoscaler to
+# avoid duplicated codes.
+# Retry for the GCP as sometimes there will be connection reset by peer error.
+@common_utils.retry
+@gcp.import_package
 def setup_gcp_authentication(config):
     config = copy.deepcopy(config)
     private_key_path = config['auth'].get('ssh_private_key', None)
@@ -157,7 +197,101 @@ def setup_gcp_authentication(config):
                         credentials=None,
                         cache_discovery=False)
     user = config['auth']['ssh_user']
-    project = compute.projects().get(project=project_id).execute()
+
+    try:
+        project = compute.projects().get(project=project_id).execute()
+    except gcp.googleapiclient.errors.HttpError as e:
+        # Can happen for a new project where Compute Engine API is disabled.
+        #
+        # Example message:
+        # 'Compute Engine API has not been used in project 123456 before
+        # or it is disabled. Enable it by visiting
+        # https://console.developers.google.com/apis/api/compute.googleapis.com/overview?project=123456
+        # then retry. If you enabled this API recently, wait a few minutes for
+        # the action to propagate to our systems and retry.'
+        if ' API has not been used in project' in e.reason:
+            match = re.fullmatch(r'(.+)(https://.*project=\d+) (.+)', e.reason)
+            if match is None:
+                raise  # This should not happen.
+            yellow = colorama.Fore.YELLOW
+            reset = colorama.Style.RESET_ALL
+            bright = colorama.Style.BRIGHT
+            dim = colorama.Style.DIM
+            logger.error(
+                f'{yellow}Certain GCP APIs are disabled for the GCP project '
+                f'{project_id}.{reset}')
+            logger.error(f'{yellow}Enable them by running:{reset} '
+                         f'{bright}sky check{reset}')
+            logger.error('Details:')
+            logger.error(f'{dim}{match.group(1)}{reset}\n'
+                         f'{dim}    {match.group(2)}{reset}\n'
+                         f'{dim}{match.group(3)}{reset}')
+            sys.exit(1)
+        else:
+            raise
+
+    project_oslogin = next(
+        (item for item in project['commonInstanceMetadata'].get('items', [])
+         if item['key'] == 'enable-oslogin'), {}).get('value', 'False')
+
+    if project_oslogin.lower() == 'true':
+        # project.
+        logger.info(
+            f'OS Login is enabled for GCP project {project_id}. Running '
+            'additional authentication steps.')
+        # Read the account information from the credential file, since the user
+        # should be set according the account, when the oslogin is enabled.
+        config_path = os.path.expanduser(clouds.gcp.GCP_CONFIG_PATH)
+        sky_backup_config_path = os.path.expanduser(
+            clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH)
+        assert os.path.exists(sky_backup_config_path), (
+            'GCP credential backup file '
+            f'{sky_backup_config_path!r} does not exist.')
+
+        with open(sky_backup_config_path, 'r') as infile:
+            for line in infile:
+                if line.startswith('account'):
+                    account = line.split('=')[1].strip()
+                    break
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'GCP authentication failed, as the oslogin is enabled '
+                        f'but the file {config_path} does not contain the '
+                        'account information.')
+        config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
+
+        # Generating ssh key if it does not exist
+        get_or_generate_keys(private_key_path, public_key_path)
+
+        # Add ssh key to GCP with oslogin
+        subprocess.run(
+            'gcloud compute os-login ssh-keys add '
+            f'--key-file={public_key_path}',
+            check=True,
+            shell=True,
+            stdout=subprocess.DEVNULL)
+        # Enable ssh port for all the instances
+        enable_ssh_cmd = ('gcloud compute firewall-rules create '
+                          'allow-ssh-ingress-from-iap '
+                          '--direction=INGRESS '
+                          '--action=allow '
+                          '--rules=tcp:22 '
+                          '--source-ranges=0.0.0.0/0')
+        proc = subprocess.run(enable_ssh_cmd,
+                              check=False,
+                              shell=True,
+                              stdout=subprocess.DEVNULL,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0 and 'already exists' not in proc.stderr.decode(
+                'utf-8'):
+            subprocess_utils.handle_returncode(proc.returncode, enable_ssh_cmd,
+                                               'Failed to enable ssh port.',
+                                               proc.stderr)
+        return config
+
+    # OS Login is not enabled for the project. Add the ssh key directly to the
+    # metadata.
     project_keys = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')
@@ -192,12 +326,15 @@ def setup_gcp_authentication(config):
             metadata.append({'key': 'ssh-keys', 'value': new_ssh_key})
         else:
             ssh_key_index = ssh_key_index[0]
-            ssh_dict = metadata[ssh_key_index]
-            ssh_dict['value'] += '\n' + new_ssh_key
-            compute.projects().setCommonInstanceMetadata(
-                project=project['name'],
-                body=project['commonInstanceMetadata']).execute()
-            time.sleep(5)
+            metadata[ssh_key_index]['value'] += '\n' + new_ssh_key
+
+        project['commonInstanceMetadata']['items'] = metadata
+
+        operation = compute.projects().setCommonInstanceMetadata(
+            project=project['name'],
+            body=project['commonInstanceMetadata']).execute()
+        _wait_for_compute_global_operation(project['name'], operation['name'],
+                                           compute)
     return config
 
 

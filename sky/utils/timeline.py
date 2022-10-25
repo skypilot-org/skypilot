@@ -3,6 +3,7 @@
 The timeline follows the trace event format defined here:
 https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview
 """  # pylint: disable=line-too-long
+import functools
 from typing import Optional, Union, Callable
 
 import atexit
@@ -10,9 +11,10 @@ import json
 import os
 import threading
 import time
-import inspect
 
 import filelock
+
+from sky.utils import common_utils
 
 _events = []
 
@@ -71,6 +73,10 @@ class Event:
         self.end()
 
 
+def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
+    return common_utils.make_decorator(Event, name_or_fn, message=message)
+
+
 class FileLockEvent:
     """Serve both as a file lock and event for the lock."""
 
@@ -103,44 +109,14 @@ class FileLockEvent:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
 
-
-def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
-    """A decorator for logging events when applied to functions.
-
-    Args:
-        name_or_fn: The name of the event or the function to be wrapped.
-        message: The message attached to the event.
-    """
-    if isinstance(name_or_fn, str):
-
-        def _wrapper(f):
-
-            def _record(*args, **kwargs):
-                nonlocal name_or_fn
-                with Event(name=name_or_fn, message=message):
-                    return f(*args, **kwargs)
-
-            return _record
-
-        return _wrapper
-    else:
-        if not inspect.isfunction(name_or_fn):
-            raise ValueError(
-                'Should directly apply the decorator to a function.')
-
-        def _record(*args, **kwargs):
-            nonlocal name_or_fn
-            f = name_or_fn
-            func_name = getattr(f, '__qualname__', f.__name__)
-            module_name = getattr(f, '__module__', '')
-            if module_name:
-                full_name = f'{module_name}.{func_name}'
-            else:
-                full_name = func_name
-            with Event(name=full_name, message=message):
+    def __call__(self, f):
+        # Make this class callable as a decorator.
+        @functools.wraps(f)
+        def wrapper(*args, **kwargs):
+            with self:
                 return f(*args, **kwargs)
 
-        return _record
+        return wrapper
 
 
 def _save_timeline(file_path: str):
@@ -148,13 +124,13 @@ def _save_timeline(file_path: str):
         'traceEvents': _events,
         'displayTimeUnit': 'ms',
         'otherData': {
-            'log_dir': os.path.dirname(file_path),
+            'log_dir': os.path.dirname(os.path.abspath(file_path)),
         }
     }
-    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
     with open(file_path, 'w') as f:
         json.dump(json_output, f)
 
 
-if os.environ.get('SKY_TIMELINE_FILE_PATH'):
-    atexit.register(_save_timeline, os.environ['SKY_TIMELINE_FILE_PATH'])
+if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
+    atexit.register(_save_timeline, os.environ['SKYPILOT_TIMELINE_FILE_PATH'])

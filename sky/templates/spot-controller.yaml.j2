@@ -4,7 +4,7 @@ name: {{cluster_name}}
 
 resources:
   disk_size: 50
-# It is now using default CPU instance type hard-coded in sky code for spot controller,
+# It is now using default CPU instance type hard-coded in code for spot controller,
 # i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
 # This allows users without the credits for some of the clouds available to use managed spot instances.
 # TODO(zhwu): Fix this to be able to failvoer across clouds with cheaper instance.
@@ -15,22 +15,33 @@ file_mounts:
 
 setup: |
   # Install cli dependencies
-  (pip list | grep boto3 2>&1 > /dev/null && \
-   pip list | grep google-api-python-client 2>&1 > /dev/null) || \
-   pip3 install "$(echo {{sky_remote_path}}/*.whl)[aws,gcp]" 2>&1 > /dev/null
+  # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
+  # TODO(zhwu): Keep the dependencies align with the ones in setup.py
+  (pip list | grep boto3 > /dev/null 2>&1 && \
+   pip list | grep google-api-python-client > /dev/null 2>&1 ) || \
+   pip install boto3 awscli pycryptodome==3.12.0 google-api-python-client google-cloud-storage 2>&1 > /dev/null
 
   # We do not install azure dependencies for now since our subscription does not support spot instances.
-  # pip list | grep azure-cli 2>&1 > /dev/null || \
-  #  pip3 install "$(echo {{sky_remote_path}}/*.whl)[azure]" 2>&1 > /dev/null 
+  # pip list | grep azure-cli > /dev/null 2>&1 || \
+  #  pip3 install azure-cli==2.31.0 azure-core
 
-  gcloud --version 2>&1 > /dev/null || \
-  (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
-    tar xzf google-cloud-sdk-367.0.0-linux-x86_64.tar.gz && \
-    mv google-cloud-sdk ~/ && \
-    ~/google-cloud-sdk/install.sh -q && \
-    echo 'source ~/google-cloud-sdk/path.bash.inc' >> ~/.bashrc) 2>&1 > /dev/null
+  {{gcloud_installation_commands}}
+
+  # Internal: disable logging for manually logging into the spot controller for debugging.
+  {% if is_dev %}
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
 
 run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
-    --job-id $SKY_JOB_ID
+    --job-id $SKY_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+
+envs:
+  SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
+{% if is_dev %}
+  SKYPILOT_DEV: 1
+{% endif %}
+{% if disable_logging %}
+  SKYPILOT_DISABLE_USAGE_COLLECTION: 1
+{% endif %}

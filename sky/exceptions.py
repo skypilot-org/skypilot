@@ -4,6 +4,7 @@ import enum
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
 SIGTSTP_CODE = 146
+RSYNC_FILE_NOT_FOUND_CODE = 23
 
 
 class ResourcesUnavailableError(Exception):
@@ -22,16 +23,29 @@ class ResourcesMismatchError(Exception):
 class CommandError(Exception):
     """Raised when a command fails.
 
-      returncode: The returncode of the command.
-      command: The command that was run.
-      error_message: The error message to print.
+    Args:
+    returncode: The returncode of the command.
+    command: The command that was run.
+    error_message: The error message to print.
     """
 
     def __init__(self, returncode: int, command: str, error_msg: str) -> None:
-        super().__init__()
         self.returncode = returncode
         self.command = command
         self.error_msg = error_msg
+        message = (f'Command {command} failed with return code {returncode}.'
+                   f'\n{error_msg}')
+        super().__init__(message)
+
+
+class ClusterNotUpError(Exception):
+    """Raised when a cluster is not up."""
+    pass
+
+
+class NotSupportedError(Exception):
+    """Raised when a feature is not supported."""
+    pass
 
 
 class StorageError(Exception):
@@ -56,6 +70,11 @@ class StorageBucketCreateError(StorageInitError):
 
 class StorageBucketGetError(StorageInitError):
     # Error raised if attempt to fetch an existing bucket fails.
+    pass
+
+
+class StorageBucketDeleteError(StorageError):
+    # Error raised if attempt to delete an existing bucket fails.
     pass
 
 
@@ -97,4 +116,19 @@ class FetchIPError(Exception):
 
 class NetworkError(Exception):
     """Raised when network fails."""
+    pass
+
+
+class ClusterStatusFetchingError(Exception):
+    """Raised when fetching the cluster status fails."""
+    pass
+
+
+class SpotUserCancelledError(Exception):
+    """Raised when a spot user cancels the job."""
+    pass
+
+
+class InvalidClusterNameError(Exception):
+    """Raised when the cluster name is invalid."""
     pass

@@ -1,6 +1,12 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
+import typing
 from typing import Dict, Iterator, List, Optional, Tuple
+
+from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -27,6 +33,10 @@ class _CloudRegistry(dict):
     def from_str(self, name: Optional[str]) -> Optional['Cloud']:
         if name is None:
             return None
+        if name.lower() not in self:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Cloud {name} is not a valid cloud among '
+                                 f'{list(self.keys())}')
         return self.get(name.lower())
 
     def register(self, cloud_cls: 'Cloud') -> None:
@@ -41,6 +51,8 @@ CLOUD_REGISTRY = _CloudRegistry()
 
 class Cloud:
     """A cloud provider."""
+
+    _REPR = '<Cloud>'
 
     #### Regions/Zones ####
 
@@ -83,6 +95,11 @@ class Cloud:
         """
         raise NotImplementedError
 
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        """Returns the shell command to obtain the zone of instance."""
+        raise NotImplementedError
+
     #### Normal methods ####
 
     # TODO: incorporate region/zone into the API.
@@ -104,7 +121,12 @@ class Cloud:
     def is_same_cloud(self, other):
         raise NotImplementedError
 
-    def make_deploy_resources_variables(self, resources):
+    def make_deploy_resources_variables(
+        self,
+        resources: 'resources.Resources',
+        region: Optional['Region'],
+        zones: Optional[List['Zone']],
+    ) -> Dict[str, str]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -119,6 +141,12 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_vcpus_from_instance_type(cls,
+                                     instance_type: str) -> Optional[float]:
+        """Returns the number of virtual CPUs that the instance type offers."""
+        raise NotImplementedError
+
+    @classmethod
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
@@ -127,13 +155,11 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls,
-                                  accelerators: Optional[Dict[str, int]] = None
-                                 ) -> str:
+    def get_default_instance_type(cls) -> str:
         raise NotImplementedError
 
     @classmethod
-    def get_default_region(cls) -> Region:
+    def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
     def get_feasible_launchable_resources(self, resources):
@@ -166,6 +192,17 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def region_exists(self, region: str) -> bool:
-        """Returns whether the region is valid for this cloud."""
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        """Validates the region and zone."""
         raise NotImplementedError
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        """Returns whether the accelerator is valid in the region or zone."""
+        raise NotImplementedError
+
+    def __repr__(self):
+        return self._REPR

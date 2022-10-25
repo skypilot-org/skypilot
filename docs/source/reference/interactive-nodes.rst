@@ -3,7 +3,7 @@
 Interactive Nodes
 =================
 
-Sky provides **interactive nodes**, the user's *personal work servers* in the
+SkyPilot provides **interactive nodes**, the user's *personal work servers* in the
 clouds.  These are single-node VMs that can be quickly accessed by convenient
 CLI commands:
 
@@ -11,11 +11,11 @@ CLI commands:
 - :code:`sky cpunode`
 - :code:`sky tpunode`
 
-Interactive nodes are normal Sky clusters.  They allow fast access to instances
+Interactive nodes are normal SkyPilot clusters.  They allow fast access to instances
 without requiring a task YAML specification.
 
 Workflow
--------------------------------
+--------
 
 Use :code:`sky gpunode` to get a node with GPU(s):
 
@@ -51,7 +51,7 @@ See all available options and short keys:
 
    $ sky gpunode --help
 
-Sky also provides :code:`sky cpunode` for CPU-only instances and :code:`sky
+SkyPilot also provides :code:`sky cpunode` for CPU-only instances and :code:`sky
 tpunode` for TPU instances (only available on Google Cloud Platform).
 
 To log in to an interactive node, either re-type the CLI command or use :code:`ssh`:
@@ -68,10 +68,10 @@ To log in to an interactive node, either re-type the CLI command or use :code:`s
     $ # sky gpunode -c node0
     $ # ssh node0
 
-Because Sky exposes SSH access to clusters, this means clusters can be easily added into
+Because SkyPilot exposes SSH access to clusters, this means clusters can be easily added into
 tools such as `Visual Studio Code Remote <https://code.visualstudio.com/docs/remote/remote-overview>`_.
 
-Since interactive nodes are just normal Sky clusters, :code:`sky exec` can be used to submit jobs to them.
+Since interactive nodes are just normal SkyPilot clusters, :code:`sky exec` can be used to submit jobs to them.
 
 Interactive nodes can be stopped, restarted, and terminated, like any other cluster:
 

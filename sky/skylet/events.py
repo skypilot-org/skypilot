@@ -1,16 +1,20 @@
 """skylet events"""
+import getpass
 import math
 import os
-import psutil
 import re
 import subprocess
 import time
 import traceback
+
+import psutil
 import yaml
 
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
 from sky.skylet import autostop_lib, job_lib
+from sky.spot import spot_utils
+from sky.utils import common_utils
 
 # Seconds of sleep between the processing of skylet events.
 EVENT_CHECKING_INTERVAL_SECONDS = 20
@@ -50,7 +54,7 @@ class SkyletEvent:
 
 class JobUpdateEvent(SkyletEvent):
     """Skylet event for updating job status."""
-    EVENT_INTERVAL_SECONDS = 20
+    EVENT_INTERVAL_SECONDS = 300
 
     # Only update status of the jobs after this many seconds of job submission,
     # to avoid race condition with `ray job` to make sure it job has been
@@ -59,14 +63,23 @@ class JobUpdateEvent(SkyletEvent):
     _SUBMITTED_GAP_SECONDS = 60
 
     def _run(self):
-        job_lib.update_status(submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
+        job_owner = getpass.getuser()
+        job_lib.update_status(job_owner,
+                              submitted_gap_sec=self._SUBMITTED_GAP_SECONDS)
+
+
+class SpotJobUpdateEvent(SkyletEvent):
+    """Skylet event for updating spot job status."""
+    EVENT_INTERVAL_SECONDS = 300
+
+    def _run(self):
+        spot_utils.update_spot_job_status()
 
 
 class AutostopEvent(SkyletEvent):
     """Skylet event for autostop."""
     EVENT_INTERVAL_SECONDS = 60
 
-    _NUM_WORKER_PATTERN = re.compile(r'((?:min|max))_workers: (\d+)')
     _UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
     _CATCH_NODES = re.compile(r'cache_stopped_nodes: (.*)')
 
@@ -105,13 +118,16 @@ class AutostopEvent(SkyletEvent):
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
-            self._replace_yaml_for_stopping(self.ray_yaml_path)
+            self._replace_yaml_for_stopping(self.ray_yaml_path,
+                                            autostop_config.down)
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
-            subprocess.run(
-                ['ray', 'up', '-y', '--restart-only', self.ray_yaml_path],
-                check=True)
+            subprocess.run([
+                'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
+                self.ray_yaml_path
+            ],
+                           check=True)
             # Stop the workers first to avoid orphan workers.
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
@@ -121,17 +137,20 @@ class AutostopEvent(SkyletEvent):
         else:
             raise NotImplementedError
 
-    def _replace_yaml_for_stopping(self, yaml_path: str):
+    def _replace_yaml_for_stopping(self, yaml_path: str, down: bool):
         with open(yaml_path, 'r') as f:
             yaml_str = f.read()
-        # Update the number of workers to 0.
-        yaml_str = self._NUM_WORKER_PATTERN.sub(r'\g<1>_workers: 0', yaml_str)
         yaml_str = self._UPSCALING_PATTERN.sub(r'upscaling_speed: 0', yaml_str)
-        yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true', yaml_str)
+        if down:
+            yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: false',
+                                             yaml_str)
+        else:
+            yaml_str = self._CATCH_NODES.sub(r'cache_stopped_nodes: true',
+                                             yaml_str)
         config = yaml.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # Empty the file_mounts.
         config['file_mounts'] = dict()
-        backend_utils.dump_yaml(yaml_path, config)
-        logger.debug('Replaced worker num and upscaling speed to 0.')
+        common_utils.dump_yaml(yaml_path, config)
+        logger.debug('Replaced upscaling speed to 0.')

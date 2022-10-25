@@ -1,20 +1,23 @@
 """Storage and Store Classes for Sky Data."""
 import enum
 import os
-import random
 import subprocess
-import textwrap
+import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
+from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
 from sky.backends import backend_utils
+from sky.utils import schemas
 from sky.data import data_transfer
 from sky.data import data_utils
+from sky.data import mounting_utils
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -22,11 +25,45 @@ Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
 
+# Clouds with object storage implemented in this module. Azure Blob
+# Storage isn't supported yet (even though Azure is).
+STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
+
+# Max number of objects a GCS bucket can be directly deleted with
+_GCS_RM_MAX_OBJS = 256
+
+_BUCKET_FAIL_TO_CONNECT_MESSAGE = (
+    'Failed to connect to an existing bucket {name!r}.\n'
+    'Please check if:\n  1. the bucket name is taken and/or '
+    '\n  2. the bucket permissions are not setup correctly.')
+
 
 class StoreType(enum.Enum):
+    """Enum for the different types of stores."""
     S3 = 'S3'
     GCS = 'GCS'
     AZURE = 'AZURE'
+
+    @classmethod
+    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
+        if isinstance(cloud, clouds.AWS):
+            return StoreType.S3
+        elif isinstance(cloud, clouds.GCP):
+            return StoreType.GCS
+        elif isinstance(cloud, clouds.Azure):
+            return StoreType.AZURE
+
+        raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
+
+    @classmethod
+    def from_store(cls, store: 'AbstractStore') -> 'StoreType':
+        if isinstance(store, S3Store):
+            return StoreType.S3
+        elif isinstance(store, GcsStore):
+            return StoreType.GCS
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {store}')
 
 
 class StorageMode(enum.Enum):
@@ -34,13 +71,30 @@ class StorageMode(enum.Enum):
     COPY = 'COPY'
 
 
-def _get_storetype_from_store(store: 'Storage') -> StoreType:
-    if isinstance(store, S3Store):
+def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
+    if isinstance(cloud, clouds.AWS):
         return StoreType.S3
-    elif isinstance(store, GcsStore):
+    elif isinstance(cloud, clouds.GCP):
         return StoreType.GCS
+    elif isinstance(cloud, clouds.Azure):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure Blob Storage is not supported yet.')
     else:
-        raise ValueError(f'Unknown store type: {store}')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown cloud type: {cloud}')
+
+
+def get_store_prefix(storetype: StoreType) -> str:
+    if storetype == StoreType.S3:
+        return 's3://'
+    elif storetype == StoreType.GCS:
+        return 'gs://'
+    elif storetype == StoreType.AZURE:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure Blob Storage is not supported yet.')
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unknown store type: {storetype}')
 
 
 class AbstractStore:
@@ -50,6 +104,10 @@ class AbstractStore:
     Storage objects are backed by AbstractStores, each representing a store
     present in a cloud.
     """
+
+    _STAT_CACHE_TTL = '5s'
+    _STAT_CACHE_CAPACITY = 4096
+    _TYPE_CACHE_TTL = '5s'
 
     class StoreMetadata:
         """A pickle-able representation of Store
@@ -236,9 +294,6 @@ class Storage(object):
         storage.delete()
     """
 
-    # Update the key list when a new field is added.
-    _YAML_KEYS = ['name', 'source', 'store', 'mode', 'persistent']
-
     class StorageMetadata(object):
         """A pickle-able tuple of:
 
@@ -250,8 +305,8 @@ class Storage(object):
         def __init__(
             self,
             *,
-            storage_name: str,
-            source: str,
+            storage_name: Optional[str],
+            source: Optional[str],
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
@@ -268,11 +323,11 @@ class Storage(object):
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             self.sky_stores[storetype] = store.get_metadata()
 
         def remove_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
@@ -327,6 +382,11 @@ class Storage(object):
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
 
+        # TODO(romilb, zhwu): This is a workaround to support storage deletion
+        # for spot. Once sky storage supports forced management for external
+        # buckets, this can be deprecated.
+        self.force_delete = False
+
         # Validate and correct inputs if necessary
         self._validate_storage_spec()
 
@@ -350,7 +410,8 @@ class Storage(object):
                     store = GcsStore.from_metadata(s_metadata,
                                                    source=self.source)
                 else:
-                    raise ValueError(f'Unknown store type: {s_type}')
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Unknown store type: {s_type}')
 
                 self._add_store(store, is_reconstructed=True)
 
@@ -403,18 +464,32 @@ class Storage(object):
         split_path = urllib.parse.urlsplit(source)
         if split_path.scheme == '':
             if source.endswith('/'):
-                raise exceptions.StorageSourceError(
-                    'Storage source paths cannot end with a slash '
-                    '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                    f'Found source={source}')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Storage source paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found source={source}')
             # Local path, check if it exists
-            source = os.path.abspath(os.path.expanduser(source))
+            full_src = os.path.abspath(os.path.expanduser(source))
             # Only check if local source exists if it is synced to the bucket
-            if not os.path.exists(source) and sync_on_reconstruction:
-                raise exceptions.StorageSourceError('Local source path does not'
-                                                    f' exist: {source}')
+            if not os.path.exists(full_src) and sync_on_reconstruction:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Local source path does not'
+                        f' exist: {source}')
+            # Check if source is a file - throw error if it is
+            if os.path.isfile(full_src):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Storage source path cannot be a file - only '
+                        'directories are supported as a source. '
+                        'To upload a single file, either\n'
+                        '1) Use regular file mounts by writing '
+                        f'<destination_path>: {source} in the file_mounts '
+                        'section of your YAML, or\n2) Place the file in a '
+                        'directory and specify the directory as the source.')
             # Raise warning if user's path is a symlink
-            elif os.path.islink(source):
+            elif os.path.islink(full_src):
                 logger.warning(f'Source path {source} is a symlink. '
                                'Referenced contents are uploaded, matching '
                                'the default behavior for S3 and GCS syncing.')
@@ -425,15 +500,17 @@ class Storage(object):
             # cloud store - ensure path points to only a directory
             if mode == StorageMode.MOUNT:
                 if split_path.path.strip('/') != '':
-                    raise exceptions.StorageModeError(
-                        'MOUNT mode does not support'
-                        ' mounting specific files from cloud'
-                        ' storage. Please use COPY mode or'
-                        ' specify only the bucket name as'
-                        ' the source.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageModeError(
+                            'MOUNT mode does not support'
+                            ' mounting specific files from cloud'
+                            ' storage. Please use COPY mode or'
+                            ' specify only the bucket name as'
+                            ' the source.')
         else:
-            raise exceptions.StorageSourceError(
-                f'Supported paths: local, s3://, gs://. Got: {source}')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSourceError(
+                    f'Supported paths: local, s3://, gs://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self) -> None:
@@ -443,19 +520,27 @@ class Storage(object):
         if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
-                # TODO(romilb): What about when a Storage object without source
-                #  already exists in global_user_state (e.g. used for scratch)
-                #  and now the user wants to mount it in COPY mode? We should
-                #  perhaps check for existence in global_user_state here.
-                raise exceptions.StorageSourceError(
-                    'Storage source must be specified when using COPY mode.')
+                # Check if a Storage object already exists in global_user_state
+                # (e.g. used as scratch previously). Such storage objects can be
+                # mounted in copy mode even though they have no source in the
+                # yaml spec (the name is the source).
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
+                if handle is not None:
+                    return
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSourceError(
+                            'New storage object: source must be specified when '
+                            'using COPY mode.')
             else:
-                # If source is not specified in mount mode, the intent is to
+                # If source is not specified in COPY mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
                 if not self.name:
-                    raise exceptions.StorageSpecError(
-                        'Storage source or storage name must be specified.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Storage source or storage name must be specified.')
                 else:
                     # Create bucket and mount
                     return
@@ -465,9 +550,10 @@ class Storage(object):
 
             if not self.name:
                 if is_local_source:
-                    raise exceptions.StorageNameError(
-                        'Storage name must be specified if the source is local.'
-                    )
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageNameError(
+                            'Storage name must be specified if the source is '
+                            'local.')
                 else:
                     # Set name to source bucket name and continue
                     self.name = urllib.parse.urlsplit(source).netloc
@@ -479,9 +565,10 @@ class Storage(object):
                 else:
                     # Both name and source should not be specified if the source
                     # is a URI. Name will be inferred from the URI.
-                    raise exceptions.StorageSpecError(
-                        'Storage name should not be specified if the source is '
-                        'a remote URI.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSpecError(
+                            'Storage name should not be specified if the '
+                            'source is a remote URI.')
         raise exceptions.StorageSpecError(
             f'Validation failed for storage source {self.source}, name '
             f'{self.name} and mode {self.mode}. Please check the arguments.')
@@ -507,8 +594,9 @@ class Storage(object):
         elif store_type == StoreType.GCS:
             store_cls = GcsStore
         else:
-            raise exceptions.StorageSpecError(
-                f'{store_type} not supported as a Store.')
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageSpecError(
+                    f'{store_type} not supported as a Store.')
 
         # Initialize store object and get/create bucket
         try:
@@ -516,18 +604,18 @@ class Storage(object):
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
-            logger.error(f'Sky could not create {store_type} store '
+            logger.error(f'Could not create {store_type} store '
                          f'with name {self.name}.')
             global_user_state.set_storage_status(self.name,
                                                  StorageStatus.INIT_FAILED)
             raise
         except exceptions.StorageBucketGetError:
             # Bucket get failed, so this is not sky managed. Do not update state
-            logger.error(f'Sky could not get {store_type} store '
+            logger.error(f'Could not get {store_type} store '
                          f'with name {self.name}.')
             raise
         except exceptions.StorageInitError:
-            logger.error(f'Sky could not initialize {store_type} store with '
+            logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
 
@@ -541,7 +629,7 @@ class Storage(object):
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
-        store_type = _get_storetype_from_store(store)
+        store_type = StoreType.from_store(store)
         self.stores[store_type] = store
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:
@@ -578,12 +666,16 @@ class Storage(object):
                     global_user_state.remove_storage(self.name)
                 else:
                     global_user_state.set_storage_handle(self.name, self.handle)
+            elif self.force_delete:
+                store.delete()
             # Remove store from bookkeeping
             del self.stores[store_type]
         else:
             for _, store in self.stores.items():
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
+                    store.delete()
+                elif self.force_delete:
                     store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
@@ -599,7 +691,7 @@ class Storage(object):
         try:
             store.upload()
         except exceptions.StorageUploadError:
-            logger.error(f'Sky could not upload {self.source} to store '
+            logger.error(f'Could not upload {self.source} to store '
                          f'name {store.name}.')
             if store.is_sky_managed:
                 global_user_state.set_storage_status(
@@ -612,12 +704,14 @@ class Storage(object):
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
-        backend_utils.check_fields(config.keys(), cls._YAML_KEYS)
+        backend_utils.validate_schema(config, schemas.get_storage_schema(),
+                                      'Invalid storage YAML: ')
 
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
+        force_delete = config.pop('_force_delete', False)
 
         if isinstance(mode_str, str):
             # Make mode case insensitive, if specified
@@ -636,6 +730,9 @@ class Storage(object):
                           mode=mode)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
+
+        # Add force deletion flag
+        storage_obj.force_delete = force_delete
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
@@ -659,6 +756,8 @@ class Storage(object):
         add_if_not_none('store', stores)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
+        if self.force_delete:
+            config['_force_delete'] = True
         return config
 
 
@@ -666,9 +765,6 @@ class S3Store(AbstractStore):
     """S3Store inherits from Storage Object and represents the backend
     for S3 buckets.
     """
-
-    _STAT_CACHE_TTL = '5s'
-    _TYPE_CACHE_TTL = '5s'
 
     def __init__(self,
                  name: str,
@@ -737,8 +833,8 @@ class S3Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        logger.info(f'Deleting S3 Bucket {self.name}')
-        return self._delete_s3_bucket(self.name)
+        self._delete_s3_bucket(self.name)
+        logger.info(f'Deleted S3 bucket {self.name}.')
 
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
@@ -751,32 +847,39 @@ class S3Store(AbstractStore):
         file (Default path: ~/.aws/config).
         """
         source = os.path.abspath(os.path.expanduser(self.source))
-        sync_command = f'aws s3 sync {source} s3://{self.name}/'
+        sync_command = ('aws s3 sync --no-follow-symlinks '
+                        f'{source} s3://{self.name}/')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to s3://{self.name}/'):
+                f'[green]{self.source}[/] to [green]s3://{self.name}/[/]'):
+            # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
+            # to a log file.
             with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE) as process:
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL) as process:
+                stderr = []
                 while True:
                     line = process.stderr.readline()
                     if not line:
                         break
                     str_line = line.decode('utf-8')
-                    logger.info(str_line)
+                    stderr.append(str_line)
                     if 'Access Denied' in str_line:
                         process.kill()
-                        logger.error('Sky Storage failed to upload files to '
-                                     'the S3 bucket. The bucket does not have '
-                                     'write permissions. It is possible that '
-                                     'the bucket is public.')
-                        e = PermissionError('Can\'t write to bucket!')
-                        logger.error(e)
-                        raise e
-                retcode = process.wait()
-                if retcode != 0:
-                    raise exceptions.StorageUploadError(
-                        f'Upload to S3 failed for store {self.name} and source '
-                        f'{self.source}. Please check the logs.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise PermissionError(
+                                'Failed to upload files to '
+                                'the S3 bucket. The bucket does not have '
+                                'write permissions. It is possible that '
+                                'the bucket is public.')
+                returncode = process.wait()
+                if returncode != 0:
+                    stderr = '\n'.join(stderr)
+                    with ux_utils.print_exception_no_traceback():
+                        logger.error(stderr)
+                        raise exceptions.StorageUploadError(
+                            f'Upload to S3 failed for store {self.name} and '
+                            f'source {self.source}. Please check the logs.')
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -796,35 +899,36 @@ class S3Store(AbstractStore):
         """
         s3 = aws.resource('s3')
         bucket = s3.Bucket(self.name)
-        # Checks if bucket exists (both public and private buckets)
+
         try:
-            s3.meta.client.head_bucket(Bucket=self.name)
+            # Try Public bucket case.
+            # This line does not error out if the bucket is an external public
+            # bucket or if it is a user's bucket that is publicly
+            # accessible.
+            self.client.head_bucket(Bucket=self.name)
             return bucket, False
         except aws.client_exception() as e:
-            # If it was a 404 error, then the bucket does not exist.
             error_code = e.response['Error']['Code']
-            if error_code == '404':
-                if self.source is not None:
-                    if self.source.startswith('s3://'):
-                        raise exceptions.StorageBucketGetError(
-                            'Attempted to connect to a non-existent bucket: '
-                            f'{self.source}. Consider using `aws s3 ls '
-                            f'{self.source}` to debug.') from e
-                    else:
-                        bucket = self._create_s3_bucket(self.name)
-                        return bucket, True
-                # TODO(romilb): Fix this logic repetition here
-                else:
-                    bucket = self._create_s3_bucket(self.name)
-                    return bucket, True
-            else:
-                ex = exceptions.StorageBucketGetError(
-                    f'Failed to connect to an existing bucket {self.name!r}.\n'
-                    'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `aws s3 ls {self.name}` to debug.')
-                logger.error(ex)
-                raise ex from e
+            # AccessDenied error for buckets that are private and not owned by
+            # user.
+            if error_code == '403':
+                command = f'aws s3 ls {self.name}'
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
+
+        if self.source is not None and self.source.startswith('s3://'):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketGetError(
+                    'Attempted to connect to a non-existent bucket: '
+                    f'{self.source}. Consider using `aws s3 ls '
+                    f'{self.source}` to debug.')
+
+        # If bucket cannot be found in both private and public settings,
+        # the bucket is created by Sky.
+        bucket = self._create_s3_bucket(self.name)
+        return bucket, True
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on s3 bucket
@@ -844,69 +948,16 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        # TODO(romilb): Move the inline script to a separate file
-        script = textwrap.dedent(f"""
-            #!/usr/bin/env bash
-            set -e
-
-            S3_SOURCE={self.bucket.name}
-            MOUNT_PATH={mount_path}
-            STAT_CACHE_TTL={self._STAT_CACHE_TTL}
-            TYPE_CACHE_TTL={self._TYPE_CACHE_TTL}
-
-            # Check if path is already mounted
-            if ! [ "$(grep -q $MOUNT_PATH /proc/mounts)" ] ; then
-                echo "Path already mounted - unmounting..."
-                fusermount -u "$MOUNT_PATH"
-                echo "Successfully unmounted $MOUNT_PATH."
-            fi
-
-            # Install goofys if not already installed
-            if ! [ -x "$(command -v goofys)" ]; then
-              echo "Installing goofys..."
-              sudo wget -nc https://github.com/romilbhardwaj/goofys/releases/download/0.24.0-romilb-upstream/goofys -O /usr/local/bin/goofys
-              sudo chmod +x /usr/local/bin/goofys
-            else
-              echo "Goofys already installed. Proceeding..."
-            fi
-
-            # Check if mount path exists
-            if [ ! -d "$MOUNT_PATH" ]; then
-              echo "Mount path $MOUNT_PATH does not exist. Creating..."
-              sudo mkdir -p $MOUNT_PATH
-              sudo chmod 777 $MOUNT_PATH
-            else
-              # Check if mount path contains files
-              if [ "$(ls -A $MOUNT_PATH)" ]; then
-                echo "Mount path $MOUNT_PATH is not empty. Please make sure its empty."
-                exit 1
-              fi
-            fi
-            echo "Mounting $S3_SOURCE to $MOUNT_PATH with goofys..."
-            goofys -o allow_other --stat-cache-ttl $STAT_CACHE_TTL --type-cache-ttl $TYPE_CACHE_TTL $S3_SOURCE $MOUNT_PATH
-            echo "Mounting done."
-        """)
-
-        # TODO(romilb): Get direct bash script to work like so:
-        # command = f'bash <<-\EOL' \
-        #           f'{script}' \
-        #           'EOL'
-
-        # TODO(romilb): This heredoc should have EOF after script, but it
-        #  fails with sky's ssh pipeline. Instead, we don't use EOF and use )
-        #  as the end of heredoc. This raises a warning (here-document delimited
-        #  by end-of-file) that can be safely ignored.
-
-        # While these commands are run sequentially for each storage object,
-        # we add random int to be on the safer side and avoid collisions.
-        script_path = f'~/.sky/mount_{random.randint(0,1000000)}.sh'
-        first_line = r'(cat <<-\EOF > {}'.format(script_path)
-        command = (f'{first_line}'
-                   f'{script}'
-                   f') && chmod +x {script_path}'
-                   f' && bash {script_path}'
-                   f' && rm {script_path}')
-        return command
+        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
+                       'releases/download/0.24.0-romilb-upstream/goofys '
+                       '-O /usr/local/bin/goofys && '
+                       'sudo chmod +x /usr/local/bin/goofys')
+        mount_cmd = ('goofys -o allow_other '
+                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
+                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+                     f'{self.bucket.name} {mount_path}')
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
 
     def _create_s3_bucket(self,
                           bucket_name: str,
@@ -929,10 +980,10 @@ class S3Store(AbstractStore):
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
         except aws.client_exception() as e:
-            logger.error(e)
-            raise exceptions.StorageBucketCreateError(
-                f'Attempted to create a bucket '
-                f'{self.name} but failed.') from e
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Attempted to create a bucket '
+                    f'{self.name} but failed.') from e
         return aws.resource('s3').Bucket(bucket_name)
 
     def _delete_s3_bucket(self, bucket_name: str) -> None:
@@ -941,15 +992,27 @@ class S3Store(AbstractStore):
         Args:
           bucket_name: str; Name of bucket
         """
+        # Deleting objects is very slow programatically
+        # (i.e. bucket.objects.all().delete() is slow).
+        # In addition, standard delete operations (i.e. via `aws s3 rm`)
+        # are slow, since AWS puts deletion markers.
+        # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
+        # The fastest way to delete is to run `aws s3 rb --force`,
+        # which removes the bucket by force.
+        remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
-            s3 = aws.resource('s3')
-            bucket = s3.Bucket(bucket_name)
-            bucket.objects.all().delete()
-            bucket.delete()
-        except aws.client_exception() as e:
-            logger.error(f'Unable to delete S3 bucket {self.name}')
-            logger.error(e)
-            raise e
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                subprocess.check_output(remove_command.split(' '))
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketDeleteError(
+                    f'Failed to delete S3 bucket {bucket_name}.')
+
+        # Wait until bucket deletion propagates on AWS servers
+        while data_utils.verify_s3_bucket(bucket_name):
+            time.sleep(0.1)
 
 
 class GcsStore(AbstractStore):
@@ -1010,20 +1073,22 @@ class GcsStore(AbstractStore):
             StorageUploadError: if upload fails.
         """
         try:
-            if self.source.startswith('gs://'):
-                pass
-            elif self.source.startswith('s3://'):
-                self._transfer_to_gcs()
-            else:
-                logger.info('Syncing Local to GCS')
-                self.sync_local_dir()
+            if self.source is not None:
+                if self.source.startswith('gs://'):
+                    pass
+                elif self.source.startswith('s3://'):
+                    self._transfer_to_gcs()
+                else:
+                    self.sync_local_dir()
+        except exceptions.StorageUploadError:
+            raise
         except Exception as e:
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
-        logger.info(f'Deleting GCS Bucket {self.name}')
-        return self._delete_gcs_bucket(self.name)
+        self._delete_gcs_bucket(self.name)
+        logger.info(f'Deleted GCS bucket {self.name}.')
 
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
@@ -1031,31 +1096,38 @@ class GcsStore(AbstractStore):
     def sync_local_dir(self) -> None:
         """Syncs a local directory to a GCS bucket."""
         source = os.path.abspath(os.path.expanduser(self.source))
+        # TODO(zhwu): Speed up the upload process by providing a list of files
+        # so that we can utilize the parallelism.
         sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
-        logger.info(f'Executing: {sync_command}')
-        with subprocess.Popen(sync_command.split(' '),
-                              stderr=subprocess.PIPE) as process:
-            while True:
-                line = process.stderr.readline()
-                if not line:
-                    break
-                str_line = line.decode('utf-8')
-                logger.info(str_line)
-                if 'AccessDeniedException' in str_line:
-                    process.kill()
-                    logger.error('Sky Storage failed to upload files to '
-                                 'GCS. The bucket does not have '
-                                 'write permissions. It is possible that '
-                                 'the bucket is public.')
-                    e = PermissionError('Can\'t write to bucket!')
-                    logger.error(e)
-                    raise e
-            retcode = process.wait()
-            if retcode != 0:
-                raise exceptions.StorageUploadError(
-                    f'Upload to S3 failed for store {self.name} and source '
-                    f'{self.source}. Please check logs.')
-            logger.info('Done Syncing Local to GCS')
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Syncing '
+                f'[green]{self.source}[/] to [green]gs://{self.name}/[/]'):
+            with subprocess.Popen(sync_command.split(' '),
+                                  stderr=subprocess.PIPE,
+                                  stdout=subprocess.DEVNULL) as process:
+                stderr = []
+                while True:
+                    line = process.stderr.readline()
+                    if not line:
+                        break
+                    str_line = line.decode('utf-8')
+                    stderr.append(str_line)
+                    if 'AccessDeniedException' in str_line:
+                        process.kill()
+                        with ux_utils.print_exception_no_traceback():
+                            raise PermissionError(
+                                'Failed to upload files to '
+                                'GCS. The bucket does not have '
+                                'write permissions. It is possible that '
+                                'the bucket is public.')
+                returncode = process.wait()
+                if returncode != 0:
+                    with ux_utils.print_exception_no_traceback():
+                        stderr = '\n'.join(stderr)
+                        logger.error(stderr)
+                        raise exceptions.StorageUploadError(
+                            f'Upload to GCS failed for store {self.name} and '
+                            f'source {self.source}. Please check logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
@@ -1077,10 +1149,11 @@ class GcsStore(AbstractStore):
             bucket = self.client.get_bucket(self.name)
             return bucket, False
         except gcp.not_found_exception() as e:
-            if self.source.startswith('gs://'):
-                raise exceptions.StorageBucketGetError(
-                    'Attempted to connect to a non-existent bucket: '
-                    f'{self.source}') from e
+            if self.source is not None and self.source.startswith('gs://'):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        'Attempted to connect to a non-existent bucket: '
+                        f'{self.source}') from e
             else:
                 bucket = self._create_gcs_bucket(self.name)
                 return bucket, True
@@ -1094,22 +1167,12 @@ class GcsStore(AbstractStore):
                 # Check if bucket can be listed/read from
                 next(bucket.list_blobs())
                 return bucket, False
-            except gcp.not_found_exception() as e:
-                ex = exceptions.StorageBucketGetError(
-                    f'Failed to connect to external bucket {self.name} \n'
-                    'Check if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                logger.error(ex)
-                raise ex from e
-            except ValueError as e:
-                ex = exceptions.StorageBucketGetError(
-                    f'Attempted to access a private external bucket {self.name}'
-                    '\nCheck if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                logger.error(ex)
-                raise ex from e
+            except (gcp.not_found_exception(), ValueError) as e:
+                command = f'gsutil ls gs://{self.name}'
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketGetError(
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
@@ -1119,8 +1182,17 @@ class GcsStore(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        # TODO(romilb, michaelzhiluo): Experiment with s3api for GCS buckets
-        raise NotImplementedError
+        install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
+                       '/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb '
+                       '-O /tmp/gcsfuse.deb && '
+                       'sudo dpkg --install /tmp/gcsfuse.deb')
+        mount_cmd = ('gcsfuse -o allow_other '
+                     f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
+                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
+                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+                     f'{self.bucket.name} {mount_path}')
+        return mounting_utils.get_mounting_command(mount_path, install_cmd,
+                                                   mount_cmd)
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on GS bucket
@@ -1145,10 +1217,11 @@ class GcsStore(AbstractStore):
             bucket = self.client.bucket(bucket_name)
             bucket.storage_class = 'STANDARD'
             new_bucket = self.client.create_bucket(bucket, location=region)
-        except Exception as e:
-            logger.error(e)
-            raise exceptions.StorageBucketCreateError(
-                f'Attempted to create a bucket {self.name} but failed.') from e
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Attempted to create a bucket {self.name} but failed.'
+                ) from e
         logger.info(
             f'Created GCS bucket {new_bucket.name} in {new_bucket.location} '
             f'with storage class {new_bucket.storage_class}')
@@ -1162,10 +1235,26 @@ class GcsStore(AbstractStore):
         """
         try:
             bucket = self.client.get_bucket(bucket_name)
-            bucket.delete(force=True)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
-            logger.error('External Bucket detected; User not allowed to delete '
-                         'external bucket!')
-            logger.error(e)
-            raise e
+            with ux_utils.print_exception_no_traceback():
+                raise PermissionError(
+                    'External Bucket detected. User not allowed to delete '
+                    'external bucket.') from e
+
+        num_files = subprocess.check_output(
+            f'gsutil du gs://{bucket_name} | wc -l', shell=True)
+        num_files = int(num_files)
+
+        try:
+            with backend_utils.safe_console_status(
+                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                if num_files >= _GCS_RM_MAX_OBJS:
+                    remove_obj_command = f'gsutil -m rm -a gs://{bucket_name}/*'
+                    subprocess.check_output(remove_obj_command.split(' '))
+                bucket.delete(force=True)
+        except subprocess.CalledProcessError as e:
+            logger.error(e.output)
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketDeleteError(
+                    f'Failed to delete GCS bucket {bucket_name}.')

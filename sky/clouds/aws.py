@@ -1,4 +1,7 @@
 """Amazon Web Services."""
+
+# pylint: disable=import-outside-toplevel
+
 import json
 import os
 import subprocess
@@ -120,6 +123,16 @@ class AWS(clouds.Cloud):
         assert region_name in amis, region_name
         return amis[region_name]
 
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        # The command for getting the current zone is from:
+        # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
+        command_str = (
+            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            ' | python3 -u -c "import sys, json; '
+            'print(json.load(sys.stdin)[\'availabilityZone\'])"')
+        return command_str
+
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
@@ -128,7 +141,8 @@ class AWS(clouds.Cloud):
                                                use_spot=use_spot,
                                                clouds='aws')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators,
+                                    use_spot: bool) -> float:
         # AWS includes accelerators as part of the instance type.  Implementing
         # this is also necessary for e.g., the instance may have 4 GPUs, while
         # the task specifies to use 1 GPU.
@@ -157,9 +171,6 @@ class AWS(clouds.Cloud):
         cost += 0.0
         return cost
 
-    def __repr__(self):
-        return AWS._REPR
-
     def is_same_cloud(self, other: clouds.Cloud):
         return isinstance(other, AWS)
 
@@ -178,8 +189,30 @@ class AWS(clouds.Cloud):
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
 
-    def make_deploy_resources_variables(self,
-                                        resources: 'resources_lib.Resources'):
+    @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='aws')
+
+    def make_deploy_resources_variables(
+            self, resources: 'resources_lib.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+        if region is None:
+            assert zones is None, (
+                'Set either both or neither for: region, zones.')
+            region = self._get_default_region()
+            zones = region.zones
+        else:
+            assert zones is not None, (
+                'Set either both or neither for: region, zones.')
+
+        region_name = region.name
+        zones = [zone.name for zone in zones]
+
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -187,10 +220,19 @@ class AWS(clouds.Cloud):
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
+
+        if r.image_id is not None:
+            image_id = r.image_id
+        else:
+            image_id = self.get_default_ami(region_name, r.instance_type)
+
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
+            'region': region_name,
+            'zones': ','.join(zones),
+            'image_id': image_id,
         }
 
     def get_feasible_launchable_resources(self,
@@ -234,6 +276,12 @@ class AWS(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+        try:
+            import boto3
+            import botocore
+        except ImportError:
+            raise ImportError('Fail to import dependencies for AWS.'
+                              'Try pip install "skypilot[aws]"') from None
         help_str = (
             ' Run the following commands:'
             '\n      $ pip install boto3'
@@ -246,38 +294,33 @@ class AWS(clouds.Cloud):
         # `aws configure list` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
             return (False, '~/.aws/credentials does not exist.' + help_str)
+
+        # Checks if the AWS CLI is installed properly
         try:
-            output = _run_output('aws configure list')
+            _run_output('aws configure list')
         except subprocess.CalledProcessError:
             return False, (
                 'AWS CLI is not installed properly.'
                 ' Run the following commands under sky folder:'
-                # TODO(zhwu): after we publish sky to pypi,
+                # TODO(zhwu): after we publish sky to PyPI,
                 # change this to `pip install sky[aws]`
                 '\n     $ pip install .[aws]'
                 '\n   Credentials may also need to be set.' + help_str)
-        # Configured correctly, the AWS output should look like this:
-        #   ...
-        #   access_key     ******************** shared-credentials-file
-        #   secret_key     ******************** shared-credentials-file
-        #   ...
-        # Otherwise, one or both keys will show as '<not set>'.
-        lines = output.split('\n')
-        if len(lines) < 2:
-            return False, 'AWS CLI output invalid.'
-        access_key_ok = False
-        secret_key_ok = False
-        for line in lines[2:]:
-            line = line.lstrip()
-            if line.startswith('access_key'):
-                if '<not set>' not in line:
-                    access_key_ok = True
-            elif line.startswith('secret_key'):
-                if '<not set>' not in line:
-                    secret_key_ok = True
-        if access_key_ok and secret_key_ok:
-            return True, None
-        return False, 'AWS credentials is not set.' + help_str
+
+        # Checks if AWS credentials 1) exist and 2) are valid.
+        # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
+        sts = boto3.client('sts')
+        try:
+            sts.get_caller_identity()
+        except botocore.exceptions.NoCredentialsError:
+            return False, 'AWS credentials are not set.' + help_str
+        except botocore.exceptions.ClientError:
+            return False, (
+                'Failed to access AWS services with credentials stored in ~/.aws/credentials.'
+                ' Make sure that the access and secret keys are correct.'
+                ' To reconfigure the credentials, ' + help_str[1].lower() +
+                help_str[2:])
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
@@ -288,5 +331,13 @@ class AWS(clouds.Cloud):
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
 
-    def region_exists(self, region: str) -> bool:
-        return service_catalog.region_exists(region, 'aws')
+    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+        return service_catalog.validate_region_zone(region, zone, clouds='aws')
+
+    def accelerator_in_region_or_zone(self,
+                                      accelerator: str,
+                                      acc_count: int,
+                                      region: Optional[str] = None,
+                                      zone: Optional[str] = None) -> bool:
+        return service_catalog.accelerator_in_region_or_zone(
+            accelerator, acc_count, region, zone, 'aws')

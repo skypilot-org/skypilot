@@ -30,6 +30,7 @@ file_mounts:
 
   ~/tmpfile: ~/tmpfile
   ~/a/b/c/tmpfile: ~/tmpfile
+  ~/tmpfile2: ~/tmp-workdir/tmp file
 
   # Intermediate dirs are created and chown-ed to $USER if they don't already
   # exist.  Thus they can be used too, e.g., 'mkdir -p /data/logs'.  See 'run'.
@@ -116,3 +117,8 @@ run: |
   # sky.egg-info/ should not exists on remote due to the .gitingore
   cd ~/sky_workdir
   ! ls sky.egg-info/
+
+  # Symlinks should be copied, but they will be broken
+  # Assumes symlink named circle-link in /tmp/workdir (created by test_smoke.py)
+  ls /tmp/workdir/circle-link
+  ! readlink -e /tmp/workdir/circle-link

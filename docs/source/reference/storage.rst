@@ -1,10 +1,11 @@
 .. _sky-storage:
 
-Sky Storage
-===========
+SkyPilot Storage
+=================
 
-A Sky Storage object represents an abstract data store containing large data
-files required by the task. Compared to file_mounts, storage is faster and
+A SkyPilot Storage object represents an abstract data store containing large data
+files required by the task. Think of it as a bucket of files that can be attached
+to your task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
 Behind the scenes, storage automatically uploads all data in the source
 to a backing object store in a particular cloud (S3/GCS/Azure Blob).
@@ -25,17 +26,17 @@ A storage object can used in either :code:`MOUNT` mode or :code:`COPY` mode.
     sky.Storage does not guarantee preservation of file
     permissions - you may need to set file permissions during task execution.
 
-Using Sky Storage
------------------
-Sky Storage can be used by specifying additional fields in the
+Using SkyPilot Storage
+----------------------
+SkyPilot Storage can be used by specifying additional fields in the
 :code:`file_mounts`. By default, :code:`file_mounts` uses rsync to
 directly copy files from local to remote VM.
-However, you can have them backed by sky Storage, which uploads
+However, you can have them backed by SkyPilot Storage, which uploads
 the files to a cloud store (e.g. S3, GCS) and have them persist there by
 specifying the :code:`name`, :code:`source` and :code:`persistent` fields. By
 enabling persistence, file_mount sync can be made significantly faster.
 
-Your usage of sky storage can fall under four broad use cases:
+Your usage of SkyPilot Storage can fall under four broad use cases:
 
 1.  **You want to upload your local data to remote VM -** specify the name and
     source fields. Name sets the bucket name that will be used, and source
@@ -44,10 +45,10 @@ Your usage of sky storage can fall under four broad use cases:
 2.  **You want to mount an existing S3/GCS bucket to your remote VM -** specify
     just the source field (e.g., s3://my-bucket/)
 
-3.  **You want to have a write-able path to directly write files to S3 buckets
+3.  **You want to have a write-able path to directly write files to S3 or GCS buckets
     -** specify a name (to create a bucket if it doesn't exist) and set the mode
     to MOUNT. This is useful for writing code outputs, such as checkpoints or
-    logs directly to a S3 bucket.
+    logs directly to a S3 or GCS bucket.
 
 4.  **You want to have a shared file-system across workers running on different
     nodes -** specify a name (to create a bucket if it doesn't exist) and set
@@ -102,7 +103,7 @@ and storage mounting:
 
       # *** Persistent Data Storage by copying from S3 ***
       #
-      # This uses sky Storage to first create a S3 bucket named sky-dataset,
+      # This uses SkyPilot Storage to first create a S3 bucket named sky-dataset,
       # copies the contents of ~/datasets to the remote bucket and makes the
       # bucket persistent (i.e., the bucket is not deleted after the completion of
       # this sky task, and future invocations of this bucket will be much faster).
@@ -170,15 +171,20 @@ and storage mounting:
     again.
 
 .. note::
-    Symbolic links are handled differently in :code:`file_mounts` depending on whether Sky Storage is used.
-    For mounts backed by Sky Storage, referenced data for all symbolic links is copied to remote.
-    For mounts not using Sky Storage (e.g., those using rsync) the symbolic links are directly copied.
-    Their targets must be separately mounted or else the symlinks may break.
+    Symbolic links are handled differently in :code:`file_mounts` depending on whether SkyPilot Storage is used.
+    For mounts backed by SkyPilot Storage, symbolic links are not copied to remote.
+    For mounts not using SkyPilot Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
+    The targets must be separately mounted or else the symlinks may break.
+
+.. note::
+    Storage only supports uploading directories (i.e., :code:`source` cannot be a file).
+    To upload a single file to a bucket, please put in a directory and specify the directory as the source.
+    To directly copy a file to a VM, please use regular :ref:`file mounts <file-mounts-example>`.
 
 Creating a shared file system
 -----------------------------
 
-Sky Storage can also be used to create a shared file-system that multiple tasks
+SkyPilot Storage can also be used to create a shared file-system that multiple tasks
 on different nodes can read and write to. This allows developers to pass files
 between workers and even use files as a medium for inter-process communication (IPC).
 
@@ -193,12 +199,12 @@ and use mount mode when attaching it to your tasks like so:
         mode: MOUNT
 
 
-Here is a `simple example <https://github.com/sky-proj/sky/blob/master/examples/storage/pingpong.yaml>`_
-using sky storage to perform communication between processes using files.
+Here is a `simple example <https://github.com/skypilot-org/skypilot/blob/master/examples/storage/pingpong.yaml>`_
+using SkyPilot Storage to perform communication between processes using files.
 
 
-Using Sky Storage CLI tools
----------------------------
+Using SkyPilot Storage CLI tools
+--------------------------------
 
 To manage persistent Storage objects, the sky CLI provides two useful commands -
 :code:`sky storage ls` and :code:`sky storage delete`.

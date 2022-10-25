@@ -1,9 +1,8 @@
-"""The controller module handles the life cycle of a sky spot cluster (job)."""
-
+"""Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import pathlib
 import time
-from typing import Optional
+import traceback
 
 import colorama
 import filelock
@@ -25,12 +24,25 @@ logger = sky_logging.init_logger(__name__)
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
-    def __init__(self, job_id: int, task_yaml: str) -> None:
+    def __init__(self, job_id: int, task_yaml: str,
+                 retry_until_up: bool) -> None:
         self._job_id = job_id
         self._task_name = pathlib.Path(task_yaml).stem
         self._task = sky.Task.from_yaml(task_yaml)
+
+        self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
+
+        # Add a unique identifier to the task environment variables, so that
+        # the user can have the same id for multiple recoveries.
+        #   Example value: sky-2022-10-04-22-46-52-467694_id-17
+        # TODO(zhwu): support SKYPILOT_RUN_ID for normal jobs as well, so
+        # the use can use env_var for normal jobs.
+        task_envs = self._task.envs or {}
+        task_envs['SKYPILOT_RUN_ID'] = (f'{self.backend.run_timestamp}'
+                                        f'_id-{self._job_id}')
+        self._task.set_envs(task_envs)
 
         spot_state.set_submitted(
             self._job_id,
@@ -40,7 +52,8 @@ class SpotController:
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            self._cluster_name, self.backend, self._task)
+            self._cluster_name, self.backend, self._task, retry_until_up,
+            self._handle_signal)
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery."""
@@ -53,11 +66,7 @@ class SpotController:
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
             # Handle the signal if it is sent by the user.
-            user_signal = self._check_signal()
-            if user_signal == spot_utils.UserSignal.CANCEL:
-                logger.info(f'User sent {user_signal.value} signal.')
-                spot_state.set_cancelled(self._job_id)
-                break
+            self._handle_signal()
 
             # Check the network connection to avoid false alarm for job failure.
             # Network glitch was observed even in the VM.
@@ -112,9 +121,8 @@ class SpotController:
                         failure_type=spot_state.SpotStatus.FAILED,
                         end_time=end_time)
                     break
-                assert (cluster_status == global_user_state.ClusterStatus.
-                        STOPPED), ('The cluster should be STOPPED, but is '
-                                   f'{cluster_status.value}.')
+            # cluster can be down, INIT or STOPPED, based on the interruption
+            # behavior of the cloud.
             # Failed to connect to the cluster or the cluster is partially down.
             # job_status is None or job_status == job_lib.JobStatus.FAILED
             logger.info('The cluster is preempted.')
@@ -127,6 +135,9 @@ class SpotController:
         """Start the controller."""
         try:
             self._run()
+        except exceptions.SpotUserCancelledError as e:
+            logger.info(e)
+            spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
             logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
                          f'{colorama.Style.RESET_ALL}')
@@ -134,6 +145,7 @@ class SpotController:
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            logger.error(traceback.format_exc())
             logger.error(f'Unexpected error occurred: {type(e).__name__}: {e}')
         finally:
             self._strategy_executor.terminate_cluster()
@@ -148,8 +160,8 @@ class SpotController:
             # Clean up Storages with persistent=False.
             self.backend.teardown_ephemeral_storage(self._task)
 
-    def _check_signal(self) -> Optional[spot_utils.UserSignal]:
-        """Check if the user has sent down signal."""
+    def _handle_signal(self):
+        """Handle the signal if the user sent it."""
         signal_file = pathlib.Path(
             spot_utils.SIGNAL_FILE_PREFIX.format(self._job_id))
         signal = None
@@ -165,7 +177,13 @@ class SpotController:
                     signal = spot_utils.UserSignal(signal)
                 # Remove the signal file, after reading the signal.
                 signal_file.unlink()
-        return signal
+        if signal is None:
+            return
+        if signal == spot_utils.UserSignal.CANCEL:
+            raise exceptions.SpotUserCancelledError(
+                f'User sent {signal.value} signal.')
+
+        raise RuntimeError(f'Unknown SkyPilot signal received: {signal.value}.')
 
 
 if __name__ == '__main__':
@@ -174,10 +192,14 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the controller job.')
+    parser.add_argument('--retry-until-up',
+                        action='store_true',
+                        help='Retry until the spot cluster is up.')
     parser.add_argument('task_yaml',
                         type=str,
                         help='The path to the user spot task yaml file. '
                         'The file name is the spot task name.')
     args = parser.parse_args()
-    controller = SpotController(args.job_id, args.task_yaml)
+    controller = SpotController(args.job_id, args.task_yaml,
+                                args.retry_until_up)
     controller.start()

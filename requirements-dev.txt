@@ -3,7 +3,9 @@ yapf==0.32.0
 pylint==2.8.2
 # https://github.com/edaniszewski/pylint-quotes
 pylint-quotes==0.2.3
+toml==0.10.2
 
 # testing
 pytest
 pytest-xdist
+pytest-env>=0.6

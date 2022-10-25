@@ -1,9 +1,9 @@
-"""Sky global user state, backed by a sqlite database.
+"""Global user state, backed by a sqlite database.
 
 Concepts:
 - Cluster name: a user-supplied or auto-generated unique name to identify a
   cluster.
-- Cluster handle: (non-user facing) an opaque backend handle for Sky to
+- Cluster handle: (non-user facing) an opaque backend handle for us to
   interact with a cluster.
 """
 import enum
@@ -11,15 +11,13 @@ import json
 import os
 import pathlib
 import pickle
-import sqlite3
-import sys
-import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional
 
 from sky import clouds
-from sky.skylet.utils import db_utils
+from sky.utils import db_utils
+from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -31,49 +29,44 @@ _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
-class _SQLiteConn(threading.local):
-    """Thread-local connection to the sqlite3 database."""
+def create_table(cursor, conn):
+    # Table for Clusters
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS clusters (
+        name TEXT PRIMARY KEY,
+        launched_at INTEGER,
+        handle BLOB,
+        last_use TEXT,
+        status TEXT,
+        autostop INTEGER DEFAULT -1)""")
+    # Table for configs (e.g. enabled clouds)
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS config (
+        key TEXT PRIMARY KEY, value TEXT)""")
+    # Table for Storage
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS storage (
+        name TEXT PRIMARY KEY,
+        launched_at INTEGER,
+        handle BLOB,
+        last_use TEXT,
+        status TEXT)""")
+    # For backward compatibility.
+    # TODO(zhwu): Remove this function after all users have migrated to
+    # the latest version of SkyPilot.
+    # Add autostop column to clusters table
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'autostop',
+                                 'INTEGER DEFAULT -1')
 
-    def __init__(self, db_path: str):
-        super().__init__()
-        self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
-        self.cursor = self.conn.cursor()
-        self._create_tables()
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
+                                 'TEXT DEFAULT "{}"')
 
-    def _create_tables(self):
-        # Table for Clusters
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS clusters (
-            name TEXT PRIMARY KEY,
-            launched_at INTEGER,
-            handle BLOB,
-            last_use TEXT,
-            status TEXT,
-            autostop INTEGER DEFAULT -1)""")
-        # Table for Sky Config (e.g. enabled clouds)
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS config (
-            key TEXT PRIMARY KEY, value TEXT)""")
-        # Table for Storage
-        self.cursor.execute("""\
-            CREATE TABLE IF NOT EXISTS storage (
-            name TEXT PRIMARY KEY,
-            launched_at INTEGER,
-            handle BLOB,
-            last_use TEXT,
-            status TEXT)""")
-        # For backward compatibility.
-        # TODO(zhwu): Remove this function after all users have migrated to
-        # the latest version of Sky.
-        # Add autostop column to clusters table
-        db_utils.add_column_to_table(self.cursor, self.conn, 'clusters',
-                                     'autostop', 'INTEGER DEFAULT -1')
-
-        self.conn.commit()
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
+                                 'INTEGER DEFAULT 0')
+    conn.commit()
 
 
-_DB = _SQLiteConn(_DB_PATH)
+_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
 
 
 class ClusterStatus(enum.Enum):
@@ -111,51 +104,68 @@ class StorageStatus(enum.Enum):
     READY = 'READY'
 
 
-def _get_pretty_entry_point() -> str:
-    """Returns the prettified entry point of this process (sys.argv).
-
-    Example return values:
-
-        $ sky launch app.yaml  # 'sky launch app.yaml'
-        $ sky gpunode  # 'sky gpunode'
-        $ python examples/app.py  # 'app.py'
-    """
-    argv = sys.argv
-    basename = os.path.basename(argv[0])
-    if basename == 'sky':
-        # Turn '/.../anaconda/envs/py36/bin/sky' into 'sky', but keep other
-        # things like 'examples/app.py'.
-        argv[0] = basename
-    return ' '.join(argv)
-
-
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
-                          ready: bool):
+                          ready: bool,
+                          is_launch: bool = True):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
-    cluster_launched_at = int(time.time())
     handle = pickle.dumps(cluster_handle)
-    last_use = _get_pretty_entry_point()
+    cluster_launched_at = int(time.time()) if is_launch else None
+    last_use = common_utils.get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status, autostop) '
-        'VALUES (?, ?, ?, ?, ?, '
+        '(name, launched_at, handle, last_use, status, autostop, to_down) '
+        'VALUES ('
+        # name
+        '?, '
+        # launched_at
+        'COALESCE('
+        '?, (SELECT launched_at FROM clusters WHERE name=?)), '
+        # handle
+        '?, '
+        # last_use
+        'COALESCE('
+        '?, (SELECT last_use FROM clusters WHERE name=?)), '
+        # status
+        '?, '
+        # autostop
         # Keep the old autostop value if it exists, otherwise set it to
         # default -1.
         'COALESCE('
-        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1)'
-        ')',  # VALUES
-        (cluster_name, cluster_launched_at, handle, last_use, status.value,
-         cluster_name, ClusterStatus.STOPPED.value))
+        '(SELECT autostop FROM clusters WHERE name=? AND status!=?), -1), '
+        # Keep the old to_down value if it exists, otherwise set it to
+        # default 0.
+        'COALESCE('
+        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0)'
+        ')',
+        (
+            # name
+            cluster_name,
+            # launched_at
+            cluster_launched_at,
+            cluster_name,
+            # handle
+            handle,
+            # last_use
+            last_use,
+            cluster_name,
+            # status
+            status.value,
+            # autostop
+            cluster_name,
+            ClusterStatus.STOPPED.value,
+            cluster_name,
+            ClusterStatus.STOPPED.value,
+        ))
     _DB.conn.commit()
 
 
 def update_last_use(cluster_name: str):
     """Updates the last used command for the cluster."""
     _DB.cursor.execute('UPDATE clusters SET last_use=(?) WHERE name=(?)',
-                       (_get_pretty_entry_point(), cluster_name))
+                       (common_utils.get_pretty_entry_point(), cluster_name))
     _DB.conn.commit()
 
 
@@ -209,9 +219,33 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def set_cluster_autostop_value(cluster_name: str, idle_minutes: int) -> None:
-    _DB.cursor.execute('UPDATE clusters SET autostop=(?) WHERE name=(?)', (
-        idle_minutes,
+def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
+                               to_down: bool) -> None:
+    _DB.cursor.execute(
+        'UPDATE clusters SET autostop=(?), to_down=(?) WHERE name=(?)', (
+            idle_minutes,
+            int(to_down),
+            cluster_name,
+        ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
+                              (cluster_name,))
+    for (metadata,) in rows:
+        if metadata is None:
+            return None
+        return json.loads(metadata)
+
+
+def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
+    _DB.cursor.execute('UPDATE clusters SET metadata=(?) WHERE name=(?)', (
+        json.dumps(metadata),
         cluster_name,
     ))
     count = _DB.cursor.rowcount
@@ -225,7 +259,8 @@ def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,))
-    for name, launched_at, handle, last_use, status, autostop in rows:
+    for (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down) in rows:
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -233,14 +268,18 @@ def get_cluster_from_name(
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
+            'to_down': bool(to_down),
+            'metadata': json.loads(metadata),
         }
         return record
 
 
 def get_clusters() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from clusters')
+    rows = _DB.cursor.execute(
+        'select * from clusters order by launched_at desc')
     records = []
-    for name, launched_at, handle, last_use, status, autostop in rows:
+    for (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down) in rows:
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -249,9 +288,17 @@ def get_clusters() -> List[Dict[str, Any]]:
             'last_use': last_use,
             'status': ClusterStatus[status],
             'autostop': autostop,
+            'to_down': bool(to_down),
+            'metadata': json.loads(metadata),
         }
         records.append(record)
     return records
+
+
+def get_cluster_names_start_with(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
+    return [row[0] for row in rows]
 
 
 def get_enabled_clouds() -> List[clouds.Cloud]:
@@ -275,7 +322,7 @@ def add_or_update_storage(storage_name: str,
                           storage_status: StorageStatus):
     storage_launched_at = int(time.time())
     handle = pickle.dumps(storage_handle)
-    last_use = _get_pretty_entry_point()
+    last_use = common_utils.get_pretty_entry_point()
 
     def status_check(status):
         return status in StorageStatus
@@ -333,6 +380,19 @@ def get_handle_from_storage_name(storage_name: str):
                               (storage_name,))
     for (handle,) in rows:
         return pickle.loads(handle)
+
+
+def get_glob_storage_name(storage_name: str) -> List[str]:
+    assert storage_name is not None, 'storage_name cannot be None'
+    rows = _DB.cursor.execute('SELECT name FROM storage WHERE name GLOB (?)',
+                              (storage_name,))
+    return [row[0] for row in rows]
+
+
+def get_storage_names_start_with(starts_with: str) -> List[str]:
+    rows = _DB.cursor.execute('SELECT name FROM storage WHERE name LIKE (?)',
+                              (f'{starts_with}%',))
+    return [row[0] for row in rows]
 
 
 def get_storage() -> List[Dict[str, Any]]:

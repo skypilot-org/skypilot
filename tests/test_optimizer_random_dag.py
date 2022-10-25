@@ -2,8 +2,9 @@ import copy
 import random
 
 import numpy as np
+import pandas as pd
+
 import sky
-from sky.clouds.service_catalog import gcp_catalog
 
 CLOUDS = {
     'AWS': sky.AWS(),
@@ -11,7 +12,7 @@ CLOUDS = {
     'Azure': sky.Azure(),
 }
 ALL_INSTANCE_TYPES = sum(sky.list_accelerators(gpus_only=True).values(), [])
-GCP_INSTANCE_TYPES = list(gcp_catalog._ON_DEMAND_PRICES.keys())
+GCP_DEFAULT_INSTANCE_TYPE = sky.GCP.get_default_instance_type()
 
 DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
@@ -61,17 +62,20 @@ def generate_random_dag(
             num_candidates = random.randint(1, max_num_candidate_resources)
             candidate_instance_types = random.choices(ALL_INSTANCE_TYPES,
                                                       k=num_candidates)
-            op.set_resources({
-                sky.Resources(
+
+            candidate_resources = set()
+            for candidate in candidate_instance_types:
+                instance_type = candidate.instance_type
+                if pd.isna(instance_type):
+                    instance_type = GCP_DEFAULT_INSTANCE_TYPE
+                resources = sky.Resources(
                     cloud=CLOUDS[candidate.cloud],
-                    instance_type=candidate.instance_type \
-                        if candidate.cloud != 'GCP' \
-                        else random.choice(GCP_INSTANCE_TYPES),
+                    instance_type=instance_type,
                     accelerators={
-                        candidate.accelerator_name: candidate.accelerator_count},
-                )
-                for candidate in candidate_instance_types
-            })
+                        candidate.accelerator_name: candidate.accelerator_count
+                    })
+                candidate_resources.add(resources)
+            op.set_resources(candidate_resources)
     return dag
 
 
