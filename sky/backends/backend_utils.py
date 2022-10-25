@@ -756,10 +756,6 @@ def write_cluster_config(
     region_name = resources_vars.get('region')
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
-    old_yaml_content = None
-    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r') as f:
-            old_yaml_content = f.read()
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -805,6 +801,8 @@ def write_cluster_config(
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
+        # If dryrun, return the unfinished tmp yaml path.
+        config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
     # Delay the optimization of the config until the authentication files is added.
@@ -814,7 +812,9 @@ def write_cluster_config(
         _optimize_file_mounts(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
-    if old_yaml_content is not None:
+    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
+        with open(yaml_path, 'r') as f:
+            old_yaml_content = f.read()
         with open(tmp_yaml_path, 'r') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
