@@ -114,6 +114,9 @@ def add_or_update_cluster(cluster_name: str,
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
+
+    metadata = get_cluster_metadata(cluster_name)
+
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         '(name, launched_at, handle, last_use, status, autostop, to_down) '
@@ -159,7 +162,15 @@ def add_or_update_cluster(cluster_name: str,
             cluster_name,
             ClusterStatus.STOPPED.value,
         ))
+
+    if not metadata:
+        metadata = {}
+        metadata['usage_intervals'] = []
+        metadata['cost_before_start'] = 0
+        metadata['latest_queried_cost'] = 0
+
     _DB.conn.commit()
+    set_cluster_metadata(cluster_name, metadata)
 
 
 def update_last_use(cluster_name: str):
@@ -169,15 +180,30 @@ def update_last_use(cluster_name: str):
     _DB.conn.commit()
 
 
-def remove_cluster(cluster_name: str, terminate: bool):
+def remove_cluster(cluster_name: str, terminate: bool) -> float:
     """Removes cluster_name mapping."""
+    handle = get_handle_from_cluster_name(cluster_name)
+    total_cost = 0
+
+    if handle:
+        metadata = get_cluster_metadata(cluster_name)
+        cost_before_start = metadata['cost_before_start']
+        start_time = get_cluster_launch_time(cluster_name)
+        end_time = int(time.time())
+        cost_from_start_to_now = get_cost_for_time_interval(
+            handle, start_time, end_time)
+        total_cost = cost_before_start + cost_from_start_to_now
+        metadata['cost_before_start'] = total_cost
+        metadata['latest_queried_cost'] = 0
+        metadata['usage_intervals'].append((start_time, end_time))
+        set_cluster_metadata(cluster_name, metadata)
+
     if terminate:
         _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)',
                            (cluster_name,))
     else:
-        handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
-            return
+            return total_cost
         # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
@@ -189,6 +215,8 @@ def remove_cluster(cluster_name: str, terminate: bool):
                 cluster_name,
             ))
     _DB.conn.commit()
+
+    return float(total_cost)
 
 
 def get_handle_from_cluster_name(
@@ -234,6 +262,15 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
+    rows = _DB.cursor.execute('SELECT launched_at FROM clusters WHERE name=(?)',
+                              (cluster_name,))
+    for (launch_time,) in rows:
+        if launch_time is None:
+            return None
+        return int(launch_time)
+
+
 def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
@@ -274,13 +311,35 @@ def get_cluster_from_name(
         return record
 
 
+def update_cost_of_clusters():
+    rows = _DB.cursor.execute(
+        'select * from clusters order by launched_at desc')
+    status_time = int(time.time())
+    for (name, launched_at, handle, _, status, _, metadata, _) in rows:
+        handle = pickle.loads(handle)
+        metadata = json.loads(metadata)
+
+        if handle and metadata:
+            cost_before_start = metadata['cost_before_start']
+            cost_from_start_to_now = 0
+            if ClusterStatus[status] == ClusterStatus.UP:
+                cost_from_start_to_now = get_cost_for_time_interval(
+                    handle, launched_at, status_time)
+            latest_cost = cost_before_start + cost_from_start_to_now
+            metadata['latest_queried_cost'] = latest_cost
+            set_cluster_metadata(name, metadata)
+
+
 def get_clusters() -> List[Dict[str, Any]]:
+    update_cost_of_clusters()
     rows = _DB.cursor.execute(
         'select * from clusters order by launched_at desc')
     records = []
+
     for (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down) in rows:
         # TODO: use namedtuple instead of dict
+
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -291,6 +350,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'to_down': bool(to_down),
             'metadata': json.loads(metadata),
         }
+
         records.append(record)
     return records
 
@@ -408,3 +468,15 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': StorageStatus[status],
         })
     return records
+
+
+def get_cost_for_time_interval(
+        handle: Optional['backends.Backend.ResourceHandle'], start_time: str,
+        end_time: str) -> float:
+
+    start_time, end_time = int(start_time), int(end_time)
+    interval_duration = end_time - start_time
+    cost = (handle.launched_resources.get_cost(interval_duration) *
+            handle.launched_nodes)
+
+    return cost
