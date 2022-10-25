@@ -34,24 +34,6 @@ Core CLI
    :prog: sky autostop
    :nested: full
 
-
-Interactive Node CLI
------------------------
-
-.. click:: sky.cli:cpunode
-   :prog: sky cpunode
-   :nested: full
-
-.. _sky-gpunode:
-.. click:: sky.cli:gpunode
-   :prog: sky gpunode
-   :nested: full
-
-.. click:: sky.cli:tpunode
-   :prog: sky tpunode
-   :nested: full
-
-
 Job Queue CLI
 --------------
 
@@ -67,17 +49,6 @@ Job Queue CLI
    :prog: sky cancel
    :nested: full
 
-
-Storage CLI
-------------
-
-.. click:: sky.cli:storage_ls
-   :prog: sky storage ls
-   :nested: full
-
-.. click:: sky.cli:storage_delete
-   :prog: sky storage delete
-   :nested: full
 
 Managed Spot Jobs CLI
 ---------------------------
@@ -98,14 +69,42 @@ Managed Spot Jobs CLI
    :prog: sky spot logs
    :nested: full
 
-Miscellaneous
--------------
+Interactive Node CLI
+-----------------------
 
-.. click:: sky.cli:check
-   :prog: sky check
+.. click:: sky.cli:cpunode
+   :prog: sky cpunode
    :nested: full
+
+.. _sky-gpunode:
+.. click:: sky.cli:gpunode
+   :prog: sky gpunode
+   :nested: full
+
+.. click:: sky.cli:tpunode
+   :prog: sky tpunode
+   :nested: full
+
+
+Storage CLI
+------------
+
+.. click:: sky.cli:storage_ls
+   :prog: sky storage ls
+   :nested: full
+
+.. click:: sky.cli:storage_delete
+   :prog: sky storage delete
+   :nested: full
+
+Utils: ``show-gpus``, ``check``
+---------------------------------------
 
 
 .. click:: sky.cli:show_gpus
    :prog: sky show-gpus
+   :nested: full
+
+.. click:: sky.cli:check
+   :prog: sky check
    :nested: full
