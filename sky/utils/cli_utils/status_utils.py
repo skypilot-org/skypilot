@@ -71,6 +71,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('AUTOSTOP', _get_autostop),
+        StatusColumn('TOTAL_COST', _get_total_cost),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
@@ -333,6 +334,14 @@ def get_cost_report(cluster_status: str,) -> float:
         return '-'
 
     return f'${cost:.3f}'
+
+
+def _get_total_cost(cluster_status):
+    if cluster_status['metadata']:
+        cost = cluster_status['metadata']['latest_queried_cost']
+        cost_str = f'$ {cost:.3f}'
+        return cost_str
+    return '-'
 
 
 def _is_pending_autostop(cluster_status):
