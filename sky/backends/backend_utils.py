@@ -1423,7 +1423,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         return set(ray_launch_hashes)
     with suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
+    # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']
@@ -1751,17 +1751,17 @@ def get_clusters(
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
-    Combs through the Sky database (in ~/.sky/state.db) to get a list of records
+    Combs through the database (in ~/.sky/state.db) to get a list of records
     corresponding to launched clusters.
 
     Args:
-        include_reserved: Whether to include sky-reserved clusters, e.g. spot
+        include_reserved: Whether to include reserved clusters, e.g. spot
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
-            state. Supports three values, 'all' for all clouds, 'public' for public
-            clouds only, and 'local' for only local clouds.
+            state. Supports three values, 'all' for all clouds, 'public' for
+            public clouds only, and 'local' for only local clouds.
 
     Returns:
         A list of cluster records.

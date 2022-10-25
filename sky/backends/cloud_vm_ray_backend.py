@@ -154,7 +154,7 @@ class RayCodeGen:
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
         # Otherwise, it will a bug of ray job failed to get the placement group
-        # in ray <= 2.0.0.
+        # in ray <= 2.0.1.
         # TODO(mluo): Check why 'auto' not working with on-prem cluster and
         # whether the placement group issue also occurs in on-prem cluster.
         ray_address = 'ray://localhost:10001' if is_local else 'auto'
@@ -198,7 +198,7 @@ class RayCodeGen:
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
         ]
         if spot_task is not None:
-            # Add the spot job to spot status table.
+            # Add the spot job to spot queue table.
             resources_str = backend_utils.get_task_resources_str(spot_task)
             self._code += [
                 'from sky.spot import spot_state',
@@ -401,6 +401,8 @@ class RayCodeGen:
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
+                sys.stdout.flush()
+                sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
@@ -1341,7 +1343,7 @@ class RetryingVmProvisioner(object):
         if isinstance(launched_resources.cloud, clouds.Local):
             raise RuntimeError(
                 'The command `ray status` errored out on the head node '
-                'of the local cluster. Check if ray[default]==1.13.0 '
+                'of the local cluster. Check if ray[default]==2.0.1 '
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 
@@ -2071,8 +2073,8 @@ class CloudVmRayBackend(backends.Backend):
         else:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} '
-                '--no-wait -- '
+                f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+                '--no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -2097,17 +2099,33 @@ class CloudVmRayBackend(backends.Backend):
                     self.tail_logs(handle, job_id)
         finally:
             name = handle.cluster_name
-            logger.info(f'{fore.CYAN}Job ID: '
-                        f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                        '\nTo cancel the job:\t'
-                        f'{backend_utils.BOLD}sky cancel {name} {job_id}'
-                        f'{backend_utils.RESET_BOLD}'
-                        '\nTo stream the logs:\t'
-                        f'{backend_utils.BOLD}sky logs {name} {job_id}'
-                        f'{backend_utils.RESET_BOLD}'
-                        '\nTo view the job queue:\t'
-                        f'{backend_utils.BOLD}sky queue {name}'
-                        f'{backend_utils.RESET_BOLD}')
+            if name == spot_lib.SPOT_CONTROLLER_NAME:
+                logger.info(f'{fore.CYAN}Spot Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            '\nTo cancel the job:\t\t'
+                            f'{backend_utils.BOLD}sky spot cancel {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo stream the logs:\t\t'
+                            f'{backend_utils.BOLD}sky spot logs {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            f'\nTo stream controller logs:\t'
+                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo view all spot jobs:\t\t'
+                            f'{backend_utils.BOLD}sky spot queue'
+                            f'{backend_utils.RESET_BOLD}')
+            else:
+                logger.info(f'{fore.CYAN}Job ID: '
+                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                            '\nTo cancel the job:\t'
+                            f'{backend_utils.BOLD}sky cancel {name} {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo stream the logs:\t'
+                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
+                            f'{backend_utils.RESET_BOLD}'
+                            '\nTo view the job queue:\t'
+                            f'{backend_utils.BOLD}sky queue {name}'
+                            f'{backend_utils.RESET_BOLD}')
 
     def _setup_and_create_job_cmd_on_local_head(
         self,
@@ -2140,8 +2158,8 @@ class CloudVmRayBackend(backends.Backend):
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
-            f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-            f'-- {switch_user_cmd}')
+            f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+            f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 
     def _add_job(self, handle: ResourceHandle, job_name: str,
@@ -2195,31 +2213,32 @@ class CloudVmRayBackend(backends.Backend):
             # Case: task_lib.Task(run, num_nodes=1)
             self._execute_task_one_node(handle, task, job_id, detach_run)
 
-    def _post_execute(self, handle: ResourceHandle, teardown: bool) -> None:
+    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         colorama.init()
         fore = colorama.Fore
         style = colorama.Style
         name = handle.cluster_name
+        if name == spot_lib.SPOT_CONTROLLER_NAME or down:
+            return
         stop_str = ('\nTo stop the cluster:'
                     f'\t{backend_utils.BOLD}sky stop {name}'
                     f'{backend_utils.RESET_BOLD}')
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             stop_str = ''
-        if not teardown:
-            logger.info(f'\n{fore.CYAN}Cluster name: '
-                        f'{style.BRIGHT}{name}{style.RESET_ALL}'
-                        '\nTo log into the head VM:\t'
-                        f'{backend_utils.BOLD}ssh {name}'
-                        f'{backend_utils.RESET_BOLD}'
-                        '\nTo submit a job:'
-                        f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
-                        f'{backend_utils.RESET_BOLD}'
-                        f'{stop_str}'
-                        '\nTo teardown the cluster:'
-                        f'\t{backend_utils.BOLD}sky down {name}'
-                        f'{backend_utils.RESET_BOLD}')
-            if handle.tpu_delete_script is not None:
-                logger.info('Tip: `sky down` will delete launched TPU(s) too.')
+        logger.info(f'\n{fore.CYAN}Cluster name: '
+                    f'{style.BRIGHT}{name}{style.RESET_ALL}'
+                    '\nTo log into the head VM:\t'
+                    f'{backend_utils.BOLD}ssh {name}'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo submit a job:'
+                    f'\t\t{backend_utils.BOLD}sky exec {name} yaml_file'
+                    f'{backend_utils.RESET_BOLD}'
+                    f'{stop_str}'
+                    '\nTo teardown the cluster:'
+                    f'\t{backend_utils.BOLD}sky down {name}'
+                    f'{backend_utils.RESET_BOLD}')
+        if handle.tpu_delete_script is not None:
+            logger.info('Tip: `sky down` will delete launched TPU(s) too.')
 
     def _teardown_ephemeral_storage(self, task: task_lib.Task) -> None:
         storage_mounts = task.storage_mounts
