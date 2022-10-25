@@ -7,6 +7,7 @@ import os
 import pathlib
 import shlex
 import time
+import typing
 from typing import Any, Dict, List, Optional
 
 import filelock
@@ -16,6 +17,9 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+
+if typing.TYPE_CHECKING:
+    from ray.dashboard.modules.job import pydantic_models as ray_pydantic
 
 logger = sky_logging.init_logger(__name__)
 
@@ -331,7 +335,7 @@ def update_job_status(job_owner: str,
     we still need this to handle staleness problem, caused by instance
     restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==1.13.0.
+    This function should only be run on the remote instance with ray==2.0.1.
     """
     if len(job_ids) == 0:
         return []
@@ -341,13 +345,19 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    # In ray 1.13.0, job_client.list_jobs returns a dict of job_id to job_info,
-    # where job_info contains the job status (str).
-    ray_job_infos = job_client.list_jobs()
+    # In ray 2.0.1, job_client.list_jobs returns a list of JobDetails,
+    # which contains the job status (str) and submission_id (str).
+    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
+
+    job_details = dict()
+    ray_job_ids_set = set(ray_job_ids)
+    for job_detail in job_detail_lists:
+        if job_detail.submission_id in ray_job_ids_set:
+            job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
-        if ray_job_id in ray_job_infos:
-            ray_status = ray_job_infos[ray_job_id].status
+        if ray_job_id in job_details:
+            ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)

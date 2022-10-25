@@ -70,6 +70,10 @@ html_theme_options = {
     'path_to_docs': 'docs/source',
 }
 
+# The name for this set of Sphinx documents.  If None, it defaults to
+# "<project> v<release> documentation".
+html_title = 'SkyPilot documentation'
+
 # -- Options for EPUB output
 epub_show_urls = 'footnote'
 
