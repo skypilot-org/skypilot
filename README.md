@@ -23,7 +23,7 @@ SkyPilot cuts your cloud costs:
 * [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): auto-selects best VM types for your jobs
 * Optimizer: auto-picks best prices across zones/regions/clouds
 
-SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change required. 
+SkyPilot supports your existing GPU, TPU, and CPU workloads -- no code change required. 
 
 Install with (choose your clouds)
 ```
