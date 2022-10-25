@@ -11,20 +11,24 @@
 
 SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
-Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
+SkyPilot abstracts away cloud infra burden:
+- Launching jobs/clusters on any cloud (AWS, Azure, GCP)
+- Picking the cheapest zone/region/cloud
+- Auto-failover to find scarce resources
+- Job queueing & using cloud object stores
 
-_Ease of use_
-* **Run existing projects on the cloud** with zero code changes
-* Use a **unified interface** to run on any cloud, without vendor lock-in (currently AWS, Azure, GCP)
-* **Queue jobs** on one or multiple clusters
-* **Automatic failover** to find scarce resources (GPUs) across regions and clouds
-* **Use datasets on the cloud** like you would on a local file system 
+SkyPilot cuts your cloud costs:
+* [Managed Spot Jobs](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with automatic recovery from preemptions
+* [Autostop & Autodown](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of clusters when all jobs finish
+* [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): finds best VM types for your jobs
+* Optimizer: automatically picks best prices across zones/regions/clouds
 
-_Cost saving_
-* Run jobs on **spot instances** with **automatic recovery** from preemptions
-* Hands-free cluster management: **automatically stopping idle clusters**
-* One-click use of **TPUs**, for high-performance, cost-effective training
-* Automatically benchmark and find the cheapest hardware for your job
+SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change required. 
+
+Install with (choose your clouds)
+```
+pip install "skypilot[aws,gcp,azure]"
+```
 
 ## Getting Started
 You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
