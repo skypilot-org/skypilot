@@ -21,9 +21,9 @@
 </p>
 
 
-<h4 align="center">
+<h3 align="center">
     Run jobs on any cloud, easily and cost effectively
-</h4>
+</h3>
 
 SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
