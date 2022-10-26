@@ -1820,8 +1820,13 @@ class CloudVmRayBackend(backends.Backend):
                 get_zone_cmd = (
                     handle.launched_resources.cloud.get_zone_shell_cmd())
                 if get_zone_cmd is not None:
-                    returncode, stdout, _ = self.run_on_head(
+                    returncode, stdout, stderr = self.run_on_head(
                         handle, get_zone_cmd, require_outputs=True)
+                    subprocess_utils.handle_returncode(returncode,
+                                                       get_zone_cmd,
+                                                       'Failed to get zone',
+                                                       stderr=stderr,
+                                                       stream_logs=stream_logs)
                     # zone will be checked during Resources cls
                     # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
