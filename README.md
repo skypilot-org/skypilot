@@ -35,7 +35,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 - [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html)
 - [CLI reference](https://skypilot.readthedocs.io/en/latest/reference/cli.html)
 
-## Example SkyPilot Task
+## SkyPilot in 1 minute
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
 
