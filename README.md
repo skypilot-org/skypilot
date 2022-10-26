@@ -5,7 +5,25 @@
   </picture>
 </p>
 
+<h4 align="center">
+    Use the clouds easily and cost-effectively, without cloud infra expertise
+</h4>
 
+<p align="center">
+  <a href="https://skypilot.readthedocs.io/en/latest/"> 
+    <img alt="Documentation" src="https://readthedocs.org/projects/skypilot/badge/?version=latest">
+  </a>
+  
+  <a href="https://github.com/skypilot-org/skypilot/releases"> 
+    <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
+  </a>
+  
+  <a href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q"> 
+    <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
+  </a>
+  
+</p>
+  
 [![Documentation Status](https://readthedocs.org/projects/skypilot/badge/?version=latest)](https://skypilot.readthedocs.io/en/latest/?badge=latest)
 ![pypi](https://img.shields.io/pypi/v/skypilot)
 [![Join Slack](https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack)](https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q)
