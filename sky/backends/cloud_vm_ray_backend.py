@@ -210,6 +210,7 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
+        cluster_ips_sorted: Optional[List[str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task."""
         assert self._has_prologue, ('Call add_prologue() before '
@@ -278,6 +279,13 @@ class RayCodeGen:
                 print('INFO: Reserved IPs:', ip_list)
                 ip_list_str = '\\n'.join(ip_list)
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
+
+                if {cluster_ips_sorted!r}:
+                    cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_ips_sorted!r})}}
+                    ip_rank_list = sorted(ip_list, key=cluster_ips_map.get)
+                    ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
+                else:
+                    ip_rank_map = {{ip: i for i, ip in enumerate(ip_list)}}
                 """),
         ]
 
@@ -306,8 +314,7 @@ class RayCodeGen:
                      log_path: str,
                      env_vars: Dict[str, str] = None,
                      gang_scheduling_id: int = 0,
-                     use_sudo: bool = False,
-                     ip_rank_map: Dict[str, str] = None) -> None:
+                     use_sudo: bool = False) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
             'Call add_gang_schedule_placement_group() before add_ray_task().')
@@ -362,11 +369,8 @@ class RayCodeGen:
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
-            if {ip_rank_map!r}:
-                ip = ip_list[{gang_scheduling_id!r}]
-                sky_env_vars_dict['SKY_NODE_RANK'] = {ip_rank_map!r}[ip]
-            else:
-                sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
+            ip = ip_list[{gang_scheduling_id!r}]
+            sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
@@ -2999,19 +3003,23 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
+        cluster_ips = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                 handle.launched_nodes,
+                                                 handle=handle,
+                                                 get_internal_ips=True)
+        # Ensure head node is the first element,
+        # then sort the remaining IPs for stableness
+        cluster_ips_sorted = [cluster_ips[0]] + sorted(cluster_ips[1:])
+
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(num_actual_nodes,
-                                                    accelerator_dict)
-
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle,
-                                             get_internal_ips=True)
-        ip_rank_map = {ip: i for i, ip in enumerate(ip_list)}
+        codegen.add_gang_scheduling_placement_group(
+            num_actual_nodes,
+            accelerator_dict,
+            cluster_ips_sorted=cluster_ips_sorted)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3035,7 +3043,6 @@ class CloudVmRayBackend(backends.Backend):
                 log_path=log_path,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,
-                ip_rank_map=ip_rank_map,
             )
 
         codegen.add_epilogue()
