@@ -6,7 +6,7 @@
 </p>
 
 <h4 align="center">
-    Use the clouds easily and cost-effectively, without cloud infra expertise
+    Run jobs on the clouds easily and with cost savings
 </h4>
 
 <p align="center">
