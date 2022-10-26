@@ -39,7 +39,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
 
-Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud.  This allows you to avoid cloud vendor lock-in and easily move jobs to a different provider in the future.
+Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud.  This avoids cloud vendor lock-in, and allows easily moving jobs to a different provider.
 
 Example:
 
