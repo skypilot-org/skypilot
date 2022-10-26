@@ -98,17 +98,19 @@ class Task:
         they are fluent APIs and can be chained together.
 
         Example:
-            >>> # A Task that will sync up local workdir '.', containing
-            >>> # requirements.txt and train.py.
-            >>> sky.Task(setup='pip install requirements.txt',
-            >>>          run='python train.py',
-            >>>          workdir='.')
-            >>>
-            >>> # An empty Task for provisioning a cluster.
-            >>> task = sky.Task(num_nodes=n).set_resources(...)
-            >>>
-            >>> # Chaining setters.
-            >>> sky.Task().set_resources(...).set_file_mounts(...)
+            .. code-block:: python
+
+                # A Task that will sync up local workdir '.', containing
+                # requirements.txt and train.py.
+                sky.Task(setup='pip install requirements.txt',
+                         run='python train.py',
+                         workdir='.')
+
+                # An empty Task for provisioning a cluster.
+                task = sky.Task(num_nodes=n).set_resources(...)
+
+                # Chaining setters.
+                sky.Task().set_resources(...).set_file_mounts(...)
 
         Args:
           name: A string name for the Task for display purposes.
@@ -230,8 +232,9 @@ class Task:
         """Initializes a task from a task YAML.
 
         Example:
+            .. code-block:: python
 
-            >>> task = sky.Task.from_yaml('/path/to/task.yaml')
+                task = sky.Task.from_yaml('/path/to/task.yaml')
 
         Args:
           yaml_path: file path to a valid task yaml file.
@@ -480,12 +483,13 @@ class Task:
         Neither source or destimation paths can end with a slash.
 
         Example:
+            .. code-block:: python
 
-            >>> task.set_file_mounts({
-            >>>     '~/.dotfile': '/local/.dotfile',
-            >>>     # /remote/dir/ will contain the contents of /local/dir/.
-            >>>     '/remote/dir': '/local/dir',
-            >>> })
+                task.set_file_mounts({
+                    '~/.dotfile': '/local/.dotfile',
+                    # /remote/dir/ will contain the contents of /local/dir/.
+                    '/remote/dir': '/local/dir',
+                })
 
         Args:
           file_mounts: an optional dict of ``{remote_path: local_path/cloud
@@ -546,11 +550,12 @@ class Task:
         This should be called before provisioning in order to take effect.
 
         Example:
+            .. code-block:: python
 
-            >>> task.update_file_mounts({
-            >>>     '~/.config': '~/Documents/config',
-            >>>     '/tmp/workdir': '/local/workdir/cnn-cifar10',
-            >>> })
+                task.update_file_mounts({
+                    '~/.config': '~/Documents/config',
+                    '/tmp/workdir': '/local/workdir/cnn-cifar10',
+                })
 
         Args:
           file_mounts: a dict of ``{remote_path: local_path/cloud URI}``, where
@@ -584,10 +589,12 @@ class Task:
         ``name`` to the bucket name; or setting ``source`` to the bucket URI).
 
         Example:
-            >>> task.set_storage_mounts({
-            >>>     '/remote/imagenet/': sky.Storage(name='my-bucket',
-            >>>                                      source='/local/imagenet'),
-            >>> })
+            .. code-block:: python
+
+                task.set_storage_mounts({
+                    '/remote/imagenet/': sky.Storage(name='my-bucket',
+                                                     source='/local/imagenet'),
+                })
 
         Args:
           storage_mounts: an optional dict of ``{mount_path: sky.Storage

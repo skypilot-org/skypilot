@@ -333,15 +333,13 @@ def launch(
         no_setup: if True, do not re-run setup commands.
 
     Example:
-        >>> import sky
-        >>> task = sky.Task(run='echo hello SkyPilot')
-        >>> task.set_resources(
-        ...         sky.Resources(
-        ...             cloud=sky.AWS(),
-        ...             accelerators='V100:4'
-        ...         )
-        ... )
-        >>> sky.launch(task, cluster_name='my-cluster')
+        .. code-block:: python
+
+            import sky
+            task = sky.Task(run='echo hello SkyPilot')
+            task.set_resources(
+                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+            sky.launch(task, cluster_name='my-cluster')
 
     """
     entrypoint = task
