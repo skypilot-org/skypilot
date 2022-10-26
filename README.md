@@ -5,10 +5,6 @@
   </picture>
 </p>
 
-<h4 align="center">
-    Run jobs on any cloud, easily and cost effectively
-</h4>
-
 <p align="center">
   <a href="https://skypilot.readthedocs.io/en/latest/"> 
     <img alt="Documentation" src="https://readthedocs.org/projects/skypilot/badge/?version=latest">
@@ -23,6 +19,11 @@
   </a>
   
 </p>
+
+
+<h4 align="center">
+    Run jobs on any cloud, easily and cost effectively
+</h4>
 
 SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
