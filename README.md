@@ -6,7 +6,7 @@
 </p>
 
 <h4 align="center">
-    Run jobs on the clouds easily and with cost savings
+    Run jobs on any cloud, easily and cost effectively
 </h4>
 
 <p align="center">
