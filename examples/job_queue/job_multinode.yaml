@@ -9,9 +9,6 @@
 
 name: job_multinode
 
-resources:
-  accelerators: K80:0.5
-
 num_nodes: 2
 
 setup: |

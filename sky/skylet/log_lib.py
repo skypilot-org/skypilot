@@ -417,7 +417,7 @@ def tail_logs(job_owner: str,
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
 
-    start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
+    start_stream_at = 'Tip: use Ctrl-C to exit log'
     if follow and status in [
             job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
     ]:
