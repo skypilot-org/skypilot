@@ -121,7 +121,7 @@ We are excited to hear your feedback!
 * For questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
 ## Contributing
-We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
+We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for how to get involved.
 
 <!-- Footnote -->
 [^1]: While SkyPilot is currently targeted at machine learning workloads, it supports and has been used for other general workloads. We're excited to hear about your use case and how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
