@@ -12,14 +12,13 @@
 SkyPilot is a framework for easily running machine learning workloads[^1] on any cloud. 
 
 SkyPilot abstracts away cloud infra burden:
-- Launching jobs/clusters on any cloud (AWS, Azure, GCP)
-- Picking the cheapest zone/region/cloud
-- Auto-failover to find scarce resources
+- Launch jobs & clusters on any cloud (AWS, Azure, GCP)
+- Automatically find scarce resources across zone/region/cloud
 - Job queueing & using cloud object stores
 
 SkyPilot cuts your cloud costs:
-* [Managed Spot Jobs](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs (auto-recovery from preemptions)
-* [Autostop & Autodown](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of clusters when all jobs finish
+* [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with auto-recovery from preemptions
+* [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters 
 * [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): auto-selects best VM types for your jobs
 * Optimizer: auto-picks best prices across zones/regions/clouds
 
@@ -40,7 +39,7 @@ You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands. 
 
-Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud. 
+Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud.  This allows you to avoid cloud vendor lock-in and easily move jobs to a different provider in the future.
 
 Example:
 
