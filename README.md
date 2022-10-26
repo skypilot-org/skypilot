@@ -113,7 +113,6 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 - [Example: HuggingFace](https://skypilot.readthedocs.io/en/latest/getting-started/tutorial.html) 
 - [Tutorials](https://github.com/skypilot-org/skypilot-tutorial) 
 - [YAML reference](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html)
-- [**`examples`**](./examples): run popular ML frameworks on the cloud with one command
 
 
 ## Issues, feature requests, and questions
