@@ -90,16 +90,20 @@ SkyPilot will perform multiple actions for you:
 </p>
 
 
-See [**`examples`**](./examples) for more YAMLs that run popular ML frameworks on the cloud with one command (PyTorch/Distributed PyTorch, TensorFlow/Distributed TensorFlow, HuggingFace, JAX, Flax, Docker).  
+Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
-Besides YAML, SkyPilot offers a corresponding [**Python API**](https://github.com/skypilot-org/skypilot/blob/master/sky/core.py) for programmatic use.
+## Learn more
 
-Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html) for more on how to get started with SkyPilot.
+- [Documentation](https://skypilot.readthedocs.io/en/latest/)
+- [Tutorial: HuggingFace training](https://skypilot.readthedocs.io/en/latest/getting-started/tutorial.html) 
+- [More tutorials](https://github.com/skypilot-org/skypilot-tutorial) 
+- [YAML reference](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html)
+- [**`examples`**](./examples): run popular ML frameworks on the cloud with one command
 
 
-## Issues, feature requests and questions
-We are excited to hear your feedback! SkyPilot has two channels for engaging with the community - [GitHub Issues](https://github.com/skypilot-org/skypilot/issues) and [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
-* For bug reports and issues, please [open an issue](https://github.com/skypilot-org/skypilot/issues/new).
+## Issues, feature requests, and questions
+We are excited to hear your feedback! 
+* For bug reports and issues, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For feature requests or general questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
 ## Contributing
