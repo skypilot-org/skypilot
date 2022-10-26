@@ -2361,10 +2361,15 @@ def check():
 def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
+    The names and counts shown can be set in the ``accelerators`` field in task
+    YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
+    table shows 8x V100s are supported, then the string ``V100:8`` will be
+    accepted by the above.
+
     To show the detailed information of a GPU/TPU type (which clouds offer it,
     the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
-    To show all GPUs, including less common ones and their detailed
+    To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
     NOTE: The price displayed for each instance type is the lowest across all
@@ -2691,7 +2696,20 @@ def spot_launch(
     retry_until_up: bool,
     yes: bool,
 ):
-    """Launch a managed spot job."""
+    """Launch a managed spot job from a YAML or a command.
+
+    If ENTRYPOINT points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # You can use normal task YAMLs.
+      sky spot launch task.yaml
+
+      sky spot launch 'echo hello!'
+    """
     if name is None:
         name = backend_utils.generate_cluster_name()
     else:
