@@ -117,8 +117,8 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 
 ## Issues, feature requests, and questions
 We are excited to hear your feedback! 
-* For bug reports and issues, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
-* For feature requests or general questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
+* For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
+* For general questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to the [contribution guide](CONTRIBUTING.md) for more on how to get involved.
