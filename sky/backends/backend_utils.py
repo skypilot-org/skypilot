@@ -1143,9 +1143,6 @@ def get_node_ips(cluster_yaml: str,
             handle.head_ip is not None):
         return [handle.head_ip]
 
-    # If get_internal_ips is True, we create a temporary config file
-    # with config[provider][use_internal_ips] set to True for
-    # "ray get-worker-ips"
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             ray_config['provider']['use_internal_ips'] = True

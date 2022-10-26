@@ -212,7 +212,12 @@ class RayCodeGen:
         accelerator_dict: Dict[str, int],
         cluster_ips_sorted: Optional[List[str]] = None,
     ) -> None:
-        """Create the gang scheduling placement group for a Task."""
+        """Create the gang scheduling placement group for a Task.
+
+        cluster_ips_sorted is used to ensure that the SKY_NODE_RANK environment
+        variable is assigned in a deterministic order whenever a new task is
+        added.
+        """
         assert self._has_prologue, ('Call add_prologue() before '
                                     'add_gang_scheduling_placement_group().')
         self._has_gang_scheduling = True
@@ -277,15 +282,17 @@ class RayCodeGen:
                     for i in range(pg.bundle_count)
                 ])
                 print('INFO: Reserved IPs:', ip_list)
-                ip_list_str = '\\n'.join(ip_list)
-                sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
 
                 if {cluster_ips_sorted!r}:
                     cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_ips_sorted!r})}}
                     ip_rank_list = sorted(ip_list, key=cluster_ips_map.get)
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
+                    ip_list_str = '\\n'.join(ip_rank_list)
                 else:
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_list)}}
+                    ip_list_str = '\\n'.join(ip_list)
+
+                sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
         ]
 
@@ -3003,13 +3010,14 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
-        cluster_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                 handle.launched_nodes,
-                                                 handle=handle,
-                                                 get_internal_ips=True)
-        # Ensure head node is the first element,
-        # then sort the remaining IPs for stableness
-        cluster_ips_sorted = [cluster_ips[0]] + sorted(cluster_ips[1:])
+        cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                          handle.launched_nodes,
+                                                          handle=handle,
+                                                          get_internal_ips=True)
+        # Ensure head node is the first element, then sort the remaining IPs
+        # for stableness
+        cluster_ips_sorted = [cluster_internal_ips[0]] + sorted(
+            cluster_internal_ips[1:])
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
