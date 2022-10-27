@@ -30,7 +30,7 @@ SkyPilot is a framework for easily running machine learning workloads[^1] on any
 SkyPilot abstracts away cloud infra burden:
 - Launch jobs & clusters on any cloud (AWS, Azure, GCP)
 - Find availability across zones/regions/clouds
-- Job queueing & using cloud object stores
+- Queue jobs & use cloud object stores
 
 SkyPilot cuts your cloud costs:
 * [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with auto-recovery from preemptions
@@ -114,6 +114,7 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 - [Example: HuggingFace](https://skypilot.readthedocs.io/en/latest/getting-started/tutorial.html) 
 - [Tutorials](https://github.com/skypilot-org/skypilot-tutorial) 
 - [YAML reference](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html)
+- Framework examples: [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml),  [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), and [many more](./examples).
 
 
 ## Issues, feature requests, and questions
