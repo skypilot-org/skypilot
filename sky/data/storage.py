@@ -224,7 +224,7 @@ class AbstractStore:
         Args:
             local_path: str; Path to local file or directory
             create_dir: If the local_path is a directory and this is set to
-                False, the contents of the directory are directly uploaded to the
+                False, the contents of the directory are directly uploaded to
                 root of the bucket. If the local_path is a directory and this is
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
@@ -516,10 +516,12 @@ class Storage(object):
                             ' directories are supported as a source. '
                             'To upload a single file, specify it in a list '
                             f'by writing <destination_path>: [{source}]. Note '
-                            'that the file will be uploaded to the root of the'
-                            f' bucket and will appear at <destination_path>/{os.path.basename(source)}. Alternatively, you can directly upload the file to the VM without using a bucket by writing '
-                            f'<destination_path>: {source} in the file_mounts '
-                            'section of your YAML')
+                            'that the file will be uploaded to the root of the '
+                            'bucket and will appear at <destination_path>/'
+                            f'{os.path.basename(source)}. Alternatively, you '
+                            'can directly upload the file to the VM without '
+                            'using a bucket by writing <destination_path>: '
+                            f'{source} in the file_mounts section of your YAML')
                 is_local_source = True
             elif split_path.scheme in ['s3', 'gs']:
                 is_local_source = False
@@ -810,14 +812,14 @@ class S3Store(AbstractStore):
                     assert self.name == data_utils.split_s3_path(
                         self.source
                     )[0], (
-                        'S3 Bucket is specified as path, the name should be the '
-                        'same as S3 bucket.')
+                        'S3 Bucket is specified as path, the name should be the'
+                        ' same as S3 bucket.')
                 elif self.source.startswith('gs://'):
                     assert self.name == data_utils.split_gcs_path(
                         self.source
                     )[0], (
-                        'GCS Bucket is specified as path, the name should be the '
-                        'same as GCS bucket.')
+                        'GCS Bucket is specified as path, the name should be '
+                        'the same as GCS bucket.')
                     assert data_utils.verify_gcs_bucket(self.name), (
                         f'Source specified as {self.source}, a GCS bucket. ',
                         'GCS Bucket should exist.')
@@ -895,13 +897,17 @@ class S3Store(AbstractStore):
         if os.path.isfile(full_local_path):
             file_name = os.path.basename(full_local_path)
             dir_path = os.path.dirname(full_local_path)
-            sync_command = f'aws s3 sync --no-follow-symlinks --exclude="*" --include="{file_name}" {dir_path} s3://{self.name}'
+            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                            f'--include="{file_name}" {dir_path} '
+                            f's3://{self.name}')
         else:
             if create_dir:
                 dest_dir_name = os.path.basename(full_local_path)
             else:
                 dest_dir_name = ''
-            sync_command = f'aws s3 sync --no-follow-symlinks {full_local_path} s3://{self.name}/{dest_dir_name}'
+            sync_command = ('aws s3 sync --no-follow-symlinks '
+                            f'{full_local_path} '
+                            f's3://{self.name}/{dest_dir_name}')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{local_path}[/] to [green]s3://{self.name}/[/]'):
@@ -1089,8 +1095,8 @@ class GcsStore(AbstractStore):
                     assert self.name == data_utils.split_s3_path(
                         self.source
                     )[0], (
-                        'S3 Bucket is specified as path, the name should be the '
-                        'same as S3 bucket.')
+                        'S3 Bucket is specified as path, the name should be the'
+                        ' same as S3 bucket.')
                     assert data_utils.verify_s3_bucket(self.name), (
                         f'Source specified as {self.source}, an S3 bucket. ',
                         'S3 Bucket should exist.')
@@ -1098,8 +1104,8 @@ class GcsStore(AbstractStore):
                     assert self.name == data_utils.split_gcs_path(
                         self.source
                     )[0], (
-                        'GCS Bucket is specified as path, the name should be the '
-                        'same as GCS bucket.')
+                        'GCS Bucket is specified as path, the name should be '
+                        'the same as GCS bucket.')
 
     def initialize(self):
         """Initializes the GCS store object on the cloud.
@@ -1168,18 +1174,20 @@ class GcsStore(AbstractStore):
         # TODO(zhwu): Speed up the upload process by providing a list of files
         # so that we can utilize the parallelism.
         if os.path.isfile(full_local_path):
-            # If source is a file, use negative lookahead regex to upload only the
+            # If source is a file, use negative lookahead regex to upload only
             # specified file since gsutil does not support including only
             # specific files in rsync.
             file_name = os.path.basename(full_local_path)
             dir_path = os.path.dirname(full_local_path)
-            sync_command = f'gsutil -m rsync -x "(?!^{file_name}$)" {dir_path} gs://{self.name}'
+            sync_command = (f'gsutil -m rsync -x "(?!^{file_name}$)" '
+                            f'{dir_path} gs://{self.name}')
         else:
             if create_dir:
                 dest_dir_name = os.path.basename(full_local_path)
             else:
                 dest_dir_name = ''
-            sync_command = f'gsutil -m rsync -r {full_local_path} gs://{self.name}/{dest_dir_name}'
+            sync_command = (f'gsutil -m rsync -r {full_local_path} '
+                            f'gs://{self.name}/{dest_dir_name}')
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{local_path}[/] to [green]gs://{self.name}/[/]'):
