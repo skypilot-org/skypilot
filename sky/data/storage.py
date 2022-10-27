@@ -886,7 +886,7 @@ class S3Store(AbstractStore):
         if os.path.isfile(full_local_path):
             file_name = os.path.basename(full_local_path)
             dir_path = os.path.dirname(full_local_path)
-            sync_command = f'aws s3 sync --no-follow-symlinks --exclude="*" --include="*/{file_name}" {dir_path} s3://{self.name}'
+            sync_command = f'aws s3 sync --no-follow-symlinks --exclude="*" --include="{file_name}" {dir_path} s3://{self.name}'
         else:
             if create_dir:
                 dest_dir_name = os.path.basename(full_local_path)
