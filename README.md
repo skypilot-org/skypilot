@@ -40,11 +40,10 @@ SkyPilot cuts your cloud costs:
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
-Install with pip (choose your clouds)
+Install with pip (choose your clouds) or [from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html):
 ```
 pip install "skypilot[aws,gcp,azure]"
 ```
-or [install from source](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
 
 ## Getting Started
 You can find our documentation [here](https://skypilot.readthedocs.io/en/latest/).
@@ -58,34 +57,31 @@ A SkyPilot task specifies: resource requirements, data to be synced, setup comma
 
 Once written in this [**unified interface**](https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html) (YAML or Python API), the task can be launched on any available cloud.  This avoids vendor lock-in, and allows easily moving jobs to a different provider.
 
-Example:
+Paste the following into a file `my_task.yaml`:
 
 ```yaml
-# my_task.yaml
 resources:
-  # 1x NVIDIA V100 GPU
-  accelerators: V100:1
+  accelerators: V100:1  # 1x NVIDIA V100 GPU
 
-# Number of VMs to launch in the cluster
-num_nodes: 1
+num_nodes: 1  # Number of VMs to launch
 
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.
 workdir: ~/torch_examples
 
-# Commands to be run before executing the job
+# Commands to be run before executing the job.
 # Typical use: pip install -r requirements.txt, git clone, etc.
 setup: |
   pip install torch torchvision
 
-# Commands to run as a job
-# Typical use: make use of resources, such as running training.
+# Commands to run as a job.
+# Typical use: launch the main program.
 run: |
   cd mnist
   python main.py --epochs 1
 ```
 
-Prepare the workdir by cloning locally:
+Prepare the workdir by cloning:
 ```bash
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
@@ -94,10 +90,10 @@ Launch with `sky launch`:
 ```bash
 sky launch my_task.yaml
 ```
-SkyPilot will perform multiple actions for you:
+SkyPilot performs these heavy-lifting actions for you:
 1. Find the lowest priced VM instance type across different clouds
-2. Provision the VM
-3. Copy the local contents of `workdir` to the VM
+2. Provision the VM, with auto-failover if the cloud returned capacity errors
+3. Sync the local `workdir` to the VM
 4. Run the task's `setup` commands to prepare the VM for running the task 
 5. Run the task's `run` commands
 
@@ -120,10 +116,12 @@ Refer to [Quickstart](https://skypilot.readthedocs.io/en/latest/getting-started/
 ## Issues, feature requests, and questions
 We are excited to hear your feedback! 
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
-* For questions, please join us on [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
+* For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
+
+For general discussions, join us on the [SkyPilot Slack](https://join.slack.com/t/skypilot-org/shared_invite/zt-1i4pa7lyc-g6Lo4_rqqCFWOSXdvwTs3Q).
 
 ## Contributing
 We welcome and value all contributions to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for how to get involved.
 
 <!-- Footnote -->
-[^1]: While SkyPilot is currently targeted at machine learning workloads, it supports and has been used for other general workloads. We're excited to hear about your use case and how we can better support your requirements - please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
+[^1]: While SkyPilot is currently targeted at machine learning workloads, it supports and has been used for other general batch workloads. We're excited to hear about your use case and how we can better support your requirements; please join us in [this discussion](https://github.com/skypilot-org/skypilot/discussions/1016)!
