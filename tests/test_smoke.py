@@ -1085,24 +1085,27 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
-    @pytest.mark.parametrize('store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
         tmp_local_list_storage_obj.add_store(store_type)
 
         # Check if tmp-file exists in the bucket root using cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
         # Check if tmp-file exists in the bucket/tmp-source using cli
-        out = subprocess.check_output(self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name, '/tmp-source/'))
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
+                            '/tmp-source/'))
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
-
 
 
 # ---------- Testing YAML Specs ----------

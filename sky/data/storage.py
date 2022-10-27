@@ -432,7 +432,9 @@ class Storage(object):
             if self.sync_on_reconstruction:
                 msg = ''
                 if self.source:
-                    if isinstance(self.source, list) or not data_utils.is_cloud_store_url(self.source):
+                    if isinstance(self.source,
+                                  list) or not data_utils.is_cloud_store_url(
+                                      self.source):
                         msg = ' and uploading from source'
                 logger.info(f'Verifying bucket{msg} for storage {self.name}')
                 self.sync_all_stores()
@@ -768,8 +770,9 @@ class Storage(object):
                 config[key] = value
 
         name = self.name
-        if self.source is not None and isinstance(self.source, str) and data_utils.is_cloud_store_url(
-                self.source):
+        if self.source is not None and isinstance(
+                self.source, str) and data_utils.is_cloud_store_url(
+                    self.source):
             # Remove name if source is a cloud store URL
             name = None
         add_if_not_none('name', name)
@@ -804,11 +807,15 @@ class S3Store(AbstractStore):
         if self.source is not None:
             if isinstance(self.source, str):
                 if self.source.startswith('s3://'):
-                    assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    assert self.name == data_utils.split_s3_path(
+                        self.source
+                    )[0], (
                         'S3 Bucket is specified as path, the name should be the '
                         'same as S3 bucket.')
                 elif self.source.startswith('gs://'):
-                    assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    assert self.name == data_utils.split_gcs_path(
+                        self.source
+                    )[0], (
                         'GCS Bucket is specified as path, the name should be the '
                         'same as GCS bucket.')
                     assert data_utils.verify_gcs_bucket(self.name), (
@@ -852,7 +859,9 @@ class S3Store(AbstractStore):
                     # all files into the same dir would also not work since
                     # we need to exclude any symlinks within dirs with the
                     # --no-follow-symlinks flag.
-                    self.upload_local_path(source_path, create_dir=os.path.isdir(os.path.expanduser(source_path)))
+                    self.upload_local_path(source_path,
+                                           create_dir=os.path.isdir(
+                                               os.path.expanduser(source_path)))
             elif self.source is not None:
                 if self.source.startswith('s3://'):
                     pass
@@ -1077,14 +1086,18 @@ class GcsStore(AbstractStore):
         if self.source is not None:
             if isinstance(self.source, str):
                 if self.source.startswith('s3://'):
-                    assert self.name == data_utils.split_s3_path(self.source)[0], (
+                    assert self.name == data_utils.split_s3_path(
+                        self.source
+                    )[0], (
                         'S3 Bucket is specified as path, the name should be the '
                         'same as S3 bucket.')
                     assert data_utils.verify_s3_bucket(self.name), (
                         f'Source specified as {self.source}, an S3 bucket. ',
                         'S3 Bucket should exist.')
                 elif self.source.startswith('gs://'):
-                    assert self.name == data_utils.split_gcs_path(self.source)[0], (
+                    assert self.name == data_utils.split_gcs_path(
+                        self.source
+                    )[0], (
                         'GCS Bucket is specified as path, the name should be the '
                         'same as GCS bucket.')
 
@@ -1124,7 +1137,9 @@ class GcsStore(AbstractStore):
                     # gsutil rsync does not support a list of files. Symlinking
                     # all files into the same dir would also not work since
                     # gsutil does not support following dir symlinks.
-                    self.upload_local_path(source_path, create_dir=os.path.isdir(os.path.expanduser(source_path)))
+                    self.upload_local_path(source_path,
+                                           create_dir=os.path.isdir(
+                                               os.path.expanduser(source_path)))
             elif self.source is not None:
                 if self.source.startswith('gs://'):
                     pass
@@ -1145,7 +1160,8 @@ class GcsStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def upload_local_path(self, local_path: str,
+    def upload_local_path(self,
+                          local_path: str,
                           create_dir: bool = False) -> None:
         """Invokes gsutil to upload a local path to a GCS bucket."""
         full_local_path = os.path.abspath(os.path.expanduser(local_path))
