@@ -14,7 +14,7 @@ To get original versions, go to the Ray branch with version:
 
 Example workflow:
 
-  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/1.13.0/python/ray/autoscaler/_private/command_runner.py
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.0.1/python/ray/autoscaler/_private/command_runner.py
   >> cp command_runner.py command_runner.py.1
 
   >> # Make some edits to command_runner.py.1...
@@ -63,7 +63,7 @@ def patch() -> None:
     from ray._private import log_monitor
     _run_patch(log_monitor.__file__, _to_absolute('log_monitor.py.patch'))
 
-    from ray import worker
+    from ray._private import worker
     _run_patch(worker.__file__, _to_absolute('worker.py.patch'))
 
     from ray.dashboard.modules.job import cli
@@ -81,6 +81,9 @@ def patch() -> None:
     from ray.autoscaler._private import resource_demand_scheduler
     _run_patch(resource_demand_scheduler.__file__,
                _to_absolute('resource_demand_scheduler.py.patch'))
+
+    from ray.autoscaler._private import updater
+    _run_patch(updater.__file__, _to_absolute('updater.py.patch'))
 
     # Fix the Azure get-access-token (used by ray azure node_provider) timeout issue,
     # by increasing the timeout.

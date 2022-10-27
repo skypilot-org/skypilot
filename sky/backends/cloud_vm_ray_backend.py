@@ -154,7 +154,7 @@ class RayCodeGen:
         # Should use 'auto' or 'ray://<internal_head_ip>:10001' rather than
         # 'ray://localhost:10001', or 'ray://127.0.0.1:10001', for public cloud.
         # Otherwise, it will a bug of ray job failed to get the placement group
-        # in ray <= 2.0.0.
+        # in ray <= 2.0.1.
         # TODO(mluo): Check why 'auto' not working with on-prem cluster and
         # whether the placement group issue also occurs in on-prem cluster.
         ray_address = 'ray://localhost:10001' if is_local else 'auto'
@@ -401,6 +401,8 @@ class RayCodeGen:
                 # Need this to set the job status in ray job to be FAILED.
                 sys.exit(1)
             else:
+                sys.stdout.flush()
+                sys.stderr.flush()
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
@@ -1341,7 +1343,7 @@ class RetryingVmProvisioner(object):
         if isinstance(launched_resources.cloud, clouds.Local):
             raise RuntimeError(
                 'The command `ray status` errored out on the head node '
-                'of the local cluster. Check if ray[default]==1.13.0 '
+                'of the local cluster. Check if ray[default]==2.0.1 '
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 
@@ -1810,8 +1812,13 @@ class CloudVmRayBackend(backends.Backend):
                 get_zone_cmd = (
                     handle.launched_resources.cloud.get_zone_shell_cmd())
                 if get_zone_cmd is not None:
-                    returncode, stdout, _ = self.run_on_head(
+                    returncode, stdout, stderr = self.run_on_head(
                         handle, get_zone_cmd, require_outputs=True)
+                    subprocess_utils.handle_returncode(returncode,
+                                                       get_zone_cmd,
+                                                       'Failed to get zone',
+                                                       stderr=stderr,
+                                                       stream_logs=stream_logs)
                     # zone will be checked during Resources cls
                     # initialization.
                     handle.launched_resources = handle.launched_resources.copy(
@@ -2066,8 +2073,8 @@ class CloudVmRayBackend(backends.Backend):
         else:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
-                f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} '
-                '--no-wait -- '
+                f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+                '--no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -2151,8 +2158,8 @@ class CloudVmRayBackend(backends.Backend):
         switch_user_cmd = ' '.join(switch_user_cmd)
         job_submit_cmd = (
             'ray job submit '
-            f'--address=http://127.0.0.1:8265 --job-id {ray_job_id} --no-wait '
-            f'-- {switch_user_cmd}')
+            f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+            f'--no-wait -- {switch_user_cmd}')
         return job_submit_cmd
 
     def _add_job(self, handle: ResourceHandle, job_name: str,

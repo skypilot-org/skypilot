@@ -56,7 +56,7 @@ def parse_footnote(readme: str) -> str:
 
 install_requires = [
     'wheel',
-    # NOTE: ray 1.13.0 requires click<=8.0.4,>=7.0; We disable the
+    # NOTE: ray 2.0.1 requires click<=8.0.4,>=7.0; We disable the
     # shell completion for click<8.0 for backward compatibility.
     'click<=8.0.4,>=7.0',
     'colorama',
@@ -70,14 +70,14 @@ install_requires = [
     'PrettyTable',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=1.13.0',
+    'ray[default]>=1.9.0,<=2.0.1',
     'rich',
     'tabulate',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
-    'grpcio<=1.43.0',
+    'grpcio>=1.32.0,<=1.43.0',
     'packaging',
     # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
     # fix.
@@ -98,6 +98,8 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
+    # azure-cli need to be pinned to 2.31.0 due to later versions
+    # do not have azure-identity (used in node_provider) installed
     'azure': ['azure-cli==2.31.0', 'azure-core'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
