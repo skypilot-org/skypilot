@@ -170,11 +170,6 @@ def _interactive_node_cli_command(cli_func):
                                 default=None,
                                 type=str,
                                 help='Cloud provider to use.')
-    instance_type_option = click.option('--instance-type',
-                                        '-t',
-                                        default=None,
-                                        type=str,
-                                        help='Instance type to use.')
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
@@ -186,100 +181,47 @@ def _interactive_node_cli_command(cli_func):
         type=str,
         help=('Type and number of TPUs to use (e.g., ``--tpus=tpu-v3-8:4`` or '
               '``--tpus=tpu-v3-8``).'))
-
-    spot_option = click.option('--use-spot',
-                               default=None,
-                               is_flag=True,
-                               help='If true, use spot instances.')
-
     tpuvm_option = click.option('--tpu-vm',
                                 default=False,
                                 is_flag=True,
                                 help='If true, use TPU VMs.')
-
-    disk_size = click.option('--disk-size',
-                             default=None,
-                             type=int,
-                             required=False,
-                             help=('OS disk size in GBs.'))
     no_confirm = click.option('--yes',
                               '-y',
                               is_flag=True,
                               default=False,
                               required=False,
                               help='Skip confirmation prompt.')
-    idle_autostop = click.option('--idle-minutes-to-autostop',
-                                 '-i',
-                                 default=None,
-                                 type=int,
-                                 required=False,
-                                 help=('Automatically stop the cluster after '
-                                       'this many minutes of idleness, i.e. '
-                                       'no running or pending jobs in the '
-                                       'cluster\'s job queue. Idleness starts '
-                                       'counting after setup/file_mounts are '
-                                       'done; the clock gets reset whenever '
-                                       'there are running/pending jobs in the '
-                                       'job queue. If not set, the cluster '
-                                       'will not be auto-stopped.'))
-    autodown = click.option('--down',
-                            default=False,
-                            is_flag=True,
-                            required=False,
-                            help=('Autodown the cluster: tear down the '
-                                  'cluster after all jobs finish '
-                                  '(successfully or abnormally). If '
-                                  '--idle-minutes-to-autostop is also set, '
-                                  'the cluster will be torn down after the '
-                                  'specified idle time. Note that if errors '
-                                  'occur during provisioning/data syncing/'
-                                  'setting up, the cluster will not be torn '
-                                  'down for debugging purposes.'))
-    retry_until_up = click.option('--retry-until-up',
-                                  '-r',
-                                  is_flag=True,
-                                  default=False,
-                                  required=False,
-                                  help=('Whether to retry provisioning '
-                                        'infinitely until the cluster is up '
-                                        'if we fail to launch the cluster on '
-                                        'any possible region/cloud due to '
-                                        'unavailability errors.'))
-    region_option = click.option('--region',
-                                 default=None,
-                                 type=str,
-                                 required=False,
-                                 help='The region to use.')
-    zone_option = click.option('--zone',
-                               default=None,
-                               type=str,
-                               required=False,
-                               help='The zone to use.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
         cluster_option,
         no_confirm,
         port_forward_option,
-        idle_autostop,
-        autodown,
-        retry_until_up,
 
         # Resource options
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
-        region_option,
-        zone_option,
-        instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
-        spot_option,
         *([tpuvm_option] if cli_func.__name__ == 'tpunode' else []),
 
         # Attach options
         screen_option,
         tmux_option,
-        disk_size,
     ]
+    click_decorators += _get_common_click_options(
+        [
+            'idle_minutes_to_autostop',
+            'down',
+            'retry_until_up',
+
+            # More resource options
+            'region',
+            'zone',
+            'instance_type',
+            'use_spot',
+            'disk_size'
+        ],
+        interactive=True)
     decorator = functools.reduce(lambda res, f: f(res),
                                  reversed(click_decorators), cli_func)
 
@@ -297,104 +239,201 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
     return tuple(env_var.split('=', 1))
 
 
-_TASK_OPTIONS = [
-    click.option('--name',
-                 '-n',
-                 required=False,
-                 type=str,
-                 help=('Task name. Overrides the "name" '
-                       'config in the YAML if both are supplied.')),
-    click.option(
-        '--workdir',
-        required=False,
-        type=click.Path(exists=True, file_okay=False),
-        help=('If specified, sync this dir to the remote working directory, '
-              'where the task will be invoked. '
-              'Overrides the "workdir" config in the YAML if both are supplied.'
-             )),
-    click.option(
-        '--cloud',
-        required=False,
-        type=str,
-        help=('The cloud to use. If specified, overrides the "resources.cloud" '
-              'config. Passing "none" resets the config.')),
-    click.option(
-        '--region',
-        required=False,
-        type=str,
-        help=('The region to use. If specified, overrides the '
-              '"resources.region" config. Passing "none" resets the config.')),
-    click.option(
-        '--zone',
-        required=False,
-        type=str,
-        help=('The zone to use. If specified, overrides the '
-              '"resources.zone" config. Passing "none" resets the config.')),
-    click.option(
-        '--num-nodes',
-        required=False,
-        type=int,
-        help=('Number of nodes to execute the task on. '
-              'Overrides the "num_nodes" config in the YAML if both are '
-              'supplied.')),
-    click.option(
-        '--use-spot/--no-use-spot',
-        required=False,
-        default=None,
-        help=('Whether to request spot instances. If specified, overrides the '
-              '"resources.use_spot" config.')),
-    click.option('--image-id',
-                 required=False,
-                 default=None,
-                 help=('Custom image id for launching the instances. '
-                       'Passing "none" resets the config.')),
-    click.option(
-        '--env',
-        required=False,
-        type=_parse_env_var,
-        multiple=True,
-        help="""\
-        Environment variable to set on the remote node.
-        It can be specified multiple times.
-        Examples:
+def _get_common_click_options(options_list: List,
+                              interactive: bool = False) -> List[click.Option]:
+    """Returns a list of common click command decorators for launching clusters.
 
-        \b
-        1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
+       Args:
+           options_list: List of option names.
+           interactive: True if options intended for interactive nodes.
+    """
+    help_messages = \
+        {
+            'name': 'Task name.',
+            'workdir': ('Sync this dir to the remote working directory, where '
+                        'the task will be invoked.'),
+            'cloud': 'The cloud to use.',
+            'region': 'The region to use.',
+            'zone': 'The zone to use,',
+            'gpus': ('Type and number of GPUs to use. Example values: '
+                     '"V100:8", "V100" (short for a count of 1), or '
+                     '"V100:0.5" (fractional counts are supported by the '
+                     'scheduling framework).'),
+            'instance_type': 'The instance type to use.',
+            'num_nodes': 'Number of nodes to execute the task on.',
+            'use_spot': 'Whether to request spot instances.',
+            'image_id': 'Custom image id for launching the instances.',
+            'disk_size': 'OS disk size in GBs.',
+            'env': """\
+                Environment variable to set on the remote node.
+                It can be specified multiple times.
+                Examples:
 
-        2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
-        same value of ``$HOME`` in the local environment where the CLI command
-        is run.
+                \b
+                1. ``--env MY_ENV=1``: set ``$MY_ENV`` on the cluster to be 1.
 
-        3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
-        same value of ``$MY_ENV3`` in the local environment.""",
-    )
-]
-_EXTRA_RESOURCES_OPTIONS = [
-    click.option(
-        '--gpus',
-        required=False,
-        type=str,
-        help=
-        ('Type and number of GPUs to use. Example values: '
-         '"V100:8", "V100" (short for a count of 1), or "V100:0.5" '
-         '(fractional counts are supported by the scheduling framework). '
-         'If a new cluster is being launched by this command, this is the '
-         'resources to provision. If an existing cluster is being reused, this'
-         ' is seen as the task demand, which must fit the cluster\'s total '
-         'resources and is used for scheduling the task. '
-         'Overrides the "accelerators" '
-         'config in the YAML if both are supplied. '
-         'Passing "none" resets the config.')),
-    click.option(
-        '--instance-type',
-        '-t',
-        required=False,
-        type=str,
-        help=('The instance type to use. If specified, overrides the '
-              '"resources.instance_type" config. Passing "none" resets the '
-              'config.'),
-    ),
-]
+                2. ``--env MY_ENV2=$HOME``: set ``$MY_ENV2`` on the cluster to be the
+                same value of ``$HOME`` in the local environment where the CLI command
+                is run.
+
+                3. ``--env MY_ENV3``: set ``$MY_ENV3`` on the cluster to be the
+                same value of ``$MY_ENV3`` in the local environment.""",
+            'idle_minutes_to_autostop': ('Automatically stop the cluster '
+                                        'after this many minutes of idleness, '
+                                        'i.e. no running or pending jobs in '
+                                        'the cluster\'s job queue. Idleness '
+                                        'starts counting after setup/'
+                                        'file_mounts are done; the clock gets '
+                                        'reset whenever there are running/'
+                                        'pending jobs in the job queue. If '
+                                        'not set, the cluster will not be '
+                                        'auto-stopped.'),
+            'down': ('Autodown the cluster: tear down the cluster after all '
+                     'jobs finish (successfully or abnormally). If '
+                     '--idle-minutes-to-autostop is also set, the cluster '
+                     'will be torn down after the specified idle time. Note '
+                     'that if errors occur during provisioning/data syncing/'
+                     'setting up, the cluster will not be torn down for '
+                     'debugging purposes.'),
+            'retry_until_up': ('Whether to retry provisioning infinitely '
+                               'until the cluster is up if we fail to launch '
+                               'the cluster on any possible region/cloud due '
+                               'to unavailability errors.'),
+        }
+
+    # Interactive nodes have different help messages than regular nodes.
+    # We patch the gap here.
+    if not interactive:
+        help_messages['idle_minutes_to_autostop'] += \
+            ('Setting this flag is equivalent to running `sky launch -d ...` '
+             'and then `sky autostop -i <minutes>`.')
+        config_names = \
+            {
+                'name': 'name',
+                'workdir': 'workdir',
+                'cloud': 'resources.cloud',
+                'region': 'resources.region',
+                'zone': 'resources.zone',
+                'gpus': 'accelerators',
+                'instance_type': 'resources.instance_type',
+                'use_spot': 'resources.use_spot',
+            }
+        for option, config_name in config_names.items():
+            help_messages[option] += (' If specified, overrides the '
+                                      f'"{config_name}" config in the YAML.')
+        for option in [
+                'cloud', 'region', 'zone', 'image_id', 'gpus', 'instance_type'
+        ]:
+            help_messages[option] += ' Passing "none" resets the config.'
+
+    click_options = []
+    if 'name' in options_list:
+        click_options.append(
+            click.option('--name',
+                         '-n',
+                         required=False,
+                         type=str,
+                         help=help_messages['name']))
+    if 'workdir' in options_list:
+        click_options.append(
+            click.option('--workdir',
+                         required=False,
+                         type=click.Path(exists=True, file_okay=False),
+                         help=help_messages['workdir']))
+    if 'cloud' in options_list:
+        click_options.append(
+            click.option('--cloud',
+                         required=False,
+                         type=str,
+                         help=help_messages['cloud']))
+    if 'region' in options_list:
+        click_options.append(
+            click.option('--region',
+                         required=False,
+                         type=str,
+                         help=help_messages['region']))
+    if 'zone' in options_list:
+        click_options.append(
+            click.option('--zone',
+                         required=False,
+                         type=str,
+                         help=help_messages['zone']))
+    if 'num_nodes' in options_list:
+        click_options.append(
+            click.option('--num-nodes',
+                         required=False,
+                         type=int,
+                         help=help_messages['num_nodes']))
+    if 'use_spot' in options_list:
+        click_options.append(
+            click.option('--use-spot/--no-use-spot',
+                         required=False,
+                         default=None,
+                         help=help_messages['use_spot']))
+    if 'image_id' in options_list:
+        click_options.append(
+            click.option('--image-id',
+                         required=False,
+                         default=None,
+                         help=help_messages['image_id']))
+    if 'disk_size' in options_list:
+        click_options.append(
+            click.option('--disk-size',
+                         default=None,
+                         type=int,
+                         required=False,
+                         help=help_messages['disk_size']))
+    if 'env' in options_list:
+        click_options.append(
+            click.option('--env',
+                         required=False,
+                         type=_parse_env_var,
+                         multiple=True,
+                         help=help_messages['env']))
+    if 'gpus' in options_list:
+        click_options.append(
+            click.option('--gpus',
+                         required=False,
+                         type=str,
+                         help=help_messages['gpus']))
+    if 'instance_type' in options_list:
+        click_options.append(
+            click.option('--instance-type',
+                         '-t',
+                         required=False,
+                         type=str,
+                         help=help_messages['instance_type']))
+    if 'idle_minutes_to_autostop' in options_list:
+        click_options.append(
+            click.option('--idle-minutes-to-autostop',
+                         '-i',
+                         default=None,
+                         type=int,
+                         required=False,
+                         help=help_messages['idle_minutes_to_autostop']))
+    if 'down' in options_list:
+        click_options.append(
+            click.option('--down',
+                         default=False,
+                         is_flag=True,
+                         required=False,
+                         help=help_messages['down']))
+    if 'retry_until_up' in options_list:
+        click_options.append(
+            click.option('--retry-until-up',
+                         '-r',
+                         is_flag=True,
+                         default=False,
+                         required=False,
+                         help=help_messages['retry_until_up']))
+    return click_options
+
+
+_TASK_OPTIONS = _get_common_click_options([
+    'name', 'workdir', 'cloud', 'region', 'zone', 'num_nodes', 'use_spot',
+    'image_id', 'env'
+])
+_EXTRA_RESOURCES_OPTIONS = _get_common_click_options(['gpus', 'instance_type'])
 
 
 def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
@@ -1068,46 +1107,9 @@ def cli():
               default=False,
               help='If used, runs locally inside a docker container.')
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--idle-minutes-to-autostop',
-    '-i',
-    default=None,
-    type=int,
-    required=False,
-    help=('Automatically stop the cluster after this many minutes '
-          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
-          'Setting this flag is equivalent to '
-          'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be autostopped.'))
-@click.option(
-    '--down',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=
-    ('Autodown the cluster: tear down the cluster after all jobs finish '
-     '(successfully or abnormally). If --idle-minutes-to-autostop is also set, '
-     'the cluster will be torn down after the specified idle time. '
-     'Note that if errors occur during provisioning/data syncing/setting up, '
-     'the cluster will not be torn down for debugging purposes.'),
-)
-@click.option(
-    '--retry-until-up',
-    '-r',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors.'))
+@_add_click_options(
+    _get_common_click_options(
+        ['disk_size', 'idle_minutes_to_autostop', 'down', 'retry_until_up']))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1735,38 +1737,9 @@ def autostop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-@click.option(
-    '--idle-minutes-to-autostop',
-    '-i',
-    default=None,
-    type=int,
-    required=False,
-    help=('Automatically stop the cluster after this many minutes '
-          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
-          'Setting this flag is equivalent to '
-          'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be autostopped.'))
-@click.option(
-    '--down',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=
-    ('Autodown the cluster: tear down the cluster after specified minutes of '
-     'idle time after all jobs finish (successfully or abnormally). Requires '
-     ' --idle-minutes-to-autostop to be set.'),
-)
-@click.option(
-    '--retry-until-up',
-    '-r',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=('Retry provisioning infinitely until the cluster is up, '
-          'if we fail to start the cluster due to unavailability errors.'))
+@_add_click_options(
+    _get_common_click_options(
+        ['idle_minutes_to_autostop', 'down', 'retry_until_up']))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
@@ -2739,31 +2712,17 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_get_common_click_options(['disk_size', 'retry_until_up']))
 @click.option('--spot-recovery',
               default=None,
               type=str,
               help='Spot recovery strategy to use for the managed spot task.')
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
 @click.option('--detach-run',
               '-d',
               default=False,
               is_flag=True,
               help='If True, run setup first (blocking), '
               'then detach from the job\'s execution.')
-@click.option(
-    '--retry-until-up',
-    '-r',
-    default=False,
-    is_flag=True,
-    required=False,
-    help=('Whether to retry provisioning infinitely until the cluster is up, '
-          'if we fail to launch the cluster on any possible region/cloud due '
-          'to unavailability errors. This applies to launching the the spot '
-          'clusters (both initial and recovery attempts).'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3041,26 +3000,9 @@ def bench():
               type=str,
               help='Benchmark name.')
 @_add_click_options(_TASK_OPTIONS)
-@click.option('--gpus',
-              required=False,
-              type=str,
-              help=('Comma-separated list of GPUs to run benchmark on. '
-                    'Example values: "T4:4,V100:8" (without blank spaces).'))
-@click.option('--disk-size',
-              default=None,
-              type=int,
-              required=False,
-              help=('OS disk size in GBs.'))
-@click.option(
-    '--idle-minutes-to-autostop',
-    '-i',
-    default=None,
-    type=int,
-    required=False,
-    help=('Automatically stop the cluster after this many minutes '
-          'of idleness after setup/file_mounts. This is equivalent to '
-          'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
-          'If not set, the cluster will not be autostopped.'))
+@_add_click_options(
+    _get_common_click_options(['gpus', 'disk_size',
+                               'idle_minutes_to_autostop']))
 @click.option('--yes',
               '-y',
               is_flag=True,
