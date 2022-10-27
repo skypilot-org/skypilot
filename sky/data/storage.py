@@ -507,6 +507,7 @@ class Storage(object):
             # Check if str source is a valid local/remote URL
             split_path = urllib.parse.urlsplit(source)
             if split_path.scheme == '':
+                _validate_local_source(source)
                 # Check if source is a file - throw error if it is
                 full_src = os.path.abspath(os.path.expanduser(source))
                 if os.path.isfile(full_src):
