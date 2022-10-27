@@ -512,7 +512,7 @@ class Storage(object):
                 if os.path.isfile(full_src):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSourceError(
-                            'Storage source path cannot be a single file - only'
+                            'Storage source path cannot be a file - only'
                             ' directories are supported as a source. '
                             'To upload a single file, specify it in a list '
                             f'by writing <destination_path>: [{source}]. Note '
