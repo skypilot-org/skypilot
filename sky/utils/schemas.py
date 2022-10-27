@@ -83,7 +83,10 @@ def get_storage_schema():
                 'type': 'string',
             },
             'source': {
-                'type': 'string',
+                'type': ['string', 'array'],
+                'items': {
+                    'type': 'string'
+                }
             },
             'store': {
                 'type': 'string',
