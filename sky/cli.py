@@ -2346,21 +2346,28 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
     for name in names:
         sky.storage_delete(name)
 
-@usage_lib.entrypoint
+
 @storage.command('create', cls=_DocumentedCodeCommand)
-@click.argument()
-@click.option()
-def storage_create(names: str, source: str, stores: Tuple[str]):
+@click.argument('stores',
+                required=False,
+                type=str,
+                nargs=-1)
+@usage_lib.entrypoint
+def storage_create(name: str, source: str, stores: Tuple[str]):
     """Create a storage object.
+    Args:
+          name: str; Name of the storage object
+          source: str; File path where the data is initially stored. Can be a
+            local path or a cloud URI (s3://, gs://, etc.). Local paths do not
+            need to be absolute.
+          stores: Optional; Specify pre-initialized stores (S3, GCS).
 
     Examples:
 
     .. code-block:: bash
-        name: list of strings tuple
-        stores: comma separated list of stores
-        source:
-        mount or copy not required and persistence not required
-        TODO how to format cli input with list of strings, string, list of strings
+
+        # Create a storage object with GCS and AWS stores
+        sky storage create imagenet S3://bucket-name GCS AWS
 
     """
     sky.storage_create(name, source, stores)

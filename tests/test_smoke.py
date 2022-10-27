@@ -895,6 +895,27 @@ class TestStorageWithCredentials:
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
     @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    def test_sky_storage_cli(self, tmp_bucket_name, tmp_source,  store_type):
+        # Creates new bucket with local source
+        subprocess.check_output(['sky', 'storage', 'create', tmp_bucket_name, tmp_source, store_type])
+
+        # Run sky storage ls to check if storage object exists in output
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_bucket_name in out.decode('utf-8')
+
+        # Run sky storage delete to delete the storage object
+        subprocess.check_output(['sky', 'storage', 'delete', tmp_bucket_name])
+
+        # Run sky storage ls to check if storage object was deleted
+        out = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_bucket_name not in out.decode('utf-8')
+
+
+
+
+
+    @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
         [('s3://tcga-2-open', storage_lib.StoreType.S3),
          ('s3://digitalcorpora', storage_lib.StoreType.S3),

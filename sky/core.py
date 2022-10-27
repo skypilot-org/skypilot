@@ -627,7 +627,6 @@ def storage_create(name: Optional[str] = None, source: Optional[str] = None, sto
     """"Create a storage.
 
     """
-
     storage = data.Storage(name, source)
 
     stores = {} if stores is None else stores
@@ -636,9 +635,5 @@ def storage_create(name: Optional[str] = None, source: Optional[str] = None, sto
     # Add stores from tuple to storage object
     if 'GCS' in stores:
         storage.add_store(StoreType.GCS)
-    if 'AZURE' in stores:
-        storage.add_store(StoreType.AZURE)
     if 'S3' in stores:
         storage.add_store(StoreType.S3)
-
-    global_user_state.add_or_update_storage(name)
