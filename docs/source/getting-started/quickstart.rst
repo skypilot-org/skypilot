@@ -128,7 +128,12 @@ This may show multiple clusters, if you have created several:
   gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp     STOPPED
   mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
-To log into the a cluster, SkyPilot provides convenient SSH access via :code:`ssh <cluster_name>`:
+Note that clusters across all regions and clouds are shown in a single, convenient view.
+
+
+SSH into clusters
+=================
+To log into a cluster, simply do :code:`ssh <cluster_name>`:
 
 .. code-block:: console
 

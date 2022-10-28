@@ -1,6 +1,6 @@
 .. _benchmark-overview:
 
-Benchmark
+SkyPilot Benchmark
 ================================================
 
 SkyPilot allows **easy measurement of performance and cost of different kinds of cloud resources** through the benchmark feature.
