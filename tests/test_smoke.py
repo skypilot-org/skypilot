@@ -973,9 +973,10 @@ class TestStorageWithCredentials:
                                             source=tmpdir)
             store_obj.add_store(store_type)
 
-        output = subprocess.check_output(
-            ['sky', 'storage', 'delete', store_obj.name])
-        assert store_obj.name not in out.decode('utf-8')
+        subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
+
+        output = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert store_obj.name not in output.decode('utf-8')
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
