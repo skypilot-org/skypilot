@@ -216,21 +216,6 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def upload_local_path(self,
-                          local_path: str,
-                          create_dir: bool = False) -> None:
-        """Syncs a local directory to a Store bucket.
-
-        Args:
-            local_path: str; Path to local file or directory
-            create_dir: If the local_path is a directory and this is set to
-                False, the contents of the directory are directly uploaded to
-                root of the bucket. If the local_path is a directory and this is
-                set to True, the directory is created in the bucket root and
-                contents are uploaded to it.
-        """
-        raise NotImplementedError
-
     def download_remote_dir(self, local_path: str) -> None:
         """Downloads directory from remote bucket to the specified
         local_path
@@ -904,6 +889,14 @@ class S3Store(AbstractStore):
         AWS Sync by default uses 10 threads to upload files to the bucket.  To
         increase parallelism, modify max_concurrent_requests in your aws config
         file (Default path: ~/.aws/config).
+
+        Args:
+            local_path: str; Path to local file or directory
+            create_dir: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
         """
         full_local_path = os.path.abspath(os.path.expanduser(local_path))
         if os.path.isfile(full_local_path):
@@ -1150,21 +1143,16 @@ class GcsStore(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                for source_path in self.source:
-                    # We upload each file in the list as individually because
-                    # gsutil rsync does not support a list of files. Symlinking
-                    # all files into the same dir would also not work since
-                    # gsutil does not support following dir symlinks.
-                    self.upload_local_path(source_path,
-                                           create_dir=os.path.isdir(
-                                               os.path.expanduser(source_path)))
+                self.batch_gsutil_cp(self.source)
             elif self.source is not None:
                 if self.source.startswith('gs://'):
                     pass
                 elif self.source.startswith('s3://'):
                     self._transfer_to_gcs()
                 else:
-                    self.upload_local_path(self.source)
+                    # If a single directory is specified in source, upload
+                    # contents to root of bucket by suffixing /*.
+                    self.batch_gsutil_cp([self.source + '/*'])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -1178,34 +1166,38 @@ class GcsStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def upload_local_path(self,
-                          local_path: str,
-                          create_dir: bool = False) -> None:
-        """Invokes gsutil to upload a local path to a GCS bucket."""
-        full_local_path = os.path.abspath(os.path.expanduser(local_path))
-        # TODO(zhwu): Speed up the upload process by providing a list of files
-        # so that we can utilize the parallelism.
-        if os.path.isfile(full_local_path):
-            # If source is a file, use negative lookahead regex to upload only
-            # specified file since gsutil does not support including only
-            # specific files in rsync.
-            file_name = os.path.basename(full_local_path)
-            dir_path = os.path.dirname(full_local_path)
-            sync_command = (f'gsutil -m rsync -x "(?!^{file_name}$)" '
-                            f'{dir_path} gs://{self.name}')
+    def batch_gsutil_cp(self,
+                        source_path_list: List[Path]) -> None:
+        """Invokes gsutil cp -n to batch upload a list of local paths
+
+        -n flag to gsutil cp checks the existence of an object before uploading,
+        making it similar to gsutil rsync. Since it allows specification of a
+        list of files, it is faster than calling gsutil rsync on each file.
+
+        Note that if the source_path list contains a directory, then the
+        directory is copied as is to the root of the bucket. To copy the
+        contents of directory to the root, add /* to the directory path
+        e.g., /mydir/*.
+        """
+        copy_list = '\n'.join(os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
+        sync_command = (f'echo "{copy_list}" | '
+                        f'gsutil -m cp -n -r -I gs://{self.name}')
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
         else:
-            if create_dir:
-                dest_dir_name = os.path.basename(full_local_path)
-            else:
-                dest_dir_name = ''
-            sync_command = (f'gsutil -m rsync -r {full_local_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+            source_message = source_path_list[0].replace('/*', '')
+        self._run_gsutil(sync_command, source_message)
+
+    def _run_gsutil(self, command: str, source_message: str):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{local_path}[/] to [green]gs://{self.name}/[/]'):
-            with subprocess.Popen(sync_command.split(' '),
+                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+            with subprocess.Popen(command,
                                   stderr=subprocess.PIPE,
-                                  stdout=subprocess.DEVNULL) as process:
+                                  stdout=subprocess.DEVNULL,
+                                  shell=True) as process:
                 stderr = []
                 while True:
                     line = process.stderr.readline()
@@ -1227,8 +1219,8 @@ class GcsStore(AbstractStore):
                         stderr = '\n'.join(stderr)
                         logger.error(stderr)
                         raise exceptions.StorageUploadError(
-                            f'Upload to GCS failed for store {self.name} and '
-                            f'source {local_path}. Please check logs.')
+                            f'Upload to GCS failed for store {self.name}. '
+                            f'Please check logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
