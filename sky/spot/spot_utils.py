@@ -259,7 +259,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
-        # check the spot status again.
+        # check the spot queue again.
         time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
         spot_status = spot_state.get_status(job_id)
     else:

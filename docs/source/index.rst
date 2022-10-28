@@ -1,4 +1,4 @@
-SkyPilot Documentation
+Welcome to SkyPilot!
 =========================
 
 .. figure:: ./images/skypilot-wide-light-1k.png
@@ -17,24 +17,29 @@ SkyPilot Documentation
    <a class="github-button" href="https://github.com/skypilot-org/skypilot/fork" data-icon="octicon-repo-forked" data-size="large" aria-label="Fork skypilot-org/skypilot on GitHub">Fork</a>
    </p>
 
-SkyPilot is a framework for easily running machine learning workloads on any cloud.
+   <p style="text-align:center">
+   <strong>Run jobs on any cloud, easily and cost effectively</strong>
+   </p>
 
-Use the clouds **easily** and **cost effectively**, without needing cloud infra expertise.
+SkyPilot is a framework for easily and cost effectively running ML workloads on any cloud.
 
-*Ease of use*
+SkyPilot abstracts away cloud infra burden:
 
-- **Run existing projects on the cloud** with zero code changes
-- Use a **unified interface** to run on any cloud, without vendor lock-in (currently AWS, Azure, GCP)
-- **Queue jobs** on one or multiple clusters
-- **Automatic failover** to find scarce resources (GPUs) across regions and clouds
-- **Use datasets on the cloud** like you would on a local file system
+- Launch jobs & clusters on any cloud (AWS, Azure, GCP)
+- Find scarce resources across zones/regions/clouds
+- Queue jobs & use cloud object stores
 
-*Cost saving*
+SkyPilot cuts your cloud costs:
 
-- Run jobs on **spot instances** with **automatic recovery** from preemptions
-- Hands-free cluster management: **automatically stopping idle clusters**
-- One-click use of **TPUs**, for high-performance, cost-effective training
-- Automatically benchmark and find the cheapest hardware for your job
+* :ref:`Managed Spot <Managed Spot Jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
+* :ref:`Autostop <Auto-stopping>`: hands-free cleanup of idle clusters
+* :ref:`Benchmark <Benchmark>`: find best VM types for your jobs
+* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
+
+SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
+
+Documentation
+--------------------------
 
 .. toctree::
    :maxdepth: 1
@@ -81,9 +86,10 @@ Use the clouds **easily** and **cost effectively**, without needing cloud infra 
 
 .. toctree::
    :maxdepth: 1
-   :caption: SkyPilot CLI
+   :caption: API References
 
    reference/cli
+   reference/api
 
 
 .. .. toctree::

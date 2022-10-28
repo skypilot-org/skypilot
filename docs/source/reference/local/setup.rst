@@ -14,13 +14,13 @@ For further reference, `here <https://docs.ray.io/en/latest/ray-core/configure.h
 Installing SkyPilot dependencies
 -----------------------------------
 
-SkyPilot On-prem requires :code:`python3`, :code:`ray==1.13.0`, and :code:`sky` to be setup on all local nodes and globally available to all users.
+SkyPilot On-prem requires :code:`python3`, :code:`ray==2.0.1`, and :code:`sky` to be setup on all local nodes and globally available to all users.
 
 To install Ray and SkyPilot for all users, run the following commands on all local nodes:
 
 .. code-block:: console
 
-   $ pip3 install ray[default]==1.13.0
+   $ pip3 install ray[default]==2.0.1
 
    $ # SkyPilot requires python >= 3.6.
    $ pip3 install skypilot
