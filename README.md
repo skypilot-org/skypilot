@@ -90,7 +90,8 @@ Launch with `sky launch`:
 ```bash
 sky launch my_task.yaml
 ```
-SkyPilot performs these heavy-lifting actions for you:
+
+SkyPilot then performs the heavy-lifting for you, including:
 1. Find the lowest priced VM instance type across different clouds
 2. Provision the VM, with auto-failover if the cloud returned capacity errors
 3. Sync the local `workdir` to the VM
