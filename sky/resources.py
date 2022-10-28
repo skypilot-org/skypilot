@@ -74,7 +74,7 @@ class ResourceFilter:
         self.accelerator = None
 
         self._check_syntax()
-        self._check_types()
+        self._check_input_types()
         self._canonicalize()
         self._assign_defaults()
         self._check_semantics()
@@ -95,28 +95,28 @@ class ResourceFilter:
                     'Cannot specify spot_recovery without use_spot '
                     'set to True.')
 
-    def _enforce_type(self, field: str, expected_type) -> None:
+    def _check_type(self, field: str, expected_type) -> None:
         val = getattr(self, field)
         if val is not None and not isinstance(val, expected_type):
             with ux_utils.print_exception_no_traceback():
                 raise TypeError(f'Expected Resources.{field} to be '
                                 f'{expected_type}, found {type(val)}.')
 
-    def _check_types(self) -> None:
-        self._enforce_type('num_nodes', int)
-        self._enforce_type('cloud', str)
-        self._enforce_type('region', str)
-        self._enforce_type('zone', str)
-        self._enforce_type('instance_type', str)
-        self._enforce_type('instance_family', str)
-        self._enforce_type('num_vcpus', (float, int, str))
-        self._enforce_type('cpu_memory', (float, int, str))
-        self._enforce_type('accelerators', str)
-        self._enforce_type('accelerator_args', dict)
-        self._enforce_type('use_spot', bool)
-        self._enforce_type('spot_recovery', str)
-        self._enforce_type('disk_size', int)
-        self._enforce_type('image_id', str)
+    def _check_input_types(self) -> None:
+        self._check_type('num_nodes', int)
+        self._check_type('cloud', str)
+        self._check_type('region', str)
+        self._check_type('zone', str)
+        self._check_type('instance_type', str)
+        self._check_type('instance_family', str)
+        self._check_type('num_vcpus', (float, int, str))
+        self._check_type('cpu_memory', (float, int, str))
+        self._check_type('accelerators', str)
+        self._check_type('accelerator_args', dict)
+        self._check_type('use_spot', bool)
+        self._check_type('spot_recovery', str)
+        self._check_type('disk_size', int)
+        self._check_type('image_id', str)
 
     def _canonicalize(self) -> None:
         if self.cloud is not None:
