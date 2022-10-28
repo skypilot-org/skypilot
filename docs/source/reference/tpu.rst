@@ -6,20 +6,21 @@ Cloud TPU
 SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/tpu/docs/intro-to-tpu>`_.
 Two different TPU architectures are available on GCP:
 
-- `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
 - `TPU VMs <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
+- `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
 
 Both are supported by SkyPilot.
 
 The two architectures differ as follows.
-For TPU Nodes, a host VM communicates with the TPU host over gRPC.
 For TPU VMs, you can SSH directly into a VM that is physically connected to the TPU device.
+For TPU Nodes, a host VM communicates with the TPU host over gRPC.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
-.. note::
+How to get TPUs for free
+------------------------
 
-   We encourage researchers to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program.
+ML researchers are encouraged to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program!
 
 
 Getting TPUs in one command
@@ -37,12 +38,72 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quic
 
 After the command has finished, you will be dropped into the host VM and can start develop code right away!
 
-Below we demonstrate how to run MNIST training on both TPU Nodes and TPU VMs with SkyPilot YAML.
+Below we demonstrate how to run MNIST training on both TPU VMs and TPU Nodes with SkyPilot YAML.
+
+TPU VMs
+--------------------------------
+
+To use TPU VMs, user needs to specify the TPU type, :code:`tpu_vm: True` and the desired TPU runtime version in :code:`accelerator_args` shown below:
+
+.. code-block:: yaml
+
+   resources:
+      accelerators: tpu-v2-8
+      accelerator_args:
+         runtime_version: tpu-vm-base
+         tpu_vm: True
+
+
+Now we show an example of running `mnist training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on TPU VM with JAX.
+
+.. code-block:: yaml
+
+   name: mnist-tpu-vm
+
+   resources:
+      accelerators: tpu-v2-8
+      accelerator_args:
+         runtime_version: tpu-vm-base
+         tpu_vm: True
+
+   setup: |
+      git clone https://github.com/google/flax.git
+
+      conda activate flax
+      if [ $? -eq 0 ]; then
+         echo 'conda env exists'
+      else
+         conda create -n flax python=3.8 -y
+         conda activate flax
+         # Make sure to install TPU related packages in a conda env to avoid package conflicts.
+         pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+         pip install --upgrade clu
+         pip install -e flax
+      fi
+
+   run: |
+      conda activate flax
+      cd flax/examples/mnist
+      python3 main.py --workdir=/tmp/mnist \
+      --config=configs/default.py \
+      --config.learning_rate=0.05 \
+      --config.num_epochs=10
+
+A GCS bucket is not required as the TPU VM is physically linked to the TPU device, which can access data directly.
+You are expected to see the below outputs when the job finishes.
+
+.. code-block:: console
+
+   $ sky launch examples/tpu/tpuvm_mnist.yaml -c mycluster
+   ...
+   (mnist-tpu-vm pid=10155) I0823 07:49:25.468526 139641357117440 train.py:146] epoch:  9, train_loss: 0.0120, train_accuracy: 99.64, test_loss: 0.0278, test_accuracy: 99.02
+   (mnist-tpu-vm pid=10155) I0823 07:49:26.966874 139641357117440 train.py:146] epoch: 10, train_loss: 0.0095, train_accuracy: 99.73, test_loss: 0.0264, test_accuracy: 99.19
+
 
 TPU Nodes
 --------------------------------
 
-To use TPU Node, a host CPU VM needs to be created together with a TPU node and configured correctly to connect with each other.
+Different from TPU VM, a host CPU VM needs to be created together with a TPU node and configured correctly to connect with each other.
 SkyPilot automates the above process with a simple interface:
 
 .. code-block:: yaml
@@ -131,63 +192,79 @@ With the above YAML, you should be able to launch the training job with :code:`s
 
 
 
-TPU VMs
+
+
+
+TPU Pods
 --------------------------------
 
-To use TPU VMs, user only needs to add :code:`tpu_vm: True` and the desired TPU runtime version in :code:`accelerator_args` shown below:
+A `TPU Pod <https://cloud.google.com/tpu/docs/training-on-tpu-pods>`_ is a collection of TPU devices connected by dedicated high-speed network interfaces for scalable training.
+User can simply change the accelerator name to a TPU Pod (e.g., :code:`v2-8` -> :code:`v2-32`) in YAML to launch such resources.
 
 .. code-block:: yaml
+   :emphasize-lines: 2-2
 
    resources:
-      accelerators: tpu-v2-8
+      accelerators: tpu-v2-32
       accelerator_args:
          runtime_version: tpu-vm-base
          tpu_vm: True
 
+.. note::
 
-Note that :code:`instance_type` is no longer needed because TPU VMs is a standalone host VM that physically connects to the TPU device.
+   Both TPU architectures, TPU VMs and TPU Nodes, are supported. Our example is based on TPU VM.
 
-Now we show an example of running `mnist training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on TPU VM with JAX.
+To show all available TPU Pods, run :code:`sky show-gpus`:
+
+.. code-block:: console
+
+   GOOGLE_TPU   AVAILABLE_QUANTITIES
+   tpu-v2-8     1
+   tpu-v2-32    1
+   tpu-v2-128   1
+   tpu-v2-256   1
+   tpu-v2-512   1
+   ...
+
+After creating a TPU Pod, multiple host VMs (e.g., :code:`v2-32` comes with 4 host VMs) will be ready.
+Normally user needs to SSH into all the hosts to setup environments and then launch the job on each host.
+SkyPilot automates such process for you. During :code:`sky launch`, all the setup/run commands will be executed on every host.
+
+Below we show an YAML example to run a cifar10 training job on :code:`v2-32` TPU Pod with JAX (`code repo <https://github.com/infwinston/tpu-example>`_):
 
 .. code-block:: yaml
 
-   name: mnist-tpu-vm
+   name: cifar-tpu-pod
 
    resources:
-      accelerators: tpu-v2-8
+      accelerators: tpu-v2-32
       accelerator_args:
          runtime_version: tpu-vm-base
          tpu_vm: True
 
    setup: |
-      git clone https://github.com/google/flax.git
-
-      conda activate flax
-      if [ $? -eq 0 ]; then
-         echo 'conda env exists'
-      else
-         conda create -n flax python=3.8 -y
-         conda activate flax
-         # Make sure to install TPU related packages in a conda env to avoid package conflicts.
-         pip install "jax[tpu]>=0.2.16" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
-         pip install --upgrade clu
-         pip install -e flax
-      fi
+      git clone https://github.com/infwinston/tpu-example.git
+      cd tpu-example
+      pip install "jax[tpu]" -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+      pip install -r requirements.txt
 
    run: |
-      conda activate flax
-      cd flax/examples/mnist
-      python3 main.py --workdir=/tmp/mnist \
-      --config=configs/default.py \
-      --config.learning_rate=0.05 \
-      --config.num_epochs=10
+      python -u tpu-example/train.py
 
-A GCS bucket is not required as the TPU VM is physically linked to the TPU device, which can access data directly.
-You are expected to see the below outputs when the job finishes.
+Expected output from :code:`sky launch`:
 
 .. code-block:: console
 
-   $ sky launch examples/tpu/tpuvm_mnist.yaml -c mycluster
+   $ sky launch examples/tpu/cifar_pod.yaml -c mycluster
+   (node-0 pid=57977, ip=10.164.0.24) JAX process: 1 / 4
+   (node-3 pid=57963, ip=10.164.0.26) JAX process: 3 / 4
+   (node-2 pid=57922, ip=10.164.0.25) JAX process: 2 / 4
+   (node-1 pid=63223) JAX process: 0 / 4
    ...
-   (mnist-tpu-vm pid=10155) I0823 07:49:25.468526 139641357117440 train.py:146] epoch:  9, train_loss: 0.0120, train_accuracy: 99.64, test_loss: 0.0278, test_accuracy: 99.02
-   (mnist-tpu-vm pid=10155) I0823 07:49:26.966874 139641357117440 train.py:146] epoch: 10, train_loss: 0.0095, train_accuracy: 99.73, test_loss: 0.0264, test_accuracy: 99.19
+   (node-0 pid=57977, ip=10.164.0.24) [  1000/100000]      time  0.034 ( 0.063)    data  0.008 ( 0.008)    loss  1.215 ( 1.489)    acc 68.750 (46.163)
+
+For future jobs, users can simply use :code:`sky exec` to submit jobs on the same TPU Pod.
+
+.. code-block:: console
+
+   $ sky exec mycluster examples/tpu/cifar_pod.yaml
