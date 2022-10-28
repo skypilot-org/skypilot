@@ -17,7 +17,7 @@ For TPU Nodes, a host VM communicates with the TPU host over gRPC.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
-How to get TPUs for free
+Free TPUs via TPU Research Cloud (TRC)
 ------------------------
 
 ML researchers are encouraged to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program!
@@ -38,23 +38,23 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quic
 
 After the command has finished, you will be dropped into the host VM and can start develop code right away!
 
-Below we demonstrate how to run MNIST training on both TPU VMs and TPU Nodes with SkyPilot YAML.
+Below, we show examples of using SkyPilot to run MNIST training on (1) TPU VMs and (2) TPU Nodes.
 
 TPU VMs
 --------------------------------
 
-To use TPU VMs, user needs to specify the TPU type, :code:`tpu_vm: True` and the desired TPU runtime version in :code:`accelerator_args` shown below:
+To use TPU VMs, set the following in a task YAML's ``resources`` field: 
 
 .. code-block:: yaml
 
    resources:
       accelerators: tpu-v2-8
       accelerator_args:
-         runtime_version: tpu-vm-base
          tpu_vm: True
+         runtime_version: tpu-vm-base  # optional
+The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the :code:`tpu_vm` bool (defaults to false, which means TPU Node is used), and an optional  TPU ``runtime_version`` field.
 
-
-Now we show an example of running `mnist training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on TPU VM with JAX.
+Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU VM using JAX.
 
 .. code-block:: yaml
 
@@ -63,8 +63,8 @@ Now we show an example of running `mnist training <https://cloud.google.com/tpu/
    resources:
       accelerators: tpu-v2-8
       accelerator_args:
-         runtime_version: tpu-vm-base
          tpu_vm: True
+         runtime_version: tpu-vm-base
 
    setup: |
       git clone https://github.com/google/flax.git
@@ -212,7 +212,7 @@ User can simply change the accelerator name to a TPU Pod (e.g., :code:`v2-8` -> 
 
 .. note::
 
-   Both TPU architectures, TPU VMs and TPU Nodes, are supported. Our example is based on TPU VM.
+   Both TPU architectures, TPU VMs and TPU Nodes, can be used with TPU Pods. The example below is based on TPU VMs.
 
 To show all available TPU Pods, run :code:`sky show-gpus`:
 
