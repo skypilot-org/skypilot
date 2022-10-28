@@ -1280,6 +1280,7 @@ class GcsStore(AbstractStore):
                        '-O /tmp/gcsfuse.deb && '
                        'sudo dpkg --install /tmp/gcsfuse.deb')
         mount_cmd = ('gcsfuse -o allow_other '
+                     '--implicit-dirs '
                      f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
