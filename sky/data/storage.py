@@ -1237,7 +1237,7 @@ class GcsStore(AbstractStore):
           bucket_name: str; Name of bucket
         """
         try:
-            bucket = self.client.get_bucket(bucket_name)
+            self.client.get_bucket(bucket_name)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
             with ux_utils.print_exception_no_traceback():
@@ -1245,19 +1245,12 @@ class GcsStore(AbstractStore):
                     'External Bucket detected. User not allowed to delete '
                     'external bucket.') from e
 
-        num_files = subprocess.check_output(
-            f'gsutil du gs://{bucket_name} | wc -l', shell=True)
-        num_files = int(num_files)
-
         try:
             with backend_utils.safe_console_status(
                     f'[bold cyan]Deleting [green]bucket {bucket_name}'):
-                if num_files >= _GCS_RM_MAX_OBJS:
-                    remove_obj_command = ('gsutil -m rm -r'
-                                          f' gs://{bucket_name}')
-                    subprocess.check_output(remove_obj_command.split(' '))
-                else:
-                    bucket.delete(force=True)
+                remove_obj_command = ('gsutil -m rm -r'
+                                      f' gs://{bucket_name}')
+                subprocess.check_output(remove_obj_command.split(' '))
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
             with ux_utils.print_exception_no_traceback():
