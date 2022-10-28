@@ -9,7 +9,7 @@ Two different TPU architectures are available on GCP:
 - `TPU VMs <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
 - `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
 
-Both are supported by SkyPilot.
+Both are supported by SkyPilot. We recommend TPU VMs which is a newer architecture encouraged by GCP.
 
 The two architectures differ as follows.
 For TPU VMs, you can SSH directly into a VM that is physically connected to the TPU device.
@@ -18,7 +18,7 @@ For more details please refer to GCP `documentation <https://cloud.google.com/tp
 
 
 Free TPUs via TPU Research Cloud (TRC)
-------------------------
+--------------------------------------
 
 ML researchers are encouraged to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program!
 
@@ -52,6 +52,7 @@ To use TPU VMs, set the following in a task YAML's ``resources`` field:
       accelerator_args:
          tpu_vm: True
          runtime_version: tpu-vm-base  # optional
+
 The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the :code:`tpu_vm` bool (defaults to false, which means TPU Node is used), and an optional  TPU ``runtime_version`` field.
 
 Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU VM using JAX.
@@ -89,8 +90,14 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
       --config.learning_rate=0.05 \
       --config.num_epochs=10
 
-A GCS bucket is not required as the TPU VM is physically linked to the TPU device, which can access data directly.
-You are expected to see the below outputs when the job finishes.
+This YAML lives under the SkyPilot repo (``examples/tpu/tpuvm_mnist.yaml``), or you can paste it into a local file.
+Launch it with:
+
+.. code-block:: console
+
+   $ sky launch examples/tpu/tpuvm_mnist.yaml -c mycluster
+
+You should see the following outputs when the job finishes.
 
 .. code-block:: console
 
@@ -104,7 +111,7 @@ TPU Nodes
 --------------------------------
 
 Different from TPU VM, a host CPU VM needs to be created together with a TPU node and configured correctly to connect with each other.
-SkyPilot automates the above process with a simple interface:
+To use a TPU Node, set the following in a task YAML's ``resources`` field:
 
 .. code-block:: yaml
 
@@ -115,10 +122,10 @@ SkyPilot automates the above process with a simple interface:
          runtime_version: 2.5.0 # TPU software version to be used.
 
 The above YAML considers :code:`n1-highmem-8` as the host machine and :code:`tpu-v2-8` as the TPU node resource.
-You may modify the host instance type or TPU type as you wish.
-To show more TPU accelerators, you may run the command :code:`sky show-gpus`.
+You can modify the host instance type or the TPU type. To show what TPU types are supported, run :code:`sky show-gpus`.
 
-Now, we show a complete YAML for running `MNIST training <https://cloud.google.com/tpu/docs/tutorials/mnist-2.x>`_ on TPU node with TensorFlow.
+Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU Node using TensorFlow.
+
 
 .. code-block:: yaml
 
@@ -199,7 +206,7 @@ TPU Pods
 --------------------------------
 
 A `TPU Pod <https://cloud.google.com/tpu/docs/training-on-tpu-pods>`_ is a collection of TPU devices connected by dedicated high-speed network interfaces for scalable training.
-User can simply change the accelerator name to a TPU Pod (e.g., :code:`v2-8` -> :code:`v2-32`) in YAML to launch such resources.
+To use a TPU Pod, simply change the ``accelerators`` field in the task YAML  (e.g., :code:`v2-8` -> :code:`v2-32`).
 
 .. code-block:: yaml
    :emphasize-lines: 2-2
