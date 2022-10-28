@@ -756,12 +756,10 @@ def write_cluster_config(
     region_name = resources_vars.get('region')
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
-    old_yaml_content = None
-    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
-        with open(yaml_path, 'r') as f:
-            old_yaml_content = f.read()
 
-    yaml_path = fill_template(
+    # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
+    tmp_yaml_path = yaml_path + '.tmp'
+    tmp_yaml_path = fill_template(
         cluster_config_template,
         dict(
             resources_vars,
@@ -799,27 +797,34 @@ def write_cluster_config(
                 'ssh_private_key': (None if auth_config is None else
                                     auth_config['ssh_private_key']),
             }),
-    )
+        output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
     config_dict['ray'] = yaml_path
     if dryrun:
+        # If dryrun, return the unfinished tmp yaml path.
+        config_dict['ray'] = tmp_yaml_path
         return config_dict
-    _add_auth_to_cluster_config(cloud, yaml_path)
+    _add_auth_to_cluster_config(cloud, tmp_yaml_path)
     # Delay the optimization of the config until the authentication files is added.
     if not isinstance(cloud, clouds.Local):
         # Only optimize the file mounts for public clouds now, as local has not
         # been fully tested yet.
-        _optimize_file_mounts(yaml_path)
+        _optimize_file_mounts(tmp_yaml_path)
 
     # Restore the old yaml content for backward compatibility.
-    if old_yaml_content is not None:
+    if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
         with open(yaml_path, 'r') as f:
+            old_yaml_content = f.read()
+        with open(tmp_yaml_path, 'r') as f:
             new_yaml_content = f.read()
         restored_yaml_content = _replace_yaml_dicts(
             new_yaml_content, old_yaml_content,
             _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY)
-        with open(yaml_path, 'w') as f:
+        with open(tmp_yaml_path, 'w') as f:
             f.write(restored_yaml_content)
+
+    # Rename the tmp file to the final YAML path.
+    os.rename(tmp_yaml_path, yaml_path)
 
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
     # For TPU nodes. TPU VMs do not need TPU_NAME.
@@ -1418,7 +1423,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         return set(ray_launch_hashes)
     with suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
-    # Adopted from https://github.com/ray-project/ray/blob/ray-1.13.0/python/ray/autoscaler/_private/node_launcher.py#L56-L64
+    # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']
@@ -1746,17 +1751,17 @@ def get_clusters(
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
-    Combs through the Sky database (in ~/.sky/state.db) to get a list of records
+    Combs through the database (in ~/.sky/state.db) to get a list of records
     corresponding to launched clusters.
 
     Args:
-        include_reserved: Whether to include sky-reserved clusters, e.g. spot
+        include_reserved: Whether to include reserved clusters, e.g. spot
             controller.
         refresh: Whether to refresh the status of the clusters. (Refreshing will
             set the status to STOPPED if the cluster cannot be pinged.)
         cloud_filter: Sets which clouds to filer through from the global user
-            state. Supports three values, 'all' for all clouds, 'public' for public
-            clouds only, and 'local' for only local clouds.
+            state. Supports three values, 'all' for all clouds, 'public' for
+            public clouds only, and 'local' for only local clouds.
 
     Returns:
         A list of cluster records.
