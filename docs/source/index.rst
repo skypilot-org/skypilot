@@ -50,31 +50,29 @@ Documentation
    getting-started/tutorial
    examples/gpu-jupyter
 
-
 .. toctree::
    :maxdepth: 1
    :caption: Running Jobs
 
    reference/job-queue
-   reference/auto-stop
-   examples/spot-jobs
+   examples/syncing-code-artifacts
+   reference/storage
    reference/tpu
    running-jobs/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: Using Data
+   :caption: Saving Cloud Costs
 
-   examples/syncing-code-artifacts
-   reference/storage
-
+   examples/spot-jobs
+   reference/auto-stop
+   reference/benchmark/index
 
 .. toctree::
    :maxdepth: 1
    :caption: User Guides
 
    reference/local/index
-   reference/benchmark/index
    examples/iterative-dev-project
    examples/auto-failover
    reference/interactive-nodes
