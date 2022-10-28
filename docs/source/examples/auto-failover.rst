@@ -3,6 +3,17 @@
 Auto-provisioning GPUs
 ==========================
 
+.. tip::
+
+  No action is required to use the auto-failover feature.
+
+  Auto-failover is automatically enabled whenever a new cluster is to be
+  provisioned, such as during :code:`sky launch` or the :ref:`interactive node
+  commands <interactive-nodes>` :code:`sky {gpunode,cpunode,tpunode}`.
+
+  If specific :code:`cloud`, ``region``, or ``zone`` fields are specified for a
+  task, auto-failover retries only within the specified location.
+
 SkyPilot comes with an *auto-failover provisioner*, which
 **automatically retries provisioning a cluster in different regions (or
 clouds)** if the requested resources cannot be provisioned.
@@ -11,17 +22,9 @@ Such provisioning failures can happen for a variety of reasons:
 - insufficient capacity (in a region or a cloud)
 - insufficient quotas (in a region or a cloud)
 
-Auto-failover is especially useful for requesting scarce resources such as GPUs
-and other accelerators.  The user is **freed from manually searching for regions
-(or clouds) that can provide the requested resources**.
-
-.. note::
-
-  Auto-failover is automatically enabled whenever a new cluster is to be
-  provisioned, such as during :code:`sky launch` or the :ref:`interactive node
-  commands <interactive-nodes>` :code:`sky {gpunode,cpunode,tpunode}`. If the
-  :code:`cloud` field is specified in resources, then auto-failover retries only
-  within the specified cloud.
+Auto-failover is especially useful for requesting **scarce resources such as
+GPUs, other accelerators, and spot instances**.  The user is freed from manually
+searching for regions (or clouds) that can provide the requested resources.
 
 Cross-region failover
 ---------------------

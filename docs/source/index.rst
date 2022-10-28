@@ -33,7 +33,7 @@ SkyPilot cuts your cloud costs:
 
 * :ref:`Managed Spot <Managed Spot Jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
 * :ref:`Autostop <Auto-stopping>`: hands-free cleanup of idle clusters
-* :ref:`Benchmark <SkyPilot Benchmark>`: find best VM types for your jobs
+* :ref:`Benchmark <Benchmark: Find the Best Hardware for Your Jobs>`: find best VM types for your jobs
 * Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
@@ -55,14 +55,13 @@ Documentation
    :caption: Running Jobs
 
    reference/job-queue
-   examples/syncing-code-artifacts
-   reference/storage
    reference/tpu
+   examples/auto-failover
    running-jobs/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: Saving Cloud Costs
+   :caption: Cutting Cloud Costs
 
    examples/spot-jobs
    reference/auto-stop
@@ -70,11 +69,17 @@ Documentation
 
 .. toctree::
    :maxdepth: 1
+   :caption: Using Data
+
+   examples/syncing-code-artifacts
+   reference/storage
+
+.. toctree::
+   :maxdepth: 1
    :caption: User Guides
 
    reference/local/index
    examples/iterative-dev-project
-   examples/auto-failover
    reference/interactive-nodes
    reference/quota
    reference/logging
