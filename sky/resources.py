@@ -17,7 +17,7 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 class Accelerator:
 
-    # FIXME: float?
+    # FIXME: count can be float?
     def __init__(self, name: str, count: int, args: Dict[str, str]) -> None:
         self.name = accelerator_registry.canonicalize_accelerator_name(name)
         self.count = count
@@ -31,20 +31,21 @@ class Accelerator:
                 self.args == other.args)
 
 
+# FIXME: rename this as Resources
 class ResourceFilter:
     """A user-specified resource filter."""
 
     def __init__(
         self,
         num_nodes: Optional[int] = None,
-        cloud: Optional[clouds.Cloud] = None,
+        cloud: Optional[str] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         instance_type: Optional[str] = None,
         instance_family: Optional[str] = None,
         num_vcpus: Union[None, float, str] = None,
-        memory_size: Union[None, float, str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
+        cpu_memory: Union[None, float, str] = None,
+        accelerators: Union[None, str] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
@@ -60,7 +61,7 @@ class ResourceFilter:
         self.instance_type = instance_type
         self.instance_family = instance_family
         self.num_vcpus = num_vcpus
-        self.memory_size = memory_size
+        self.cpu_memory = cpu_memory
         self._accelerators = accelerators
 
         # Configured by the user.
@@ -73,7 +74,9 @@ class ResourceFilter:
         self.accelerator = None
 
         self._check_syntax()
+        self._check_types()
         self._canonicalize()
+        self._assign_defaults()
         self._check_semantics()
 
     def _check_syntax(self) -> None:
@@ -85,66 +88,130 @@ class ResourceFilter:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify accelerator_args without accelerators.')
-        if (self.use_spot is None or
-                not self.use_spot) and self.spot_recovery is not None:
+        if ((self.use_spot is None or not self.use_spot) and
+                self.spot_recovery is not None):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cannot specify spot_recovery without use_spot set to True.'
-                )
-        if self.image_id is not None and (self.region is None and
-                                          self.zone is None):
+                    'Cannot specify spot_recovery without use_spot '
+                    'set to True.')
+
+    def _enforce_type(self, field: str, expected_type) -> None:
+        val = getattr(self, field)
+        if val is not None and not isinstance(val, expected_type):
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must specify region/zone when specifying image_id.')
+                raise TypeError(f'Expected Resources.{field} to be '
+                                f'{expected_type}, found {type(val)}.')
+
+    def _check_types(self) -> None:
+        self._enforce_type('num_nodes', int)
+        self._enforce_type('cloud', str)
+        self._enforce_type('region', str)
+        self._enforce_type('zone', str)
+        self._enforce_type('instance_type', str)
+        self._enforce_type('instance_family', str)
+        self._enforce_type('num_vcpus', (float, int, str))
+        self._enforce_type('cpu_memory', (float, int, str))
+        self._enforce_type('accelerators', str)
+        self._enforce_type('accelerator_args', dict)
+        self._enforce_type('use_spot', bool)
+        self._enforce_type('spot_recovery', str)
+        self._enforce_type('disk_size', int)
+        self._enforce_type('image_id', str)
 
     def _canonicalize(self) -> None:
-        if self.disk_size is None:
-            self.disk_size = _DEFAULT_DISK_SIZE_GB
+        if self.cloud is not None:
+            self.cloud = self.cloud.upper()
+        if self.region is not None:
+            self.region = self.region.lower()
+        if self.zone is not None:
+            self.zone = self.zone.lower()
+        if self.instance_type is not None:
+            # NOTE: Some azure instance types use uppercase letters.
+            self.instance_type = self.instance_type.lower()
+        if self.instance_family is not None:
+            self.instance_family = self.instance_family.lower()
         if self.spot_recovery is not None:
             self.spot_recovery = self.spot_recovery.upper()
 
         if self._accelerators is None:
             return
-
-        # Parse accelerators.
         accelerators = self._accelerators
-        if isinstance(accelerators, str):
-            if ':' not in accelerators:
-                accelerators = {accelerators: 1}
-            else:
-                splits = accelerators.split(':')
-                parse_error = ('The "accelerators" field as a str '
-                               'should be <name> or <name>:<cnt>. '
-                               f'Found: {accelerators!r}')
-                if len(splits) != 2:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(parse_error)
-                try:
-                    # NOTE: accelerator count must be an integer.
-                    num = int(splits[1])
-                    accelerators = {splits[0]: num}
-                except ValueError:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(parse_error) from None
+        if ':' not in accelerators:
+            acc_name = accelerators
+            acc_count = 1
+        else:
+            splits = accelerators.split(':')
+            parse_error = ('The "accelerators" field as a str '
+                           'should be <name> or <name>:<cnt>. '
+                           f'Found: {accelerators!r}')
+            if len(splits) != 2:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(parse_error)
+            try:
+                # NOTE: accelerator count must be an integer.
+                acc_name = splits[0]
+                acc_count = int(splits[1])
+            except ValueError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(parse_error) from None
 
-        assert len(accelerators) == 1, accelerators
-        acc, acc_count = list(self._accelerators.items())[0]
-        self.accelerator = Accelerator(name=acc,
+        self.accelerator = Accelerator(name=acc_name,
                                        count=acc_count,
                                        args=self._accelerator_args)
 
+    def _assign_defaults(self) -> None:
+        if self.num_nodes is None:
+            self.num_nodes = 1
+        if self.disk_size is None:
+            self.disk_size = _DEFAULT_DISK_SIZE_GB
+        if self.use_spot is None:
+            self.use_spot = False
+        if self.use_spot and self.spot_recovery is None:
+            self.spot_recovery = spot.SPOT_DEFAULT_STRATEGY
+
     def _check_semantics(self) -> None:
-        if self.spot_recovery not in spot.SPOT_STRATEGIES:
+        num_vcpus = self.num_vcpus
+        if isinstance(self.num_vcpus, str):
+            if self.num_vcpus.endswith('+'):
+                num_vcpus_str = self.num_vcpus[:-1]
+            else:
+                num_vcpus_str = self.num_vcpus
+            try:
+                num_vcpus = float(num_vcpus_str)
+            except ValueError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('') from None
+        if num_vcpus <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('num_vcpus must be positive.')
+
+        cpu_memory = self.cpu_memory
+        if isinstance(self.cpu_memory, str):
+            if self.cpu_memory.endswith('+'):
+                cpu_memory_str = self.cpu_memory[:-1]
+            else:
+                cpu_memory_str = self.cpu_memory
+            try:
+                cpu_memory = float(cpu_memory_str)
+            except ValueError:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('') from None
+        if cpu_memory <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('cpu_memory must be positive.')
+
+        if (self.spot_recovery is not None and
+                self.spot_recovery not in spot.SPOT_STRATEGIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Invalid spot_recovery strategy: {self.spot_recovery}.')
         if self.disk_size < 50:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'OS disk size must be larger than 50GB. Got {self.disk_size} GB.'
-                )
+                raise ValueError('OS disk size must be larger than 50GB. '
+                                 f'Got {self.disk_size} GB.')
 
 
+# FIXME: rename this
 class Resource:
     """SkyPilot's internal representation of cloud resources."""
 
@@ -157,11 +224,11 @@ class Resource:
         instance_type: str,
         num_vcpus: float,
         memory_size: float,
-        accelerator: Accelerator,
+        accelerator: Optional[Accelerator],
         use_spot: bool,
         spot_recovery: str,
         disk_size: int,
-        image_id: str,
+        image_id: Optional[str],
     ) -> None:
         self.num_nodes = num_nodes
         self.cloud = cloud
@@ -175,6 +242,12 @@ class Resource:
         self.spot_recovery = spot_recovery
         self.disk_size = disk_size
         self.image_id = image_id
+
+    def get_cost(self, seconds: float) -> float:
+        hours = seconds / 3600.0
+        # TODO
+        hourly_price = self.cloud.get_hourly_price()
+        return hours * hourly_price
 
 
 class Resources:
