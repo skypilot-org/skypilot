@@ -476,6 +476,16 @@ class Storage(object):
           is_local_path: bool; Whether the source is a local path. False if URI.
         """
 
+        def _check_basename_conflicts(source_list: List[str]) -> None:
+            """Checks if two paths in source_list have the same basename."""
+            basenames = [os.path.basename(s) for s in source_list]
+            conflicts = {x for x in basenames if basenames.count(x) > 1}
+            if conflicts:
+                raise exceptions.StorageSourceError(
+                    'Cannot have multiple files or directories with the same '
+                    'name in source. Conflicts found for: '
+                    f'{", ".join(conflicts)}')
+
         def _validate_local_source(local_source):
             if local_source.endswith('/'):
                 with ux_utils.print_exception_no_traceback():
@@ -499,6 +509,8 @@ class Storage(object):
 
         # Check if source is a list of paths
         if isinstance(source, list):
+            # Check for conflicts in basenames
+            _check_basename_conflicts(source)
             # Validate each path
             for local_source in source:
                 _validate_local_source(local_source)
