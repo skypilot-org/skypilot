@@ -2825,7 +2825,7 @@ class CloudVmRayBackend(backends.Backend):
             # alternatives (smart_open, each provider's own sdk), a
             # data-transfer container etc.
             if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'~/{dst}'
+                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Sync 'src' to 'wrapped_dst', a safe-to-write "wrapped" path.
             wrapped_dst = dst
             if not dst.startswith('~/') and not dst.startswith('/tmp/'):
@@ -2945,7 +2945,7 @@ class CloudVmRayBackend(backends.Backend):
 
         for dst, storage_obj in storage_mounts.items():
             if not os.path.isabs(dst) and not dst.startswith('~/'):
-                dst = f'~/{dst}'
+                dst = f'{SKY_REMOTE_WORKDIR}/{dst}'
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
             mount_cmd = store.mount_command(dst)
