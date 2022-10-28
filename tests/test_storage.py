@@ -29,7 +29,8 @@ class TestStorageSpecLocalSource:
 
     def test_source_multifile_conflict(self):
         with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_lib.Storage(name='test', source=['/myfile.txt', '/a/myfile.txt'])
+            storage_lib.Storage(name='test',
+                                source=['/myfile.txt', '/a/myfile.txt'])
         assert 'Cannot have multiple files or directories' in str(e)
 
 

@@ -1166,8 +1166,7 @@ class GcsStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def batch_gsutil_cp(self,
-                        source_path_list: List[Path]) -> None:
+    def batch_gsutil_cp(self, source_path_list: List[Path]) -> None:
         """Invokes gsutil cp -n to batch upload a list of local paths
 
         -n flag to gsutil cp checks the existence of an object before uploading,
@@ -1179,9 +1178,10 @@ class GcsStore(AbstractStore):
         contents of directory to the root, add /* to the directory path
         e.g., /mydir/*.
         """
-        copy_list = '\n'.join(os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
+        copy_list = '\n'.join(
+            os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         sync_command = (f'echo "{copy_list}" | '
-                        f'gsutil -m cp -n -r -I gs://{self.name}')
+                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
 
         # Generate message for upload
         if len(source_path_list) > 1:
