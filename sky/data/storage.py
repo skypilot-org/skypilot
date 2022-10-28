@@ -345,7 +345,7 @@ class Storage(object):
 
     def __init__(self,
                  name: Optional[str] = None,
-                 source: Optional[Union[Path, List[Path]]] = None,
+                 source: Union[Path, List[Path], None] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
@@ -516,7 +516,7 @@ class Storage(object):
                             'Storage source path cannot be a file - only'
                             ' directories are supported as a source. '
                             'To upload a single file, specify it in a list '
-                            f'by writing <destination_path>: [{source}]. Note '
+                            f'by writing source: [{source}]. Note '
                             'that the file will be uploaded to the root of the '
                             'bucket and will appear at <destination_path>/'
                             f'{os.path.basename(source)}. Alternatively, you '
@@ -773,9 +773,8 @@ class Storage(object):
                 config[key] = value
 
         name = self.name
-        if self.source is not None and isinstance(
-                self.source, str) and data_utils.is_cloud_store_url(
-                    self.source):
+        if (self.source is not None and isinstance(self.source, str) and
+                data_utils.is_cloud_store_url(self.source)):
             # Remove name if source is a cloud store URL
             name = None
         add_if_not_none('name', name)
