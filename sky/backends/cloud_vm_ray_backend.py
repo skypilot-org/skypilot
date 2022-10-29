@@ -101,6 +101,7 @@ def _get_cluster_config_template(cloud):
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
+        clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -629,6 +630,9 @@ class RetryingVmProvisioner(object):
                 self._blocked_regions.add(r.name)
         else:
             self._blocked_regions.add(region.name)
+    
+    def _update_blocklist_on_ibm_error(self, region, zones, stdout, stderr):
+        pass  # TODO IBM-TODO
 
     def _update_blocklist_on_local_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
@@ -681,6 +685,10 @@ class RetryingVmProvisioner(object):
         if isinstance(cloud, clouds.Azure):
             return self._update_blocklist_on_azure_error(
                 region, zones, stdout, stderr)
+        
+        if isinstance(cloud, clouds.IBM):
+            return self._update_blocklist_on_ibm_error(
+                region, zones, stdout, stderr)
 
         if isinstance(cloud, clouds.Local):
             return self._update_blocklist_on_local_error(
@@ -705,7 +713,7 @@ class RetryingVmProvisioner(object):
                 if prev_resources is not None and cloud.is_same_cloud(
                         prev_resources.cloud):
                     if cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
-                            clouds.AWS()):
+                            clouds.AWS()) or cloud.is_same_cloud(clouds.IBM()):
                         region = config['provider']['region']
                         zones = config['provider']['availability_zone']
                     elif cloud.is_same_cloud(clouds.Azure()):
@@ -1555,7 +1563,7 @@ class CloudVmRayBackend(backends.Backend):
             if cloud.is_same_cloud(clouds.Azure()):
                 region = provider['location']
             elif cloud.is_same_cloud(clouds.GCP()) or cloud.is_same_cloud(
-                    clouds.AWS()):
+                    clouds.AWS()) or cloud.is_same_cloud(clouds.IBM()):
                 region = provider['region']
             elif cloud.is_same_cloud(clouds.Local()):
                 # There is only 1 region for Local cluster, 'Local'.
@@ -2474,7 +2482,7 @@ class CloudVmRayBackend(backends.Backend):
               (prev_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.AWS):
+            if isinstance(cloud, clouds.AWS):  # TODO IBM-TODO
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
                 # The stopped instance on AWS will not be correctly terminated
