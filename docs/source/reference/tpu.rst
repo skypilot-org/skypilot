@@ -4,9 +4,6 @@
 Cloud TPU
 =========
 
-Overview
-========
-
 SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/tpu/docs/intro-to-tpu>`_.
 Two different TPU architectures are available on GCP:
 
@@ -22,13 +19,13 @@ For more details please refer to GCP `documentation <https://cloud.google.com/tp
 
 
 Free TPUs via TPU Research Cloud (TRC)
---------------------------------------
+======================================
 
 ML researchers are encouraged to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program!
 
 
 Getting TPUs in one command
---------------------------------
+===========================
 
 Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quickly get TPUs for development:
 
@@ -40,7 +37,7 @@ Like :ref:`GPUs <interactive-nodes>`, SkyPilot provides a simple command to quic
    sky tpunode --instance-type n1-highmem-16  # Change the host VM type to n1-highmem-16
    sky tpunode --tpu-vm                       # Use TPU VM (instead of TPU Node)
 
-After the command has finished, you will be dropped into the host VM and can start develop code right away!
+After the command finishes, you will be dropped into a TPU host VM and can start developing code right away.
 
 Below, we show examples of using SkyPilot to run MNIST training on (1) TPU VMs and (2) TPU Nodes.
 
@@ -119,7 +116,7 @@ You should see the following outputs when the job finishes.
 TPU Nodes
 ---------
 
-In a TPU Node, a normal CPU VM (e.g., `n1` instance) needs to be provisioned to communicate with the TPU host/device.
+In a TPU Node, a normal CPU VM (an `n1` instance) needs to be provisioned to communicate with the TPU host/device.
 
 To use a TPU Node, set the following in a task YAML's ``resources`` field:
 
@@ -129,7 +126,7 @@ To use a TPU Node, set the following in a task YAML's ``resources`` field:
       instance_type: n1-highmem-8
       accelerators: tpu-v2-8
       accelerator_args:
-         runtime_version: 2.5.0 # TPU software version to be used.
+         runtime_version: 2.5.0  # optional, TPU runtime version.
 
 The above YAML considers :code:`n1-highmem-8` as the host machine and :code:`tpu-v2-8` as the TPU node resource.
 You can modify the host instance type or the TPU type.
@@ -139,22 +136,21 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
 
 .. code-block:: yaml
 
-   # Task name (optional), used for display purposes.
    name: mnist-tpu-node
 
    resources:
       accelerators: tpu-v2-8
       accelerator_args:
-         runtime_version: 2.5.0 # TPU software version to be used.
+         runtime_version: 2.5.0  # optional, TPU runtime version.
 
    # TPU node requires loading data from a GCS bucket.
+   # We use SkyPilot Storage to mount a GCS bucket to /dataset.
    file_mounts:
       /dataset:
          name: mnist-tpu-node
          store: gcs
          mode: MOUNT
 
-   # The setup command.  Will be run under the working directory.
    setup: |
       git clone https://github.com/tensorflow/models.git
 
@@ -167,7 +163,6 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
          pip install tensorflow==2.5.0 tensorflow-datasets tensorflow-model-optimization cloud-tpu-client
       fi
 
-   # The command to run.  Will be run under the working directory.
    run: |
       conda activate mnist
       cd models/official/legacy/image_classification/
@@ -258,7 +253,11 @@ After creating a TPU Pod, multiple host VMs (e.g., :code:`v2-32` comes with 4 ho
 Normally, the user needs to SSH into all hosts (depending on the architecture used, either the ``n1`` User VMs or the TPU Host VMs) to prepare files and setup environments, and
 then launch the job on each host, which is a tedious and error-prone process.
 
-SkyPilot automates away this complexity. From your laptop, a single :code:`sky launch` command will perform workdir/file syncing, and then execute the setup/run commands on every host of the pod.
+SkyPilot automates away this complexity. From your laptop, a single :code:`sky launch` command will perform:
+
+- workdir/file_mounts syncing; and
+- execute the setup/run commands on every host of the pod.
+
 Here is a task YAML for a cifar10 training job on a :code:`v2-32` TPU Pod with JAX (`code repo <https://github.com/infwinston/tpu-example>`_):
 
 .. code-block:: yaml
@@ -299,7 +298,7 @@ You should see the following output.
 
 .. note::
 
-   By default, outputs from all hosts will be displayed. You may use :code:`jax.process_index()` to determine which host to print messages.
+   By default, outputs from all hosts are shown with the ``node-<i>`` prefix. Use :code:`jax.process_index()` to control which host to print messages.
 
 To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
