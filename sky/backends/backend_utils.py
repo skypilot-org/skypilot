@@ -991,6 +991,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_azure_authentication(config)
     elif isinstance(cloud, clouds.Lambda):
         config = auth.setup_lambda_authentication(config)
+    elif isinstance(cloud, clouds.IBM):
+        config = auth.setup_ibm_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1701,6 +1703,11 @@ def _query_status_azure(
     # )
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
+def _query_status_ibm(
+    cluster: str,
+    ray_config: Dict[str, Any],
+) -> List[global_user_state.ClusterStatus]:
+    pass  # TODO IBM-TODO
 
 def _query_status_lambda(
         cluster: str,
@@ -1729,6 +1736,7 @@ _QUERY_STATUS_FUNCS = {
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
+    'IBM':_query_status_ibm,
 }
 
 

@@ -120,6 +120,7 @@ def _get_cluster_config_template(cloud):
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
         clouds.Lambda: 'lambda-ray.yml.j2',
+        clouds.IBM: 'ibm-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -804,6 +805,11 @@ class RetryingVmProvisioner(object):
                 resources_lib.Resources(cloud=clouds.Azure()))
         else:
             self._blocked_resources.add(launchable_resources.copy(zone=None))
+
+
+    def _update_blocklist_on_ibm_error(self, region, zones, stdout, stderr):
+        pass  # TODO IBM-TODO
+
 
     def _update_blocklist_on_lambda_error(
             self, launchable_resources: 'resources_lib.Resources',
@@ -3045,7 +3051,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.AWS):
+            if isinstance(cloud, clouds.AWS):  # TODO IBM-TODO
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
                 # The stopped instance on AWS will not be correctly terminated
