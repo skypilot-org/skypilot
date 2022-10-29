@@ -123,6 +123,7 @@ extras_require: Dict[str, List[str]] = {
         'azure-mgmt-network'
     ],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'ibm':['ibm_cloud_sdk_core','ibm_vpc'],
     'docker': ['docker'],
     'lambda': [],
     'cloudflare': aws_dependencies
