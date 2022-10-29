@@ -12,8 +12,8 @@ Two different TPU architectures are available on GCP:
 Both are supported by SkyPilot. We recommend TPU VMs which is a newer architecture encouraged by GCP.
 
 The two architectures differ as follows.
-For TPU VMs, you can SSH directly into a VM that is physically connected to the TPU device.
-For TPU Nodes, a host VM communicates with the TPU host over gRPC.
+For TPU VMs, you can directly SSH into the "TPU host" VM that is physically connected to the TPU device.
+For TPU Nodes, a user VM (`n1` instance) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
@@ -92,6 +92,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
       --config.num_epochs=10
 
 This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu>`_ (``examples/tpu/tpuvm_mnist.yaml``), or you can paste it into a local file.
+
 Launch it with:
 
 .. code-block:: console
@@ -209,14 +210,15 @@ This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypil
 TPU Pods
 --------------------------------
 
-A `TPU Pod <https://cloud.google.com/tpu/docs/training-on-tpu-pods>`_ is a collection of TPU devices connected by dedicated high-speed network interfaces for scalable training.
+A `TPU Pod <https://cloud.google.com/tpu/docs/training-on-tpu-pods>`_ is a collection of TPU devices connected by dedicated high-speed network interfaces for high-performance training.
+
 To use a TPU Pod, simply change the ``accelerators`` field in the task YAML  (e.g., :code:`v2-8` -> :code:`v2-32`).
 
 .. code-block:: yaml
    :emphasize-lines: 2-2
 
    resources:
-      accelerators: tpu-v2-32
+      accelerators: tpu-v2-32  # Pods have > 8 cores (the last number) 
       accelerator_args:
          runtime_version: tpu-vm-base
          tpu_vm: True
@@ -241,7 +243,7 @@ After creating a TPU Pod, multiple host VMs (e.g., :code:`v2-32` comes with 4 ho
 Normally user needs to SSH into all the hosts to setup environments and then launch the job on each host.
 SkyPilot automates such process for you. During :code:`sky launch`, all the setup/run commands will be executed on every host.
 
-Below we show an YAML example to run a cifar10 training job on :code:`v2-32` TPU Pod with JAX (`code repo <https://github.com/infwinston/tpu-example>`_):
+Here is a task YAML for a cifar10 training job on a :code:`v2-32` TPU Pod with JAX (`code repo <https://github.com/infwinston/tpu-example>`_):
 
 .. code-block:: yaml
 
@@ -274,7 +276,7 @@ Expected output from :code:`sky launch`:
    ...
    (node-0 pid=57977, ip=10.164.0.24) [  1000/100000]      time  0.034 ( 0.063)    data  0.008 ( 0.008)    loss  1.215 ( 1.489)    acc 68.750 (46.163)
 
-For future jobs, users can simply use :code:`sky exec` to submit jobs on the same TPU Pod.
+To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
 .. code-block:: console
 
