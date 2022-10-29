@@ -426,10 +426,9 @@ def tail_logs(job_owner: str,
         with open(log_path, 'r', newline='') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
-            for line in _follow_job_logs(
-                    log_file,
-                    job_id=job_id,
-                    start_streaming_at=start_stream_at):
+            for line in _follow_job_logs(log_file,
+                                         job_id=job_id,
+                                         start_streaming_at=start_stream_at):
                 print(line, end='', flush=True)
     else:
         try:
