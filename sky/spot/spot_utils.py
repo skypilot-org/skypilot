@@ -239,10 +239,15 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             spot_status = spot_state.get_status(job_id)
             continue
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-        returncode = backend.tail_logs(handle,
-                                       job_id=None,
-                                       spot_job_id=job_id,
-                                       follow=follow)
+        returncode = 1
+        # The cluster can be removed from the table before the spot state is
+        # updated by the controller. In this case, we should skip the logging,
+        # and wait for the next round of status check.
+        if handle is not None:
+            returncode = backend.tail_logs(handle,
+                                           job_id=None,
+                                           spot_job_id=job_id,
+                                           follow=follow)
         if returncode == 0:
             # If the log tailing exit successfully (the real job can be
             # SUCCEEDED or FAILED), we can safely break the loop. We use the
