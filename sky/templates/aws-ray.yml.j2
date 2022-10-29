@@ -128,7 +128,7 @@ head_start_ray_commands:
   # NOTE: --disable-usage-stats in `ray start` saves 10 seconds of idle wait.
   # Line "which prlimit ..": increase the limit of the number of open files for the raylet process, as the `ulimit` may not take effect at this point, because it requires
   # all the sessions to be reloaded. This is a workaround.
-  - ((ps aux | grep "-m sky.skylet.skylet" | grep -q python3) || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
+  - ((ps aux | grep -v nohup | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);
     ray stop; ray start --disable-usage-stats --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml {{"--resources='%s'" % custom_resources if custom_resources}} || exit 1;
     which prlimit && for id in $(pgrep -f raylet/raylet); do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;
 
