@@ -1,7 +1,11 @@
 .. _tpu:
 
+=========
 Cloud TPU
-================================
+=========
+
+Overview
+========
 
 SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/tpu/docs/intro-to-tpu>`_.
 Two different TPU architectures are available on GCP:
@@ -13,7 +17,7 @@ Both are supported by SkyPilot. We recommend TPU VMs which is a newer architectu
 
 The two architectures differ as follows.
 For TPU VMs, you can directly SSH into the "TPU host" VM that is physically connected to the TPU device.
-For TPU Nodes, a user VM (`n1` instance) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
+For TPU Nodes, a user VM (e.g., `n1` instances) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
@@ -40,8 +44,11 @@ After the command has finished, you will be dropped into the host VM and can sta
 
 Below, we show examples of using SkyPilot to run MNIST training on (1) TPU VMs and (2) TPU Nodes.
 
+TPU Architectures
+=================
+
 TPU VMs
---------------------------------
+-------
 
 To use TPU VMs, set the following in a task YAML's ``resources`` field: 
 
@@ -110,9 +117,10 @@ You should see the following outputs when the job finishes.
 
 
 TPU Nodes
---------------------------------
+---------
 
-Different from TPU VM, a host CPU VM needs to be created together with a TPU node and configured correctly to connect with each other.
+In a TPU Node, a normal CPU VM (e.g., `n1` instance) needs to be provisioned to communicate with the TPU host/device.
+
 To use a TPU Node, set the following in a task YAML's ``resources`` field:
 
 .. code-block:: yaml
@@ -207,8 +215,8 @@ This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypil
 
 
 
-TPU Pods
---------------------------------
+Using TPU Pods
+==============
 
 A `TPU Pod <https://cloud.google.com/tpu/docs/training-on-tpu-pods>`_ is a collection of TPU devices connected by dedicated high-speed network interfaces for high-performance training.
 
@@ -227,7 +235,7 @@ To use a TPU Pod, simply change the ``accelerators`` field in the task YAML  (e.
 
    Both TPU architectures, TPU VMs and TPU Nodes, can be used with TPU Pods. The example below is based on TPU VMs.
 
-To show all available TPU Pods, run :code:`sky show-gpus`:
+To show all available TPU Pod types, run :code:`sky show-gpus` (more than 8 cores means Pods):
 
 .. code-block:: console
 
@@ -237,12 +245,20 @@ To show all available TPU Pods, run :code:`sky show-gpus`:
    tpu-v2-128   1
    tpu-v2-256   1
    tpu-v2-512   1
-   ...
+   tpu-v3-8     1
+   tpu-v3-32    1
+   tpu-v3-64    1
+   tpu-v3-128   1
+   tpu-v3-256   1
+   tpu-v3-512   1
+   tpu-v3-1024  1
+   tpu-v3-2048  1
 
-After creating a TPU Pod, multiple host VMs (e.g., :code:`v2-32` comes with 4 host VMs) will be ready.
-Normally user needs to SSH into all the hosts to setup environments and then launch the job on each host.
-SkyPilot automates such process for you. During :code:`sky launch`, all the setup/run commands will be executed on every host.
+After creating a TPU Pod, multiple host VMs (e.g., :code:`v2-32` comes with 4 host VMs) are launched.
+Normally, the user needs to SSH into all hosts (depending on the architecture used, either the ``n1`` User VMs or the TPU Host VMs) to prepare files and setup environments, and
+then launch the job on each host, which is a tedious and error-prone process.
 
+SkyPilot automates away this complexity. From your laptop, a single :code:`sky launch` command will perform workdir/file syncing, and then execute the setup/run commands on every host of the pod.
 Here is a task YAML for a cifar10 training job on a :code:`v2-32` TPU Pod with JAX (`code repo <https://github.com/infwinston/tpu-example>`_):
 
 .. code-block:: yaml
@@ -264,17 +280,26 @@ Here is a task YAML for a cifar10 training job on a :code:`v2-32` TPU Pod with J
    run: |
       python -u tpu-example/train.py
 
-Expected output from :code:`sky launch`:
+Launch it with:
 
 .. code-block:: console
 
    $ sky launch examples/tpu/cifar_pod.yaml -c mycluster
+
+You should see the following output.
+
+.. code-block:: console
+
    (node-0 pid=57977, ip=10.164.0.24) JAX process: 1 / 4
    (node-3 pid=57963, ip=10.164.0.26) JAX process: 3 / 4
    (node-2 pid=57922, ip=10.164.0.25) JAX process: 2 / 4
    (node-1 pid=63223) JAX process: 0 / 4
    ...
    (node-0 pid=57977, ip=10.164.0.24) [  1000/100000]      time  0.034 ( 0.063)    data  0.008 ( 0.008)    loss  1.215 ( 1.489)    acc 68.750 (46.163)
+
+.. note::
+
+   By default, outputs from all hosts will be displayed. You may use :code:`jax.process_index()` to determine which host to print messages.
 
 To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
