@@ -1006,7 +1006,7 @@ class S3Store(AbstractStore):
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
             with backend_utils.safe_console_status(
-                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                    f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '))
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
@@ -1251,7 +1251,7 @@ class GcsStore(AbstractStore):
 
         try:
             with backend_utils.safe_console_status(
-                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                    f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
                 remove_obj_command = ('gsutil -m rm -r'
                                       f' gs://{bucket_name}')
                 subprocess.check_output(remove_obj_command.split(' '),
