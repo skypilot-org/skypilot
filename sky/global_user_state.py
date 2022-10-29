@@ -566,7 +566,7 @@ def get_cost_for_usage_intervals(
     usage_intervals: List[Tuple[int, int]],
 ) -> float:
 
-    if not handle:
+    if handle is None:
         return 0
 
     total_duration = 0
