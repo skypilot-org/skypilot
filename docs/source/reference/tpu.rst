@@ -14,7 +14,7 @@ Both are supported by SkyPilot. We recommend TPU VMs which is a newer architectu
 
 The two architectures differ as follows.
 For TPU VMs, you can directly SSH into the "TPU host" VM that is physically connected to the TPU device.
-For TPU Nodes, a user VM (e.g., `n1` instances) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
+For TPU Nodes, a user VM (an `n1` instance) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
 For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 
