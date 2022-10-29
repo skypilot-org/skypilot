@@ -82,11 +82,13 @@ class Azure(clouds.Cloud):
         return 'Standard_D8_v4'
 
     def _get_image_config(self, gen_version, instance_type):
+        # az vm image list \
+        #  --publisher microsoft-dsvm --all --output table
         image_config = {
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',
             'image_sku': '2004-gen2',
-            'image_version': '21.11.04'
+            'image_version': '22.09.14'
         }
 
         # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80

@@ -110,15 +110,14 @@ class AWS(clouds.Cloud):
                 }
                 assert region_name in amis, region_name
                 return amis[region_name]
-        # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
+        # Deep Learning AMI GPU PyTorch 1.12.1 (Ubuntu 20.04) 20221025
         # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-        # Nvidia driver: 510.47.03, CUDA Version: 11.6
+        # Nvidia driver: , CUDA Version: 11.7
         amis = {
-            'us-east-1': 'ami-0729d913a335efca7',
-            'us-east-2': 'ami-070f4af81c19b41bf',
-            # This AMI is 20210623 as aws does not provide a newer one.
-            'us-west-1': 'ami-0b3c34d643904a734',
-            'us-west-2': 'ami-050814f384259894c',
+            'us-east-1': 'ami-0eb1f91977a3fcc1b',
+            'us-east-2': 'ami-0274a6db2e19b7cc6',
+            'us-west-1': 'ami-0fb299af41d32cfd3',
+            'us-west-2': 'ami-04ba15f9bd464eb20',
         }
         assert region_name in amis, region_name
         return amis[region_name]

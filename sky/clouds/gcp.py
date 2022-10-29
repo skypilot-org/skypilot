@@ -214,7 +214,10 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
+        # gcloud compute images list \
+        # --project deeplearning-platform-release \
+        # --no-standard-images
+        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20221026'
 
         r = resources
         # Find GPU spec, if any.
@@ -259,7 +262,7 @@ class GCP(clouds.Cloud):
                     image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
                 else:
                     # CUDA driver version 510.47.03, CUDA Library 11.6
-                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220806'
+                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20221026'
 
         if resources.image_id is not None:
             image_id = resources.image_id
