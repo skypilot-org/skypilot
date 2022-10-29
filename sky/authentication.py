@@ -369,3 +369,33 @@ def setup_azure_authentication(config):
     config['file_mounts'] = file_mounts
 
     return config
+
+def setup_ibm_authentication(config): # TODO IBM-TODO
+    def _is_pair(private_key_path, public_key_path):
+        try:
+            public_key_data = open(private_key_path, "r")
+            public_key_data = public_key_data[public_key_data.index(' ') + 1 : public_key_data.rindex(' ')]
+            private_from_public = subprocess.getoutput([f"ssh-keygen -y -f {public_key_path} | cut -d' ' -f 2"])
+        except Exception as e:
+            logger.error("Failed ssh keys comparison.\n", e)
+            return False
+        return public_key_data == private_from_public
+
+    config = copy.deepcopy(config)
+    private_key_path = config['auth'].get('ssh_private_key', None)
+    if private_key_path is None:
+        private_key_path = PRIVATE_SSH_KEY_PATH
+        config['auth']['ssh_private_key'] = private_key_path
+
+    private_key_path = os.path.expanduser(private_key_path)
+    public_key_path = get_public_key_path(private_key_path)
+
+    # if keys were valid we would get their data, otherwise, the keys will also be stored in PRIVATE_SSH_KEY_PATH
+    get_or_generate_keys(private_key_path, public_key_path)
+
+    if not _is_pair(private_key_path,public_key_path):
+        private_key_path = PRIVATE_SSH_KEY_PATH
+        config['auth']['ssh_private_key'] = private_key_path
+        get_or_generate_keys(private_key_path, public_key_path)
+
+    return config
