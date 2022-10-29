@@ -100,6 +100,7 @@ extras_require = {
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
     'azure': ['azure-cli==2.31.0', 'azure-core'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
+    'ibm':['ibm_cloud_sdk_core','ibm_vpc'],
     'docker': ['docker'],
 }
 
