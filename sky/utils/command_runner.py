@@ -68,6 +68,8 @@ def ssh_options_list(ssh_private_key: Optional[str],
         'ConnectTimeout': f'{timeout}s',
         # Agent forwarding for git.
         'ForwardAgent': 'yes',
+        # Disable loggings for ssh.
+        'LogLevel': 'QUIET',
     }
     if ssh_control_name is not None:
         arg_dict.update({
