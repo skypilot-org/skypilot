@@ -181,6 +181,9 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
 
    TPU node requires loading data from a GCS bucket, so we add a :code:`file_mounts` to create a new bucket.
    Check :ref:`SkyPilot Storage <sky-storage>` for more details.
+   If you encounter a bucket :code:`Permission denied` error,
+   make sure the bucket is created in the same region as the Host VM/TPU Nodes and IAM permission for Cloud TPU is
+   correctly setup (follow instructions `here <https://cloud.google.com/tpu/docs/storage-buckets#using_iam_permissions_for_alternative>`_).
 
 .. note::
    The environment variable :code:`$TPU_NAME` is automatically set by SkyPilot for connecting TPU devices.
