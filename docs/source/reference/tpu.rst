@@ -54,6 +54,7 @@ To use TPU VMs, set the following in a task YAML's ``resources`` field:
          runtime_version: tpu-vm-base  # optional
 
 The ``accelerators`` field specifies the TPU type, and the :code:`accelerator_args` dict includes the :code:`tpu_vm` bool (defaults to false, which means TPU Node is used), and an optional  TPU ``runtime_version`` field.
+To show what TPU types are supported, run :code:`sky show-gpus`.
 
 Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU VM using JAX.
 
@@ -90,7 +91,7 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
       --config.learning_rate=0.05 \
       --config.num_epochs=10
 
-This YAML lives under the SkyPilot repo (``examples/tpu/tpuvm_mnist.yaml``), or you can paste it into a local file.
+This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu>`_ (``examples/tpu/tpuvm_mnist.yaml``), or you can paste it into a local file.
 Launch it with:
 
 .. code-block:: console
@@ -122,7 +123,7 @@ To use a TPU Node, set the following in a task YAML's ``resources`` field:
          runtime_version: 2.5.0 # TPU software version to be used.
 
 The above YAML considers :code:`n1-highmem-8` as the host machine and :code:`tpu-v2-8` as the TPU node resource.
-You can modify the host instance type or the TPU type. To show what TPU types are supported, run :code:`sky show-gpus`.
+You can modify the host instance type or the TPU type.
 
 Here is a complete task YAML that runs `MNIST training <https://cloud.google.com/tpu/docs/run-calculation-jax#running_jax_code_on_a_tpu_vm>`_ on a TPU Node using TensorFlow.
 
@@ -184,11 +185,11 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
 .. note::
    The environment variable :code:`$TPU_NAME` is automatically set by SkyPilot for connecting TPU devices.
 
-With the above YAML, you should be able to launch the training job with :code:`sky launch`!
+This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu>`_ (``examples/tpu/tpu_node_mnist.yaml``). Launch it with:
 
 .. code-block:: console
 
-   $ sky launch mnist-tpu-node.yaml -c mycluster
+   $ sky launch examples/tpu/tpu_node_mnist.yaml  -c mycluster
    ...
    (mnist-tpu-node pid=28961) Epoch 9/10
    (mnist-tpu-node pid=28961) 58/58 [==============================] - 1s 19ms/step - loss: 0.1181 - sparse_categorical_accuracy: 0.9646 - val_loss: 0.0921 - val_sparse_categorical_accuracy: 0.9719
