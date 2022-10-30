@@ -4,7 +4,7 @@ from pathlib import Path
 from threading import RLock
 from uuid import uuid4
 
-from azure.identity import DefaultAzureCredential
+from azure.identity import AzureCliCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
@@ -65,12 +65,8 @@ class AzureNodeProvider(NodeProvider):
         _configure_resource_group({"provider": provider_config})
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
-        # AWS provides managed identity for Azure, but it is not setup properly by
-        # default. This interferes with azure-cli credentials and causes failures,
-        # when using sky to launch Azure on AWS ec2 instances. We disable it to give
-        # way to azure-cli credentials.
-        credential = DefaultAzureCredential(exclude_shared_token_cache_credential=True,
-                                            exclude_managed_identity_credential=True)
+        # Sky only supports Azure CLI credential for now.
+        credential = AzureCliCredential()
         self.compute_client = ComputeManagementClient(credential, subscription_id)
         self.network_client = NetworkManagementClient(credential, subscription_id)
         self.resource_client = ResourceManagementClient(credential, subscription_id)
@@ -164,7 +160,7 @@ class AzureNodeProvider(NodeProvider):
         """Return whether the specified node is terminated."""
         # always get current status
         node = self._get_node(node_id=node_id)
-        return node is None or node["status"].startswith("deallocat")
+        return node["status"].startswith("deallocat")
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
@@ -358,7 +354,7 @@ class AzureNodeProvider(NodeProvider):
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
-        return self.cached_nodes.get(node_id)
+        return self.cached_nodes[node_id]
 
     def _get_cached_node(self, node_id):
         if node_id in self.cached_nodes:
