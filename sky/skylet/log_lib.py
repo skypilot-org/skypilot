@@ -417,6 +417,7 @@ def tail_logs(job_owner: str,
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
 
+    start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
     if follow and status in [
             job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
     ]:
@@ -425,15 +426,19 @@ def tail_logs(job_owner: str,
         with open(log_path, 'r', newline='') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
-            for line in _follow_job_logs(
-                    log_file,
-                    job_id=job_id,
-                    start_streaming_at='INFO: Tip: use Ctrl-C to exit log'):
+            for line in _follow_job_logs(log_file,
+                                         job_id=job_id,
+                                         start_streaming_at=start_stream_at):
                 print(line, end='', flush=True)
     else:
         try:
+            start_stream = False
             with open(log_path, 'r') as f:
-                print(f.read())
+                for line in f.readlines():
+                    if start_stream_at in line:
+                        start_stream = True
+                    if start_stream:
+                        print(line, end='', flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

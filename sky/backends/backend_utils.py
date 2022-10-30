@@ -1997,9 +1997,11 @@ def kill_children_processes():
 # Handle ctrl-c
 def interrupt_handler(signum, frame):
     del signum, frame
-    logger.warning(f'{colorama.Style.DIM}The job will keep '
-                   f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     kill_children_processes()
+    # Avoid using logger here, as it will print the stack trace for broken
+    # pipe, when the output is piped to another program.
+    print(f'{colorama.Style.DIM}Tip: The job will keep '
+          f'running after Ctrl-C.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.KEYBOARD_INTERRUPT_CODE)
 
@@ -2007,9 +2009,11 @@ def interrupt_handler(signum, frame):
 # Handle ctrl-z
 def stop_handler(signum, frame):
     del signum, frame
-    logger.warning(f'{colorama.Style.DIM}The job will keep '
-                   f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     kill_children_processes()
+    # Avoid using logger here, as it will print the stack trace for broken
+    # pipe, when the output is piped to another program.
+    print(f'{colorama.Style.DIM}Tip: The job will keep '
+          f'running after Ctrl-Z.{colorama.Style.RESET_ALL}')
     with ux_utils.print_exception_no_traceback():
         raise KeyboardInterrupt(exceptions.SIGTSTP_CODE)
 
