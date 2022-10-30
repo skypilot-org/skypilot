@@ -84,12 +84,14 @@ class Azure(clouds.Cloud):
     def _get_image_config(self, gen_version, instance_type):
         # az vm image list \
         #  --publisher microsoft-dsvm --all --output table
-        # Does not support torch==1.13.0 with cu117
+        # nvidia-driver: 495.29.05, cuda: 11.5
+        # The latest image 2022.09.14/2022.08.11 has even older nvidia driver
+        # 470.57.02, cuda: 11.4
         image_config = {
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',
             'image_sku': '2004-gen2',
-            'image_version': '22.09.14'
+            'image_version': '21.11.04'
         }
 
         # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80
