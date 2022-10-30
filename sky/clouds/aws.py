@@ -112,7 +112,7 @@ class AWS(clouds.Cloud):
                 return amis[region_name]
         # Deep Learning AMI GPU PyTorch 1.12.1 (Ubuntu 20.04) 20221025
         # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-        # Nvidia driver: 510.47.03, CUDA Version: 11.6 (supports PyTorch 1.13.0)
+        # Nvidia driver: 510.47.03, CUDA Version: 11.6 (supports torch==1.13.0+cu117)
         amis = {
             'us-east-1': 'ami-0eb1f91977a3fcc1b',
             'us-east-2': 'ami-0274a6db2e19b7cc6',

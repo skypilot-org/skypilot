@@ -84,6 +84,7 @@ class Azure(clouds.Cloud):
     def _get_image_config(self, gen_version, instance_type):
         # az vm image list \
         #  --publisher microsoft-dsvm --all --output table
+        # Does not support torch==1.13.0+cu117
         image_config = {
             'image_publisher': 'microsoft-dsvm',
             'image_offer': 'ubuntu-2004',

@@ -13,7 +13,7 @@ setup: |
   git checkout v4.21.0
   pip3 install .
   cd examples/pytorch/text-classification
-  pip3 install -r requirements.txt torch==1.13.0+cu116
+  pip3 install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu116
 
 # The command to run.  Will be run under the working directory.
 run: |
