@@ -10,7 +10,7 @@ else
     conda create -n resnet python=3.7 -y
     conda activate resnet
 fi
-pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu113
+pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
 
 mkdir -p data
 mkdir -p saved_models
