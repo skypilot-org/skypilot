@@ -217,7 +217,6 @@ class GCP(clouds.Cloud):
         # gcloud compute images list \
         # --project deeplearning-platform-release \
         # --no-standard-images
-        # Does not support torch==1.13.0+cu117
         image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20221026'
 
         r = resources
@@ -263,6 +262,7 @@ class GCP(clouds.Cloud):
                     image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
                 else:
                     # CUDA driver version 510.47.03, CUDA Library 11.6
+                    # Does not support torch==1.13.0 with cu117
                     image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20221026'
 
         if resources.image_id is not None:
