@@ -164,7 +164,7 @@ class AzureNodeProvider(NodeProvider):
         """Return whether the specified node is terminated."""
         # always get current status
         node = self._get_node(node_id=node_id)
-        return node["status"].startswith("deallocat")
+        return node is None or node["status"].startswith("deallocat")
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
@@ -358,7 +358,7 @@ class AzureNodeProvider(NodeProvider):
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
-        return self.cached_nodes[node_id]
+        return self.cached_nodes.get(node_id)
 
     def _get_cached_node(self, node_id):
         if node_id in self.cached_nodes:
