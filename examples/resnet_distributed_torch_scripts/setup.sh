@@ -7,10 +7,10 @@ if [ $? -eq 0 ]; then
     echo "conda env exists"
 else
     echo "conda env does not exist"
-    conda create -n resnet python=3.6 -y
+    conda create -n resnet python=3.7 -y
     conda activate resnet
 fi
-pip install -r requirements.txt
+pip install -r requirements.txt torch==1.13.0+cu116
 
 mkdir -p data
 mkdir -p saved_models
