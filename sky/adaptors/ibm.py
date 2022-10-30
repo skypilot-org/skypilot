@@ -34,9 +34,8 @@ def client(**kwargs):
     """returns ibm vpc client"""
 
     if not client:
-        if not os.path.isfile(os.path.expanduser("~/.ibm/credentials")):
-            with open("~/.ibm/credentials") as f:
-                    base_config = yaml.safe_load(f)
+        with open("~/.ibm/credentials") as f:
+                base_config = yaml.safe_load(f)
         return ibm_vpc.VpcV1(authenticator=ibm_cloud_sdk_core.authenticators.IAMAuthenticator(base_config['iam_api_key']))
     else:
         return client
