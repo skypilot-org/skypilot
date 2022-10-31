@@ -258,6 +258,8 @@ class GCP(clouds.Cloud):
                         acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 if acc == 'K80':
+                    # Though the image is called cu113, it actually has later
+                    # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
                 else:
