@@ -3,6 +3,7 @@ import enum
 import os
 import subprocess
 import time
+from multiprocessing import pool
 from typing import Any, Dict, Optional, Tuple, Union, List
 import urllib.parse
 
@@ -31,6 +32,11 @@ STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 
 # Max number of objects a GCS bucket can be directly deleted with
 _GCS_RM_MAX_OBJS = 256
+
+# Maximum number of concurrent rsync upload processes
+_MAX_CONCURRENT_UPLOADS = 32
+
+
 
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     'Failed to connect to an existing bucket {name!r}.\n'
@@ -466,10 +472,11 @@ class Storage(object):
             basenames = [os.path.basename(s) for s in source_list]
             conflicts = {x for x in basenames if basenames.count(x) > 1}
             if conflicts:
-                raise exceptions.StorageSourceError(
-                    'Cannot have multiple files or directories with the same '
-                    'name in source. Conflicts found for: '
-                    f'{", ".join(conflicts)}')
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Cannot have multiple files or directories with the '
+                        'same name in source. Conflicts found for: '
+                        f'{", ".join(conflicts)}')
 
         def _validate_local_source(local_source):
             if local_source.endswith('/'):
@@ -1143,7 +1150,7 @@ class GcsStore(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                self.batch_gsutil_cp(self.source)
+                self.batch_gsutil_rsync(self.source, create_dirs=True)
             elif self.source is not None:
                 if self.source.startswith('gs://'):
                     pass
@@ -1152,7 +1159,7 @@ class GcsStore(AbstractStore):
                 else:
                     # If a single directory is specified in source, upload
                     # contents to root of bucket by suffixing /*.
-                    self.batch_gsutil_cp([self.source + '/*'])
+                    self.batch_gsutil_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -1166,61 +1173,108 @@ class GcsStore(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def batch_gsutil_cp(self, source_path_list: List[Path]) -> None:
+    def batch_gsutil_cp(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
         """Invokes gsutil cp -n to batch upload a list of local paths
 
         -n flag to gsutil cp checks the existence of an object before uploading,
         making it similar to gsutil rsync. Since it allows specification of a
         list of files, it is faster than calling gsutil rsync on each file.
-
-        Note that if the source_path list contains a directory, then the
-        directory is copied as is to the root of the bucket. To copy the
-        contents of directory to the root, add /* to the directory path
-        e.g., /mydir/*.
+        However, unlike rsync, files are compared based on just their filename,
+        and any updates to a file would not be copied to the bucket.
         """
-        copy_list = '\n'.join(
-            os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
-        sync_command = (f'echo "{copy_list}" | '
-                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
-
         # Generate message for upload
         if len(source_path_list) > 1:
             source_message = f'{len(source_path_list)} paths'
         else:
-            source_message = source_path_list[0].replace('/*', '')
+            source_message = source_path_list
+
+        # If the source_path list contains a directory, then gsutil cp -n
+        # copies the dir as is to the root of the bucket. To copy the
+        # contents of directory to the root, add /* to the directory path
+        # e.g., /mydir/*
+        source_path_list = [
+            str(path) + '/*' if (os.path.isdir(path) and not create_dirs)
+            else str(path) for path in source_path_list]
+        copy_list = '\n'.join(
+            os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
+        sync_command = (f'echo "{copy_list}" | '
+                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
         self._run_gsutil(sync_command, source_message)
 
-    def _run_gsutil(self, command: str, source_message: str):
+    def batch_gsutil_rsync(self,
+                           source_path_list: List[Path],
+                           create_dirs: bool = False) -> None:
+        """Invokes gsutil rsync to batch upload a list of local paths
+
+        Since gsutil rsync does not support include commands, We use negative
+        look-ahead regex to exclude everything else than the path(s) we want to
+        upload.
+
+        Since gsutil rsync does not support batch operations, we construct
+        multiple commands to be run in parallel.
+        """
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        # Generate gsutil rsync command for files and dirs
+        commands = []
+        grouped_files, dirs = data_utils.group_files_by_dir(source_path_list)
+        # Generate file upload commands
+        for dir_path, file_names in grouped_files.items():
+            sync_format = '|'.join(file_names)
+            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
+                            f'{dir_path} gs://{self.name}')
+            commands.append(sync_command)
+        # Generate dir upload commands
+        for dir_path in dirs:
+            if create_dirs:
+                dest_dir_name = os.path.basename(dir_path)
+            else:
+                dest_dir_name = ''
+            sync_command = (f'gsutil -m rsync -r {dir_path} '
+                            f'gs://{self.name}/{dest_dir_name}')
+            commands.append(sync_command)
+
+        # Run commands in parallel
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
-            with subprocess.Popen(command,
-                                  stderr=subprocess.PIPE,
-                                  stdout=subprocess.DEVNULL,
-                                  shell=True) as process:
-                stderr = []
-                while True:
-                    line = process.stderr.readline()
-                    if not line:
-                        break
-                    str_line = line.decode('utf-8')
-                    stderr.append(str_line)
-                    if 'AccessDeniedException' in str_line:
-                        process.kill()
-                        with ux_utils.print_exception_no_traceback():
-                            raise PermissionError(
-                                'Failed to upload files to '
-                                'GCS. The bucket does not have '
-                                'write permissions. It is possible that '
-                                'the bucket is public.')
-                returncode = process.wait()
-                if returncode != 0:
+            with pool.ThreadPool(processes=_MAX_CONCURRENT_UPLOADS) as p:
+                p.map(self._run_gsutil, commands)
+
+    def _run_gsutil(self, command: str):
+        with subprocess.Popen(command,
+                              stderr=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL,
+                              shell=True) as process:
+            stderr = []
+            while True:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                str_line = line.decode('utf-8')
+                stderr.append(str_line)
+                if 'AccessDeniedException' in str_line:
+                    process.kill()
                     with ux_utils.print_exception_no_traceback():
-                        stderr = '\n'.join(stderr)
-                        logger.error(stderr)
-                        raise exceptions.StorageUploadError(
-                            f'Upload to GCS failed for store {self.name}. '
-                            f'Please check logs.')
+                        raise PermissionError(
+                            'Failed to upload files to '
+                            'GCS. The bucket does not have '
+                            'write permissions. It is possible that '
+                            'the bucket is public.')
+            returncode = process.wait()
+            if returncode != 0:
+                with ux_utils.print_exception_no_traceback():
+                    stderr = '\n'.join(stderr)
+                    logger.error(stderr)
+                    raise exceptions.StorageUploadError(
+                        f'Upload to GCS failed for store {self.name}. '
+                        f'Please check logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):

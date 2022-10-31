@@ -1,6 +1,7 @@
 """Miscellaneous Utils for Sky Data
 """
-from typing import Any, Tuple
+import os
+from typing import Any, Dict, List, Tuple
 import urllib.parse
 
 from sky.adaptors import aws, gcp
@@ -69,3 +70,32 @@ def is_cloud_store_url(url):
     result = urllib.parse.urlsplit(url)
     # '' means non-cloud URLs.
     return result.netloc
+
+
+def group_files_by_dir(source_list: List[str]) -> Tuple[Dict[str, List[str]], List[str]]:
+    """Groups a list of paths based on their directory
+
+    Given a list of paths, generates a dict of {dir_name: List[file_name]}
+    which groups files with same dir, and a list of dirs in the source_list.
+
+    This is used to optimize uploads by reducing the number of calls to rsync.
+    E.g., ['a/b/c.txt', 'a/b/d.txt', 'a/e.txt'] will be grouped into
+    {'a/b': ['c.txt', 'd.txt'], 'a': ['e.txt']}, and these three files can be
+    uploaded in two rsync calls instead of three.
+
+    Args:
+        source_list: List[str]; List of paths to group
+    """
+    grouped_files = {}
+    dirs = []
+    for source in source_list:
+        source = os.path.abspath(os.path.expanduser(source))
+        if os.path.isdir(source):
+            dirs.append(source)
+        else:
+            base_path = os.path.dirname(source)
+            file_name = os.path.basename(source)
+            if base_path not in grouped_files:
+                grouped_files[base_path] = []
+            grouped_files[base_path].append(file_name)
+    return grouped_files, dirs
