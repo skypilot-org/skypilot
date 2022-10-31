@@ -1219,7 +1219,11 @@ class GcsStore(AbstractStore):
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         sync_command = (f'echo "{copy_list}" | '
                         f'gsutil -m cp -e -n -r -I gs://{self.name}')
-        self._run_gsutil(sync_command)
+
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Syncing '
+                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+            self._run_gsutil(sync_command)
 
     def batch_gsutil_rsync(self,
                            source_path_list: List[Path],
