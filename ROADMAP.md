@@ -1,13 +1,18 @@
 # SkyPilot Roadmap
 
+This doc lists general directions of interest to facilitate community contributions. 
+
+Note that
+- This list is not meant to be comprehensive (i.e., new work items of interest may pop up)
+- Even though listed under a specific version, not all items need to be completed before we ship that version (i.e., some items can go into future versions)
+
 ## v0.3
 
 ### Managed Spot
 - Minimize the cost of the controller
-  - Support spot controller on existing cluster (or local cluster)
+  - Support running spot controller on an existing/local cluster
   - Reducing the fixed cost of the controller (e.g., allow setting controller VM type)
-  - Increasing parallelism (number of concurrent jobs)
-- Pushing the scale (e.g., support a high number of pending/concurrent jobs)
+- Supporting a higher number of pending/concurrent jobs
 - Framework-specific guides to add checkpointing/reloading using SkyPilot Storage
 
 ### Smarter Optimizer
@@ -21,11 +26,13 @@
 - Refactor/extend the current API to *make it easy to programmatically use SkyPilot*
 - Expose core classes in docs
 
-### More clouds
+### Support more clouds
 - Refactoring of interfaces to ease adding new clouds
 - IBM Cloud
+- Explore support for low-cost clouds (e.g., lambda labs/runpod/jarvis labs)
 
 ### On-prem
+- Robustify the on-prem feature
 - Design for switching between cloud and on-prem
 - Explore/design of "local mode" to run SkyPilot tasks locally
 
