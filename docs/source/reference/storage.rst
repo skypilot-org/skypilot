@@ -4,7 +4,8 @@ SkyPilot Storage
 =================
 
 A SkyPilot Storage object represents an abstract data store containing large data
-files required by the task. Compared to file_mounts, storage is faster and
+files required by the task. Think of it as a bucket of files that can be attached
+to your task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
 Behind the scenes, storage automatically uploads all data in the source
 to a backing object store in a particular cloud (S3/GCS/Azure Blob).
@@ -174,6 +175,11 @@ and storage mounting:
     For mounts backed by SkyPilot Storage, symbolic links are not copied to remote.
     For mounts not using SkyPilot Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
+
+.. note::
+    Storage only supports uploading directories (i.e., :code:`source` cannot be a file).
+    To upload a single file to a bucket, please put in a directory and specify the directory as the source.
+    To directly copy a file to a VM, please use regular :ref:`file mounts <file-mounts-example>`.
 
 Creating a shared file system
 -----------------------------

@@ -11,7 +11,6 @@ import pytest
 import yaml
 
 from sky import cli
-from sky import exceptions
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 

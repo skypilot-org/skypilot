@@ -17,30 +17,29 @@ with sky.Dag() as dag:
 sky.launch(dag, cluster_name='hgs', detach_run=True)
 
 for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
-    with sky.Dag() as dag:
-        # To be filled in: {lr}.
-        run_format = f"""\
-            cd transformers/examples/pytorch/text-classification
-            python3 run_glue.py
-                --learning_rate {lr}
-                --output_dir /tmp/imdb-{lr}/
-                --model_name_or_path bert-base-cased
-                --dataset_name imdb
-                --do_train
-                --max_seq_length 128
-                --per_device_train_batch_size 32
-                --max_steps 50
-                --fp16 --overwrite_output_dir 2>&1 | tee run-{lr}.log'
-            """
+    # To be filled in: {lr}.
+    run_format = f"""\
+        cd transformers/examples/pytorch/text-classification
+        python3 run_glue.py
+            --learning_rate {lr}
+            --output_dir /tmp/imdb-{lr}/
+            --model_name_or_path bert-base-cased
+            --dataset_name imdb
+            --do_train
+            --max_seq_length 128
+            --per_device_train_batch_size 32
+            --max_steps 50
+            --fp16 --overwrite_output_dir 2>&1 | tee run-{lr}.log'
+        """
 
-        per_trial_resources = sky.Resources(accelerators={'V100': 1})
+    per_trial_resources = sky.Resources(accelerators={'V100': 1})
 
-        task = sky.Task(
-            # A descriptive name.
-            f'task-{lr}',
-            # Run command for each task, with different lr.
-            run=run_format.format(lr=lr)).set_resources(per_trial_resources)
+    task = sky.Task(
+        # A descriptive name.
+        f'task-{lr}',
+        # Run command for each task, with different lr.
+        run=run_format.format(lr=lr)).set_resources(per_trial_resources)
 
     # Set 'stream_logs=False' to not mix all tasks' outputs together.
     # Each task's output is redirected to run-{lr}.log and can be tail-ed.
-    sky.exec(dag, cluster_name='hgs', stream_logs=False, detach_run=True)
+    sky.exec(task, cluster_name='hgs', stream_logs=False, detach_run=True)

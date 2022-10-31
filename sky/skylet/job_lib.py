@@ -3,20 +3,23 @@
 This is a remote utility module that provides job queue functionality.
 """
 import enum
-import json
 import os
 import pathlib
 import shlex
 import time
+import typing
 from typing import Any, Dict, List, Optional
 
 import filelock
 
-from sky import constants
 from sky import sky_logging
-from sky.utils import subprocess_utils
+from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+
+if typing.TYPE_CHECKING:
+    from ray.dashboard.modules.job import pydantic_models as ray_pydantic
 
 logger = sky_logging.init_logger(__name__)
 
@@ -220,7 +223,7 @@ def get_status(job_id: int) -> Optional[JobStatus]:
         return get_status_no_lock(job_id)
 
 
-def get_statuses_json(job_ids: List[Optional[int]]) -> str:
+def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     # Per-job lock is not required here, since the staled job status will not
     # affect the caller.
     query_str = ','.join(['?'] * len(job_ids))
@@ -230,11 +233,11 @@ def get_statuses_json(job_ids: List[Optional[int]]) -> str:
     statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return json.dumps(statuses)
+    return common_utils.encode_payload(statuses)
 
 
-def load_statuses_json(statuses_json: str) -> Dict[int, JobStatus]:
-    statuses = json.loads(statuses_json)
+def load_statuses_payload(statuses_payload: str) -> Dict[int, JobStatus]:
+    statuses = common_utils.decode_payload(statuses_payload)
     for job_id, status in statuses.items():
         if status is not None:
             statuses[job_id] = JobStatus[status]
@@ -248,12 +251,12 @@ def get_latest_job_id() -> Optional[int]:
         return job_id
 
 
-def get_job_time(job_id: int, is_end: bool) -> Optional[int]:
+def get_job_time_payload(job_id: int, is_end: bool) -> Optional[int]:
     field = 'end_at' if is_end else 'start_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
-        return timestamp
+        return common_utils.encode_payload(timestamp)
 
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
@@ -332,7 +335,7 @@ def update_job_status(job_owner: str,
     we still need this to handle staleness problem, caused by instance
     restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==1.13.0.
+    This function should only be run on the remote instance with ray==2.0.1.
     """
     if len(job_ids) == 0:
         return []
@@ -342,13 +345,19 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    # In ray 1.13.0, job_client.list_jobs returns a dict of job_id to job_info,
-    # where job_info contains the job status (str).
-    ray_job_infos = job_client.list_jobs()
+    # In ray 2.0.1, job_client.list_jobs returns a list of JobDetails,
+    # which contains the job status (str) and submission_id (str).
+    job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
+
+    job_details = dict()
+    ray_job_ids_set = set(ray_job_ids)
+    for job_detail in job_detail_lists:
+        if job_detail.submission_id in ray_job_ids_set:
+            job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
-        if ray_job_id in ray_job_infos:
-            ray_status = ray_job_infos[ray_job_id].status
+        if ray_job_id in job_details:
+            ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
@@ -460,7 +469,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
 
 
 def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
-    """Get the job queue in json format.
+    """Get the job queue in encoded json format.
 
     Args:
         username: The username to show jobs for. Show all the users if None.
@@ -475,16 +484,16 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-    return json.dumps(jobs, indent=2)
+    return common_utils.encode_payload(jobs)
 
 
-def load_job_queue(json_str: str) -> List[Dict[str, Any]]:
-    """Load the job queue from json format.
+def load_job_queue(payload: str) -> List[Dict[str, Any]]:
+    """Load the job queue from encoded json format.
 
     Args:
-        json_str: The json string to load.
+        payload: The encoded payload string to load.
     """
-    jobs = json.loads(json_str)
+    jobs = common_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
     return jobs
@@ -503,21 +512,22 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     else:
         job_records = _get_jobs_by_ids(jobs)
 
-    jobs = [make_ray_job_id(job['job_id'], job_owner) for job in job_records]
     # TODO(zhwu): `job_client.stop_job` will wait for the jobs to be killed, but
     # when the memory is not enough, this will keep waiting.
     job_client = _create_ray_job_submission_client()
 
-    def stop_job(job: str):
+    # Sequentially cancel the jobs to avoid the resource number bug caused by
+    # ray cluster (tracked in #1262).
+    for job in job_records:
+        job_id = make_ray_job_id(job['job_id'], job_owner)
         try:
-            job_client.stop_job(job)
+            job_client.stop_job(job_id)
         except RuntimeError as e:
             # If the job does not exist or if the request to the
             # job server fails.
             logger.warning(str(e))
+            continue
 
-    subprocess_utils.run_in_parallel(stop_job, jobs)
-    for job in job_records:
         if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
@@ -535,7 +545,7 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     return run_timestamp
 
 
-def run_timestamp_with_globbing_json(
+def run_timestamp_with_globbing_payload(
         job_ids: List[Optional[str]]) -> Dict[str, str]:
     """Returns the relative paths to the log files for job with globbing."""
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
@@ -549,7 +559,7 @@ def run_timestamp_with_globbing_json(
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
-    return json.dumps(run_timestamps)
+    return common_utils.encode_payload(run_timestamps)
 
 
 class JobLibCodeGen:
@@ -604,8 +614,11 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def tail_logs(cls, job_owner: str, job_id: Optional[int],
-                  spot_job_id: Optional[int]) -> str:
+    def tail_logs(cls,
+                  job_owner: str,
+                  job_id: Optional[int],
+                  spot_job_id: Optional[int],
+                  follow: bool = True) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
@@ -613,7 +626,7 @@ class JobLibCodeGen:
             (f'log_dir = os.path.join({constants.SKY_LOGS_DIRECTORY!r}, '
              'run_timestamp)'),
             (f'log_lib.tail_logs({job_owner!r},'
-             f'job_id, log_dir, {spot_job_id!r})'),
+             f'job_id, log_dir, {spot_job_id!r}, follow={follow})'),
         ]
         return cls._build(code)
 
@@ -623,19 +636,19 @@ class JobLibCodeGen:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'job_statuses = job_lib.get_statuses_json(job_ids)',
+            'job_statuses = job_lib.get_statuses_payload(job_ids)',
             'print(job_statuses, flush=True)',
         ]
         return cls._build(code)
 
     @classmethod
-    def get_job_time(cls,
-                     job_id: Optional[int] = None,
-                     is_end: bool = False) -> str:
+    def get_job_time_payload(cls,
+                             job_id: Optional[int] = None,
+                             is_end: bool = False) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            f'job_time = job_lib.get_job_time(job_id, {is_end})',
+            f'job_time = job_lib.get_job_time_payload(job_id, {is_end})',
             'print(job_time, flush=True)',
         ]
         return cls._build(code)
@@ -646,7 +659,7 @@ class JobLibCodeGen:
         code = [
             f'job_ids = {job_ids} if {job_ids} is not None '
             'else [job_lib.get_latest_job_id()]',
-            'log_dirs = job_lib.run_timestamp_with_globbing_json(job_ids)',
+            'log_dirs = job_lib.run_timestamp_with_globbing_payload(job_ids)',
             'print(log_dirs, flush=True)',
         ]
         return cls._build(code)

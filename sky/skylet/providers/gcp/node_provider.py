@@ -1,16 +1,11 @@
-from typing import Dict
+import logging
+import time
 import copy
 from functools import wraps
 from threading import RLock
-import time
-import logging
+from typing import Dict, List, Tuple
 
 import googleapiclient
-
-from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
-                                 TAG_RAY_USER_NODE_TYPE)
-from ray.autoscaler._private.cli_logger import cli_logger, cf
 
 from sky.skylet.providers.gcp.config import (
     bootstrap_gcp,
@@ -18,20 +13,27 @@ from sky.skylet.providers.gcp.config import (
     get_node_type,
 )
 
+from ray.autoscaler.tags import (TAG_RAY_LAUNCH_CONFIG, TAG_RAY_NODE_KIND,
+                                 TAG_RAY_USER_NODE_TYPE)
+from ray.autoscaler._private.cli_logger import cf, cli_logger
+
+
 # The logic has been abstracted away here to allow for different GCP resources
 # (API endpoints), which can differ widely, making it impossible to use
 # the same logic for everything.
 from sky.skylet.providers.gcp.node import (  # noqa
-    GCPResource,
-    GCPNode,
     GCPCompute,
-    GCPTPU,
+    GCPNode,
     GCPNodeType,
+    GCPResource,
+    GCPTPU,
+    # Added by SkyPilot
     INSTANCE_NAME_MAX_LEN,
     INSTANCE_NAME_UUID_LEN,
     MAX_POLLS_STOP,
     POLL_INTERVAL,
 )
+from ray.autoscaler.node_provider import NodeProvider
 
 logger = logging.getLogger(__name__)
 
@@ -173,8 +175,14 @@ class GCPNodeProvider(NodeProvider):
             return ip
 
     @_retry
-    def create_node(self, base_config: dict, tags: dict, count: int) -> None:
+    def create_node(self, base_config: dict, tags: dict, count: int) -> Dict[str, dict]:
+        """Creates instances.
+
+        Returns dict mapping instance id to each create operation result for the created
+        instances.
+        """
         with self.lock:
+            result_dict = dict()
             labels = tags  # gcp uses "labels" instead of aws "tags"
             labels = dict(sorted(copy.deepcopy(labels).items()))
 
@@ -211,12 +219,16 @@ class GCPNodeProvider(NodeProvider):
                         "under `provider` in the cluster configuration."
                     )
                     for node_id in reuse_node_ids:
-                        resource.start_instance(node_id)
+                        result = resource.start_instance(node_id)
+                        result_dict[node_id] = {node_id: result}
                     for node_id in reuse_node_ids:
                         self.set_node_tags(node_id, tags)
                     count -= len(reuse_node_ids)
             if count:
-                resource.create_instances(base_config, labels, count)
+                results = resource.create_instances(base_config, labels, count)
+                result_dict.update({instance_id: result for result, instance_id in results})
+            return result_dict
+
 
     @_retry
     def terminate_node(self, node_id: str):

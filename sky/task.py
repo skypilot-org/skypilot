@@ -8,11 +8,14 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
+from sky import check
 from sky import clouds
+from sky import exceptions
+from sky import global_user_state
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
-from sky.data import data_transfer as data_transfer_lib
 from sky.data import data_utils
+from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -67,7 +70,7 @@ def _is_valid_env_var(name: str) -> bool:
 
 
 class Task:
-    """Task: a coarse-grained stage in an application."""
+    """Task: a computation to be run on the cloud."""
 
     def __init__(
         self,
@@ -83,36 +86,57 @@ class Task:
     ):
         """Initializes a Task.
 
-        All fields are optional.  `Task.run` is the actual program: either a
+        All fields are optional.  ``Task.run`` is the actual program: either a
         shell command to run (str) or a command generator for different nodes
         (lambda; see below).
 
-        Before executing a Task, it is required to call Task.set_resources() to
-        assign resource requirements to this task.
+        Optionally, call ``Task.set_resources()`` to set the resource
+        requirements for this task.  If not set, a default CPU-only requirement
+        is assumed (the same as ``sky cpunode``).
+
+        All setters of this class, ``Task.set_*()``, return ``self``, i.e.,
+        they are fluent APIs and can be chained together.
+
+        Example:
+            .. code-block:: python
+
+                # A Task that will sync up local workdir '.', containing
+                # requirements.txt and train.py.
+                sky.Task(setup='pip install requirements.txt',
+                         run='python train.py',
+                         workdir='.')
+
+                # An empty Task for provisioning a cluster.
+                task = sky.Task(num_nodes=n).set_resources(...)
+
+                # Chaining setters.
+                sky.Task().set_resources(...).set_file_mounts(...)
 
         Args:
-          name: A string name for the Task.
-          setup: A setup command, run under 'workdir' and before actually
-            executing the run command, 'run'.
-          run: Either a shell command (str) or a command generator (callable).
-            If latter, it must take a node rank and a list of node addresses as
-            input and return a shell command (str) (valid to return None for
-            some nodes, in which case no commands are run on them).  Commands
-            will be run under 'workdir'. Note the command generator should be
-            self-contained.
+          name: A string name for the Task for display purposes.
+          setup: A setup command, which will be run before executing the run
+            commands ``run``, and executed under ``workdir``.
+          run: The actual command for the task. If not None, either a shell
+            command (str) or a command generator (callable).  If latter, it
+            must take a node rank and a list of node addresses as input and
+            return a shell command (str) (valid to return None for some nodes,
+            in which case no commands are run on them).  Run commands will be
+            run under ``workdir``. Note the command generator should be a
+            self-contained lambda.
           envs: A dictionary of environment variables to set before running the
-            setup and run command.
-          workdir: The local working directory.  This directory and its files
-            will be synced to a location on the remote VM(s), and 'setup' and
-            'run' commands will be run under that location (thus, they can rely
-            on relative paths when invoking binaries).
+            setup and run commands.
+          workdir: The local working directory.  This directory will be synced
+            to a location on the remote VM(s), and ``setup`` and ``run``
+            commands will be run under that location (thus, they can rely on
+            relative paths when invoking binaries).
           num_nodes: The number of nodes to provision for this Task.  If None,
             treated as 1 node.  If > 1, each node will execute its own
-            setup/run command; 'run' can either be a str, meaning all nodes get
-            the same command, or a lambda, as documented above.
-          docker_image: The base docker image that this Task will be built on.
-            In effect when LocalDockerBackend is used.  Defaults to
-            'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
+            setup/run command, where ``run`` can either be a str, meaning all
+            nodes get the same command, or a lambda, with the semantics
+            documented above.
+          docker_image: (EXPERIMENTAL: Only in effect when LocalDockerBackend
+            is used.) The base docker image that this Task will be built on.
+            Defaults to 'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
         """
         self.name = name
         self.run = run
@@ -204,7 +228,21 @@ class Task:
                         f'a symlink to a directory). {self.workdir} not found.')
 
     @staticmethod
-    def from_yaml(yaml_path):
+    def from_yaml(yaml_path: str) -> 'Task':
+        """Initializes a task from a task YAML.
+
+        Example:
+            .. code-block:: python
+
+                task = sky.Task.from_yaml('/path/to/task.yaml')
+
+        Args:
+          yaml_path: file path to a valid task yaml file.
+
+        Raises:
+          ValueError: if the path gets loaded into a str instead of a dict; or
+            if there are any other parsing errors.
+        """
         with open(os.path.expanduser(yaml_path), 'r') as f:
             # TODO(zongheng): use
             #  https://github.com/yaml/pyyaml/issues/165#issuecomment-430074049
@@ -258,7 +296,13 @@ class Task:
             mount_path = storage[0]
             assert mount_path, \
                 'Storage mount path cannot be empty.'
-            storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+            try:
+                storage_obj = storage_lib.Storage.from_yaml_config(storage[1])
+            except exceptions.StorageSourceError as e:
+                # Patch the error message to include the mount path, if included
+                e.args = (e.args[0].replace('<destination_path>',
+                                            mount_path),) + e.args[1:]
+                raise e
             task_storage_mounts[mount_path] = storage_obj
         task.set_storage_mounts(task_storage_mounts)
 
@@ -286,8 +330,456 @@ class Task:
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
+    @property
+    def num_nodes(self) -> int:
+        return self._num_nodes
+
+    @property
+    def envs(self) -> Dict[str, str]:
+        return self._envs
+
+    def set_envs(
+            self, envs: Union[None, Tuple[Tuple[str, str]],
+                              Dict[str, str]]) -> 'Task':
+        """Sets the environment variables for use inside the setup/run commands.
+
+        Args:
+          envs: (optional) either a list of ``(env_name, value)`` or a dict
+            ``{env_name: value}``.
+
+        Returns:
+          self: The current task, with envs set.
+
+        Raises:
+          ValueError: if various invalid inputs errors are detected.
+        """
+        if envs is None:
+            self._envs = None
+            return self
+        if isinstance(envs, (list, tuple)):
+            keys = set(env[0] for env in envs)
+            if len(keys) != len(envs):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Duplicate env keys provided.')
+            envs = dict(envs)
+        if isinstance(envs, dict):
+            for key in envs:
+                if not isinstance(key, str):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError('Env keys must be strings.')
+                if not _is_valid_env_var(key):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Invalid env key: {key}')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'envs must be List[Tuple[str, str]] or Dict[str, str]: '
+                    f'{envs}')
+        self._envs = envs
+        return self
+
+    @property
+    def need_spot_recovery(self) -> bool:
+        return any(r.spot_recovery is not None for r in self.resources)
+
+    @num_nodes.setter
+    def num_nodes(self, num_nodes: Optional[int]) -> None:
+        if num_nodes is None:
+            num_nodes = 1
+        if not isinstance(num_nodes, int) or num_nodes <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'num_nodes should be a positive int. Got: {num_nodes}')
+        self._num_nodes = num_nodes
+
+    def set_inputs(self, inputs, estimated_size_gigabytes) -> 'Task':
+        # E.g., 's3://bucket', 'gs://bucket', or None.
+        self.inputs = inputs
+        self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
+        return self
+
+    def get_inputs(self):
+        return self.inputs
+
+    def get_estimated_inputs_size_gigabytes(self):
+        return self.estimated_inputs_size_gigabytes
+
+    def get_inputs_cloud(self):
+        """EXPERIMENTAL: Returns the cloud my inputs live in."""
+        assert isinstance(self.inputs, str), self.inputs
+        if self.inputs.startswith('s3:'):
+            return clouds.AWS()
+        elif self.inputs.startswith('gs:'):
+            return clouds.GCP()
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'cloud path not supported: {self.inputs}')
+
+    def set_outputs(self, outputs, estimated_size_gigabytes) -> 'Task':
+        self.outputs = outputs
+        self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
+        return self
+
+    def get_outputs(self):
+        return self.outputs
+
+    def get_estimated_outputs_size_gigabytes(self):
+        return self.estimated_outputs_size_gigabytes
+
+    def set_resources(
+        self, resources: Union['resources_lib.Resources',
+                               Set['resources_lib.Resources']]
+    ) -> 'Task':
+        """Sets the required resources to execute this task.
+
+        If this function is not called for a Task, default resource
+        requirements will be used (8 vCPUs).
+
+        Args:
+          resources: either a sky.Resources, or a set of them.  The latter case
+            is EXPERIMENTAL and indicates asking the optimizer to "pick the
+            best of these resources" to run this task.
+
+        Returns:
+          self: The current task, with resources set.
+        """
+        if isinstance(resources, sky.Resources):
+            resources = {resources}
+        self.resources = resources
+        return self
+
+    def get_resources(self):
+        return self.resources
+
+    def set_time_estimator(self, func: Callable[['sky.Resources'],
+                                                int]) -> 'Task':
+        """Sets a func mapping resources to estimated time (secs).
+
+        This is EXPERIMENTAL.
+        """
+        self.time_estimator_func = func
+        return self
+
+    def estimate_runtime(self, resources):
+        """Returns a func mapping resources to estimated time (secs).
+
+        This is EXPERIMENTAL.
+        """
+        if self.time_estimator_func is None:
+            raise NotImplementedError(
+                'Node [{}] does not have a cost model set; '
+                'call set_time_estimator() first'.format(self))
+        return self.time_estimator_func(resources)
+
+    def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
+        """Sets the file mounts for this task.
+
+        Useful for syncing datasets, dotfiles, etc.
+
+        File mounts are a dictionary: ``{remote_path: local_path/cloud URI}``.
+        Local (or cloud) files/directories will be synced to the specified
+        paths on the remote VM(s) where this Task will run.
+
+        Neither source or destimation paths can end with a slash.
+
+        Example:
+            .. code-block:: python
+
+                task.set_file_mounts({
+                    '~/.dotfile': '/local/.dotfile',
+                    # /remote/dir/ will contain the contents of /local/dir/.
+                    '/remote/dir': '/local/dir',
+                })
+
+        Args:
+          file_mounts: an optional dict of ``{remote_path: local_path/cloud
+            URI}``, where remote means the VM(s) on which this Task will
+            eventually run on, and local means the node from which the task is
+            launched.
+
+        Returns:
+          self: the current task, with file mounts set.
+
+        Raises:
+          ValueError: if input paths are invalid.
+        """
+        if file_mounts is None:
+            self.file_mounts = None
+            return self
+        for target, source in file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'File mount paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found: target={target} source={source}')
+            if data_utils.is_cloud_store_url(target):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'File mount destination paths cannot be cloud storage')
+            if not data_utils.is_cloud_store_url(source):
+                if not os.path.exists(
+                        os.path.abspath(os.path.expanduser(source))):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'File mount source {source!r} does not exist '
+                            'locally. To fix: check if it exists, and correct '
+                            'the path.')
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
+
+        self.file_mounts = file_mounts
+        return self
+
+    def update_file_mounts(self, file_mounts: Dict[str, str]) -> 'Task':
+        """Updates the file mounts for this task.
+
+        Different from set_file_mounts(), this function updates into the
+        existing file_mounts (calls ``dict.update()``), rather than
+        overwritting it.
+
+        This should be called before provisioning in order to take effect.
+
+        Example:
+            .. code-block:: python
+
+                task.update_file_mounts({
+                    '~/.config': '~/Documents/config',
+                    '/tmp/workdir': '/local/workdir/cnn-cifar10',
+                })
+
+        Args:
+          file_mounts: a dict of ``{remote_path: local_path/cloud URI}``, where
+            remote means the VM(s) on which this Task will eventually run on,
+            and local means the node from which the task is launched.
+
+        Returns:
+          self: the current task, with file mounts updated.
+
+        Raises:
+          ValueError: if input paths are invalid.
+        """
+        if self.file_mounts is None:
+            self.file_mounts = {}
+        self.file_mounts.update(file_mounts)
+        # For validation logic:
+        return self.set_file_mounts(self.file_mounts)
+
+    def set_storage_mounts(
+        self,
+        storage_mounts: Optional[Dict[str, storage_lib.Storage]],
+    ) -> 'Task':
+        """Sets the storage mounts for this task.
+
+        Storage mounts are a dictionary: ``{mount_path: sky.Storage object}``,
+        each of which mounts a sky.Storage object (a cloud object store bucket)
+        to a path inside the remote cluster.
+
+        A sky.Storage object can be created by uploading from a local directory
+        (setting ``source``), or backed by an existing cloud bucket (setting
+        ``name`` to the bucket name; or setting ``source`` to the bucket URI).
+
+        Example:
+            .. code-block:: python
+
+                task.set_storage_mounts({
+                    '/remote/imagenet/': sky.Storage(name='my-bucket',
+                                                     source='/local/imagenet'),
+                })
+
+        Args:
+          storage_mounts: an optional dict of ``{mount_path: sky.Storage
+            object}``, where mount_path is the path inside the remote VM(s)
+            where the Storage object will be mounted on.
+
+        Returns:
+          self: The current task, with storage mounts set.
+
+        Raises:
+          ValueError: if input paths are invalid.
+        """
+        if storage_mounts is None:
+            self.storage_mounts = None
+            return self
+        for target, _ in storage_mounts.items():
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
+
+            if data_utils.is_cloud_store_url(target):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Storage mount destination path cannot be cloud storage'
+                    )
+        # Storage source validation is done in Storage object
+        self.storage_mounts = storage_mounts
+        return self
+
+    def update_storage_mounts(
+            self, storage_mounts: Dict[str, storage_lib.Storage]) -> 'Task':
+        """Updates the storage mounts for this task.
+
+        Different from set_storage_mounts(), this function updates into the
+        existing storage_mounts (calls ``dict.update()``), rather than
+        overwritting it.
+
+        This should be called before provisioning in order to take effect.
+
+        Args:
+          storage_mounts: an optional dict of ``{mount_path: sky.Storage
+            object}``, where mount_path is the path inside the remote VM(s)
+            where the Storage object will be mounted on.
+
+        Returns:
+          self: The current task, with storage mounts updated.
+
+        Raises:
+          ValueError: if input paths are invalid.
+        """
+        if not storage_mounts:
+            return self
+        task_storage_mounts = self.storage_mounts if self.storage_mounts else {}
+        task_storage_mounts.update(storage_mounts)
+        return self.set_storage_mounts(task_storage_mounts)
+
+    def get_preferred_store_type(self) -> storage_lib.StoreType:
+        # TODO(zhwu, romilb): The optimizer should look at the source and
+        #  destination to figure out the right stores to use. For now, we
+        #  use a heuristic solution to find the store type by the following
+        #  order:
+        #  1. cloud decided in best_resources.
+        #  2. cloud specified in the task resources.
+        #  3. the first enabled cloud.
+        # This should be refactored and moved to the optimizer.
+        assert len(self.resources) == 1, self.resources
+        storage_cloud = None
+        if self.best_resources is not None:
+            storage_cloud = self.best_resources.cloud
+        else:
+            resources = list(self.resources)[0]
+            storage_cloud = resources.cloud
+            if storage_cloud is None:
+                # Get the first enabled cloud.
+                enabled_clouds = global_user_state.get_enabled_clouds()
+                if len(enabled_clouds) == 0:
+                    check.check(quiet=True)
+                    enabled_clouds = global_user_state.get_enabled_clouds()
+                if len(enabled_clouds) == 0:
+                    raise ValueError('No enabled clouds.')
+
+                for cloud in storage_lib.STORE_ENABLED_CLOUDS:
+                    for enabled_cloud in enabled_clouds:
+                        if cloud.is_same_cloud(enabled_cloud):
+                            storage_cloud = cloud
+                            break
+        if storage_cloud is None:
+            raise ValueError('No available cloud to mount storage.')
+        store_type = storage_lib.get_storetype_from_cloud(storage_cloud)
+        return store_type
+
+    def sync_storage_mounts(self) -> None:
+        """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
+
+        After syncing up, COPY-mode storage mounts are translated into regular
+        file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
+        }``.
+        """
+        for storage in self.storage_mounts.values():
+            if len(storage.stores) == 0:
+                store_type = self.get_preferred_store_type()
+                self.storage_plans[storage] = store_type
+                storage.add_store(store_type)
+            else:
+                # We will download the first store that is added to remote.
+                self.storage_plans[storage] = list(storage.stores.keys())[0]
+
+        storage_mounts = self.storage_mounts
+        storage_plans = self.storage_plans
+        for mnt_path, storage in storage_mounts.items():
+            if storage.mode == storage_lib.StorageMode.COPY:
+                store_type = storage_plans[storage]
+                if store_type is storage_lib.StoreType.S3:
+                    # TODO: allow for Storage mounting of different clouds
+                    if storage.source is not None and storage.source.startswith(
+                            's3://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 's3://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.GCS:
+                    if storage.source.startswith('gs://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'gs://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
+                elif store_type is storage_lib.StoreType.AZURE:
+                    # TODO when Azure Blob is done: sync ~/.azure
+                    assert False, 'TODO: Azure Blob not mountable yet'
+                else:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(f'Storage Type {store_type} '
+                                         'does not exist!')
+
+    def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
+        """Returns file mounts of the form (dst=VM path, src=local path).
+
+        Any cloud object store URIs (gs://, s3://, etc.), either as source or
+        destination, are not included.
+
+        INTERNAL: this method is internal-facing.
+        """
+        if self.file_mounts is None:
+            return None
+        d = {}
+        for k, v in self.file_mounts.items():
+            if not data_utils.is_cloud_store_url(
+                    k) and not data_utils.is_cloud_store_url(v):
+                d[k] = v
+        return d
+
+    def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
+        """Returns file mounts of the form (dst=VM path, src=cloud URL).
+
+        Local-to-remote file mounts are excluded (handled by
+        get_local_to_remote_file_mounts()).
+
+        INTERNAL: this method is internal-facing.
+        """
+        if self.file_mounts is None:
+            return None
+        d = {}
+        for k, v in self.file_mounts.items():
+            if not data_utils.is_cloud_store_url(
+                    k) and data_utils.is_cloud_store_url(v):
+                d[k] = v
+        return d
+
     def to_yaml_config(self) -> Dict[str, Any]:
-        """Returns a yaml-style dict representation of the task."""
+        """Returns a yaml-style dict representation of the task.
+
+        INTERNAL: this method is internal-facing.
+        """
         config = dict()
 
         def add_if_not_none(key, value):
@@ -326,306 +818,6 @@ class Task:
                 for mount_path, storage in self.storage_mounts.items()
             })
         return config
-
-    @property
-    def num_nodes(self) -> int:
-        return self._num_nodes
-
-    @property
-    def envs(self) -> Dict[str, str]:
-        return self._envs
-
-    def set_envs(self, envs: Union[None, Tuple[Tuple[str, str]], Dict[str,
-                                                                      str]]):
-        if envs is None:
-            self._envs = None
-            return
-        if isinstance(envs, (list, tuple)):
-            keys = set(env[0] for env in envs)
-            if len(keys) != len(envs):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Duplicate env keys provided.')
-            envs = dict(envs)
-        if isinstance(envs, dict):
-            for key in envs:
-                if not isinstance(key, str):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError('Env keys must be strings.')
-                if not _is_valid_env_var(key):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Invalid env key: {key}')
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'envs must be List[Tuple[str, str]] or Dict[str, str]: '
-                    f'{envs}')
-        self._envs = envs
-
-    @property
-    def need_spot_recovery(self) -> bool:
-        return any(r.spot_recovery is not None for r in self.resources)
-
-    @num_nodes.setter
-    def num_nodes(self, num_nodes: Optional[int]) -> None:
-        if num_nodes is None:
-            num_nodes = 1
-        if not isinstance(num_nodes, int) or num_nodes <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'num_nodes should be a positive int. Got: {num_nodes}')
-        self._num_nodes = num_nodes
-
-    # E.g., 's3://bucket', 'gs://bucket', or None.
-    def set_inputs(self, inputs, estimated_size_gigabytes):
-        self.inputs = inputs
-        self.estimated_inputs_size_gigabytes = estimated_size_gigabytes
-        return self
-
-    def get_inputs(self):
-        return self.inputs
-
-    def get_estimated_inputs_size_gigabytes(self):
-        return self.estimated_inputs_size_gigabytes
-
-    def get_inputs_cloud(self):
-        """Returns the cloud my inputs live in."""
-        assert isinstance(self.inputs, str), self.inputs
-        if self.inputs.startswith('s3:'):
-            return clouds.AWS()
-        elif self.inputs.startswith('gs:'):
-            return clouds.GCP()
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'cloud path not supported: {self.inputs}')
-
-    def set_outputs(self, outputs, estimated_size_gigabytes):
-        self.outputs = outputs
-        self.estimated_outputs_size_gigabytes = estimated_size_gigabytes
-        return self
-
-    def get_outputs(self):
-        return self.outputs
-
-    def get_estimated_outputs_size_gigabytes(self):
-        return self.estimated_outputs_size_gigabytes
-
-    def set_resources(self, resources: Union['resources_lib.Resources',
-                                             Set['resources_lib.Resources']]):
-        """Sets the required resources to execute this task.
-
-        Args:
-          resources: either a sky.Resources, or a set of them.  The latter case
-            indicates the user intent "pick any one of these resources" to run
-            a task.
-        """
-        if isinstance(resources, sky.Resources):
-            resources = {resources}
-        self.resources = resources
-        return self
-
-    def get_resources(self):
-        return self.resources
-
-    def set_time_estimator(self, func):
-        """Sets a func mapping resources to estimated time (secs)."""
-        self.time_estimator_func = func
-        return self
-
-    def estimate_runtime(self, resources):
-        """Returns a func mapping resources to estimated time (secs)."""
-        if self.time_estimator_func is None:
-            raise NotImplementedError(
-                'Node [{}] does not have a cost model set; '
-                'call set_time_estimator() first'.format(self))
-        return self.time_estimator_func(resources)
-
-    def set_storage_mounts(
-        self,
-        storage_mounts: Optional[Dict[str, storage_lib.Storage]],
-    ):
-        """Sets the storage mounts for this Task
-
-        Advanced method for users. Storage mounts map a mount path on the Cloud
-        VM to a Storage object (see data/storage.py). The storage object can be
-        from a local folder or from an existing cloud bucket.
-
-        Example:
-            task.set_storage_mounts({
-                '/tmp/imagenet/': \
-                Storage(name='imagenet', source='s3://imagenet-bucket'):
-            })
-
-        Args:
-            storage_mounts: a dict of {mount_path: Storage}, where mount_path
-            is the path on the Cloud VM where the Storage object will be
-            mounted on
-        """
-        if storage_mounts is None:
-            self.storage_mounts = None
-            return self
-        for target, _ in storage_mounts.items():
-            if data_utils.is_cloud_store_url(target):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Storage mount destination path cannot be cloud storage'
-                    )
-        # Storage source validation is done in Storage object
-
-        self.storage_mounts = storage_mounts
-        return self
-
-    def add_storage_mounts(self) -> None:
-        """Adds storage mounts to the Task."""
-        # TODO(romilb): The optimizer should look at the source and destination
-        #  to figure out the right stores to use. For now, we hardcode
-        #  storage_plans to AWS as the optimal plan.
-        for storage in self.storage_mounts.values():
-            if len(storage.stores) == 0:
-                self.storage_plans[storage] = storage_lib.StoreType.S3
-                storage.add_store(storage_lib.StoreType.S3)
-            else:
-                # We will download the first store that is added to remote.
-                self.storage_plans[storage] = list(storage.stores.keys())[0]
-
-        storage_mounts = self.storage_mounts
-        storage_plans = self.storage_plans
-        for mnt_path, storage in storage_mounts.items():
-            if storage.mode == storage_lib.StorageMode.COPY:
-                store_type = storage_plans[storage]
-                if store_type is storage_lib.StoreType.S3:
-                    # TODO: allow for Storage mounting of different clouds
-                    if storage.source is not None and storage.source.startswith(
-                            's3://'):
-                        blob_path = storage.source
-                    else:
-                        blob_path = 's3://' + storage.name
-                    self.update_file_mounts({
-                        mnt_path: blob_path,
-                    })
-                elif store_type is storage_lib.StoreType.GCS:
-                    # Remember to run `gcloud auth application-default login`
-                    self.setup = (
-                        '([[ -z $GOOGLE_APPLICATION_CREDENTIALS ]] && '
-                        'echo GOOGLE_APPLICATION_CREDENTIALS='
-                        f'{data_transfer_lib.DEFAULT_GCS_CREDENTIALS_PATH} '
-                        f'>> ~/.bashrc || true); {self.setup or "true"}')
-                    if storage.source.startswith('gs://'):
-                        blob_path = storage.source
-                    else:
-                        blob_path = 'gs://' + storage.name
-                    self.update_file_mounts({
-                        mnt_path: blob_path,
-                    })
-                elif store_type is storage_lib.StoreType.AZURE:
-                    # TODO when Azure Blob is done: sync ~/.azure
-                    assert False, 'TODO: Azure Blob not mountable yet'
-                else:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(f'Storage Type {store_type} '
-                                         'does not exist!')
-
-    def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> None:
-        """Sets the file mounts for this Task.
-
-        File mounts are a dictionary of { remote_path: local_path/cloud URI }.
-        Local (or cloud) files/directories will be synced to the specified
-        paths on the remote VM(s) where this Task will run.
-
-        Used for syncing datasets, dotfiles, etc.
-
-        Paths cannot end with a slash (for clarity).
-
-        Example:
-
-            task.set_file_mounts({
-                '~/.dotfile': '/local/.dotfile',
-                # /remote/dir/ will contain the contents of /local/dir/.
-                '/remote/dir': '/local/dir',
-            })
-
-        Args:
-          file_mounts: either None or a dict of { remote_path: local_path/cloud
-            URI }, where remote is the VM on which this Task will eventually
-            run on, and local is the node from which the task is launched.
-        """
-        if file_mounts is None:
-            self.file_mounts = None
-            return self
-        for target, source in file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
-            if data_utils.is_cloud_store_url(target):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount destination paths cannot be cloud storage')
-            if not data_utils.is_cloud_store_url(source):
-                if not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'File mount source {source!r} does not exist '
-                            'locally. To fix: check if it exists, and correct '
-                            'the path.')
-
-        self.file_mounts = file_mounts
-        return self
-
-    def update_file_mounts(self, file_mounts: Dict[str, str]):
-        """Updates the file mounts for this Task.
-
-        This should be run before provisioning.
-
-        Example:
-
-            task.update_file_mounts({
-                '~/.config': '~/Documents/config',
-                '/tmp/workdir': '/local/workdir/cnn-cifar10',
-            })
-
-        Args:
-          file_mounts: a dict of { remote_path: local_path }, where remote is
-            the VM on which this Task will eventually run on, and local is the
-            node from which the task is launched.
-        """
-        if self.file_mounts is None:
-            self.file_mounts = {}
-        self.file_mounts.update(file_mounts)
-        # For validation logic:
-        return self.set_file_mounts(self.file_mounts)
-
-    def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
-        """Returns file mounts of the form (dst=VM path, src=local path).
-
-        Any cloud object store URLs (gs://, s3://, etc.), either as source or
-        destination, are not included.
-        """
-        if self.file_mounts is None:
-            return None
-        d = {}
-        for k, v in self.file_mounts.items():
-            if not data_utils.is_cloud_store_url(
-                    k) and not data_utils.is_cloud_store_url(v):
-                d[k] = v
-        return d
-
-    def get_cloud_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
-        """Returns file mounts of the form (dst=VM path, src=cloud URL).
-
-        Local-to-remote file mounts are excluded (handled by
-        get_local_to_remote_file_mounts()).
-        """
-        if self.file_mounts is None:
-            return None
-        d = {}
-        for k, v in self.file_mounts.items():
-            if not data_utils.is_cloud_store_url(
-                    k) and data_utils.is_cloud_store_url(v):
-                d[k] = v
-        return d
 
     def __rshift__(self, b):
         sky.dag.get_current_dag().add_edge(self, b)

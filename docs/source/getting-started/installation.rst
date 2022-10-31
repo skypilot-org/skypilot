@@ -151,3 +151,30 @@ Finally, you can stop the container with:
 .. code-block:: console
 
   $ docker stop sky
+
+.. _shell-completion:
+
+Enabling shell completion
+-------------------------
+
+SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).
+
+To enable shell completion after installing SkyPilot, you will need to modify your shell configuration.
+SkyPilot automates this process using the :code:`--install-shell-completion` option, which you should call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: console
+
+  $ sky --install-shell-completion auto
+  $ # sky --install-shell-completion zsh
+  $ # sky --install-shell-completion bash
+  $ # sky --install-shell-completion fish
+
+Shell completion may perform poorly on certain shells and machines.
+If you experience any issues after installation, you can use the :code:`--uninstall-shell-completion` option to uninstall it, which you should similarly call using the appropriate shell name or :code:`auto`:
+
+.. code-block:: console
+
+  $ sky --uninstall-shell-completion auto
+  $ # sky --uninstall-shell-completion zsh
+  $ # sky --uninstall-shell-completion bash
+  $ # sky --uninstall-shell-completion fish
