@@ -10,7 +10,7 @@ with sky.Dag() as dag:
     setup = 'echo \"alias python=python3\" >> ~/.bashrc && pip3 install --upgrade pip && \
       [ -d pytorch-distributed-resnet ] || \
       (git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet && \
-      cd pytorch-distributed-resnet && pip3 install -r requirements.txt && \
+      cd pytorch-distributed-resnet && pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113 && \
       mkdir -p data  && mkdir -p saved_models && cd data && \
       wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz && \
       tar -xvzf cifar-10-python.tar.gz)'
