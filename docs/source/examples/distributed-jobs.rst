@@ -38,15 +38,15 @@ For example, here is a simple PyTorch Distributed training example:
 In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
 nodes. The :code:`setup` and :code:`run` commands are executed on both nodes.
 
-SkyPilot exposes two environment variables to distinguish per-node commands:
+SkyPilot exposes these environment variables that can be accessed in a task's ``run`` commands:
 
 - :code:`SKY_NODE_RANK`: rank (an integer ID from 0 to :code:`num_nodes-1`) of
-  the node executing the task
+  the node executing the task.
 - :code:`SKY_NODE_IPS`: a string of IP addresses of the nodes reserved to execute
   the task, where each line contains one IP address.
 
   You can retrieve the number of nodes by :code:`echo "$SKY_NODE_IPS" | wc -l`
   and the IP address of the third node by :code:`echo "$SKY_NODE_IPS" | sed -n
   3p`.
-- :code:`SKY_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node (the same
-  for all nodes scheduled for the task).
+- :code:`SKY_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
+  task; rounded to the smallest integer larger than the count in accelerators: <name>:<count>

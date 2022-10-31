@@ -3,6 +3,7 @@ import ast
 import enum
 import getpass
 import inspect
+import math
 import json
 import os
 import pathlib
@@ -378,7 +379,7 @@ class RayCodeGen:
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
-            sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {num_gpus!r}
+            sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
             sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
