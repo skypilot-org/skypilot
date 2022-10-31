@@ -10,7 +10,7 @@ SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/
 Free TPUs via TPU Research Cloud (TRC)
 ======================================
 
-ML researchers are encouraged to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program!
+ML researchers and students are encouraged to apply for free TPU access through `TPU Research Cloud (TRC) <https://sites.research.google/trc/about/>`_ program!
 
 
 Getting TPUs in one command
