@@ -275,22 +275,22 @@ class RayCodeGen:
                 @ray.remote
                 def check_ip():
                     return ray.util.get_node_ip_address()
-                ip_list = ray.get([
+                gang_scheduling_id_to_ip = ray.get([
                     check_ip.options(num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND},
                                      placement_group=pg,
                                      placement_group_bundle_index=i).remote()
                     for i in range(pg.bundle_count)
                 ])
-                print('INFO: Reserved IPs:', ip_list)
+                print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
-                if {cluster_ips_sorted!r}:
+                if {cluster_ips_sorted!r} is not None:
                     cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_ips_sorted!r})}}
-                    ip_rank_list = sorted(ip_list, key=cluster_ips_map.get)
+                    ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
                     ip_list_str = '\\n'.join(ip_rank_list)
                 else:
-                    ip_rank_map = {{ip: i for i, ip in enumerate(ip_list)}}
-                    ip_list_str = '\\n'.join(ip_list)
+                    ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
+                    ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
 
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
@@ -371,12 +371,12 @@ class RayCodeGen:
             textwrap.dedent(f"""\
         script = {bash_script!r}
         if run_fn is not None:
-            script = run_fn({gang_scheduling_id}, ip_list)
+            script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
-            ip = ip_list[{gang_scheduling_id!r}]
+            ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
             sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
