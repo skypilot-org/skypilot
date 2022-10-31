@@ -230,14 +230,17 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
     spot_status = spot_state.get_status(job_id)
-    while not spot_status.is_terminal():
+    while spot_status is None or not spot_status.is_terminal():
         handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         # Check the handle: The cluster can be removed from the table before the
         # spot state is updated by the controller. In this case, we should skip
         # the logging, and wait for the next round of status check.
         if handle is None or spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'INFO: The log is not ready yet, as the spot job '
-                        f'is {spot_status.value}. '
+            status_help_str = ''
+            if (spot_status is not None and
+                    spot_status != spot_state.SpotStatus.RUNNING):
+                status_help_str = f', as the spot job is {spot_status.value}'
+            logger.info(f'INFO: The log is not ready yet{status_help_str}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
