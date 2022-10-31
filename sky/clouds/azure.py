@@ -85,7 +85,7 @@ class Azure(clouds.Cloud):
         # az vm image list \
         #  --publisher microsoft-dsvm --all --output table
         # nvidia-driver: 495.29.05, cuda: 11.5
-        
+
         # The latest image 2022.09.14/2022.08.11/22.06.10/22.05.11/
         # 22.04.27/22.04.05 has even older nvidia driver 470.57.02,
         # cuda: 11.4
