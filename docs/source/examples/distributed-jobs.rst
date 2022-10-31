@@ -20,8 +20,9 @@ For example, here is a simple PyTorch Distributed training example:
   setup: |
     pip3 install --upgrade pip
     git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet
+    cd pytorch-distributed-resnet
     # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
-    cd pytorch-distributed-resnet && pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+    pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     mkdir -p data  && mkdir -p saved_models && cd data && \
       wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
     tar -xvzf cifar-10-python.tar.gz
