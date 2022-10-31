@@ -296,7 +296,9 @@ def test_job_queue():
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
             f'sky cancel {name} 3',
             f'sky exec {name} --gpus K80:0.2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus K80:1 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
     )
@@ -321,8 +323,10 @@ def test_n_node_job_queue():
             f'sky cancel {name} 3',
             f'sky exec {name} --gpus K80:0.2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus K80:0.2 --num-nodes 2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus K80:1 --num-nodes 2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
         ],
         f'sky down -y {name}',
     )
