@@ -13,7 +13,7 @@ For example, here is a simple PyTorch Distributed training example:
   name: resnet-distributed-app
 
   resources:
-    accelerators: V100
+    accelerators: V100:4
 
   num_nodes: 2
 
@@ -30,7 +30,7 @@ For example, here is a simple PyTorch Distributed training example:
 
     num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
     master_addr=`echo "$SKY_NODE_IPS" | head -n1`
-    python3 -m torch.distributed.launch --nproc_per_node=1 \
+    python3 -m torch.distributed.launch --nproc_per_node=$SKY_NUM_GPUS_PER_NODE \
       --nnodes=$num_nodes --node_rank=${SKY_NODE_RANK} --master_addr=$master_addr \
       --master_port=8008 resnet_ddp.py --num_epochs 20
 
@@ -47,3 +47,5 @@ SkyPilot exposes two environment variables to distinguish per-node commands:
   You can retrieve the number of nodes by :code:`echo "$SKY_NODE_IPS" | wc -l`
   and the IP address of the third node by :code:`echo "$SKY_NODE_IPS" | sed -n
   3p`.
+- :code:`SKY_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node (the same
+  for all nodes scheduled for the task).

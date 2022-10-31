@@ -326,17 +326,19 @@ class RayCodeGen:
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
+        num_gpus = 0
         num_gpus_str = ''
         if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
+            num_gpus = list(ray_resources_dict.values())[0]
             resources_str = f', resources={json.dumps(ray_resources_dict)}'
 
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
+            num_gpus_str = f', num_gpus={num_gpus}'
             # `num_gpus` should be empty when the accelerator is not GPU.
             # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]
@@ -364,6 +366,7 @@ class RayCodeGen:
 
         if script is not None:
             sky_env_vars_dict['SKY_NODE_RANK'] = {gang_scheduling_id!r}
+            sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {num_gpus!r}
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
