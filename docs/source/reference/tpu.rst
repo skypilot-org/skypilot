@@ -4,18 +4,7 @@
 Cloud TPU
 =========
 
-SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/tpu/docs/intro-to-tpu>`_.
-Two different TPU architectures are available on GCP:
-
-- `TPU VMs <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
-- `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
-
-Both are supported by SkyPilot. We recommend TPU VMs which is a newer architecture encouraged by GCP.
-
-The two architectures differ as follows.
-For TPU VMs, you can directly SSH into the "TPU host" VM that is physically connected to the TPU device.
-For TPU Nodes, a user VM (an `n1` instance) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
-For more details please refer to GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
+SkyPilot supports running jobs on Google's `Cloud TPU <https://cloud.google.com/tpu>`_, a specialized hardware accelerator for ML workloads.
 
 
 Free TPUs via TPU Research Cloud (TRC)
@@ -43,6 +32,18 @@ Below, we show examples of using SkyPilot to run MNIST training on (1) TPU VMs a
 
 TPU Architectures
 =================
+
+Two different TPU architectures are available on GCP:
+
+- `TPU VMs <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-vm>`_
+- `TPU Nodes <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-node>`_
+
+Both are supported by SkyPilot. We recommend TPU VMs which is a newer architecture encouraged by GCP.
+
+The two architectures differ as follows.
+For TPU VMs, you can directly SSH into the "TPU host" VM that is physically connected to the TPU device.
+For TPU Nodes, a user VM (an `n1` instance) must be separately provisioned to communicate with an inaccessible TPU host over gRPC.
+More details can be found on GCP `documentation <https://cloud.google.com/tpu/docs/system-architecture-tpu-vm#tpu-arch>`_.
 
 TPU VMs
 -------
@@ -189,7 +190,8 @@ Here is a complete task YAML that runs `MNIST training <https://cloud.google.com
    correctly setup (follow instructions `here <https://cloud.google.com/tpu/docs/storage-buckets#using_iam_permissions_for_alternative>`_).
 
 .. note::
-   The environment variable :code:`$TPU_NAME` is automatically set by SkyPilot for connecting TPU devices.
+   The special environment variable :code:`$TPU_NAME` is automatically set by SkyPilot at run time, so it can be used in the ``run`` commands.
+
 
 This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypilot/tree/master/examples/tpu>`_ (``examples/tpu/tpu_node_mnist.yaml``). Launch it with:
 
