@@ -886,13 +886,16 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self,
-                            to_provision: resources_lib.Resources,
-                            num_nodes: int,
-                            dryrun: bool,
-                            stream_logs: bool,
-                            cluster_name: str,
-                            cluster_exists: bool = False):
+    def _retry_region_zones(
+        self,
+        to_provision: resources_lib.Resources,
+        num_nodes: int,
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        cluster_exists: bool = False,
+        task: task_lib.Task = None,
+    ):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -948,7 +951,8 @@ class RetryingVmProvisioner(object):
             # This sets the status to INIT (even for a normal, UP cluster).
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
-                                                    ready=False)
+                                                    ready=False,
+                                                    task=task)
 
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
@@ -1395,7 +1399,9 @@ class RetryingVmProvisioner(object):
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
-                    cluster_exists=cluster_exists)
+                    cluster_exists=cluster_exists,
+                    task=task,
+                )
                 if dryrun:
                     return
             except exceptions.ResourcesUnavailableError as e:

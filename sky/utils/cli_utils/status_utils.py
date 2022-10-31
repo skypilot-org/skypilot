@@ -246,8 +246,7 @@ def _get_price(cluster_status):
 
 
 def _get_total_cost(cluster_status):
-    cluster_name = cluster_status['name']
-    cost = global_user_state.get_cost_for_cluster(cluster_name)
+    cost = cluster_status['cost']
     if not cost:
         return '-'
 
