@@ -912,8 +912,8 @@ class S3Store(AbstractStore):
         grouped_files, dirs = data_utils.group_files_by_dir(source_path_list)
         # Generate file upload commands
         for dir_path, file_names in grouped_files.items():
-            includes = ' '.join([f'--include "{file_name}"'
-                                 for file_name in file_names])
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in file_names])
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {dir_path} '
                             f's3://{self.name}')
@@ -1219,7 +1219,7 @@ class GcsStore(AbstractStore):
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         sync_command = (f'echo "{copy_list}" | '
                         f'gsutil -m cp -e -n -r -I gs://{self.name}')
-        self._run_gsutil(sync_command, source_message)
+        self._run_gsutil(sync_command)
 
     def batch_gsutil_rsync(self,
                            source_path_list: List[Path],
