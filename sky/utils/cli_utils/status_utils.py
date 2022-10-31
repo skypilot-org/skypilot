@@ -5,7 +5,6 @@ import colorama
 
 from sky import backends
 from sky import spot
-from sky import global_user_state
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils.cli_utils import cli_utils

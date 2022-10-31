@@ -47,7 +47,7 @@ def create_table(cursor, conn):
         name TEXT,
         requested_resources BLOB,
         launched_resources BLOB,
-        metadata TEXT DEFAULT "{}")""")
+        usage_intervals BLOB)""")
     # Table for configs (e.g. enabled clouds)
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS config (
@@ -75,9 +75,6 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
-
-    db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'metadata',
-                                 'TEXT DEFAULT "{}"')
     conn.commit()
 
 
@@ -143,15 +140,13 @@ def add_or_update_cluster(cluster_name: str,
         assert len(task.resources) == 1, task.resources
         requested_resources = list(task.resources)[0]
 
-    metadata = get_cluster_history_metadata(cluster_hash)
-    if not metadata:
-        metadata = {}
-        metadata['usage_intervals'] = []
+    usage_intervals = get_cluster_usage_intervals(cluster_hash)
+    if not usage_intervals:
+        usage_intervals = []
 
     # if this is the cluster init or we are starting after a stop
-    if len(metadata['usage_intervals']
-          ) == 0 or metadata['usage_intervals'][-1][-1]:
-        metadata['usage_intervals'].append((cluster_launched_at, None))
+    if len(usage_intervals) == 0 or usage_intervals[-1][-1]:
+        usage_intervals.append((cluster_launched_at, None))
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -225,7 +220,7 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
     set_cluster_hash(cluster_name, cluster_hash)
-    set_cluster_history_metadata(cluster_hash, metadata)
+    set_cluster_usage_intervals(cluster_hash, usage_intervals)
 
 
 def update_last_use(cluster_name: str):
@@ -237,21 +232,21 @@ def update_last_use(cluster_name: str):
 
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
-    handle = get_handle_from_cluster_name(cluster_name)
     cluster_hash = get_cluster_hash(cluster_name)
-    metadata = get_cluster_history_metadata(cluster_hash)
+    usage_intervals = get_cluster_usage_intervals(cluster_hash)
 
-    if metadata:
+    if usage_intervals:
 
-        start_time = metadata['usage_intervals'].pop()[0]
+        start_time = usage_intervals.pop()[0]
         end_time = int(time.time())
-        metadata['usage_intervals'].append((start_time, end_time))
-        set_cluster_history_metadata(cluster_hash, metadata)
+        usage_intervals.append((start_time, end_time))
+        set_cluster_usage_intervals(cluster_hash, usage_intervals)
 
     if terminate:
         _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)',
                            (cluster_name,))
     else:
+        handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
             return
         # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
@@ -331,21 +326,22 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_cluster_history_metadata(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute(
-        'SELECT metadata FROM cluster_history WHERE cluster_hash=(?)',
+        'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
         (cluster_hash,))
-    for (metadata,) in rows:
-        if metadata is None:
+    for (usage_intervals,) in rows:
+        if usage_intervals is None:
             return None
-        return json.loads(metadata)
+        return pickle.loads(usage_intervals)
 
 
-def set_cluster_history_metadata(cluster_hash: str,
-                                 metadata: Dict[str, Any]) -> None:
+def set_cluster_usage_intervals(cluster_hash: str,
+                                usage_intervals: Dict[str, Any]) -> None:
     _DB.cursor.execute(
-        'UPDATE cluster_history SET metadata=(?) WHERE cluster_hash=(?)', (
-            json.dumps(metadata),
+        'UPDATE cluster_history SET usage_intervals=(?) WHERE cluster_hash=(?)',
+        (
+            pickle.dumps(usage_intervals),
             cluster_hash,
         ))
     count = _DB.cursor.rowcount
@@ -409,6 +405,7 @@ def get_cluster_from_name(
             'to_down': bool(to_down),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
+            'cost': get_cost_for_cluster(name),
         }
         return record
 
@@ -557,9 +554,7 @@ def get_storage() -> List[Dict[str, Any]]:
 def get_cost_for_cluster(cluster_name: str,) -> float:
 
     cluster_hash = get_cluster_hash(cluster_name) or str(uuid.uuid4())
-    metadata = get_cluster_history_metadata(cluster_hash)
-
-    usage_intervals = metadata['usage_intervals']
+    usage_intervals = get_cluster_usage_intervals(cluster_hash)
 
     return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
 
