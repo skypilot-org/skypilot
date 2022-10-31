@@ -59,7 +59,9 @@ install_requires = [
     # NOTE: ray 2.0.1 requires click<=8.0.4,>=7.0; We disable the
     # shell completion for click<8.0 for backward compatibility.
     'click<=8.0.4,>=7.0',
-    'colorama',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama<0.4.5',
     'cryptography',
     'jinja2',
     'jsonschema',
