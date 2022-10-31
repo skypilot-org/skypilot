@@ -72,7 +72,8 @@ def is_cloud_store_url(url):
     return result.netloc
 
 
-def group_files_by_dir(source_list: List[str]) -> Tuple[Dict[str, List[str]], List[str]]:
+def group_files_by_dir(
+        source_list: List[str]) -> Tuple[Dict[str, List[str]], List[str]]:
     """Groups a list of paths based on their directory
 
     Given a list of paths, generates a dict of {dir_name: List[file_name]}

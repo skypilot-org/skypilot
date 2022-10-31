@@ -36,8 +36,6 @@ _GCS_RM_MAX_OBJS = 256
 # Maximum number of concurrent rsync upload processes
 _MAX_CONCURRENT_UPLOADS = 32
 
-
-
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     'Failed to connect to an existing bucket {name!r}.\n'
     'Please check if:\n  1. the bucket name is taken and/or '
@@ -859,22 +857,14 @@ class S3Store(AbstractStore):
         """
         try:
             if isinstance(self.source, list):
-                for source_path in self.source:
-                    # We upload each file in the list as individually because
-                    # aws s3 sync does not support a list of files. Symlinking
-                    # all files into the same dir would also not work since
-                    # we need to exclude any symlinks within dirs with the
-                    # --no-follow-symlinks flag.
-                    self.upload_local_path(source_path,
-                                           create_dir=os.path.isdir(
-                                               os.path.expanduser(source_path)))
+                self.batch_aws_rsync(self.source, create_dirs=True)
             elif self.source is not None:
                 if self.source.startswith('s3://'):
                     pass
                 elif self.source.startswith('gs://'):
                     self._transfer_to_s3()
                 else:
-                    self.upload_local_path(self.source)
+                    self.batch_aws_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -888,69 +878,91 @@ class S3Store(AbstractStore):
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
 
-    def upload_local_path(self,
-                          local_path: str,
-                          create_dir: bool = False) -> None:
-        """Invokes aws cli to upload a local path to a S3 bucket.
+    def batch_aws_rsync(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes aws s3 sync to batch upload a list of local paths to S3
 
         AWS Sync by default uses 10 threads to upload files to the bucket.  To
         increase parallelism, modify max_concurrent_requests in your aws config
         file (Default path: ~/.aws/config).
 
+        Since aws s3 sync does not support batch operations, we construct
+        multiple commands to be run in parallel.
+
         Args:
-            local_path: str; Path to local file or directory
-            create_dir: If the local_path is a directory and this is set to
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
                 False, the contents of the directory are directly uploaded to
                 root of the bucket. If the local_path is a directory and this is
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
-        full_local_path = os.path.abspath(os.path.expanduser(local_path))
-        if os.path.isfile(full_local_path):
-            file_name = os.path.basename(full_local_path)
-            dir_path = os.path.dirname(full_local_path)
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'--include="{file_name}" {dir_path} '
-                            f's3://{self.name}')
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
         else:
-            if create_dir:
-                dest_dir_name = os.path.basename(full_local_path)
+            source_message = source_path_list[0]
+
+        # Generate gsutil rsync command for files and dirs
+        commands = []
+        grouped_files, dirs = data_utils.group_files_by_dir(source_path_list)
+        # Generate file upload commands
+        for dir_path, file_names in grouped_files.items():
+            includes = ' '.join([f'--include "{file_name}"'
+                                 for file_name in file_names])
+            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                            f'{includes} {dir_path} '
+                            f's3://{self.name}')
+            commands.append(sync_command)
+        # Generate dir upload commands
+        for dir_path in dirs:
+            if create_dirs:
+                dest_dir_name = os.path.basename(dir_path)
             else:
                 dest_dir_name = ''
             sync_command = ('aws s3 sync --no-follow-symlinks '
-                            f'{full_local_path} '
+                            f'{dir_path} '
                             f's3://{self.name}/{dest_dir_name}')
+            commands.append(sync_command)
+
+        # Run commands in parallel
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{local_path}[/] to [green]s3://{self.name}/[/]'):
-            # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
-            # to a log file.
-            with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE,
-                                  stdout=subprocess.DEVNULL) as process:
-                stderr = []
-                while True:
-                    line = process.stderr.readline()
-                    if not line:
-                        break
-                    str_line = line.decode('utf-8')
-                    stderr.append(str_line)
-                    if 'Access Denied' in str_line:
-                        process.kill()
-                        with ux_utils.print_exception_no_traceback():
-                            raise PermissionError(
-                                'Failed to upload files to '
-                                'the S3 bucket. The bucket does not have '
-                                'write permissions. It is possible that '
-                                'the bucket is public.')
-                returncode = process.wait()
-                if returncode != 0:
-                    stderr = '\n'.join(stderr)
+                f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
+            with pool.ThreadPool(processes=_MAX_CONCURRENT_UPLOADS) as p:
+                p.map(self._run_awscli, commands)
+
+    def _run_awscli(self, command: str):
+        # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
+        # to a log file.
+        with subprocess.Popen(command,
+                              stderr=subprocess.PIPE,
+                              stdout=subprocess.DEVNULL,
+                              shell=True) as process:
+            stderr = []
+            while True:
+                line = process.stderr.readline()
+                if not line:
+                    break
+                str_line = line.decode('utf-8')
+                stderr.append(str_line)
+                if 'Access Denied' in str_line:
+                    process.kill()
                     with ux_utils.print_exception_no_traceback():
-                        logger.error(stderr)
-                        raise exceptions.StorageUploadError(
-                            f'Upload to S3 failed for store {self.name} and '
-                            f'source {local_path}. Please check the logs.')
+                        raise PermissionError(
+                            'Failed to upload files to '
+                            'the S3 bucket. The bucket does not have '
+                            'write permissions. It is possible that '
+                            'the bucket is public.')
+            returncode = process.wait()
+            if returncode != 0:
+                stderr = '\n'.join(stderr)
+                with ux_utils.print_exception_no_traceback():
+                    logger.error(stderr)
+                    raise exceptions.StorageUploadError(
+                        f'Upload to S3 failed for store {self.name}. '
+                        'Please check the logs.')
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -1195,8 +1207,10 @@ class GcsStore(AbstractStore):
         # contents of directory to the root, add /* to the directory path
         # e.g., /mydir/*
         source_path_list = [
-            str(path) + '/*' if (os.path.isdir(path) and not create_dirs)
-            else str(path) for path in source_path_list]
+            str(path) + '/*' if
+            (os.path.isdir(path) and not create_dirs) else str(path)
+            for path in source_path_list
+        ]
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         sync_command = (f'echo "{copy_list}" | '
@@ -1214,6 +1228,14 @@ class GcsStore(AbstractStore):
 
         Since gsutil rsync does not support batch operations, we construct
         multiple commands to be run in parallel.
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
         """
         # Generate message for upload
         if len(source_path_list) > 1:
@@ -1274,7 +1296,7 @@ class GcsStore(AbstractStore):
                     logger.error(stderr)
                     raise exceptions.StorageUploadError(
                         f'Upload to GCS failed for store {self.name}. '
-                        f'Please check logs.')
+                        f'Please check the logs.')
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
