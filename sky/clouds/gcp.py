@@ -261,6 +261,8 @@ class GCP(clouds.Cloud):
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
                 else:
+                    # Though the image is called cu113, it actually has later
+                    # versions of CUDA as noted below.
                     # CUDA driver version 510.47.03, CUDA Library 11.6
                     # Does not support torch==1.13.0 with cu117
                     image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20221026'
