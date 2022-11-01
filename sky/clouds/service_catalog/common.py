@@ -49,7 +49,18 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def _get_filter_cache_path(filename: str, area_filter: List[str]) -> str:
+def _get_filtered_cache_path(filename: str, area_filter: List[str]) -> str:
+    """Returns the cache path for the filtered catalog.
+    
+    It will the other caches for the cloud to keep the catatlog folder clean.
+
+    Args:
+        filename: The filename of the catalog.
+        area_filter: The area filter.
+
+    Returns:
+        The cache path.
+    """
     assert filename.endswith('.csv'), filename
     new_name = filename.split('.csv')[0] + '.filtered.'
     cached_catalog_path = get_catalog_path(new_name)
@@ -63,7 +74,7 @@ def _get_filter_cache_path(filename: str, area_filter: List[str]) -> str:
 
 
 def _read_catalog_config() -> Optional[Dict[str, Dict[str, str]]]:
-    """Reads the config file."""
+    """Reads the config file and extract the catalog config."""
     # TODO(zhwu): Add schema validation.
     config_path = os.path.expanduser(sky_constants.CONFIG_PATH)
     if not os.path.exists(config_path):
@@ -74,23 +85,24 @@ def _read_catalog_config() -> Optional[Dict[str, Dict[str, str]]]:
 
 def get_preferred_areas_from_config(
         cloud: 'cloud_lib.Cloud') -> Optional[List[str]]:
+    """Gets the preferred areas from the config file.
+    
+    If not specified, returns the default areas for the cloud.
+    """
     default_areas = cloud.default_areas
-    _config = _read_catalog_config()
-    if _config is None:
+    config = _read_catalog_config()
+    if config is None:
         return default_areas
-    _config = {k.lower(): v for k, v in _config.items()}
+    config = {k.lower(): v for k, v in config.items()}
     cloud_str = str(cloud).lower()
-    if cloud_str not in _config:
+    if cloud_str not in config:
         return default_areas
-    _preferred_areas = _config[cloud_str].get('preferred_areas')
+    _preferred_areas = config[cloud_str].get('preferred_areas')
     if _preferred_areas is None:
         return default_areas
-    logger.info(
-        f'Using preferred areas for {cloud} from {sky_constants.CONFIG_PATH}: {_preferred_areas}'
-    )
     logger.warning(
-        'Setting preferred areas are EXPERIMENTAL and may break your existing clusters.'
-    )
+        f'Setting preferred areas are EXPERIMENTAL and '
+        f'may break existing clusters. ({cloud}: {_preferred_areas})')
     if isinstance(_preferred_areas, str):
         if _preferred_areas == 'all':
             _preferred_areas = None
@@ -110,8 +122,8 @@ def read_catalog(
 ) -> pd.DataFrame:
     """Reads the catalog from a local CSV file and filter it by area.
 
-    If the file does not exist, download the up-to-date catalog that matches
-    the schema version.
+    If the catalog file does not exist, download the up-to-date catalog that
+    matches the schema version.
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
@@ -120,7 +132,7 @@ def read_catalog(
     if area_filter_fn is not None:
         preferred_areas = get_preferred_areas_from_config(cloud)
         if preferred_areas is not None:
-            cached_catalog_path = _get_filter_cache_path(
+            cached_catalog_path = _get_filtered_cache_path(
                 filename, preferred_areas)
             try:
                 return pd.read_csv(cached_catalog_path)
