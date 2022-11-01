@@ -1212,7 +1212,8 @@ def get_node_ips(cluster_yaml: str,
 
 
 @timeline.event
-def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any], get_internal_ips: bool = False) -> List[str]:
+def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
+                        get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all TPU VM Pod workers using gcloud."""
 
     cluster_name = ray_config['cluster_name']
@@ -1222,12 +1223,12 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any], get_internal_ips: bool = Fal
                  f'--zone={zone} --format=value\\(name\\)')
     if not get_internal_ips:
         tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                    f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                    '(networkEndpoints.accessConfig.externalIp)"')
+                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                     '(networkEndpoints.accessConfig.externalIp)"')
     else:
         tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                    f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                    '(networkEndpoints.ipAddress)"')
+                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                     '(networkEndpoints.ipAddress)"')
 
     rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
                                                  '/dev/null',
