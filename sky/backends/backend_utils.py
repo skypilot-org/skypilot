@@ -1384,8 +1384,7 @@ def check_network_connection():
     try:
         http.head(_TEST_IP, timeout=3)
     except requests.Timeout as e:
-        raise exceptions.NetworkError(
-            'Network seems down.') from e
+        raise exceptions.NetworkError('Network seems down.') from e
     check_if_ssh_blocked()
 
 
