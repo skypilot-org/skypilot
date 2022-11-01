@@ -49,5 +49,8 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
   You can retrieve the number of nodes by :code:`echo "$SKY_NODE_IPS" | wc -l`
   and the IP address of the third node by :code:`echo "$SKY_NODE_IPS" | sed -n
   3p`.
+
+  To manipulate these IP addresses, you can also store them to a file in the
+  :code:`run` command with :code:`echo $SKY_NODE_IPS >> ~/sky_node_ips``.
 - :code:`SKY_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
