@@ -952,14 +952,8 @@ class S3Store(AbstractStore):
         Args:
           mount_path: str; Path to mount the bucket to.
         """
-        install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                       'releases/download/0.24.0-romilb-upstream/goofys '
-                       '-O /usr/local/bin/goofys && '
-                       'sudo chmod +x /usr/local/bin/goofys')
-        mount_cmd = ('goofys -o allow_other '
-                     f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
-                     f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
-                     f'{self.bucket.name} {mount_path}')
+        install_cmd = 'sudo apt install s3fs'
+        mount_cmd = f's3fs {self.bucket.name} {mount_path}'
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
