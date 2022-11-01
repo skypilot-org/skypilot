@@ -127,9 +127,27 @@ class AWS(clouds.Cloud):
         amis = {
             'us-east-1': 'ami-0729d913a335efca7',
             'us-east-2': 'ami-070f4af81c19b41bf',
-            # This AMI is 20210623 as aws does not provide a newer one.
-            'us-west-1': 'ami-0b3c34d643904a734',
+            'us-west-1': 'ami-0365e546798d80d88',
             'us-west-2': 'ami-050814f384259894c',
+            'af-south-1': 'ami-087e9c777068588cf',  # AF (Cape Town)
+            'ap-east-1': 'ami-0f67c8304962f6139',  # AP (Hong Kong)
+            'ap-southeast-3': 'ami-05b1df9070f4f50db',  # AP (Jakarta) (20221024, no old version)
+            'ap-south-1': 'ami-0d3c1d29d1dd98d1a',  # AP (Mumbai)
+            'ap-northeast-3': 'ami-03e883fd27d3203db',  # AP (Osaka)
+            'ap-northeast-2': 'ami-027aafa258be40256',  # AP (Seoul)
+            'ap-southeast-1': 'ami-0950163cc7b4bd94a',  # AP (Singapore)
+            'ap-southeast-2': 'ami-0736202a4ca189973',  # AP (Sydney)
+            'ap-northeast-1': 'ami-07b8b0c43a572bef3',  # AP (Tokyo)
+            'ca-central-1': 'ami-090ff046d4100a70f',  # Canada (Central)
+            'eu-central-1': 'ami-0ce648c1894dfd60f',  # EU (Frankfurt)
+            'eu-west-1': 'ami-0e55e4d019884a5f8',  # EU (Ireland)
+            'eu-west-2': 'ami-010455402d8e1cc58',  # EU (London)
+            'eu-south-1': 'ami-083d67d3190e95b0c',  # EU (Milan)
+            'eu-west-3': 'ami-00b068cc55c59b711',  # EU (Paris)
+            'eu-north-1': 'ami-016368d37ba996f72',  # EU (Stockholm)
+            'me-south-1': 'ami-05d2bc426c8cf24a8',  # Middle East (Bahrain)
+            'me-central-1': 'ami-0a7c9f2a2a95f25bf',  # Middle East (UAE) (20221024, no old version)
+            'sa-east-1': 'ami-081d7ffe67ce8673a',  # SA (Sao Paulo)
         }
         assert region_name in amis, region_name
         return amis[region_name]
@@ -189,6 +207,10 @@ class AWS(clouds.Cloud):
     def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM. 3rd generation Intel Xeon. General Purpose.
         return 'm6i.2xlarge'
+
+    @property
+    def default_areas(cls) -> Optional[List[str]]:
+        return ['us']
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.

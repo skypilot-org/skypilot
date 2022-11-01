@@ -23,11 +23,11 @@ ALL_REGIONS = [
     'eu-west-3',
     'eu-north-1',
     'me-south-1',
-    # 'me-central-1', # failed for no credential
+    'me-central-1',
     'af-south-1',
     'ap-east-1',
     'ap-southeast-3',
-    # 'ap-south-1', # failed for no credential
+    'ap-south-1',
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
@@ -36,7 +36,7 @@ ALL_REGIONS = [
 ]
 US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
-REGIONS = US_REGIONS
+REGIONS = ALL_REGIONS
 
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
@@ -134,8 +134,8 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         def get_memory_gib(row) -> float:
             if isinstance(row['MemoryInfo'], dict):
-                return row['MemoryInfo']['SizeInMiB'] // 1024
-            return int(row['Memory'].split(' GiB')[0])
+                return row['MemoryInfo']['SizeInMiB'] / 1024
+            return float(row['Memory'].split(' GiB')[0])
 
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)

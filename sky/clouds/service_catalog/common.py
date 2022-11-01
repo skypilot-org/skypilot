@@ -1,6 +1,7 @@
 """Common utilities for service catalog."""
 import os
-from typing import Dict, List, NamedTuple, Optional, Tuple
+import pathlib
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import difflib
 import requests
@@ -10,6 +11,8 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
+from sky.skylet import constants as sky_constants
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -46,8 +49,66 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def read_catalog(filename: str) -> pd.DataFrame:
-    """Reads the catalog from a local CSV file.
+def _get_filter_cache_path(filename: str, area_filter: List[str]) -> str:
+    assert filename.endswith('.csv'), filename
+    new_name = filename.split('.csv')[0] + '.filtered.'
+    cached_catalog_path = get_catalog_path(new_name)
+    existing_cache_paths = pathlib.Path(cached_catalog_path).glob('*')
+    cached_catalog_path += f'{"_".join(area_filter)}.csv'
+    for path in existing_cache_paths:
+        # Delete the old caches.
+        if path.name != cached_catalog_path:
+            path.unlink()
+    return cached_catalog_path
+
+
+def _read_catalog_config() -> Optional[Dict[str, Dict[str, str]]]:
+    """Reads the config file."""
+    # TODO(zhwu): Add schema validation.
+    config_path = os.path.expanduser(sky_constants.CONFIG_PATH)
+    if not os.path.exists(config_path):
+        return None
+    config = common_utils.read_yaml(config_path)
+    return config.get('catalog')
+
+
+def get_preferred_areas_from_config(
+        cloud: 'cloud_lib.Cloud') -> Optional[List[str]]:
+    default_areas = cloud.default_areas
+    _config = _read_catalog_config()
+    if _config is None:
+        return default_areas
+    _config = {k.lower(): v for k, v in _config.items()}
+    cloud_str = str(cloud).lower()
+    if cloud_str not in _config:
+        return default_areas
+    _preferred_areas = _config[cloud_str].get('preferred_areas')
+    if _preferred_areas is None:
+        return default_areas
+    logger.info(
+        f'Using preferred areas for {cloud} from {sky_constants.CONFIG_PATH}: {_preferred_areas}'
+    )
+    logger.warning(
+        'Setting preferred areas are EXPERIMENTAL and may break your existing clusters.'
+    )
+    if isinstance(_preferred_areas, str):
+        if _preferred_areas == 'all':
+            _preferred_areas = None
+        else:
+            _preferred_areas = [_preferred_areas]
+    elif _preferred_areas is not None and not isinstance(
+            _preferred_areas, list):
+        raise ValueError(
+            f'Invalid preferred_areas for {cloud}: {_preferred_areas}')
+    return _preferred_areas
+
+
+def read_catalog(
+    filename: str,
+    area_filter_fn: Optional[Callable[[pd.DataFrame, List[str]],
+                                      pd.DataFrame]] = None
+) -> pd.DataFrame:
+    """Reads the catalog from a local CSV file and filter it by area.
 
     If the file does not exist, download the up-to-date catalog that matches
     the schema version.
@@ -55,6 +116,18 @@ def read_catalog(filename: str) -> pd.DataFrame:
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
     cloud = cloud_lib.CLOUD_REGISTRY.from_str(filename.split('.csv')[0])
+
+    if area_filter_fn is not None:
+        preferred_areas = get_preferred_areas_from_config(cloud)
+        if preferred_areas is not None:
+            cached_catalog_path = _get_filter_cache_path(
+                filename, preferred_areas)
+            try:
+                return pd.read_csv(cached_catalog_path)
+            except Exception:
+                # Failed to load the cache regenerate the cache.
+                pass
+
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -80,6 +153,10 @@ def read_catalog(filename: str) -> pd.DataFrame:
                      'To fix: delete the csv file and try again.')
         with ux_utils.print_exception_no_traceback():
             raise e
+
+    if area_filter_fn is not None and preferred_areas is not None:
+        df = area_filter_fn(df, preferred_areas)
+        df.to_csv(cached_catalog_path, index=False)
     return df
 
 

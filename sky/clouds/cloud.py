@@ -162,6 +162,10 @@ class Cloud:
     def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
+    @property
+    def default_areas(cls) -> Optional[List[str]]:
+        return None
+
     def get_feasible_launchable_resources(self, resources):
         """Returns a list of feasible and launchable resources.
 

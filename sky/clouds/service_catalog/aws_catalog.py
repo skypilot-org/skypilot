@@ -3,12 +3,26 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
+import typing
 from typing import Dict, List, Optional, Tuple
 
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
 
-_df = common.read_catalog('aws.csv')
+if typing.TYPE_CHECKING:
+    import pandas as pd
+
+
+# Filter the dataframe to only include the preferred regions.
+def area_filter_fn(df: 'pd.DataFrame',
+                   preferred_areas: Optional[List[str]]) -> 'pd.DataFrame':
+    if preferred_areas is not None:
+        area_filters = [f'{r.lower()}-' for r in preferred_areas]
+        return df[df['Region'].str.startswith(tuple(area_filters))]
+    return df
+
+
+_df = common.read_catalog('aws.csv', area_filter_fn=area_filter_fn)
 
 
 def instance_type_exists(instance_type: str) -> bool:
