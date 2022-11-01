@@ -52,8 +52,6 @@ def get_catalog_path(filename: str) -> str:
 def _get_filtered_cache_path(filename: str, area_filter: List[str]) -> str:
     """Returns the cache path for the filtered catalog.
 
-    It will the other caches for the cloud to keep the catatlog folder clean.
-
     Args:
         filename: The filename of the catalog.
         area_filter: The area filter.
@@ -64,12 +62,7 @@ def _get_filtered_cache_path(filename: str, area_filter: List[str]) -> str:
     assert filename.endswith('.csv'), filename
     new_name = filename.split('.csv')[0] + '.filtered.'
     cached_catalog_path = get_catalog_path(new_name)
-    existing_cache_paths = pathlib.Path(cached_catalog_path).glob('*')
     cached_catalog_path += f'{"_".join(area_filter)}.csv'
-    for path in existing_cache_paths:
-        # Delete the old caches.
-        if path.name != cached_catalog_path:
-            path.unlink()
     return cached_catalog_path
 
 
@@ -80,6 +73,8 @@ def _read_catalog_config() -> Optional[Dict[str, Dict[str, str]]]:
     if not os.path.exists(config_path):
         return None
     config = common_utils.read_yaml(config_path)
+    if config is None:
+        return None
     return config.get('catalog')
 
 
