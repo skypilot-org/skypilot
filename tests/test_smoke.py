@@ -294,6 +294,11 @@ def test_job_queue():
             f'sky cancel {name} 2',
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel {name} 3',
+            f'sky exec {name} --gpus K80:0.2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus K80:1 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
     )
@@ -315,6 +320,13 @@ def test_n_node_job_queue():
             f'sky cancel {name} 1',
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel {name} 3',
+            f'sky exec {name} --gpus K80:0.2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus K80:0.2 --num-nodes 2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus K80:1 --num-nodes 2 "[[ \$SKY_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
         ],
         f'sky down -y {name}',
     )
@@ -954,6 +966,29 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    def test_bucket_bulk_deletion(self, store_type):
+        # Create a temp folder with over 256 files and folders, upload
+        # files and folders to a new bucket, then delete bucket.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
+                                    shell=True)
+            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
+                                    shell=True)
+            subprocess.check_output(
+                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
+
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                            source=tmpdir)
+            store_obj.add_store(store_type)
+
+        subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
+
+        output = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert store_obj.name not in output.decode('utf-8')
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',

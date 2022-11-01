@@ -6,6 +6,8 @@ import time
 from typing import Any, Dict, Optional, Tuple, Union
 import urllib.parse
 
+import colorama
+
 from sky import clouds
 from sky.adaptors import aws
 from sky.adaptors import gcp
@@ -399,8 +401,8 @@ class Storage(object):
         self.handle = global_user_state.get_handle_from_storage_name(self.name)
         if self.handle:
             # Reconstruct the Storage object from the global_user_state
-            logger.info('Detected existing storage object, '
-                        f'loading Storage: {self.name}')
+            logger.debug('Detected existing storage object, '
+                         f'loading Storage: {self.name}')
             for s_type, s_metadata in self.handle.sky_stores.items():
                 # When initializing from global_user_state, we override the
                 # source from the YAML
@@ -835,7 +837,8 @@ class S3Store(AbstractStore):
 
     def delete(self) -> None:
         self._delete_s3_bucket(self.name)
-        logger.info(f'Deleted S3 bucket {self.name}.')
+        logger.info(f'{colorama.Fore.GREEN}Deleted S3 bucket {self.name}.'
+                    f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
@@ -1003,7 +1006,7 @@ class S3Store(AbstractStore):
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
             with backend_utils.safe_console_status(
-                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                    f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '))
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
@@ -1089,7 +1092,8 @@ class GcsStore(AbstractStore):
 
     def delete(self) -> None:
         self._delete_gcs_bucket(self.name)
-        logger.info(f'Deleted GCS bucket {self.name}.')
+        logger.info(f'{colorama.Fore.GREEN}Deleted GCS bucket {self.name}.'
+                    f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
@@ -1237,7 +1241,7 @@ class GcsStore(AbstractStore):
           bucket_name: str; Name of bucket
         """
         try:
-            bucket = self.client.get_bucket(bucket_name)
+            self.client.get_bucket(bucket_name)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
             with ux_utils.print_exception_no_traceback():
@@ -1245,17 +1249,13 @@ class GcsStore(AbstractStore):
                     'External Bucket detected. User not allowed to delete '
                     'external bucket.') from e
 
-        num_files = subprocess.check_output(
-            f'gsutil du gs://{bucket_name} | wc -l', shell=True)
-        num_files = int(num_files)
-
         try:
             with backend_utils.safe_console_status(
-                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
-                if num_files >= _GCS_RM_MAX_OBJS:
-                    remove_obj_command = f'gsutil -m rm -a gs://{bucket_name}/*'
-                    subprocess.check_output(remove_obj_command.split(' '))
-                bucket.delete(force=True)
+                    f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
+                remove_obj_command = ('gsutil -m rm -r'
+                                      f' gs://{bucket_name}')
+                subprocess.check_output(remove_obj_command.split(' '),
+                                        stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
             with ux_utils.print_exception_no_traceback():
