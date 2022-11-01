@@ -208,15 +208,67 @@ def _interactive_node_cli_command(cli_func):
                               default=False,
                               required=False,
                               help='Skip confirmation prompt.')
+    idle_autostop = click.option('--idle-minutes-to-autostop',
+                                 '-i',
+                                 default=None,
+                                 type=int,
+                                 required=False,
+                                 help=('Automatically stop the cluster after '
+                                       'this many minutes of idleness, i.e. '
+                                       'no running or pending jobs in the '
+                                       'cluster\'s job queue. Idleness starts '
+                                       'counting after setup/file_mounts are '
+                                       'done; the clock gets reset whenever '
+                                       'there are running/pending jobs in the '
+                                       'job queue. If not set, the cluster '
+                                       'will not be auto-stopped.'))
+    autodown = click.option('--down',
+                            default=False,
+                            is_flag=True,
+                            required=False,
+                            help=('Autodown the cluster: tear down the '
+                                  'cluster after all jobs finish '
+                                  '(successfully or abnormally). If '
+                                  '--idle-minutes-to-autostop is also set, '
+                                  'the cluster will be torn down after the '
+                                  'specified idle time. Note that if errors '
+                                  'occur during provisioning/data syncing/'
+                                  'setting up, the cluster will not be torn '
+                                  'down for debugging purposes.'))
+    retry_until_up = click.option('--retry-until-up',
+                                  '-r',
+                                  is_flag=True,
+                                  default=False,
+                                  required=False,
+                                  help=('Whether to retry provisioning '
+                                        'infinitely until the cluster is up '
+                                        'if we fail to launch the cluster on '
+                                        'any possible region/cloud due to '
+                                        'unavailability errors.'))
+    region_option = click.option('--region',
+                                 default=None,
+                                 type=str,
+                                 required=False,
+                                 help='The region to use.')
+    zone_option = click.option('--zone',
+                               default=None,
+                               type=str,
+                               required=False,
+                               help='The zone to use.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
         cluster_option,
         no_confirm,
         port_forward_option,
+        idle_autostop,
+        autodown,
+        retry_until_up,
 
         # Resource options
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
+        region_option,
+        zone_option,
         instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
@@ -656,6 +708,14 @@ def _launch_with_confirm(
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
+
+        # We do not sky.launch if interactive node is already up, so we need
+        # to update idle timeout and autodown here.
+        elif idle_minutes_to_autostop is not None:
+            core.autostop(cluster, idle_minutes_to_autostop, down)
+        elif down:
+            core.autostop(cluster, 1, down)
+
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
@@ -685,6 +745,9 @@ def _create_and_ssh_into_node(
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
     no_confirm: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -697,6 +760,17 @@ def _create_and_ssh_into_node(
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
+        idle_minutes_to_autostop: Automatically stop the cluster after
+                                  specified minutes of idleness. Idleness
+                                  starts counting after setup/file_mounts are
+                                  done; the clock gets reset whenever there
+                                  are running/pending jobs in the job queue.
+        down: If true, autodown the cluster after all jobs finish. If
+              idle_minutes_to_autostop is also set, the cluster will be torn
+              down after the specified idle time.
+        retry_until_up: Whether to retry provisioning infinitely until the
+                        cluster is up if we fail to launch due to
+                        unavailability errors.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
@@ -735,6 +809,9 @@ def _create_and_ssh_into_node(
         dryrun=False,
         detach_run=True,
         no_confirm=no_confirm,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -2127,10 +2204,12 @@ def _down_or_stop_clusters(
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            gpus: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2167,7 +2246,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2178,6 +2258,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=gpus,
                               use_spot=use_spot,
@@ -2191,6 +2273,9 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2198,9 +2283,11 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2236,7 +2323,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2245,6 +2333,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2257,6 +2347,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2264,10 +2357,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
+            region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2303,7 +2398,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
-    user_requested_resources = not (instance_type is None and tpus is None and
+    user_requested_resources = not (region is None and zone is None and
+                                    instance_type is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
@@ -2317,6 +2413,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
@@ -2331,6 +2429,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
