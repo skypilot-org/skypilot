@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import re
+import socket
 import subprocess
 import tempfile
 import textwrap
@@ -87,6 +88,13 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = 'https://8.8.8.8'
+
+# Test IP used in check_if_ssh_blocked(). See: http://portquiz.net/
+_SSH_TEST_IP = 'portquiz.net'
+
+# True if check_if_ssh_blocked() has been called. Used to limit the number of
+# connections to _SSH_TEST_IP due to rate limits.
+_SSH_TEST_IP_CHECKED = False
 
 # GCP has a 63 char limit; however, Ray autoscaler adds many
 # characters. Through testing, this is the maximum length for the Sky cluster
@@ -1346,6 +1354,27 @@ def do_filemounts_and_setup_on_local_workers(
         subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
 
 
+def check_if_ssh_blocked():
+    """ Checks if network blocks outgoing connections to port 22. """
+    # Limit the number of connections to _SSH_TEST_IP.
+    global _SSH_TEST_IP_CHECKED
+    if _SSH_TEST_IP_CHECKED:
+        return
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1)  # 1 second timeout
+    try:
+        s.connect((_SSH_TEST_IP, 22))
+        s.shutdown(socket.SHUT_RDWR)
+    except socket.timeout:
+        logger.warning(f'{colorama.Fore.YELLOW} Your network may be blocking '
+                       f'outgoing ssh connections.'
+                       f'{colorama.Style.RESET_ALL}')
+    finally:
+        s.close()
+        _SSH_TEST_IP_CHECKED = True
+
+
 def check_network_connection():
     # Tolerate 3 retries as it is observed that connections can fail.
     adapter = adapters.HTTPAdapter(max_retries=retry_lib.Retry(total=3))
@@ -1356,7 +1385,8 @@ def check_network_connection():
         http.head(_TEST_IP, timeout=3)
     except requests.Timeout as e:
         raise exceptions.NetworkError(
-            'Could not refresh the cluster. Network seems down.') from e
+            'Network seems down.') from e
+    check_if_ssh_blocked()
 
 
 def _process_cli_query(

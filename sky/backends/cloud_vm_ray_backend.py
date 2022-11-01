@@ -1183,6 +1183,7 @@ class RetryingVmProvisioner(object):
             logger.info(
                 f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
                 f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+            backend_utils.check_if_ssh_blocked()
         start = time.time()
 
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
