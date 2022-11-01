@@ -204,7 +204,12 @@ class Resources:
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
-            assert len(accelerators) == 1, accelerators
+
+            # Ignore check for the local cloud case.
+            # It is possible the accelerators dict can contain multiple
+            # types of accelerators for some on-prem clusters.
+            if not isinstance(self._cloud, clouds.Local):
+                assert len(accelerators) == 1, accelerators
 
             # Canonicalize the accelerator names.
             accelerators = {

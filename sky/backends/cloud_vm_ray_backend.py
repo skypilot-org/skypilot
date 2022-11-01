@@ -231,10 +231,15 @@ class RayCodeGen:
             'CPU': backend_utils.DEFAULT_TASK_CPU_DEMAND
         } for _ in range(num_nodes)]
 
+        ray_supported_accs = backend_utils.supported_ray_accs()
+
         if accelerator_dict is not None:
             acc_name = list(accelerator_dict.keys())[0]
             acc_count = list(accelerator_dict.values())[0]
-            gpu_dict = {'GPU': acc_count}
+            if acc_name in ray_supported_accs:
+                gpu_dict = {'GPU': acc_count}
+            else:
+                gpu_dict = {}
             # gpu_dict should be empty when the accelerator is not GPU.
             # FIXME: This is a hack to make sure that we do not reserve
             # GPU when requesting TPU.
@@ -346,13 +351,17 @@ class RayCodeGen:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
-            num_gpus = list(ray_resources_dict.values())[0]
+            acc_type = list(ray_resources_dict.keys())[0]
             resources_str = f', resources={json.dumps(ray_resources_dict)}'
 
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={num_gpus}'
+            if acc_type in backend_utils.supported_ray_accs():
+                num_gpus = list(ray_resources_dict.values())[0]
+                num_gpus_str = f', num_gpus={num_gpus}'
+            else:
+                num_gpus_str = ''
             # `num_gpus` should be empty when the accelerator is not GPU.
             # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]

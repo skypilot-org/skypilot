@@ -266,7 +266,11 @@ def get_local_cluster_accelerators(
                             'T4',
                             'P4',
                             'K80',
-                            'A100',]
+                            'A100',
+                            '1080',
+                            '2080',
+                            'A5000'
+                            'A6000']
         accelerators_dict = {}
         for acc in all_accelerators:
             output_str = os.popen(f'lspci | grep \\'{acc}\\'').read()

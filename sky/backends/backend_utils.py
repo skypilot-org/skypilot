@@ -157,6 +157,7 @@ def fill_template(template_name: str,
         cluster_name = variables.get('cluster_name')
         output_path = _get_yaml_path_from_cluster_name(cluster_name,
                                                        output_prefix)
+
     output_path = os.path.abspath(output_path)
 
     # Add yaml file path to the template variables.
@@ -758,7 +759,10 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
-    tmp_yaml_path = yaml_path + '.tmp'
+    if isinstance(cloud, clouds.Local):
+        tmp_yaml_path = yaml_path
+    else:
+        tmp_yaml_path = yaml_path + '.tmp'
     tmp_yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -2047,3 +2051,16 @@ def validate_schema(obj, schema, err_msg_prefix=''):
     if err_msg:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(err_msg)
+
+
+def supported_ray_accs():
+    # List of supported ray accelerators (w/out importing ray).
+    # https://github.com/ray-project/ray/blob/8be5f016afefb2e199fa45416a8c2021e05805e0/python/ray/util/accelerators/accelerators.py
+    return [
+        'V100',
+        'P100',
+        'T4',
+        'P4',
+        'K80',
+        'A100',
+    ]
