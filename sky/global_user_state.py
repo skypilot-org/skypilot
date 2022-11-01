@@ -116,11 +116,13 @@ class StorageStatus(enum.Enum):
     READY = 'READY'
 
 
-def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
-                          ready: bool,
-                          is_launch: bool = True,
-                          task=None):
+def add_or_update_cluster(
+    cluster_name: str,
+    cluster_handle: 'backends.Backend.ResourceHandle',
+    task: Any,
+    ready: bool,
+    is_launch: bool = True,
+):
     """Adds or updates cluster_name -> cluster_handle mapping."""
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
@@ -128,19 +130,23 @@ def add_or_update_cluster(cluster_name: str,
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
 
-    cluster_hash = get_cluster_hash(cluster_name)
+    cluster_hash = _get_cluster_hash(cluster_name) or str(uuid.uuid4())
 
-    if not cluster_hash:
-        cluster_hash = str(uuid.uuid4())
+    def get_launched_resources_from_handle(
+            handle: Optional['backends.Backend.ResourceHandle']):
+        launched_resources = handle.launched_resources
+        launched_nodes = handle.launched_nodes
+        return (launched_nodes, launched_resources)
 
-    launched_resources = get_launched_resources(cluster_handle)
+    launched_resources = get_launched_resources_from_handle(cluster_handle)
+
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     requested_resources = None
-    if task:
+    if task and not usage_intervals:
         assert len(task.resources) == 1, task.resources
         requested_resources = list(task.resources)[0]
 
-    usage_intervals = get_cluster_usage_intervals(cluster_hash)
     if not usage_intervals:
         usage_intervals = []
 
@@ -150,7 +156,8 @@ def add_or_update_cluster(cluster_name: str,
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status, autostop, to_down) '
+        '(name, launched_at, handle, last_use, status, '
+        'autostop, to_down, cluster_hash) '
         'VALUES ('
         # name
         '?, '
@@ -172,7 +179,9 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old to_down value if it exists, otherwise set it to
         # default 0.
         'COALESCE('
-        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0)'
+        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0),'
+        # cluster_hash
+        '?'
         ')',
         (
             # name
@@ -192,11 +201,13 @@ def add_or_update_cluster(cluster_name: str,
             ClusterStatus.STOPPED.value,
             cluster_name,
             ClusterStatus.STOPPED.value,
+            cluster_hash,
         ))
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
-        '(cluster_hash, name, requested_resources, launched_resources) '
+        '(cluster_hash, name, requested_resources, '
+        'launched_resources, usage_intervals) '
         'VALUES ('
         # hash
         '?, '
@@ -205,6 +216,8 @@ def add_or_update_cluster(cluster_name: str,
         # requested resources
         '?, '
         # launched resources
+        '?, '
+        # usage intervals
         '?)',
         (
             # hash
@@ -215,12 +228,11 @@ def add_or_update_cluster(cluster_name: str,
             pickle.dumps(requested_resources),
             # launched resources
             pickle.dumps(launched_resources),
+            # usage intervals
+            pickle.dumps(usage_intervals),
         ))
 
     _DB.conn.commit()
-
-    set_cluster_hash(cluster_name, cluster_hash)
-    set_cluster_usage_intervals(cluster_hash, usage_intervals)
 
 
 def update_last_use(cluster_name: str):
@@ -232,15 +244,15 @@ def update_last_use(cluster_name: str):
 
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
-    cluster_hash = get_cluster_hash(cluster_name)
-    usage_intervals = get_cluster_usage_intervals(cluster_hash)
+    cluster_hash = _get_cluster_hash(cluster_name)
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     if usage_intervals:
 
         start_time = usage_intervals.pop()[0]
         end_time = int(time.time())
         usage_intervals.append((start_time, end_time))
-        set_cluster_usage_intervals(cluster_hash, usage_intervals)
+        _set_cluster_usage_intervals(cluster_hash, usage_intervals)
 
     if terminate:
         _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)',
@@ -326,7 +338,7 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute(
         'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
         (cluster_hash,))
@@ -336,8 +348,8 @@ def get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
         return pickle.loads(usage_intervals)
 
 
-def set_cluster_usage_intervals(cluster_hash: str,
-                                usage_intervals: Dict[str, Any]) -> None:
+def _set_cluster_usage_intervals(cluster_hash: str,
+                                 usage_intervals: Dict[str, Any]) -> None:
     _DB.cursor.execute(
         'UPDATE cluster_history SET usage_intervals=(?) WHERE cluster_hash=(?)',
         (
@@ -351,7 +363,7 @@ def set_cluster_usage_intervals(cluster_hash: str,
         raise ValueError(f'Cluster hash {cluster_hash} not found.')
 
 
-def get_cluster_hash(cluster_name: str) -> Optional[str]:
+def _get_cluster_hash(cluster_name: str) -> Optional[str]:
     rows = _DB.cursor.execute(
         'SELECT cluster_hash FROM clusters WHERE name=(?)', (cluster_name,))
     for (cluster_hash,) in rows:
@@ -360,33 +372,16 @@ def get_cluster_hash(cluster_name: str) -> Optional[str]:
         return cluster_hash
 
 
-def set_cluster_hash(cluster_name: str, cluster_hash: str) -> None:
-    _DB.cursor.execute('UPDATE clusters SET cluster_hash=(?) WHERE name=(?)', (
-        cluster_hash,
-        cluster_name,
-    ))
-    count = _DB.cursor.rowcount
-    _DB.conn.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Cluster {cluster_name} not found.')
-
-
-def get_launched_resources(handle: Optional['backends.Backend.ResourceHandle']):
-    launched_resources = handle.launched_resources
-    launched_nodes = handle.launched_nodes
-    return (launched_nodes, launched_resources)
-
-
-def get_launched_resources_from_cluster_hash(cluster_hash: str):
+def get_launched_resources_from_cluster_hash(
+        cluster_hash: str) -> Optional[Tuple[int, Any]]:
     rows = _DB.cursor.execute(
         'SELECT launched_resources FROM cluster_history WHERE cluster_hash=(?)',
         (cluster_hash,))
-    for (launch_info,) in rows:
-        if launch_info is None:
+    for (launched_resources,) in rows:
+        if launched_resources is None:
             return None
-        launch_info = pickle.loads(launch_info)
-        return launch_info
+        launched_resources = pickle.loads(launched_resources)
+        return launched_resources
 
 
 def get_cluster_from_name(
@@ -553,8 +548,12 @@ def get_storage() -> List[Dict[str, Any]]:
 
 def get_cost_for_cluster(cluster_name: str,) -> float:
 
-    cluster_hash = get_cluster_hash(cluster_name) or str(uuid.uuid4())
-    usage_intervals = get_cluster_usage_intervals(cluster_hash)
+    cluster_hash = _get_cluster_hash(cluster_name)
+
+    if cluster_hash is None:
+        return 0
+
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
 
@@ -574,8 +573,9 @@ def get_cost_for_usage_intervals(
         start_time, end_time = int(start_time), int(end_time)
         total_duration += end_time - start_time
 
-    nodes, resources = get_launched_resources_from_cluster_hash(cluster_hash)
+    num_nodes, resources = get_launched_resources_from_cluster_hash(
+        cluster_hash)
 
-    cost = (resources.get_cost(total_duration) * nodes)
+    cost = (resources.get_cost(total_duration) * num_nodes)
 
     return cost

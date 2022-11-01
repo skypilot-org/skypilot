@@ -890,11 +890,11 @@ class RetryingVmProvisioner(object):
         self,
         to_provision: resources_lib.Resources,
         num_nodes: int,
+        task: task_lib.Task,
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
         cluster_exists: bool = False,
-        task: task_lib.Task = None,
     ):
         """The provision retry loop."""
         style = colorama.Style
@@ -949,10 +949,12 @@ class RetryingVmProvisioner(object):
                 global_user_state.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
-            global_user_state.add_or_update_cluster(cluster_name,
-                                                    cluster_handle=handle,
-                                                    ready=False,
-                                                    task=task)
+            global_user_state.add_or_update_cluster(
+                cluster_name,
+                cluster_handle=handle,
+                task=task,
+                ready=False,
+            )
 
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
@@ -1396,11 +1398,11 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
+                    task=task,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
                     cluster_exists=cluster_exists,
-                    task=task,
                 )
                 if dryrun:
                     return
@@ -1858,9 +1860,12 @@ class CloudVmRayBackend(backends.Backend):
                     stdout + stderr)
 
             with timeline.Event('backend.provision.post_process'):
-                global_user_state.add_or_update_cluster(cluster_name,
-                                                        handle,
-                                                        ready=True)
+                global_user_state.add_or_update_cluster(
+                    cluster_name,
+                    handle,
+                    task,
+                    ready=True,
+                )
                 usage_lib.messages.usage.update_final_cluster_status(
                     global_user_state.ClusterStatus.UP)
                 auth_config = common_utils.read_yaml(
@@ -2634,7 +2639,7 @@ class CloudVmRayBackend(backends.Backend):
                                          terminate=terminate)
 
         if cluster_cost:
-            logger.info(f'Total cost of cluster is $ {cluster_cost:.3f}')
+            logger.info(f'Total cost of cluster is $ {cluster_cost:.2f}')
 
         if terminate:
             # Clean up TPU creation/deletion scripts

@@ -155,6 +155,7 @@ class LocalDockerBackend(backends.Backend):
         logger.info('Provisioning complete.')
         global_user_state.add_or_update_cluster(cluster_name,
                                                 cluster_handle=handle,
+                                                task=task,
                                                 ready=False)
         return handle
 
@@ -246,6 +247,7 @@ class LocalDockerBackend(backends.Backend):
             f'{image_tag} /bin/bash{style.RESET_ALL}.\n')
         global_user_state.add_or_update_cluster(cluster_name,
                                                 cluster_handle=handle,
+                                                task=task,
                                                 ready=True)
 
     def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
