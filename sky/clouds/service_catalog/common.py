@@ -1,6 +1,5 @@
 """Common utilities for service catalog."""
 import os
-import pathlib
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import difflib
