@@ -162,7 +162,6 @@ class Cloud:
     def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
-    @property
     @classmethod
     def default_areas(cls) -> Optional[List[str]]:
         return None

@@ -208,7 +208,6 @@ class AWS(clouds.Cloud):
         # 8 vCpus, 32 GB RAM. 3rd generation Intel Xeon. General Purpose.
         return 'm6i.2xlarge'
 
-    @property
     @classmethod
     def default_areas(cls) -> Optional[List[str]]:
         return ['us']

@@ -89,7 +89,7 @@ def get_preferred_areas_from_config(
 
     If not specified, returns the default areas for the cloud.
     """
-    default_areas = cloud.default_areas
+    default_areas = cloud.default_areas()
     config = _read_catalog_config()
     if config is None:
         return default_areas
