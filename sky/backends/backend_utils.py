@@ -2051,16 +2051,3 @@ def validate_schema(obj, schema, err_msg_prefix=''):
     if err_msg:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(err_msg)
-
-
-def supported_ray_accs():
-    # List of supported ray accelerators (w/out importing ray).
-    # https://github.com/ray-project/ray/blob/8be5f016afefb2e199fa45416a8c2021e05805e0/python/ray/util/accelerators/accelerators.py
-    return [
-        'V100',
-        'P100',
-        'T4',
-        'P4',
-        'K80',
-        'A100',
-    ]

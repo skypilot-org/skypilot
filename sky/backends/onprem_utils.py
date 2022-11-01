@@ -362,9 +362,10 @@ def launch_ray_on_local_cluster(
 
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
+    head_gpu_count = sum(list(custom_resources[0].values()))
     head_cmd = ('ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
-                f'--resources={head_resources!r}')
+                f'--resources={head_resources!r} --num-gpus={head_gpu_count}')
 
     with console.status('[bold cyan]Launching ray cluster on head'):
         backend_utils.run_command_and_handle_ssh_failure(
@@ -403,9 +404,11 @@ def launch_ray_on_local_cluster(
 
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
+            worker_gpu_count = sum(list(custom_resources[idx + 1].values()))
             worker_cmd = (f'ray start --address={head_ip}:6379 '
                           '--object-manager-port=8076 --dashboard-port 8265 '
-                          f'--resources={worker_resources!r}')
+                          f'--resources={worker_resources!r} '
+                          f'--num-gpus={worker_gpu_count}')
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
                 worker_cmd,
