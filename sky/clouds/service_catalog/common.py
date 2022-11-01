@@ -51,7 +51,7 @@ def get_catalog_path(filename: str) -> str:
 
 def _get_filtered_cache_path(filename: str, area_filter: List[str]) -> str:
     """Returns the cache path for the filtered catalog.
-    
+
     It will the other caches for the cloud to keep the catatlog folder clean.
 
     Args:
@@ -86,7 +86,7 @@ def _read_catalog_config() -> Optional[Dict[str, Dict[str, str]]]:
 def get_preferred_areas_from_config(
         cloud: 'cloud_lib.Cloud') -> Optional[List[str]]:
     """Gets the preferred areas from the config file.
-    
+
     If not specified, returns the default areas for the cloud.
     """
     default_areas = cloud.default_areas
@@ -97,22 +97,20 @@ def get_preferred_areas_from_config(
     cloud_str = str(cloud).lower()
     if cloud_str not in config:
         return default_areas
-    _preferred_areas = config[cloud_str].get('preferred_areas')
-    if _preferred_areas is None:
+    preferred_areas = config[cloud_str].get('preferred_areas')
+    if preferred_areas is None:
         return default_areas
-    logger.warning(
-        f'Setting preferred areas are EXPERIMENTAL and '
-        f'may break existing clusters. ({cloud}: {_preferred_areas})')
-    if isinstance(_preferred_areas, str):
-        if _preferred_areas == 'all':
-            _preferred_areas = None
+    logger.warning(f'Setting preferred areas are EXPERIMENTAL and '
+                   f'may break existing clusters. ({cloud}: {preferred_areas})')
+    if isinstance(preferred_areas, str):
+        if preferred_areas == 'all':
+            preferred_areas = None
         else:
-            _preferred_areas = [_preferred_areas]
-    elif _preferred_areas is not None and not isinstance(
-            _preferred_areas, list):
+            preferred_areas = [preferred_areas]
+    elif preferred_areas is not None and not isinstance(preferred_areas, list):
         raise ValueError(
-            f'Invalid preferred_areas for {cloud}: {_preferred_areas}')
-    return _preferred_areas
+            f'Invalid preferred_areas for {cloud}: {preferred_areas}')
+    return preferred_areas
 
 
 def read_catalog(
@@ -136,7 +134,7 @@ def read_catalog(
                 filename, preferred_areas)
             try:
                 return pd.read_csv(cached_catalog_path)
-            except Exception:
+            except Exception:  # pylint: disable=broad-except
                 # Failed to load the cache regenerate the cache.
                 pass
 

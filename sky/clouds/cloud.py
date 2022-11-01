@@ -163,6 +163,7 @@ class Cloud:
         raise NotImplementedError
 
     @property
+    @classmethod
     def default_areas(cls) -> Optional[List[str]]:
         return None
 
