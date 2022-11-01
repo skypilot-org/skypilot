@@ -110,7 +110,7 @@ For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``s
 View all clusters
 =================
 
-Use :code:`sky status` to see all clusters (across regions and clouds) in a single convenient table:
+Use :code:`sky status` to see all clusters (across regions and clouds) in a single table:
 
 .. code-block:: console
 
