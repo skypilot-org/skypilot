@@ -237,7 +237,7 @@ def list_accelerators_impl(
     instance types offered by this cloud.
     """
     if gpus_only:
-        df = df[~pd.isna(df['GpuInfo'])]
+        df = df[~df['GpuInfo'].isna()]
     df = df[[
         'InstanceType',
         'AcceleratorName',
