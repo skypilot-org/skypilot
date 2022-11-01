@@ -33,7 +33,7 @@ SkyPilot cuts your cloud costs:
 
 * :ref:`Managed Spot <Managed Spot Jobs>`: **3x cost savings** using spot VMs, with auto-recovery from preemptions
 * :ref:`Autostop <Auto-stopping>`: hands-free cleanup of idle clusters
-* :ref:`Benchmark <Benchmark>`: find best VM types for your jobs
+* :ref:`Benchmark <Benchmark: Find the Best Hardware for Your Jobs>`: find best VM types for your jobs
 * Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
@@ -48,69 +48,47 @@ Documentation
    getting-started/installation
    getting-started/quickstart
    getting-started/tutorial
-
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Use Cases
-
-   examples/iterative-dev-project
-   examples/syncing-code-artifacts
-   examples/auto-failover
-   examples/grid-search
-   examples/distributed-jobs
    examples/gpu-jupyter
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Running Jobs
+
+   reference/job-queue
+   reference/tpu
+   examples/auto-failover
+   running-jobs/index
 
 .. toctree::
    :maxdepth: 1
-   :caption: Features
+   :caption: Cutting Cloud Costs
 
-   reference/job-queue
-   reference/auto-stop
    examples/spot-jobs
+   reference/auto-stop
    reference/benchmark/index
-   reference/tpu
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Using Data
+
+   examples/syncing-code-artifacts
+   reference/storage
 
 .. toctree::
    :maxdepth: 1
    :caption: User Guides
 
-   reference/yaml-spec
-   reference/interactive-nodes
-   reference/storage
    reference/local/index
+   examples/iterative-dev-project
+   reference/interactive-nodes
    reference/quota
    reference/logging
    reference/faq
 
 .. toctree::
    :maxdepth: 1
-   :caption: API References
+   :caption: References
 
+   reference/yaml-spec
    reference/cli
    reference/api
-
-
-.. .. toctree::
-..   :maxdepth: 1
-..   :caption: Advanced SkyPilot Tutorials
-
-..   .. advanced/distributed
-..   advanced/python-control
-
-
-.. .. toctree::
-..    :maxdepth: 1
-..    :caption: Developer Documentation
-
-..   developers/contributing
-..   developers/testing
-..   developers/design
-
-
-.. .. toctree::
-..   :maxdepth: 3
-..   :caption: API documentation
-
-..   sky
