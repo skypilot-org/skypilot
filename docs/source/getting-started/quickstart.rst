@@ -127,16 +127,31 @@ This may show multiple clusters, if you have created several:
 
 SSH into clusters
 =================
-To log into a cluster, simply run :code:`ssh <cluster_name>`:
+Simply run :code:`ssh <cluster_name>` to log into a cluster:
 
 .. code-block:: console
 
   $ ssh mycluster
 
+:ref:`Multi-node clusters <dist-jobs>` work too:
+
+.. code-block:: console
+
+  # Assuming 3 nodes.
+
+  # Head node.
+  $ ssh mycluster
+
+  # Worker nodes.
+  $ ssh mycluster-worker1
+  $ ssh mycluster-worker2
+
+The above are achieved by adding appropriate entries to ``~/.ssh/config``.
+
 Transfer files
 ===============
 
-After a task's execution,  use :code:`rsync` (or :code:`scp`) to download files (e.g., checkpoints):
+After a task's execution,  use :code:`rsync` or :code:`scp` to download files (e.g., checkpoints):
 
 .. code-block:: console
 
