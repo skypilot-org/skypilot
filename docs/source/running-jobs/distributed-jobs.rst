@@ -9,35 +9,41 @@ provisioning and distributed execution on many VMs.
 For example, here is a simple PyTorch Distributed training example:
 
 .. code-block:: yaml
+   :emphasize-lines: 6-6
 
-  name: resnet-distributed-app
+   name: resnet-distributed-app
 
-  resources:
-    accelerators: V100:4
+   resources:
+     accelerators: V100:4
 
-  num_nodes: 2
+   num_nodes: 2
 
-  setup: |
-    pip3 install --upgrade pip
-    git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet
-    cd pytorch-distributed-resnet
-    # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
-    pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
-    mkdir -p data  && mkdir -p saved_models && cd data && \
-      wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
-    tar -xvzf cifar-10-python.tar.gz
+   setup: |
+     pip3 install --upgrade pip
+     git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet
+     cd pytorch-distributed-resnet
+     # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
+     pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+     mkdir -p data  && mkdir -p saved_models && cd data && \
+       wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
+     tar -xvzf cifar-10-python.tar.gz
 
-  run: |
-    cd pytorch-distributed-resnet
+   run: |
+     cd pytorch-distributed-resnet
 
-    num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
-    master_addr=`echo "$SKY_NODE_IPS" | head -n1`
-    python3 -m torch.distributed.launch --nproc_per_node=$SKY_NUM_GPUS_PER_NODE \
-      --nnodes=$num_nodes --node_rank=${SKY_NODE_RANK} --master_addr=$master_addr \
-      --master_port=8008 resnet_ddp.py --num_epochs 20
+     num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
+     master_addr=`echo "$SKY_NODE_IPS" | head -n1`
+     python3 -m torch.distributed.launch --nproc_per_node=$SKY_NUM_GPUS_PER_NODE \
+       --nnodes=$num_nodes --node_rank=${SKY_NODE_RANK} --master_addr=$master_addr \
+       --master_port=8008 resnet_ddp.py --num_epochs 20
 
 In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
-nodes. The :code:`setup` and :code:`run` commands are executed on both nodes.
+nodes, each node having 4 V100s.
+The :code:`setup` and :code:`run` commands are executed on both nodes.
+
+
+Environment variables
+-----------------------------------------
 
 SkyPilot exposes these environment variables that can be accessed in a task's ``run`` commands:
 
@@ -54,3 +60,27 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
     :code:`run` command with :code:`echo $SKY_NODE_IPS >> ~/sky_node_ips`.
 - :code:`SKY_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
+
+
+Executing a multi-node task
+-----------------------------------------
+
+The execution behavior is: all nodes are provisioned (barrier);
+workdir/file_mounts are synced to all nodes (barrier); ``setup`` commands are
+executed on all nodes (barrier); finally, the ``run`` commands are executed on
+all nodes.
+
+
+To execute a command on the head node only (common for tools like ``mpirun``),
+use ``SKY_NODE_RANK`` as follows:
+
+.. code-block:: yaml
+
+   ...
+
+   num_nodes: <n>
+
+   run: |
+     if [ "${SKY_NODE_RANK}" == "0" ]; then
+         # Launch the head-only command here.
+     fi
