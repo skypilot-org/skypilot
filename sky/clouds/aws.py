@@ -95,30 +95,38 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
+        image_id = service_catalog.get_image_id_from_tag('sky:gpu-ubuntu-2004',
+                                                         region_name,
+                                                         clouds='aws')
         if acc is not None:
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 image_id = service_catalog.get_image_id_from_tag(
                     'sky:k80-ubuntu-2004', region_name, clouds='aws')
-                assert image_id, f'No image found for region {region_name}'
-        image_id = service_catalog.get_image_id_from_tag('sky:gpu-ubuntu-2004',
-                                                         region_name,
-                                                         clouds='aws')
-        assert image_id, f'No image found for region {region_name}'
-        return image_id
+        if image_id is not None:
+            return image_id
+        # Raise ResourcesUnavailableError to make sure the failover in
+        # CloudVMRayBackend will be correctly triggered.
+        # TODO(zhwu): This is a information leakage to the cloud implementor,
+        # we need to find a better way to handle this.
+        raise exceptions.ResourcesUnavailableError(
+            'No image found in catalog for region '
+            f'{region_name}. Try setting a valid image_id.')
 
     @classmethod
-    def parse_image_id(cls, region_name: str, instance_type: str,
-                       image_id: Optional[str]) -> str:
+    def _get_image_id(cls, region_name: str, instance_type: str,
+                      image_id: Optional[str]) -> str:
         if image_id is not None:
             if image_id.startswith('sky:'):
                 image_id = service_catalog.get_image_id_from_tag(image_id,
                                                                  region_name,
                                                                  clouds='aws')
-                if not image_id:
-                    # Raise ResourcesUnavailableError to make sure the failover in
-                    # CloudVMRayBackend will be correctly triggered.
+                if image_id is None:
+                    # Raise ResourcesUnavailableError to make sure the failover
+                    # in CloudVMRayBackend will be correctly triggered.
+                    # TODO(zhwu): This is a information leakage to the cloud
+                    # implementor, we need to find a better way to handle this.
                     raise exceptions.ResourcesUnavailableError(
                         f'No image found for region {region_name}')
             return image_id
@@ -222,7 +230,7 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self.parse_image_id(region_name, r.instance_type, r.image_id)
+        image_id = self._get_image_id(region_name, r.instance_type, r.image_id)
 
         return {
             'instance_type': r.instance_type,

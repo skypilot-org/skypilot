@@ -9,7 +9,7 @@ from sky import clouds as cloud_lib
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-_df = common.read_catalog('azure/instances.csv', cloud_lib.Azure())
+_df = common.read_catalog('azure/instances.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:

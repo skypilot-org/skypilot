@@ -6,14 +6,13 @@ instance types and pricing information for AWS.
 import typing
 from typing import Dict, List, Optional, Tuple
 
-from sky import clouds as clouds_lib
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('aws/instances.csv', clouds_lib.AWS())
-_image_df = common.read_catalog('aws/images.csv', clouds_lib.AWS())
+_df = common.read_catalog('aws/instances.csv')
+_image_df = common.read_catalog('aws/images.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -76,6 +75,11 @@ def list_accelerators(gpus_only: bool,
                                          case_sensitive)
 
 
-def get_image_id_from_tag(tag: str, region: str) -> Optional[str]:
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
     return common.get_image_id_from_tag_impl(_image_df, tag, region)
+
+
+def validate_image_tag(tag: str, region: Optional[str]) -> bool:
+    """Returns whether the image tag is valid."""
+    return common.validate_image_tag_impl(_image_df, tag, region)

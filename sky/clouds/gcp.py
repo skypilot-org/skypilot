@@ -34,8 +34,6 @@ _CREDENTIAL_FILES = [
     'active_config',
 ]
 
-_IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
-
 _GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
 # Need to be run with /bin/bash
 # We factor out the installation logic to keep it align in both spot

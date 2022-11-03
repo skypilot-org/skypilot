@@ -1,10 +1,11 @@
 """A script that queries AWS API to get instance types and pricing information.
 This script takes about 1 minute to finish.
 """
+import argparse
 import datetime
 import os
 import subprocess
-from typing import Tuple, Union
+from typing import List, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -136,8 +137,8 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         def get_memory_gib(row) -> float:
             if isinstance(row['MemoryInfo'], dict):
-                return row['MemoryInfo']['SizeInMiB'] // 1024
-            return int(row['Memory'].split(' GiB')[0])
+                return row['MemoryInfo']['SizeInMiB'] / 1024
+            return float(row['Memory'].split(' GiB')[0])
 
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
@@ -182,8 +183,8 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     return df
 
 
-def get_all_regions_instance_types_df():
-    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in REGIONS])
+def get_all_regions_instance_types_df(regions: List[str]) -> pd.DataFrame:
+    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in regions])
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -197,11 +198,10 @@ def get_all_regions_instance_types_df():
 
 
 # Fetch Images
-REGIONS = ALL_REGIONS
-GPU_TO_IMAGE_DATE = {
+_GPU_TO_IMAGE_DATE = {
     # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-    # Commented below are newer AMIs, but as other clouds do not support
-    # torch==1.13.0+cu117 we do not use these AMIs to avoid frequent updates:
+    # Commented below is the new AMI name, but as other clouds do not support
+    # torch==1.13.0+cu117 we do not use this AMI to avoid frequent updates:
     #   Deep Learning AMI GPU PyTorch 1.12.1 (Ubuntu 20.04) 20221025
     #
     # Current AMIs:
@@ -213,7 +213,7 @@ GPU_TO_IMAGE_DATE = {
     # NVIDIA driver lower than 470.
     'k80': ['20211208']
 }
-UBUNTU_VERSION = ['18.04', '20.04']
+_UBUNTU_VERSION = ['18.04', '20.04']
 
 
 def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
@@ -239,7 +239,7 @@ def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
 def get_image_row(region: str, ubuntu_version: str,
                   cpu_or_gpu: str) -> Tuple[str, str, str, str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
-    creation_date = GPU_TO_IMAGE_DATE[cpu_or_gpu]
+    creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     for date in creation_date:
         image_id = get_image_id(region, ubuntu_version, date)
         if image_id:
@@ -250,30 +250,39 @@ def get_image_row(region: str, ubuntu_version: str,
             f'Failed to find image for {region}, {ubuntu_version}, {cpu_or_gpu}'
         )
     tag = f'sky:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
-    return tag, region, f'ubuntu-{ubuntu_version.replace(".", "")}', image_id, date
+    return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
 
 def get_all_regions_images_df() -> pd.DataFrame:
     workers = []
-    for cpu_or_gpu in GPU_TO_IMAGE_DATE:
-        for ubuntu_version in UBUNTU_VERSION:
-            for region in REGIONS:
+    for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
+        for ubuntu_version in _UBUNTU_VERSION:
+            for region in ALL_REGIONS:
                 workers.append(
                     get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
 
     results = ray.get(workers)
     results = pd.DataFrame(
-        results, columns=['Tag', 'Region', 'OS', 'ImageId', 'CreationDate'])
+        results,
+        columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
     return results
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--all-regions',
+                        action='store_true',
+                        help='Fetch all regions')
+    args = parser.parse_args()
+
+    regions = ALL_REGIONS if args.all_regions else US_REGIONS
+
     ray.init()
-    df = get_all_regions_instance_types_df()
+    df = get_all_regions_instance_types_df(regions)
     os.makedirs('aws', exist_ok=True)
     df.to_csv('aws/instances.csv', index=False)
     print('AWS Service Catalog saved to aws.csv')
 
-    df = get_all_regions_instance_types_df()
+    df = get_all_regions_images_df()
     df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')

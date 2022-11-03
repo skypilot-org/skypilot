@@ -392,9 +392,16 @@ class Resources:
                 'image_id is only supported for AWS and GCP, please '
                 'explicitly specify the cloud.')
 
+        if self._image_id.startswith(
+                'sky:') and not self._cloud.validate_image_tag(self._image_id):
+            region_or_zone = self._region or self._zone
+            region_str = f' ({region_or_zone})' if region_or_zone else ''
+            raise ValueError(
+                f'Image tag {self._image_id} is not valid, please make sure '
+                f'the tag exists in {self._cloud}{region_str}.')
+
         if (self._cloud.is_same_cloud(clouds.AWS()) and
-                not self._image_id.startswith('sky:') and
-                self._region is not None):
+                not self._image_id.startswith('sky:') and self._region is None):
             raise ValueError('image_id is only supported for AWS in a specific '
                              'region, please explicitly specify the region.')
 
