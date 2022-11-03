@@ -356,5 +356,5 @@ def validate_image_tag_impl(df: pd.DataFrame, tag: str,
     df = df[df['Tag'] == tag]
     if region is not None:
         df = df[df['Region'] == region]
-    df.dropna(subset=['ImageId'], inplace=True)
+    df = df.dropna(subset=['ImageId'])
     return len(df) > 0
