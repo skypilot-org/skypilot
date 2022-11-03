@@ -157,14 +157,13 @@ def parallel_upload(source_path_list: List[Path],
 
     # Run commands in parallel
     with pool.ThreadPool(processes=max_concurrent_uploads) as p:
-        p.starmap(run_upload_cli, zip(commands,
-                                      [access_denied_message] * len(commands),
-                                      [bucket_name] * len(commands)))
+        p.starmap(
+            run_upload_cli,
+            zip(commands, [access_denied_message] * len(commands),
+                [bucket_name] * len(commands)))
 
 
-def run_upload_cli(command: str,
-                   access_denied_message: str,
-                   bucket_name: str):
+def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
     # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
     # to a log file.
     with subprocess.Popen(command,

@@ -3,7 +3,6 @@ import enum
 import os
 import subprocess
 import time
-from multiprocessing import pool
 from typing import Any, Dict, Optional, Tuple, Union, List
 import urllib.parse
 
@@ -422,7 +421,9 @@ class Storage(object):
             # syncing to file_mount stage..
             if self.sync_on_reconstruction:
                 msg = ''
-                if (self.source and (isinstance(self.source, list) or not data_utils.is_cloud_store_url(self.source))):
+                if (self.source and
+                    (isinstance(self.source, list) or
+                     not data_utils.is_cloud_store_url(self.source))):
                     msg = ' and uploading from source'
                 logger.info(f'Verifying bucket{msg} for storage {self.name}')
                 self.sync_all_stores()
@@ -811,15 +812,11 @@ class S3Store(AbstractStore):
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
             if self.source.startswith('s3://'):
-                assert self.name == data_utils.split_s3_path(
-                    self.source
-                )[0], (
+                assert self.name == data_utils.split_s3_path(self.source)[0], (
                     'S3 Bucket is specified as path, the name should be the'
                     ' same as S3 bucket.')
             elif self.source.startswith('gs://'):
-                assert self.name == data_utils.split_gcs_path(
-                    self.source
-                )[0], (
+                assert self.name == data_utils.split_gcs_path(self.source)[0], (
                     'GCS Bucket is specified as path, the name should be '
                     'the same as GCS bucket.')
                 assert data_utils.verify_gcs_bucket(self.name), (
@@ -899,6 +896,7 @@ class S3Store(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
@@ -922,13 +920,14 @@ class S3Store(AbstractStore):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
-            data_utils.parallel_upload(source_path_list,
-                                       get_file_sync_command,
-                                       get_dir_sync_command,
-                                       self.name,
-                                       self.ACCESS_DENIED_MESSAGE,
-                                       create_dirs=create_dirs,
-                                       max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                self.name,
+                self.ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -1188,7 +1187,9 @@ class GcsStore(AbstractStore):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
-            data_utils.run_upload_cli(sync_command, self.ACCESS_DENIED_MESSAGE)
+            data_utils.run_upload_cli(sync_command,
+                                      self.ACCESS_DENIED_MESSAGE,
+                                      bucket_name=self.name)
 
     def batch_gsutil_rsync(self,
                            source_path_list: List[Path],
@@ -1210,6 +1211,7 @@ class GcsStore(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
@@ -1230,13 +1232,14 @@ class GcsStore(AbstractStore):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
-            data_utils.parallel_upload(source_path_list,
-                                       get_file_sync_command,
-                                       get_dir_sync_command,
-                                       self.name,
-                                       self.ACCESS_DENIED_MESSAGE,
-                                       create_dirs=create_dirs,
-                                       max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                self.name,
+                self.ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
