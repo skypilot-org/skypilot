@@ -262,6 +262,7 @@ __all__ = [
     'get_tpus',
     # Images
     'get_image_id_from_tag',
+    'is_image_tag_valid',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',
