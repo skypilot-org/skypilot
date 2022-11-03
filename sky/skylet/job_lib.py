@@ -2,6 +2,7 @@
 
 This is a remote utility module that provides job queue functionality.
 """
+import datetime
 import enum
 import os
 import pathlib
@@ -64,7 +65,8 @@ def create_table(cursor, conn):
     cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
         job_id INTEGER,
         run_cmd TEXT,
-        submit INTEGER
+        submit INTEGER,
+        created_time TIMESTAMP default CURRENT_TIMESTAMP
     )""")
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
@@ -388,8 +390,8 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 
 def _get_pending_jobs():
-    rows = _CURSOR.execute('SELECT job_id FROM pending_jobs')
-    return [int(row[0]) for row in rows]
+    rows = _CURSOR.execute('SELECT job_id, created_time FROM pending_jobs')
+    return [int(row[0]) for row in rows], [int(row[1]) for row in rows]
 
 
 def update_job_status(job_owner: str,
@@ -425,13 +427,18 @@ def update_job_status(job_owner: str,
         if job_detail.submission_id in ray_job_ids_set:
             job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(job_ids)
-    pending_jobs = _get_pending_jobs()
+    pending_jobs, start_times = _get_pending_jobs()
     for i, job_id in enumerate(job_ids):
         ray_job_id = make_ray_job_id(job_id, job_owner)
         if ray_job_id in job_details:
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
+            idx = pending_jobs.indexof(job_id)
+            # if start_times[i] < :
+            #     job_statuses[i] = JobStatus.FAILED
+            # else:
+            #     job_statuses[i] = JobStatus.PENDING
             job_statuses[i] = JobStatus.PENDING
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
@@ -594,16 +601,17 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     # ray cluster (tracked in #1262).
     for job in job_records:
         job_id = make_ray_job_id(job['job_id'], job_owner)
-        try:
-            job_client.stop_job(job_id)
-        except RuntimeError as e:
-            # If the job does not exist or if the request to the
-            # job server fails.
-            logger.warning(str(e))
-            continue
+        with filelock.FileLock(_get_lock_path(job_id)):
+            try:
+                job_client.stop_job(job_id)
+            except RuntimeError as e:
+                # If the job does not exist or if the request to the
+                # job server fails.
+                logger.warning(str(e))
+                continue
 
-        if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
-            set_status(job['job_id'], JobStatus.CANCELLED)
+            if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
+                set_status(job['job_id'], JobStatus.CANCELLED)
     scheduler.run_next_if_possible()
 
 

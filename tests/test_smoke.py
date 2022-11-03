@@ -214,7 +214,7 @@ def test_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -345,6 +345,10 @@ def test_large_job_queue():
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
             f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
+            f'sky queue {name} | grep {name}-15 | grep RUNNING',
+            f'sky queue {name} | grep {name}-32 | grep RUNNING',
+            f'sky queue {name} | grep {name}-33 | grep PENDING',
+            f'sky queue {name} | grep {name}-50 | grep PENDING',
         ],
         f'sky down -y {name}',
     )
