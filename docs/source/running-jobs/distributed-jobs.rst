@@ -38,8 +38,8 @@ For example, here is a simple PyTorch Distributed training example:
        --master_port=8008 resnet_ddp.py --num_epochs 20
 
 In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
-nodes, each node having 4 V100s.
-The :code:`setup` and :code:`run` commands are executed on both nodes.
+nodes, with each node having 4 V100s. The :code:`setup` and :code:`run` commands
+are executed on both nodes.
 
 
 Environment variables
@@ -62,17 +62,18 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
 
 
-Executing a multi-node task
+Launching a multi-node task
 -----------------------------------------
 
-The execution behavior is: all nodes are provisioned (barrier);
-workdir/file_mounts are synced to all nodes (barrier); ``setup`` commands are
-executed on all nodes (barrier); finally, the ``run`` commands are executed on
-all nodes.
+When using ``sky launch`` to launch a multi-node task, the following happens in sequence:
 
+1. Nodes are provisioned. SkyPilot waits for all nodes to be ready (barrier).
+2. Workdir/file_mounts are synced to all nodes. SkyPilot waits for transfers on all nodes to complete (barrier).
+3. ``setup`` commands are executed on all nodes. SkyPilot waits for setup on all nodes to complete (barrier).
+4. ``run`` commands are executed on all nodes.
 
-To execute a command on the head node only (common for tools like ``mpirun``),
-use ``SKY_NODE_RANK`` as follows:
+To execute a command on the head node only (a common scenario for tools like
+``mpirun``), use the ``SKY_NODE_RANK`` environment variable as follows:
 
 .. code-block:: yaml
 
