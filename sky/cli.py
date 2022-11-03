@@ -2348,6 +2348,14 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
 
 
 @storage.command('create', cls=_DocumentedCodeCommand)
+@click.argument('name',
+                required=True,
+                type=str,
+                nargs=1)
+@click.argument('source',
+                required=True,
+                type=str,
+                nargs=1)
 @click.argument('stores',
                 required=False,
                 type=str,
@@ -2360,7 +2368,7 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
           source: str; File path where the data is initially stored. Can be a
             local path or a cloud URI (s3://, gs://, etc.). Local paths do not
             need to be absolute.
-          stores: Optional; Specify pre-initialized stores (S3, GCS).
+          stores: Optional; Specify pre-initialized stores (S3 or GCS).
 
     Examples:
 
@@ -2370,6 +2378,7 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
         sky storage create imagenet S3://bucket-name GCS AWS
 
     """
+    
     sky.storage_create(name, source, stores)
 
 

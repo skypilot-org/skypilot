@@ -200,8 +200,8 @@ using SkyPilot Storage to perform communication between processes using files.
 Using SkyPilot Storage CLI tools
 --------------------------------
 
-To manage persistent Storage objects, the sky CLI provides two useful commands -
-:code:`sky storage ls` and :code:`sky storage delete`.
+To manage persistent Storage objects, the sky CLI provides three useful commands -
+:code:`sky storage ls`, :code:`sky storage create`, and :code:`sky storage delete`.
 
 1.  :code:`sky storage ls` shows the currently provisioned Storage objects.
 
@@ -211,7 +211,13 @@ To manage persistent Storage objects, the sky CLI provides two useful commands -
     NAME               CREATED     STORE  COMMAND                                        STATUS
     sky-dataset-romil  3 mins ago  S3     sky launch -c demo examples/storage_demo.yaml  READY
 
-2.  :code:`sky storage delete` allows you to delete any Storage objects managed
+2.  :code:`sky storage create` allows you to create a sky Storage object.
+
+.. code-block:: console
+    $ sky storage create imagenet S3://bucket-name GCS AWS
+
+
+3.  :code:`sky storage delete` allows you to delete any Storage objects managed
     by sky.
 
 .. code-block:: console

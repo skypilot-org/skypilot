@@ -894,11 +894,9 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
-    @pytest.mark.parametrize(
-        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
-    def test_sky_storage_cli(self, tmp_bucket_name, tmp_source,  store_type):
+    def test_sky_storage_cli(self, tmp_bucket_name, tmp_source):
         # Creates new bucket with local source
-        subprocess.check_output(['sky', 'storage', 'create', tmp_bucket_name, tmp_source, store_type])
+        subprocess.check_output(['sky', 'storage', 'create', tmp_bucket_name, tmp_source, 'AWS'])
 
         # Run sky storage ls to check if storage object exists in output
         out = subprocess.check_output(['sky', 'storage', 'ls'])
