@@ -63,8 +63,8 @@ When specifying a storage object, you can specify either of two modes:
     they are accessed by applications. This mode also allows applications to
     write to the mount path. All writes are replicated to remote bucket (and
     any other VMs mounting the same bucket). Please note that this mode
-    uses a close-to-open consistency model, which means a file write is
-    committed to the backing store only after :code:`close()` is called on it.
+    uses a close-to-open consistency model. This means calling :code:`close()`
+    on a file will guarantee that any subsequent reads will see the latest data.
 
 - :code:`mode: COPY`
     This mode pre-fetches your files from remote storage and caches them on the
