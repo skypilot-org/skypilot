@@ -41,7 +41,7 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 # FIXME(woosuk): This URL can change.
-A2_PRICING_URL = '/compute/vm-instance-pricing_34568c2efd1858a89d6f5b0f1cdd171bbea1cdcba646e9771e6ef4028238086f.frame' # pylint: disable=line-too-long
+A2_PRICING_URL = '/compute/vm-instance-pricing_34568c2efd1858a89d6f5b0f1cdd171bbea1cdcba646e9771e6ef4028238086f.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
         'vCPUs': 12,
