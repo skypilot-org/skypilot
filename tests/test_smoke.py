@@ -131,7 +131,7 @@ def test_minimal():
     test = Test(
         'minimal',
         [
-            f'sky launch -y -c {name} examples/minimal.yaml',
+            f'sky launch -y -c {name} --image-id sky:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
