@@ -2,10 +2,11 @@
 
 This script takes about 1 minute to finish.
 """
+import argparse
 import json
 import os
 import subprocess
-from typing import Optional
+from typing import Optional, Set, Tuple
 import urllib
 
 import numpy as np
@@ -26,17 +27,13 @@ US_REGIONS = [
 ]
 
 # To enable all the regions, uncomment the following line.
-# def get_regions() -> Tuple[str]:
-#     """Get all available regions."""
-#     proc = subprocess.run('az account list-locations  --query "[?not_null(metadata.latitude)] .{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json', shell=True, check=True, stdout=subprocess.PIPE)
-#     items = json.loads(proc.stdout.decode('utf-8'))
-#     regions = [item['RegionName'] for item in items if not item['RegionName'].endswith('stg')]
-#     return tuple(regions)
-# all_regions = get_regions()
+def get_regions() -> Tuple[str]:
+    """Get all available regions."""
+    proc = subprocess.run('az account list-locations  --query "[?not_null(metadata.latitude)] .{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json', shell=True, check=True, stdout=subprocess.PIPE)
+    items = json.loads(proc.stdout.decode('utf-8'))
+    regions = [item['RegionName'] for item in items if not item['RegionName'].endswith('stg')]
+    return tuple(regions)
 
-# REGIONS = all_regions
-REGIONS = US_REGIONS
-REGION_SET = set(REGIONS)
 # Azure secretly deprecated the M60 family which is still returned by its API.
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
@@ -91,7 +88,7 @@ def get_all_regions_pricing_df() -> pd.DataFrame:
 
 
 @ray.remote
-def get_sku_df() -> pd.DataFrame:
+def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     print(f'Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
@@ -106,7 +103,7 @@ def get_sku_df() -> pd.DataFrame:
     for item in items:
         # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
-        if region not in REGION_SET:
+        if region not in region_set:
             continue
         item['Region'] = region
         filtered_items.append(item)
@@ -142,10 +139,10 @@ def get_gpu_name(family: str) -> str:
     return gpu_data.get(family)
 
 
-def get_all_regions_instance_types_df():
+def get_all_regions_instance_types_df(region_set: Set[str]):
     df, df_sku = ray.get([
         get_all_regions_pricing_df.remote(),
-        get_sku_df.remote(),
+        get_sku_df.remote(region_set),
     ])
     print(f'Processing dataframes')
     df.drop_duplicates(inplace=True)
@@ -233,8 +230,18 @@ def get_all_regions_instance_types_df():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--all-regions',
+        action='store_true',
+        help='Fetch all global regions, not just the U.S. ones.')
+    args = parser.parse_args()
+
     ray.init()
-    df = get_all_regions_instance_types_df()
+    regions = get_regions() if args.all_regions else US_REGIONS
+    regions = set(regions)
+
+    df = get_all_regions_instance_types_df(regions)
     os.makedirs('azure', exist_ok=True)
     df.to_csv('azure/instances.csv', index=False)
     print('Azure Service Catalog saved to azure.csv')
