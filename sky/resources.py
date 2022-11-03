@@ -386,7 +386,7 @@ class Resources:
         if self.cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Cloud must be specified when image_id provided.')
+                    'Cloud must be specified when image_id is provided.')
 
         if not self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
@@ -396,7 +396,7 @@ class Resources:
                     'explicitly specify the cloud.')
 
         if (self._image_id.startswith('sky:') and
-                not self._cloud.validate_image_tag(self._image_id,
+                not self._cloud.is_image_tag_valid(self._image_id,
                                                    self._region)):
             region_or_zone = self._region or self._zone
             region_str = f' ({region_or_zone})' if region_or_zone else ''
