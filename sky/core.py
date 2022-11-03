@@ -1,5 +1,4 @@
 """SDK functions for cluster/job management."""
-import click
 import colorama
 import getpass
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,7 +20,6 @@ from sky.utils import ux_utils
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
-
 
 # ======================
 # = Cluster Management =
@@ -418,7 +416,7 @@ def job_status(
 
 
 def _is_spot_controller_up(
-        stopped_message: str,
+    stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     controller_status, handle = backend_utils.refresh_cluster_status_handle(
@@ -470,8 +468,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
         return []
 
     if (refresh and controller_status in [
-        global_user_state.ClusterStatus.STOPPED,
-        global_user_state.ClusterStatus.INIT
+            global_user_state.ClusterStatus.STOPPED,
+            global_user_state.ClusterStatus.INIT
     ]):
         print(f'{colorama.Fore.YELLOW}'
               'Restarting controller for latest status...'
@@ -624,14 +622,16 @@ def storage_delete(name: Optional[str] = None):
         store_object.delete()
 
 
-def storage_create(name: Optional[str] = None, source: Optional[str] = None, stores: Tuple[str] = None):
+def storage_create(name: Optional[str] = None,
+                   source: Optional[str] = None,
+                   stores: Tuple[str] = None):
     """"Create a storage.
 
     """
     storage = data.Storage(name, source)
 
     stores = [] if stores is None else stores
-    stores = [storeType.upper() for storeType in stores]
+    stores = [store_type.upper() for store_type in stores]
 
     # Add stores from tuple to storage object
     if 'GCS' in stores:

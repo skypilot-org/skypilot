@@ -2348,18 +2348,9 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
 
 
 @storage.command('create', cls=_DocumentedCodeCommand)
-@click.argument('name',
-                required=False,
-                type=str,
-                nargs=1)
-@click.argument('source',
-                required=False,
-                type=str,
-                nargs=1)
-@click.argument('stores',
-                required=False,
-                type=str,
-                nargs=-1)
+@click.argument('name', required=False, type=str, nargs=1)
+@click.argument('source', required=False, type=str, nargs=1)
+@click.argument('stores', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 def storage_create(name: str, source: str, stores: Tuple[str]):
     """Create a storage object.
@@ -2380,9 +2371,6 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
     """
     click.echo('Creating storage object' + ' ' + name + ' from ' + source)
     sky.storage_create(name, source, stores)
-
-
-
 
 
 @cli.group(cls=_NaturalOrderGroup)
