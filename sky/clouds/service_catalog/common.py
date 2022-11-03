@@ -350,7 +350,7 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     return image_id
 
 
-def validate_image_tag_impl(df: pd.DataFrame, tag: str,
+def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
                             region: Optional[str]) -> bool:
     """Returns True if the image tag is valid."""
     df = df[df['Tag'] == tag]

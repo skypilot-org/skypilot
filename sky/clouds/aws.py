@@ -95,7 +95,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag('sky:gpu-ubuntu-2004',
+        image_id = service_catalog.get_image_id_from_tag('skypilot:gpu-ubuntu-2004',
                                                          region_name,
                                                          clouds='aws')
         if acc is not None:
@@ -103,7 +103,7 @@ class AWS(clouds.Cloud):
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 image_id = service_catalog.get_image_id_from_tag(
-                    'sky:k80-ubuntu-2004', region_name, clouds='aws')
+                    'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -118,7 +118,7 @@ class AWS(clouds.Cloud):
     def _get_image_id(cls, region_name: str, instance_type: str,
                       image_id: Optional[str]) -> str:
         if image_id is not None:
-            if image_id.startswith('sky:'):
+            if image_id.startswith('skypilot:'):
                 image_id = service_catalog.get_image_id_from_tag(image_id,
                                                                  region_name,
                                                                  clouds='aws')

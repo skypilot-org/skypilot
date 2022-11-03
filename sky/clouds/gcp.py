@@ -217,7 +217,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = service_catalog.get_image_id_from_tag('sky:cpu-debian-10',
+        image_id = service_catalog.get_image_id_from_tag('skypilot:cpu-debian-10',
                                                          clouds='gcp')
 
         r = resources
@@ -263,14 +263,14 @@ class GCP(clouds.Cloud):
                     # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
                     image_id = service_catalog.get_image_id_from_tag(
-                        'sky:k80-debian-10', clouds='gcp')
+                        'skypilot:k80-debian-10', clouds='gcp')
                 else:
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
                     # CUDA driver version 510.47.03, CUDA Library 11.6
                     # Does not support torch==1.13.0 with cu117
                     image_id = service_catalog.get_image_id_from_tag(
-                        'sky:gpu-debian-10', clouds='gcp')
+                        'skypilot:gpu-debian-10', clouds='gcp')
 
         if resources.image_id is not None:
             image_id = resources.image_id
