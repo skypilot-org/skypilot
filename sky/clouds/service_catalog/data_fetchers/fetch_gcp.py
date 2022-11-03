@@ -3,6 +3,7 @@
 Google Cloud does not have an API for querying TPU/GPU offerings, so we crawl
 the information from GCP websites.
 """
+import os
 import re
 
 from lxml import html
@@ -584,5 +585,6 @@ if __name__ == '__main__':
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
 
-    catalog_df.to_csv('gcp.csv', index=False)
+    os.makedirs('gcp', exist_ok=True)
+    catalog_df.to_csv('gcp/instances.csv', index=False)
     print('GCP Service Catalog saved to gcp.csv')

@@ -9,6 +9,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 
 if typing.TYPE_CHECKING:
@@ -98,41 +99,30 @@ class AWS(clouds.Cloud):
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-                # Downgrade the AMI for K80 due as it is only compatible with
-                # NVIDIA driver lower than 470.
-                amis = {
-                    'us-east-1': 'ami-0868a20f5a3bf9702',
-                    'us-east-2': 'ami-09b8825010d4dc701',
-                    # This AMI is 20210623 as aws does not provide a newer one.
-                    'us-west-1': 'ami-0b3c34d643904a734',
-                    'us-west-2': 'ami-06b3479ab15aaeaf1',
-                }
-                assert region_name in amis, region_name
-                return amis[region_name]
-        # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+                image_id = service_catalog.get_image_id_from_tag(
+                    'sky:k80-ubuntu-2004', region_name, clouds='aws')
+                assert image_id, f'No image found for region {region_name}'
+        image_id = service_catalog.get_image_id_from_tag('sky:gpu-ubuntu-2004',
+                                                         region_name,
+                                                         clouds='aws')
+        assert image_id, f'No image found for region {region_name}'
+        return image_id
 
-        # Commented below are newer AMIs, but as other clouds do not support
-        # torch==1.13.0+cu117 we do not use these AMIs to avoid frequent updates:
-        # Deep Learning AMI GPU PyTorch 1.12.1 (Ubuntu 20.04) 20221025
-        #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (supports torch==1.13.0+cu117)
-        #     'us-east-1': 'ami-0eb1f91977a3fcc1b'
-        #     'us-east-2': 'ami-0274a6db2e19b7cc6'
-        #     'us-west-1': 'ami-0fb299af41d32cfd3'
-        #     'us-west-2': 'ami-04ba15f9bd464eb20'
-        #
-        # Current AMIs:
-        # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
-        #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (does not support torch==1.13.0+cu117)
-        amis = {
-            'us-east-1': 'ami-0729d913a335efca7',
-            'us-east-2': 'ami-070f4af81c19b41bf',
-            # This AMI is 20210623 as aws does not provide a newer one.
-            'us-west-1': 'ami-0b3c34d643904a734',
-            'us-west-2': 'ami-050814f384259894c',
-        }
-        assert region_name in amis, region_name
-        return amis[region_name]
+    @classmethod
+    def parse_image_id(cls, region_name: str, instance_type: str,
+                       image_id: Optional[str]) -> str:
+        if image_id is not None:
+            if image_id.startswith('sky:'):
+                image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                                 region_name,
+                                                                 clouds='aws')
+                if not image_id:
+                    # Raise ResourcesUnavailableError to make sure the failover in
+                    # CloudVMRayBackend will be correctly triggered.
+                    raise exceptions.ResourcesUnavailableError(
+                        f'No image found for region {region_name}')
+            return image_id
+        return cls.get_default_ami(region_name, instance_type)
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -232,10 +222,8 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        if r.image_id is not None:
-            image_id = r.image_id
-        else:
-            image_id = self.get_default_ami(region_name, r.instance_type)
+        image_id = self.parse_image_id(region_name, r.instance_type,
+                                           r.image_id)
 
         return {
             'instance_type': r.instance_type,

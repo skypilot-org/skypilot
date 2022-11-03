@@ -3,12 +3,17 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
+import typing
 from typing import Dict, List, Optional, Tuple
 
-from sky.clouds import cloud
+from sky import clouds as clouds_lib
 from sky.clouds.service_catalog import common
 
-_df = common.read_catalog('aws.csv')
+if typing.TYPE_CHECKING:
+    from sky.clouds import cloud
+
+_df = common.read_catalog('aws/instances.csv', clouds_lib.AWS())
+_image_df = common.read_catalog('aws/images.csv', clouds_lib.AWS())
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -57,7 +62,7 @@ def get_instance_type_for_accelerator(
 
 
 def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+                                       use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
@@ -69,3 +74,8 @@ def list_accelerators(gpus_only: bool,
     """Returns all instance types in AWS offering accelerators."""
     return common.list_accelerators_impl('AWS', _df, gpus_only, name_filter,
                                          case_sensitive)
+
+
+def get_image_id_from_tag(tag: str, region: str) -> Optional[str]:
+    """Returns the image id from the tag."""
+    return common.get_image_id_from_tag_impl(_image_df, tag, region)

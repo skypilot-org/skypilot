@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from sky import clouds as cloud_lib
 from sky import exceptions
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
@@ -16,7 +17,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('gcp.csv')
+_df = common.read_catalog('gcp/instances.csv', cloud_lib.GCP())
 
 _TPU_REGIONS = [
     'us-central1',

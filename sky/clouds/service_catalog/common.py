@@ -46,7 +46,7 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def read_catalog(filename: str) -> pd.DataFrame:
+def read_catalog(filename: str, cloud: cloud_lib.Cloud) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
@@ -54,7 +54,6 @@ def read_catalog(filename: str) -> pd.DataFrame:
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_lib.CLOUD_REGISTRY.from_str(filename.split('.csv')[0])
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -325,3 +324,15 @@ def accelerator_in_region_or_zone_impl(
         return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
         return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
+
+
+# Images
+def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
+                               region: Optional[str]) -> Optional[str]:
+    """Returns the image ID for the given tag and region."""
+    df = df[df['Tag'] == tag]
+    if region is not None:
+        df = df[df['Region'] == region]
+    assert len(
+        df) == 1, f'Found {len(df)} images for tag {tag} in region {region}'
+    return df['ImageId'].iloc[0]

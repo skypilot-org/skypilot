@@ -3,6 +3,7 @@
 This script takes about 1 minute to finish.
 """
 import json
+import os
 import subprocess
 from typing import Optional
 import urllib
@@ -234,5 +235,6 @@ def get_all_regions_instance_types_df():
 if __name__ == '__main__':
     ray.init()
     df = get_all_regions_instance_types_df()
-    df.to_csv('azure.csv', index=False)
+    os.makedirs('azure', exist_ok=True)
+    df.to_csv('azure/instances.csv', index=False)
     print('Azure Service Catalog saved to azure.csv')

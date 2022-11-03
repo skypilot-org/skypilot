@@ -235,6 +235,13 @@ def get_tpus() -> List[str]:
     ]
 
 
+def get_image_id_from_tag(tag: str,
+                          region: Optional[str],
+                          clouds: CloudFilter = None) -> str:
+    """Returns the image ID from the tag."""
+    return _map_clouds_catalog(clouds, 'get_image_id_from_tag', tag, region)
+
+
 __all__ = [
     'list_accelerators',
     'list_accelerator_counts',
@@ -246,6 +253,8 @@ __all__ = [
     'get_region_zones_for_accelerators',
     'get_common_gpus',
     'get_tpus',
+    # Images
+    'get_image_id_from_tag',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',
