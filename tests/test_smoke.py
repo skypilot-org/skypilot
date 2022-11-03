@@ -896,14 +896,16 @@ class TestStorageWithCredentials:
 
     def test_sky_storage_cli(self, tmp_bucket_name, tmp_source):
         # Creates new bucket with local source
-        subprocess.check_output(['sky', 'storage', 'create', tmp_bucket_name, tmp_source, 'AWS'])
+        out1 = subprocess.check_output(['sky', 'storage', 'create',
+                                        tmp_bucket_name, tmp_source, 'AWS'])
 
         # Run sky storage ls to check if storage object exists in output
-        out = subprocess.check_output(['sky', 'storage', 'ls'])
-        assert tmp_bucket_name in out.decode('utf-8')
+        out2 = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert tmp_bucket_name in out2.decode('utf-8')
 
         # Run sky storage delete to delete the storage object
-        subprocess.check_output(['sky', 'storage', 'delete', tmp_bucket_name])
+        subprocess.check_output(
+            ['sky', 'storage', 'delete', tmp_bucket_name])
 
         # Run sky storage ls to check if storage object was deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])

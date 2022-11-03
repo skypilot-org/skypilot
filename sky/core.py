@@ -1,4 +1,5 @@
 """SDK functions for cluster/job management."""
+import click
 import colorama
 import getpass
 from typing import Any, Dict, List, Optional, Tuple
@@ -629,11 +630,11 @@ def storage_create(name: Optional[str] = None, source: Optional[str] = None, sto
     """
     storage = data.Storage(name, source)
 
-    stores = {} if stores is None else stores
+    stores = [] if stores is None else stores
     stores = [storeType.upper() for storeType in stores]
 
     # Add stores from tuple to storage object
     if 'GCS' in stores:
         storage.add_store(StoreType.GCS)
-    if 'S3' in stores:
+    if 'AWS' in stores:
         storage.add_store(StoreType.S3)

@@ -2311,7 +2311,7 @@ def storage_ls():
                 type=str,
                 nargs=-1,
                 shell_complete=_complete_storage_name)
-@click.option('--all',
+@click.option(' --all',
               '-a',
               default=False,
               is_flag=True,
@@ -2349,11 +2349,11 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
 
 @storage.command('create', cls=_DocumentedCodeCommand)
 @click.argument('name',
-                required=True,
+                required=False,
                 type=str,
                 nargs=1)
 @click.argument('source',
-                required=True,
+                required=False,
                 type=str,
                 nargs=1)
 @click.argument('stores',
@@ -2378,7 +2378,7 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
         sky storage create imagenet S3://bucket-name GCS AWS
 
     """
-    
+    click.echo('Creating storage object' + ' ' + name + ' from source: ' + source)
     sky.storage_create(name, source, stores)
 
 
