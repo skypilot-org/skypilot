@@ -384,26 +384,33 @@ class Resources:
             return
 
         if self.cloud is None:
-            raise ValueError('Cloud must be specified when image_id provided.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified when image_id provided.')
 
         if not self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
-            raise ValueError(
-                'image_id is only supported for AWS and GCP, please '
-                'explicitly specify the cloud.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'image_id is only supported for AWS and GCP, please '
+                    'explicitly specify the cloud.')
 
-        if self._image_id.startswith(
-                'sky:') and not self._cloud.validate_image_tag(self._image_id):
+        if (self._image_id.startswith('sky:') and
+                not self._cloud.validate_image_tag(self._image_id,
+                                                   self._region)):
             region_or_zone = self._region or self._zone
             region_str = f' ({region_or_zone})' if region_or_zone else ''
-            raise ValueError(
-                f'Image tag {self._image_id} is not valid, please make sure '
-                f'the tag exists in {self._cloud}{region_str}.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Image tag {self._image_id} is not valid, please make sure'
+                    f' the tag exists in {self._cloud}{region_str}.')
 
         if (self._cloud.is_same_cloud(clouds.AWS()) and
                 not self._image_id.startswith('sky:') and self._region is None):
-            raise ValueError('image_id is only supported for AWS in a specific '
-                             'region, please explicitly specify the region.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'image_id is only supported for AWS in a specific '
+                    'region, please explicitly specify the region.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

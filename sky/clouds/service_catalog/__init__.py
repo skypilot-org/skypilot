@@ -242,6 +242,13 @@ def get_image_id_from_tag(tag: str,
     return _map_clouds_catalog(clouds, 'get_image_id_from_tag', tag, region)
 
 
+def validate_image_tag(tag: str,
+                       region: Optional[str],
+                       clouds: CloudFilter = None) -> None:
+    """Validates the image tag."""
+    return _map_clouds_catalog(clouds, 'validate_image_tag', tag, region)
+
+
 __all__ = [
     'list_accelerators',
     'list_accelerator_counts',
