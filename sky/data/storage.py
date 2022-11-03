@@ -422,11 +422,8 @@ class Storage(object):
             # syncing to file_mount stage..
             if self.sync_on_reconstruction:
                 msg = ''
-                if self.source:
-                    if isinstance(self.source,
-                                  list) or not data_utils.is_cloud_store_url(
-                                      self.source):
-                        msg = ' and uploading from source'
+                if (self.source and (isinstance(self.source, list) or not data_utils.is_cloud_store_url(self.source))):
+                    msg = ' and uploading from source'
                 logger.info(f'Verifying bucket{msg} for storage {self.name}')
                 self.sync_all_stores()
 
@@ -800,6 +797,8 @@ class S3Store(AbstractStore):
     for S3 buckets.
     """
 
+    ACCESS_DENIED_MESSAGE = 'Access Denied'
+
     def __init__(self,
                  name: str,
                  source: str,
@@ -810,23 +809,22 @@ class S3Store(AbstractStore):
         super().__init__(name, source, region, is_sky_managed)
 
     def _validate(self):
-        if self.source is not None:
-            if isinstance(self.source, str):
-                if self.source.startswith('s3://'):
-                    assert self.name == data_utils.split_s3_path(
-                        self.source
-                    )[0], (
-                        'S3 Bucket is specified as path, the name should be the'
-                        ' same as S3 bucket.')
-                elif self.source.startswith('gs://'):
-                    assert self.name == data_utils.split_gcs_path(
-                        self.source
-                    )[0], (
-                        'GCS Bucket is specified as path, the name should be '
-                        'the same as GCS bucket.')
-                    assert data_utils.verify_gcs_bucket(self.name), (
-                        f'Source specified as {self.source}, a GCS bucket. ',
-                        'GCS Bucket should exist.')
+        if self.source is not None and isinstance(self.source, str):
+            if self.source.startswith('s3://'):
+                assert self.name == data_utils.split_s3_path(
+                    self.source
+                )[0], (
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
+            elif self.source.startswith('gs://'):
+                assert self.name == data_utils.split_gcs_path(
+                    self.source
+                )[0], (
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
+                assert data_utils.verify_gcs_bucket(self.name), (
+                    f'Source specified as {self.source}, a GCS bucket. ',
+                    'GCS Bucket should exist.')
 
     def initialize(self):
         """Initializes the S3 store object on the cloud.
@@ -901,71 +899,36 @@ class S3Store(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        def get_file_sync_command(base_dir_path, file_names):
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in file_names])
+            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                            f'{includes} {base_dir_path} '
+                            f's3://{self.name}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            sync_command = ('aws s3 sync --no-follow-symlinks '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name}')
+            return sync_command
+
         # Generate message for upload
         if len(source_path_list) > 1:
             source_message = f'{len(source_path_list)} paths'
         else:
             source_message = source_path_list[0]
 
-        # Generate gsutil rsync command for files and dirs
-        commands = []
-        grouped_files, dirs = data_utils.group_files_by_dir(source_path_list)
-        # Generate file upload commands
-        for dir_path, file_names in grouped_files.items():
-            includes = ' '.join(
-                [f'--include "{file_name}"' for file_name in file_names])
-            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
-                            f'{includes} {dir_path} '
-                            f's3://{self.name}')
-            commands.append(sync_command)
-        # Generate dir upload commands
-        for dir_path in dirs:
-            if create_dirs:
-                dest_dir_name = os.path.basename(dir_path)
-            else:
-                dest_dir_name = ''
-            sync_command = ('aws s3 sync --no-follow-symlinks '
-                            f'{dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
-            commands.append(sync_command)
-
-        # Run commands in parallel
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
-            with pool.ThreadPool(processes=_MAX_CONCURRENT_UPLOADS) as p:
-                p.map(self._run_awscli, commands)
-
-    def _run_awscli(self, command: str):
-        # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
-        # to a log file.
-        with subprocess.Popen(command,
-                              stderr=subprocess.PIPE,
-                              stdout=subprocess.DEVNULL,
-                              shell=True) as process:
-            stderr = []
-            while True:
-                line = process.stderr.readline()
-                if not line:
-                    break
-                str_line = line.decode('utf-8')
-                stderr.append(str_line)
-                if 'Access Denied' in str_line:
-                    process.kill()
-                    with ux_utils.print_exception_no_traceback():
-                        raise PermissionError(
-                            'Failed to upload files to '
-                            'the S3 bucket. The bucket does not have '
-                            'write permissions. It is possible that '
-                            'the bucket is public.')
-            returncode = process.wait()
-            if returncode != 0:
-                stderr = '\n'.join(stderr)
-                with ux_utils.print_exception_no_traceback():
-                    logger.error(stderr)
-                    raise exceptions.StorageUploadError(
-                        f'Upload to S3 failed for store {self.name}. '
-                        'Please check the logs.')
+            data_utils.parallel_upload(source_path_list,
+                                       get_file_sync_command,
+                                       get_dir_sync_command,
+                                       self.name,
+                                       self.ACCESS_DENIED_MESSAGE,
+                                       create_dirs=create_dirs,
+                                       max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -1106,6 +1069,8 @@ class GcsStore(AbstractStore):
     for GCS buckets.
     """
 
+    ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
+
     def __init__(self,
                  name: str,
                  source: str,
@@ -1223,7 +1188,7 @@ class GcsStore(AbstractStore):
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
-            self._run_gsutil(sync_command)
+            data_utils.run_upload_cli(sync_command, self.ACCESS_DENIED_MESSAGE)
 
     def batch_gsutil_rsync(self,
                            source_path_list: List[Path],
@@ -1245,66 +1210,33 @@ class GcsStore(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        def get_file_sync_command(base_dir_path, file_names):
+            sync_format = '|'.join(file_names)
+            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
+                            f'{base_dir_path} gs://{self.name}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            sync_command = (f'gsutil -m rsync -r {src_dir_path} '
+                            f'gs://{self.name}/{dest_dir_name}')
+            return sync_command
+
         # Generate message for upload
         if len(source_path_list) > 1:
             source_message = f'{len(source_path_list)} paths'
         else:
             source_message = source_path_list[0]
 
-        # Generate gsutil rsync command for files and dirs
-        commands = []
-        grouped_files, dirs = data_utils.group_files_by_dir(source_path_list)
-        # Generate file upload commands
-        for dir_path, file_names in grouped_files.items():
-            sync_format = '|'.join(file_names)
-            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
-                            f'{dir_path} gs://{self.name}')
-            commands.append(sync_command)
-        # Generate dir upload commands
-        for dir_path in dirs:
-            if create_dirs:
-                dest_dir_name = os.path.basename(dir_path)
-            else:
-                dest_dir_name = ''
-            sync_command = (f'gsutil -m rsync -r {dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
-            commands.append(sync_command)
-
-        # Run commands in parallel
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
                 f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
-            with pool.ThreadPool(processes=_MAX_CONCURRENT_UPLOADS) as p:
-                p.map(self._run_gsutil, commands)
-
-    def _run_gsutil(self, command: str):
-        with subprocess.Popen(command,
-                              stderr=subprocess.PIPE,
-                              stdout=subprocess.DEVNULL,
-                              shell=True) as process:
-            stderr = []
-            while True:
-                line = process.stderr.readline()
-                if not line:
-                    break
-                str_line = line.decode('utf-8')
-                stderr.append(str_line)
-                if 'AccessDeniedException' in str_line:
-                    process.kill()
-                    with ux_utils.print_exception_no_traceback():
-                        raise PermissionError(
-                            'Failed to upload files to '
-                            'GCS. The bucket does not have '
-                            'write permissions. It is possible that '
-                            'the bucket is public.')
-            returncode = process.wait()
-            if returncode != 0:
-                with ux_utils.print_exception_no_traceback():
-                    stderr = '\n'.join(stderr)
-                    logger.error(stderr)
-                    raise exceptions.StorageUploadError(
-                        f'Upload to GCS failed for store {self.name}. '
-                        f'Please check the logs.')
+            data_utils.parallel_upload(source_path_list,
+                                       get_file_sync_command,
+                                       get_dir_sync_command,
+                                       self.name,
+                                       self.ACCESS_DENIED_MESSAGE,
+                                       create_dirs=create_dirs,
+                                       max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
