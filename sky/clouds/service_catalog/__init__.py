@@ -236,7 +236,7 @@ def get_tpus() -> List[str]:
 
 
 def get_image_id_from_tag(tag: str,
-                          region: Optional[str],
+                          region: Optional[str]=None,
                           clouds: CloudFilter = None) -> str:
     """Returns the image ID from the tag."""
     return _map_clouds_catalog(clouds, 'get_image_id_from_tag', tag, region)

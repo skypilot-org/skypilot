@@ -392,9 +392,11 @@ class Resources:
                 'image_id is only supported for AWS and GCP, please '
                 'explicitly specify the cloud.')
 
-        if (self._cloud.is_same_cloud(clouds.AWS()) and not self._image_id.startswith('sky:') and self._region is not None):
-                raise ValueError('image_id is only supported for AWS in a specific '
-                                'region, please explicitly specify the region.')
+        if (self._cloud.is_same_cloud(clouds.AWS()) and
+                not self._image_id.startswith('sky:') and
+                self._region is not None):
+            raise ValueError('image_id is only supported for AWS in a specific '
+                             'region, please explicitly specify the region.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

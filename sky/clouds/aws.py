@@ -222,8 +222,7 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self.parse_image_id(region_name, r.instance_type,
-                                           r.image_id)
+        image_id = self.parse_image_id(region_name, r.instance_type, r.image_id)
 
         return {
             'instance_type': r.instance_type,
