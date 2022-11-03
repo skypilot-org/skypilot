@@ -2378,7 +2378,7 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
         sky storage create imagenet S3://bucket-name GCS AWS
 
     """
-    click.echo('Creating storage object' + ' ' + name + ' from source: ' + source)
+    click.echo('Creating storage object' + ' ' + name + ' from ' + source)
     sky.storage_create(name, source, stores)
 
 

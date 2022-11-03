@@ -214,7 +214,9 @@ To manage persistent Storage objects, the sky CLI provides three useful commands
 2.  :code:`sky storage create` allows you to create a sky Storage object.
 
 .. code-block:: console
+
     $ sky storage create imagenet S3://bucket-name GCS AWS
+    Creating storage object imagenet from S3://bucket-name
 
 
 3.  :code:`sky storage delete` allows you to delete any Storage objects managed
