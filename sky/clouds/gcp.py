@@ -275,6 +275,7 @@ class GCP(clouds.Cloud):
         if resources.image_id is not None:
             image_id = resources.image_id
 
+        assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
         return resources_vars

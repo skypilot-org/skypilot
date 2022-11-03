@@ -82,8 +82,8 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
 
 
 @ray.remote
-def get_all_regions_pricing_df() -> pd.DataFrame:
-    dfs = ray.get([get_pricing_df.remote(region) for region in REGIONS])
+def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
+    dfs = ray.get([get_pricing_df.remote(region) for region in regions])
     return pd.concat(dfs)
 
 
@@ -141,7 +141,7 @@ def get_gpu_name(family: str) -> str:
 
 def get_all_regions_instance_types_df(region_set: Set[str]):
     df, df_sku = ray.get([
-        get_all_regions_pricing_df.remote(),
+        get_all_regions_pricing_df.remote(region_set),
         get_sku_df.remote(region_set),
     ])
     print(f'Processing dataframes')
@@ -244,4 +244,4 @@ if __name__ == '__main__':
     df = get_all_regions_instance_types_df(regions)
     os.makedirs('azure', exist_ok=True)
     df.to_csv('azure/instances.csv', index=False)
-    print('Azure Service Catalog saved to azure.csv')
+    print('Azure Service Catalog saved to azure/instances.csv')

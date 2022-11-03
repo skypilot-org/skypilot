@@ -1,6 +1,6 @@
 resources:
   cloud: aws
-  image_id: sky:gpu-ubuntu-1804
+  image_id: skypilot:gpu-ubuntu-1804
 
 
 setup: |
