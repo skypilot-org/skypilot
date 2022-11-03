@@ -442,7 +442,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
                 'Please refer to: https://cloud.google.com/compute/docs/gpus')
 
 
-def get_image_id_from_tag(tag: str, region: Optional[str]) -> Dict[str, str]:
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     """Returns the image id from the tag."""
     return common.get_image_id_from_tag_impl(_image_df, tag, region)
 

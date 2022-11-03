@@ -200,13 +200,12 @@ def get_all_regions_instance_types_df(regions: List[str]) -> pd.DataFrame:
 # Fetch Images
 _GPU_TO_IMAGE_DATE = {
     # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-    # Commented below is the new AMI name, but as other clouds do not support
-    # torch==1.13.0+cu117 we do not use this AMI to avoid frequent updates:
-    #   Deep Learning AMI GPU PyTorch 1.12.1 (Ubuntu 20.04) 20221025
-    #
     # Current AMIs:
     # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
     #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (does not support torch==1.13.0+cu117)
+    #
+    # Use a list to fallback to newer AMI, as some regions like ap-southeast-3 does not have
+    # the older AMI.
     'gpu': ['20220308', '20221101'],
     # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
     # Downgrade the AMI for K80 due as it is only compatible with
@@ -237,7 +236,7 @@ def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
 
 @ray.remote
 def get_image_row(region: str, ubuntu_version: str,
-                  cpu_or_gpu: str) -> Tuple[str, str, str, str]:
+                  cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     for date in creation_date:
@@ -270,9 +269,10 @@ def get_all_regions_images_df() -> pd.DataFrame:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--all-regions',
-                        action='store_true',
-                        help='Fetch all regions')
+    parser.add_argument(
+        '--all-regions',
+        action='store_true',
+        help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
 
     regions = ALL_REGIONS if args.all_regions else US_REGIONS

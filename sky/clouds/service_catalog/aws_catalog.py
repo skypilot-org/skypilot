@@ -64,7 +64,9 @@ def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
     region_list = common.get_region_zones(df, use_spot)
-    # Hack: Enforce the failover tries US regions first.
+    # Hack: Enforce US regions are always tried first:
+
+    #   [US regions sorted by price] + [non-US regions sorted by price]
     us_region_list = []
     other_region_list = []
     for region in region_list:
