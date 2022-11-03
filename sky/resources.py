@@ -406,7 +406,8 @@ class Resources:
                     f' the tag exists in {self._cloud}{region_str}.')
 
         if (self._cloud.is_same_cloud(clouds.AWS()) and
-                not self._image_id.startswith('skypilot:') and self._region is None):
+                not self._image_id.startswith('skypilot:') and
+                self._region is None):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'image_id is only supported for AWS in a specific '

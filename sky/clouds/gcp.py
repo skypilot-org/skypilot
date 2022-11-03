@@ -217,8 +217,8 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = service_catalog.get_image_id_from_tag('skypilot:cpu-debian-10',
-                                                         clouds='gcp')
+        image_id = service_catalog.get_image_id_from_tag(
+            'skypilot:cpu-debian-10', clouds='gcp')
 
         r = resources
         # Find GPU spec, if any.

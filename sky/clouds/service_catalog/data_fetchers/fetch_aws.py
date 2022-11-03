@@ -281,7 +281,7 @@ if __name__ == '__main__':
     df = get_all_regions_instance_types_df(regions)
     os.makedirs('aws', exist_ok=True)
     df.to_csv('aws/instances.csv', index=False)
-    print('AWS Service Catalog saved to aws.csv')
+    print('AWS Service Catalog saved to aws/instances.csv')
 
     df = get_all_regions_images_df()
     df.to_csv('aws/images.csv', index=False)
