@@ -116,8 +116,12 @@ class Resources:
         if self.image_id is not None:
             image_id = f', image_id={self.image_id!r}'
 
+        disk_size = ''
+        if self.disk_size != _DEFAULT_DISK_SIZE_GB:
+            disk_size = f', disk_size={self.disk_size}'
+
         return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args}{image_id})')
+                f'{accelerators}{accelerator_args}{image_id}{disk_size})')
 
     @property
     def cloud(self):

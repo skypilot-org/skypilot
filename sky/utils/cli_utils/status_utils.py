@@ -7,10 +7,28 @@ from sky import backends
 from sky import spot
 from sky.backends import backend_utils
 from sky.utils import common_utils
-from sky.utils.cli_utils import cli_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
+
+
+def _truncate_long_string(s: str, max_length: int = 35) -> str:
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'  # Use '…'?
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'
 
 
 class StatusColumn:
@@ -29,7 +47,7 @@ class StatusColumn:
     def calc(self, record):
         val = self.calc_func(record)
         if self.trunc_length != 0:
-            val = cli_utils.truncate_long_string(str(val), self.trunc_length)
+            val = _truncate_long_string(str(val), self.trunc_length)
         return val
 
 
@@ -211,7 +229,7 @@ def show_local_status_table(local_clusters: List[str]):
             # RESOURCES
             resources_str,
             # COMMAND
-            cli_utils.truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
+            _truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
         ]
         names.append(cluster_name)
         cluster_table.add_row(row)

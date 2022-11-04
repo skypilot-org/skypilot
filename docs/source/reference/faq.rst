@@ -83,6 +83,7 @@ By default, SkyPilot only supports the US regions on different clouds for conven
 
 .. code-block:: bash
 
+  mkdir -p ~/.sky/catalogs/v4
   cd ~/.sky/catalogs/v4
   # Fetch all regions for AWS
   python -m sky.clouds.service_catalog.data_fetchers.fetch_aws --all-regions
