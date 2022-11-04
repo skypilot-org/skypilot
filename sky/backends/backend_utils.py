@@ -157,12 +157,8 @@ def fill_template(template_name: str,
         cluster_name = variables.get('cluster_name')
         output_path = _get_yaml_path_from_cluster_name(cluster_name,
                                                        output_prefix)
-
     output_path = os.path.abspath(output_path)
 
-    # Add yaml file path to the template variables.
-    variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
-    variables['sky_ray_yaml_local_path'] = output_path
     # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
@@ -759,10 +755,7 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
-    if isinstance(cloud, clouds.Local):
-        tmp_yaml_path = yaml_path
-    else:
-        tmp_yaml_path = yaml_path + '.tmp'
+    tmp_yaml_path = yaml_path + '.tmp'
     tmp_yaml_path = fill_template(
         cluster_config_template,
         dict(
@@ -790,6 +783,11 @@ def write_cluster_config(
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                # Add yaml file path to the template variables.
+                'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
+                'sky_ray_yaml_local_path':
+                    tmp_yaml_path
+                    if not isinstance(cloud, clouds.Local) else yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
                 # Local IP handling (optional).
