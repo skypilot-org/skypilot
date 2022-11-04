@@ -284,12 +284,18 @@ class RayCodeGen:
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
+                #all_nodes = ray.nodes()
+                #sorted_cluster_internal_ips = sorted([
+                #    r['NodeManagerAddress'] for r in all_nodes])
+
                 if {cluster_ips_sorted!r} is not None:
                     cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_ips_sorted!r})}}
                     ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
+                    print('ip_rank_list', ip_rank_list)
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
                     ip_list_str = '\\n'.join(ip_rank_list)
                 else:
+                    cluster_ips_map = None  # This means it's a single-node task.
                     ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
                     ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
 
@@ -325,7 +331,7 @@ class RayCodeGen:
                      use_sudo: bool = False) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
-            'Call add_gang_schedule_placement_group() before add_ray_task().')
+            'Call add_gang_scheduling_placement_group() before add_ray_task().')
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
@@ -381,11 +387,24 @@ class RayCodeGen:
         if script is not None:
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
+
+            # FIXME: respect display-purpose task name that gets passed? may be ok as it will be shown in 'sky queue'
+
+            if cluster_ips_map is not None:
+                sorted_ips = sorted(cluster_ips_map.keys())  # FIXME: head node should not be sorted along with workers
+                curr_node_idx_in_sorted_ips = sorted_ips.index(ip)
+                if curr_node_idx_in_sorted_ips == 0:
+                    task_name = 'head'
+                else:
+                    task_name = f'worker{{curr_node_idx_in_sorted_ips}}'
+            else:
+                # FIXME: pass this in for 1-node task
+                task_name = 'n/a'  # FIXME: this is wrong for 'exec --num-nodes 1' - wrongly tags worker ip to be head
             sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
-                    .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
+                    .options(name=task_name{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
                         log_path,
@@ -3038,6 +3057,19 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
+        import ipdb; ipdb.set_trace()
+        # cluster_public_ips = backend_utils.get_node_ips(handle.cluster_yaml,
+        #                                                   handle.launched_nodes,
+        #                                                   handle=handle,
+        #                                                   get_internal_ips=False)
+        # ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        #     handle.cluster_yaml)
+        # runners = command_runner.SSHCommandRunner.make_runner_list(
+        #     ip_list, *ssh_credentials)
+
+        # def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
+
+        # Ensure head node is the first element, then sort the remaining IPs
         cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
                                                           handle.launched_nodes,
                                                           handle=handle,

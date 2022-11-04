@@ -399,7 +399,8 @@ class SSHConfigHelper(object):
 
         Args:
             cluster_name: Cluster name (see `sky status`)
-            ips: List of IP addresses in the cluster. First IP is head node.
+            ips: List of public IP addresses in the cluster. First IP is head
+              node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
@@ -480,6 +481,36 @@ class SSHConfigHelper(object):
         host_name = cluster_name
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
+
+        # Ensures stableness of the aliases worker-<i>.
+        worker_ips = list(sorted(worker_ips))
+        print('Sorted public worker ips', worker_ips)
+
+        # TODO: sort these public worker_ips by their internal ips.
+
+        runners = command_runner.SSHCommandRunner.make_runner_list(
+            worker_ips, username, key_path, ssh_control_name=host_name)
+
+        def get_private_ip(runner: command_runner.SSHCommandRunner) -> str:
+            returncode, stdout, stderr = runner.run(
+                # FIXME(zongheng): -I is not universally supported?
+                'hostname -I',
+                require_outputs=True,
+                stream_logs=False,
+            )
+            print(returncode, stdout, stderr)
+            # proc = subprocess_utils.run(
+            #     f'ssh -i {key_path} {username}@{public_ip} -- hostname -I',
+            #     stdout=subprocess.PIPE)
+            print('public ip', runner.ip, ':', returncode, stdout, stderr)
+            return stdout
+
+        # FIXME: problem of doing it here is that it shows Warning: Permanently
+        # added '44.204.253.219' (ED25519) to the list of known hosts.
+        outs = subprocess_utils.run_in_parallel(get_private_ip, runners)
+        print('Outs', outs)
+        import ipdb
+        ipdb.set_trace()
 
         overwrites = [False] * len(worker_ips)
         overwrite_begin_idxs = [None] * len(worker_ips)
@@ -1136,7 +1167,7 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all nodes in the cluster."""
+    """Returns the IPs of all nodes in the cluster, with head node at front."""
 
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
