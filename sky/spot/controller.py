@@ -13,10 +13,12 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -40,8 +42,8 @@ class SpotController:
         # TODO(zhwu): support SKYPILOT_RUN_ID for normal jobs as well, so
         # the use can use env_var for normal jobs.
         task_envs = self._task.envs or {}
-        task_envs['SKYPILOT_RUN_ID'] = (f'{self.backend.run_timestamp}'
-                                        f'_id-{self._job_id}')
+        task_envs[constants.JOB_RUN_ID_ENV_VAR] = common_utils.get_job_run_id(
+            self.backend.run_timestamp, 'spot', self._job_id)
         self._task.set_envs(task_envs)
 
         spot_state.set_submitted(

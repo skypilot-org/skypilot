@@ -12,7 +12,7 @@ import socket
 import sys
 import time
 import uuid
-from typing import Any
+from typing import Any, Optional
 import yaml
 
 from sky import sky_logging
@@ -24,20 +24,20 @@ _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
 
-_run_id = None
+_usage_run_id = None
 
 
-def get_run_id():
+def get_usage_run_id():
     """Returns a unique run id for each 'run'.
 
     A run is defined as the lifetime of a process that has imported `sky`
     and has called its CLI or programmatic APIs. For example, two successive
     `sky launch` are two runs.
     """
-    global _run_id
-    if _run_id is None:
-        _run_id = str(uuid.uuid4())
-    return _run_id
+    global _usage_run_id
+    if _usage_run_id is None:
+        _usage_run_id = str(uuid.uuid4())
+    return _usage_run_id
 
 
 def get_user_hash():
@@ -52,6 +52,15 @@ def get_user_hash():
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
+
+
+def get_job_run_id(run_timestamp: str, cluster_name: Optional[str],
+                   job_id: str):
+    """Returns a unique job run id for each job run.
+
+    A job run is defined as the lifetime of a job that has been launched.
+    """
+    return f'{run_timestamp}_{cluster_name}_id-{job_id}'
 
 
 class Backoff:

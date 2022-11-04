@@ -318,6 +318,7 @@ class RayCodeGen:
     def add_ray_task(self,
                      bash_script: str,
                      task_name: Optional[str],
+                     job_run_id: str,
                      ray_resources_dict: Optional[Dict[str, float]],
                      log_path: str,
                      env_vars: Dict[str, str] = None,
@@ -366,6 +367,10 @@ class RayCodeGen:
             sky_env_vars_dict_str = '\n'.join(
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
                 for k, v in env_vars.items())
+        if job_run_id is not None:
+            sky_env_vars_dict_str += (
+                f'\nsky_env_vars_dict[{constants.JOB_RUN_ID_ENV_VAR!r}]'
+                f' = {job_run_id!r}')
 
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
@@ -3002,12 +3007,18 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
+        job_run_id = common_utils.get_job_run_id(
+            self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
+        envs = task.envs if task.envs else {}
+        envs[constants.JOB_RUN_ID_ENV_VAR] = job_run_id
+
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_ray_task(
             bash_script=command_for_node,
             env_vars=task.envs,
             task_name=task.name,
+            job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
             log_path=log_path,
             use_sudo=use_sudo)
@@ -3061,6 +3072,10 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
+
+        job_run_id = common_utils.get_job_run_id(
+            self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
+
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
         for i in range(num_actual_nodes):
@@ -3075,6 +3090,7 @@ class CloudVmRayBackend(backends.Backend):
                 bash_script=command_for_node,
                 env_vars=task.envs,
                 task_name=name,
+                job_run_id=job_run_id,
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
                 gang_scheduling_id=i,

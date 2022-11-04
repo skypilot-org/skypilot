@@ -24,7 +24,30 @@ run: |
     exit 1
   fi
 
-  echo NODE ID: $SKY_NODE_RANK
-  echo NODE IPS: "$SKY_NODE_IPS"
+  if [[ -z "$SKY_NODE_RANK" ]]; then
+    echo "SKY_NODE_RANK is not set"
+    exit 1
+  else
+    echo "SKY_NODE_RANK is set to ${SKY_NODE_RANK}"
+  fi
+
+  if [[ -z "$SKY_NODE_IPS" ]]; then
+    echo "SKY_NODE_IPS is not set"
+    exit 1
+  else
+    echo "SKY_NODE_IPS is set to ${SKY_NODE_IPS}"
+    num_nodes=$(echo ${SKY_NODE_IPS} | wc -l)
+    if [[ ${num_nodes} -ne 2 ]]; then
+      echo "SKY_NODE_IPS does not contain 2 nodes"
+      exit 1
+    fi
+  fi
   worker_addr=`echo "$SKY_NODE_IPS" | sed -n 2p`
   echo Worker IP: $worker_addr
+
+  if [[ -z "$SKYPILOT_RUN_ID" ]]; then
+    echo "SKYPILOT_RUN_ID is not set"
+    exit 1
+  else
+    echo "SKYPILOT_RUN_ID is set to ${SKYPILOT_RUN_ID}"
+  fi
