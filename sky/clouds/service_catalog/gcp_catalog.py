@@ -16,7 +16,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('gcp/instances.csv')
+_df = common.read_catalog('gcp/vms.csv')
 _image_df = common.read_catalog('gcp/images.csv')
 
 _TPU_REGIONS = [

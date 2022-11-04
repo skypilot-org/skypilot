@@ -243,5 +243,5 @@ if __name__ == '__main__':
 
     df = get_all_regions_instance_types_df(regions)
     os.makedirs('azure', exist_ok=True)
-    df.to_csv('azure/instances.csv', index=False)
-    print('Azure Service Catalog saved to azure/instances.csv')
+    df.to_csv('azure/vms.csv', index=False)
+    print('Azure Service Catalog saved to azure/vms.csv')

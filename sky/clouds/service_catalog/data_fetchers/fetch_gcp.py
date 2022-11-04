@@ -593,5 +593,5 @@ if __name__ == '__main__':
     catalog_df = catalog_df[COLUMNS]
 
     os.makedirs('gcp', exist_ok=True)
-    catalog_df.to_csv('gcp/instances.csv', index=False)
-    print('GCP Service Catalog saved to gcp/instances.csv')
+    catalog_df.to_csv('gcp/vms.csv', index=False)
+    print('GCP Service Catalog saved to gcp/vms.csv')

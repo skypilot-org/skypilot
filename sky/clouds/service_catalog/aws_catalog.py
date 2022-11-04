@@ -11,7 +11,7 @@ from sky.clouds.service_catalog import common
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('aws/instances.csv')
+_df = common.read_catalog('aws/vms.csv')
 _image_df = common.read_catalog('aws/images.csv')
 
 

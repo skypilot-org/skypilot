@@ -280,8 +280,8 @@ if __name__ == '__main__':
     ray.init()
     df = get_all_regions_instance_types_df(regions)
     os.makedirs('aws', exist_ok=True)
-    df.to_csv('aws/instances.csv', index=False)
-    print('AWS Service Catalog saved to aws/instances.csv')
+    df.to_csv('aws/vms.csv', index=False)
+    print('AWS Service Catalog saved to aws/vms.csv')
 
     df = get_all_regions_images_df()
     df.to_csv('aws/images.csv', index=False)
