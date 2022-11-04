@@ -16,7 +16,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_df = common.read_catalog('gcp.csv')
+_df = common.read_catalog('gcp/vms.csv')
+_image_df = common.read_catalog('gcp/images.csv')
 
 _TPU_REGIONS = [
     'us-central1',
@@ -439,3 +440,13 @@ def check_accelerator_attachable_to_host(instance_type: str,
                 f'{acc_name}:{acc_count} cannot be attached to '
                 f'{instance_type}. The maximum CPU memory is {max_memory} GB. '
                 'Please refer to: https://cloud.google.com/compute/docs/gpus')
+
+
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    """Returns the image id from the tag."""
+    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+
+
+def validate_image_tag(tag: str, region: Optional[str]) -> bool:
+    """Returns whether the image tag is valid."""
+    return common.is_image_tag_valid_impl(_image_df, tag, region)

@@ -1,0 +1,10 @@
+resources:
+  cloud: aws
+  image_id: skypilot:gpu-ubuntu-1804
+
+
+setup: |
+  echo "running setup"
+
+run: |
+  conda env list
