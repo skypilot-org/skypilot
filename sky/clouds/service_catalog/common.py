@@ -341,8 +341,8 @@ def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
     df = df[df['Tag'] == tag]
     if region is not None:
         df = df[df['Region'] == region]
-    assert len(
-        df) <= 1, f'Multiple images found for tag {tag} in region {region}'
+    assert len(df) <= 1, ('Multiple images found for tag '
+                          f'{tag} in region {region}')
     if len(df) == 0:
         return None
     image_id = df['ImageId'].iloc[0]
