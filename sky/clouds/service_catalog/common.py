@@ -67,6 +67,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
                 with ux_utils.print_exception_no_traceback():
                     raise e
         # Save the catalog to a local file.
+        os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
         with open(catalog_path, 'w') as f:
             f.write(r.text)
         logger.info(f'A new {cloud} catalog has been downloaded to '
