@@ -36,8 +36,8 @@ run: |
     exit 1
   else
     echo "SKY_NODE_IPS is set to ${SKY_NODE_IPS}"
-    echo ${SKY_NODE_IPS}
-    echo ${SKY_NODE_IPS} | wc -l | grep 2 || exit 1
+    echo "${SKY_NODE_IPS}"
+    echo "${SKY_NODE_IPS}" | wc -l | grep 2 || exit 1
   fi
   worker_addr=`echo "$SKY_NODE_IPS" | sed -n 2p`
   echo Worker IP: $worker_addr
