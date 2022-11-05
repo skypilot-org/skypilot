@@ -150,7 +150,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     --max_seq_length 384 \
     --doc_stride 128 \
     --report_to wandb \
-    --run_name $SKYPILOT_RUN_ID \
+    --run_name $SKYPILOT_JOB_ID \
     --output_dir /checkpoint/bert_qa/ \
     --save_total_limit 10 \
     --save_steps 1000
@@ -162,11 +162,11 @@ the output directory and frequency of checkpointing (see more
 on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
 You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_ for periodically checkpointing with PyTorch.
 
-We also set :code:`--run_name` to :code:`$SKYPILOT_RUN_ID` so that the loggings will be saved
+We also set :code:`--run_name` to :code:`$SKYPILOT_JOB_ID` so that the loggings will be saved
 to the same run in Weights & Biases.
 
 .. note::
-  The environment variable :code:`$SKYPILOT_RUN_ID` (example: "sky-2022-10-06-05-17-09-750781_spot_id-22") can be used to identify the same job, i.e., it is kept identical across all
+  The environment variable :code:`$SKYPILOT_JOB_ID` (example: "sky-2022-10-06-05-17-09-750781_spot_id-22") can be used to identify the same job, i.e., it is kept identical across all
   recoveries of the job.
   It can be accessed in the task's :code:`run` commands or directly in the program itself (e.g., access
   via :code:`os.environ` and pass to Weights & Biases for tracking purposes in your training script). It is made available to

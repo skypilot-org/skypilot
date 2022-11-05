@@ -9,4 +9,4 @@ UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'Found uninitialized local cluster {cluster}. Run this '
     'command to initialize it locally: sky launch -c {cluster} \'\'')
 
-JOB_RUN_ID_ENV_VAR = 'SKYPILOT_RUN_ID'
+JOB_RUN_ID_ENV_VAR = 'SKYPILOT_JOB_ID'
