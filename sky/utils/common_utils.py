@@ -11,8 +11,8 @@ import re
 import socket
 import sys
 import time
+from typing import Any, Dict, Optional
 import uuid
-from typing import Any, Optional
 import yaml
 
 from sky import sky_logging
@@ -27,7 +27,7 @@ logger = sky_logging.init_logger(__name__)
 _usage_run_id = None
 
 
-def get_usage_run_id():
+def get_usage_run_id() -> str:
     """Returns a unique run id for each 'run'.
 
     A run is defined as the lifetime of a process that has imported `sky`
@@ -40,7 +40,7 @@ def get_usage_run_id():
     return _usage_run_id
 
 
-def get_user_hash():
+def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id."""
     if os.path.exists(_USER_HASH_FILE):
         with open(_USER_HASH_FILE, 'r') as f:
@@ -54,13 +54,13 @@ def get_user_hash():
     return user_hash
 
 
-def get_job_run_id(run_timestamp: str, cluster_name: Optional[str],
-                   job_id: str):
+def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
+                      job_id: str) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    return f'{run_timestamp}_{cluster_name}_id-{job_id}'
+    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
 
 
 class Backoff:
@@ -136,13 +136,13 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path):
+def read_yaml(path) -> Dict[str, Any]:
     with open(path, 'r') as f:
         config = yaml.safe_load(f)
     return config
 
 
-def dump_yaml(path, config):
+def dump_yaml(path, config) -> None:
     with open(path, 'w') as f:
         f.write(dump_yaml_str(config))
 
