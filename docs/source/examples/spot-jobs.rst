@@ -54,7 +54,7 @@ We can launch it with the following:
     git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
-    pip install -r requirements.txt
+    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
   run: |
@@ -215,4 +215,3 @@ you can still tear it down manually with
 
 .. note::
   Tearing down the spot controller will lose all logs and status information for the spot jobs and can cause resource leakage when there are still in-progress spot jobs.
-
