@@ -286,7 +286,7 @@ class RayCodeGen:
             textwrap.dedent(f"""\
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
                 plural = 's' if {num_nodes} > 1 else ''
-                node_str = f'{num_nodes} node' + plural + '.'
+                node_str = f'{num_nodes} node{{plural}}'
                 
                 message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
