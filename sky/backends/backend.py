@@ -66,20 +66,24 @@ class Backend:
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
-    def setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
-        return self._setup(handle, task)
+    def setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+              async_setup: bool) -> None:
+        return self._setup(handle, task, async_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('execute')
-    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
-                detach_run: bool) -> None:
+    def execute(self,
+                handle: ResourceHandle,
+                task: 'task_lib.Task',
+                detach_run: bool,
+                setup_cmd: Optional[str] = None) -> None:
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run)
+        return self._execute(handle, task, detach_run, setup_cmd=setup_cmd)
 
     @timeline.event
     def post_execute(self, handle: ResourceHandle, down: bool) -> None:
@@ -123,11 +127,15 @@ class Backend:
     ) -> None:
         raise NotImplementedError
 
-    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
+    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+               async_setup: bool) -> None:
         raise NotImplementedError
 
-    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
-                 detach_run: bool) -> None:
+    def _execute(self,
+                 handle: ResourceHandle,
+                 task: 'task_lib.Task',
+                 detach_run: bool,
+                 setup_cmd: Optional[str] = None) -> None:
         raise NotImplementedError
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:

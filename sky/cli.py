@@ -666,6 +666,7 @@ def _launch_with_confirm(
     *,
     dryrun: bool,
     detach_run: bool,
+    async_setup: bool = False,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
@@ -726,6 +727,7 @@ def _launch_with_confirm(
             dryrun=dryrun,
             stream_logs=True,
             cluster_name=cluster,
+            async_setup=async_setup,
             detach_run=detach_run,
             backend=backend,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -1057,6 +1059,11 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
+@click.option('--async-setup',
+              '-s',
+              default=False,
+              is_flag=True,
+              help='if True, run setup asynchronously.')
 @click.option('--detach-run',
               '-d',
               default=False,
@@ -1126,6 +1133,7 @@ def launch(
     entrypoint: str,
     cluster: Optional[str],
     dryrun: bool,
+    async_setup: bool,
     detach_run: bool,
     backend_name: Optional[str],
     name: Optional[str],
@@ -1190,6 +1198,7 @@ def launch(
         backend,
         cluster,
         dryrun=dryrun,
+        async_setup=async_setup,
         detach_run=detach_run,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,

@@ -78,6 +78,8 @@ class JobStatus(enum.Enum):
     # not started yet. skylet can transit the state from INIT to FAILED
     # directly, if the ray program fails to start.
     INIT = 'INIT'
+    # Running the user's setup script.
+    SETUP = 'SETUP'
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
@@ -94,7 +96,7 @@ class JobStatus(enum.Enum):
 
     @classmethod
     def nonterminal_statuses(cls) -> List['JobStatus']:
-        return [cls.INIT, cls.PENDING, cls.RUNNING]
+        return [cls.INIT, cls.SETUP, cls.PENDING, cls.RUNNING]
 
     def is_terminal(self):
         return self not in self.nonterminal_statuses()
@@ -115,7 +117,7 @@ _RAY_TO_JOB_STATUS_MAP = {
     # reserved resources and actually started running: it will set the
     # status in the DB to RUNNING.
     'PENDING': JobStatus.INIT,
-    'RUNNING': JobStatus.PENDING,
+    'RUNNING': JobStatus.SETUP,
     'SUCCEEDED': JobStatus.SUCCEEDED,
     'FAILED': JobStatus.FAILED,
     'STOPPED': JobStatus.CANCELLED,
@@ -390,7 +392,7 @@ def update_job_status(job_owner: str,
                 # already been set to later state by the job. We skip the
                 # update.
                 # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
-                # `RUNNING` to our JobStatus.PENDING; if a job has already been
+                # `RUNNING` to our JobStatus.SETYO; if a job has already been
                 # set to JobStatus.RUNNING by the generated ray program,
                 # `original_status` (job status from our DB) would already have
                 # that value. So we take the max here to keep it at RUNNING.
@@ -475,7 +477,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    status_list = [JobStatus.PENDING, JobStatus.RUNNING]
+    status_list = [JobStatus.SETUP, JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
 
@@ -508,7 +510,8 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     # Update the status of the jobs to avoid setting the status of stale
     # jobs to CANCELLED.
     if jobs is None:
-        job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
+        job_records = _get_jobs(
+            None, [JobStatus.SETUP, JobStatus.PENDING, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
 
@@ -528,7 +531,9 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
             logger.warning(str(e))
             continue
 
-        if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
+        if job['status'] in [
+                JobStatus.SETUP, JobStatus.PENDING, JobStatus.RUNNING
+        ]:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 
