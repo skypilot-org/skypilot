@@ -35,7 +35,7 @@ setup: |
 run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
-    --job-id $SKY_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+    --job-id $SKY_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:
   SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
