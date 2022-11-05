@@ -3009,8 +3009,6 @@ class CloudVmRayBackend(backends.Backend):
 
         job_run_id = common_utils.get_job_run_id(
             self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
-        envs = task.envs if task.envs else {}
-        envs[constants.JOB_RUN_ID_ENV_VAR] = job_run_id
 
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
