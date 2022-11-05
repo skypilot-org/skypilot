@@ -31,6 +31,7 @@ and the commands to run:
 
   setup: |
     set -e  # Exit if any command failed.
+    conda install pytorch==1.12.1 cudatoolkit=11.3 -c pytorch -y
     git clone https://github.com/huggingface/transformers/ || true
     cd transformers
     pip3 install .
