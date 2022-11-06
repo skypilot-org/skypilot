@@ -16,6 +16,7 @@ num_nodes: 2
 
 setup: |
   echo "running setup"
+  sleep 80
 
 run: |
   timestamp=$(date +%s)

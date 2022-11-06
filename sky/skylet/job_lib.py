@@ -79,7 +79,7 @@ class JobStatus(enum.Enum):
     # directly, if the ray program fails to start.
     INIT = 'INIT'
     # Running the user's setup script.
-    SETUP = 'SETUP'
+    SETUP = 'SETTING_UP'
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
