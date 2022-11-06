@@ -211,7 +211,7 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
-        cluster_ips_sorted: Optional[List[str]] = None,
+        cluster_internal_ips_sorted: Optional[List[str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -284,12 +284,8 @@ class RayCodeGen:
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
-                #all_nodes = ray.nodes()
-                #sorted_cluster_internal_ips = sorted([
-                #    r['NodeManagerAddress'] for r in all_nodes])
-
-                if {cluster_ips_sorted!r} is not None:
-                    cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_ips_sorted!r})}}
+                if {cluster_internal_ips_sorted!r} is not None:
+                    cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_internal_ips_sorted!r})}}
                     ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
                     print('ip_rank_list', ip_rank_list)
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
@@ -339,10 +335,9 @@ class RayCodeGen:
         #   name=...
         #   resources=...
         #   num_gpus=...
-        name_str = f'name=\'{task_name}\''
         if task_name is None:
             # Make the task name more meaningful in ray log.
-            name_str = 'name=\'task\''
+            task_name = 'task'
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
@@ -374,7 +369,7 @@ class RayCodeGen:
                 for k, v in env_vars.items())
 
         logger.debug('Added Task with options: '
-                     f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
+                     f'{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -387,24 +382,21 @@ class RayCodeGen:
         if script is not None:
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
-
-            # FIXME: respect display-purpose task name that gets passed? may be ok as it will be shown in 'sky queue'
+            rank = ip_rank_map[ip]
 
             if cluster_ips_map is not None:
-                sorted_ips = sorted(cluster_ips_map.keys())  # FIXME: head node should not be sorted along with workers
-                curr_node_idx_in_sorted_ips = sorted_ips.index(ip)
-                if curr_node_idx_in_sorted_ips == 0:
-                    task_name = 'head'
+                idx_in_cluster = cluster_ips_map[ip]
+                if cluster_ips_map[ip] == 0:
+                    node_name = 'head'
                 else:
-                    task_name = f'worker{{curr_node_idx_in_sorted_ips}}'
+                    node_name = f'worker{{idx_in_cluster}}'
             else:
-                # FIXME: pass this in for 1-node task
-                task_name = 'n/a'  # FIXME: this is wrong for 'exec --num-nodes 1' - wrongly tags worker ip to be head
-            sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
+                node_name = 'head'
+            sky_env_vars_dict['SKY_NODE_RANK'] = rank
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
-                    .options(name=task_name{cpu_str}{resources_str}{num_gpus_str}) \\
+                    .options(name=f'{task_name}, {{node_name}}, rank={{rank}},'{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
                         log_path,
@@ -3057,27 +3049,20 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
-        import ipdb; ipdb.set_trace()
-        # cluster_public_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-        #                                                   handle.launched_nodes,
-        #                                                   handle=handle,
-        #                                                   get_internal_ips=False)
-        # ssh_credentials = backend_utils.ssh_credential_from_yaml(
-        #     handle.cluster_yaml)
-        # runners = command_runner.SSHCommandRunner.make_runner_list(
-        #     ip_list, *ssh_credentials)
-
-        # def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
-
-        # Ensure head node is the first element, then sort the remaining IPs
+        cluster_external_ips = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                          handle.launched_nodes,
+                                                          handle=handle)
         cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
                                                           handle.launched_nodes,
                                                           handle=handle,
                                                           get_internal_ips=True)
-        # Ensure head node is the first element, then sort the remaining IPs
-        # for stableness
-        cluster_ips_sorted = [cluster_internal_ips[0]] + sorted(
-            cluster_internal_ips[1:])
+        cluster_ip_pairs = list(zip(cluster_internal_ips, cluster_external_ips))
+
+        # Ensure head node is the first element, then sort based on the external
+        # IPs for stableness
+        cluster_ips_pairs_sorted = [cluster_ip_pairs[0]] + sorted(
+            cluster_ip_pairs[1:], key=lambda x: x[1])
+        cluster_internal_ips_sorted = [x[0] for x in cluster_ips_pairs_sorted]
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3087,7 +3072,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            cluster_ips_sorted=cluster_ips_sorted)
+            cluster_internal_ips_sorted=cluster_internal_ips_sorted)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))

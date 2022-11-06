@@ -484,33 +484,6 @@ class SSHConfigHelper(object):
 
         # Ensures stableness of the aliases worker-<i>.
         worker_ips = list(sorted(worker_ips))
-        print('Sorted public worker ips', worker_ips)
-
-        # TODO: sort these public worker_ips by their internal ips.
-
-        runners = command_runner.SSHCommandRunner.make_runner_list(
-            worker_ips, username, key_path, ssh_control_name=host_name)
-
-        def get_private_ip(runner: command_runner.SSHCommandRunner) -> str:
-            returncode, stdout, stderr = runner.run(
-                # FIXME(zongheng): -I is not universally supported?
-                'hostname -I',
-                require_outputs=True,
-                stream_logs=False,
-            )
-            print(returncode, stdout, stderr)
-            # proc = subprocess_utils.run(
-            #     f'ssh -i {key_path} {username}@{public_ip} -- hostname -I',
-            #     stdout=subprocess.PIPE)
-            print('public ip', runner.ip, ':', returncode, stdout, stderr)
-            return stdout
-
-        # FIXME: problem of doing it here is that it shows Warning: Permanently
-        # added '44.204.253.219' (ED25519) to the list of known hosts.
-        outs = subprocess_utils.run_in_parallel(get_private_ip, runners)
-        print('Outs', outs)
-        import ipdb
-        ipdb.set_trace()
 
         overwrites = [False] * len(worker_ips)
         overwrite_begin_idxs = [None] * len(worker_ips)
