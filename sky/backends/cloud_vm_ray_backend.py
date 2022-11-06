@@ -287,7 +287,6 @@ class RayCodeGen:
                 if {cluster_internal_ips_sorted!r} is not None:
                     cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_internal_ips_sorted!r})}}
                     ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
-                    print('ip_rank_list', ip_rank_list)
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
                     ip_list_str = '\\n'.join(ip_rank_list)
                 else:
