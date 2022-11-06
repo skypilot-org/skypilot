@@ -215,7 +215,7 @@ def get_status_no_lock(job_id: int) -> JobStatus:
     for (status,) in rows:
         if status is None:
             return None
-        return JobStatus[status]
+        return JobStatus(status)
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
@@ -242,7 +242,7 @@ def load_statuses_payload(statuses_payload: str) -> Dict[int, JobStatus]:
     statuses = common_utils.decode_payload(statuses_payload)
     for job_id, status in statuses.items():
         if status is not None:
-            statuses[job_id] = JobStatus[status]
+            statuses[job_id] = JobStatus(status)
     return statuses
 
 
@@ -272,7 +272,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'job_name': row[JobInfoLoc.JOB_NAME.value],
             'username': row[JobInfoLoc.USERNAME.value],
             'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
-            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'status': JobStatus(row[JobInfoLoc.STATUS.value]),
             'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
             'start_at': row[JobInfoLoc.START_AT.value],
             'end_at': row[JobInfoLoc.END_AT.value],
