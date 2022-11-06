@@ -1123,7 +1123,6 @@ def cli():
               required=False,
               help='Skip confirmation prompt.')
 @click.option('--no-setup',
-              '-n',
               is_flag=True,
               default=False,
               required=False,
