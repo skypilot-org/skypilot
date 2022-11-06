@@ -318,9 +318,8 @@ class RayCodeGen:
 
     def add_ray_task(self,
                      bash_script: str,
-                     task_name: Optional[str],
                      ray_resources_dict: Optional[Dict[str, float]],
-                     log_path: str,
+                     log_dir: str,
                      env_vars: Dict[str, str] = None,
                      gang_scheduling_id: int = 0,
                      use_sudo: bool = False) -> None:
@@ -334,9 +333,6 @@ class RayCodeGen:
         #   name=...
         #   resources=...
         #   num_gpus=...
-        if task_name is None:
-            # Make the task name more meaningful in ray log.
-            task_name = 'task'
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
@@ -376,7 +372,6 @@ class RayCodeGen:
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
-        log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
@@ -389,13 +384,15 @@ class RayCodeGen:
                     node_name = 'head'
                 else:
                     node_name = f'worker{{idx_in_cluster}}'
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{node_name}}.log'))
             else:
                 node_name = 'head'
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
             sky_env_vars_dict['SKY_NODE_RANK'] = rank
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
-                    .options(name=f'{task_name}, {{node_name}}, rank={{rank}},'{cpu_str}{resources_str}{num_gpus_str}) \\
+                    .options(name=f'{{node_name}}, rank={{rank}},'{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
                         log_path,
@@ -2996,7 +2993,6 @@ class CloudVmRayBackend(backends.Backend):
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
-        log_path = os.path.join(log_dir, 'run.log')
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
@@ -3017,9 +3013,8 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_ray_task(
             bash_script=command_for_node,
             env_vars=task.envs,
-            task_name=task.name,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
-            log_path=log_path,
+            log_dir=log_dir,
             use_sudo=use_sudo)
 
         codegen.add_epilogue()
@@ -3084,15 +3079,12 @@ class CloudVmRayBackend(backends.Backend):
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
-            name = f'node-{i}'
-            log_path = os.path.join(f'{log_dir}', f'{name}.log')
             use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
             codegen.add_ray_task(
                 bash_script=command_for_node,
                 env_vars=task.envs,
-                task_name=name,
                 ray_resources_dict=accelerator_dict,
-                log_path=log_path,
+                log_dir=log_dir,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,
             )
