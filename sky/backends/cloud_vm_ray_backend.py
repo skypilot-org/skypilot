@@ -2001,7 +2001,7 @@ class CloudVmRayBackend(backends.Backend):
         self._execute_storage_mounts(handle, storage_mounts)
 
     def _setup(self, handle: ResourceHandle, task: task_lib.Task,
-               async_setup: bool) -> Optional[str]:
+               detach_setup: bool) -> Optional[str]:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
@@ -2036,7 +2036,7 @@ class CloudVmRayBackend(backends.Backend):
                              target=f'/tmp/{setup_file}',
                              up=True,
                              stream_logs=False)
-                if async_setup:
+                if detach_setup:
                     return
                 setup_log_path = os.path.join(self.log_dir,
                                               f'setup-{runner.ip}.log')
@@ -2079,7 +2079,7 @@ class CloudVmRayBackend(backends.Backend):
 
             num_nodes = len(ip_list)
             plural = 's' if num_nodes > 1 else ''
-            if async_setup:
+            if detach_setup:
                 logger.info(
                     f'{fore.CYAN}Preparing setup for {num_nodes} node{plural}.'
                     f'{style.RESET_ALL}')
@@ -2089,7 +2089,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'{style.RESET_ALL}')
             subprocess_utils.run_in_parallel(_setup_node, runners)
 
-        if async_setup:
+        if detach_setup:
             self._setup_cmd = setup_cmd
             return
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')

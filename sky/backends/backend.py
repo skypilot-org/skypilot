@@ -67,8 +67,8 @@ class Backend:
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
     def setup(self, handle: ResourceHandle, task: 'task_lib.Task',
-              async_setup: bool) -> None:
-        return self._setup(handle, task, async_setup)
+              detach_setup: bool) -> None:
+        return self._setup(handle, task, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
@@ -125,7 +125,7 @@ class Backend:
         raise NotImplementedError
 
     def _setup(self, handle: ResourceHandle, task: 'task_lib.Task',
-               async_setup: bool) -> None:
+               detach_setup: bool) -> None:
         raise NotImplementedError
 
     def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',

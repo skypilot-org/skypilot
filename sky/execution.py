@@ -114,7 +114,7 @@ def _execute(
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
-    async_setup: bool = False,
+    detach_setup: bool = False,
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
@@ -147,7 +147,7 @@ def _execute(
         skipping all setup steps.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
-      async_setup: bool; whether to run the setup asynchronously.
+      detach_setup: bool; whether to run the setup asynchronously.
       detach_run: bool; whether to detach the process after the job submitted.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
@@ -242,7 +242,7 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages:
-            backend.setup(handle, task, async_setup=async_setup)
+            backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
@@ -291,7 +291,7 @@ def launch(
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
-    async_setup: bool = False,
+    detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
 ) -> None:
@@ -331,7 +331,7 @@ def launch(
             (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
             OptimizeTarget.TIME.
-        async_setup: If True, run setup asynchronously.
+        detach_setup: If True, run setup asynchronously.
         detach_run: If True, run setup first, then detach from the
             job's execution.
         no_setup: if True, do not re-run setup commands.
@@ -359,7 +359,7 @@ def launch(
         retry_until_up=retry_until_up,
         optimize_target=optimize_target,
         cluster_name=cluster_name,
-        async_setup=async_setup,
+        detach_setup=detach_setup,
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
