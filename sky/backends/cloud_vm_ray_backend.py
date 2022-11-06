@@ -1648,6 +1648,10 @@ class CloudVmRayBackend(backends.Backend):
         self._dag = None
         self._optimize_target = None
 
+        # Command for running the setup script. It is only set when the
+        # setup needs to be run outside the self._setup().
+        self._setup_cmd = None
+
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -2086,7 +2090,8 @@ class CloudVmRayBackend(backends.Backend):
             subprocess_utils.run_in_parallel(_setup_node, runners)
 
         if async_setup:
-            return setup_cmd
+            self._setup_cmd = setup_cmd
+            return
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -2260,7 +2265,6 @@ class CloudVmRayBackend(backends.Backend):
         handle: ResourceHandle,
         task: task_lib.Task,
         detach_run: bool,
-        setup_cmd: Optional[str] = None,
     ) -> None:
         if task.run is None:
             logger.info('Run commands not specified or empty.')
@@ -2275,12 +2279,10 @@ class CloudVmRayBackend(backends.Backend):
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if task.num_nodes > 1 or is_tpu_vm_pod:
-            self._execute_task_n_nodes(handle, task, job_id, detach_run,
-                                       setup_cmd)
+            self._execute_task_n_nodes(handle, task, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task, job_id, detach_run,
-                                        setup_cmd)
+            self._execute_task_one_node(handle, task, job_id, detach_run)
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
         colorama.init()
@@ -3032,12 +3034,9 @@ class CloudVmRayBackend(backends.Backend):
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
 
-    def _execute_task_one_node(self,
-                               handle: ResourceHandle,
-                               task: task_lib.Task,
-                               job_id: int,
-                               detach_run: bool,
-                               setup_cmd: Optional[str] = None) -> None:
+    def _execute_task_one_node(self, handle: ResourceHandle,
+                               task: task_lib.Task, job_id: int,
+                               detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
         log_path = os.path.join(log_dir, 'run.log')
@@ -3048,7 +3047,7 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
-                             setup_cmd=setup_cmd,
+                             setup_cmd=self._setup_cmd,
                              envs=task.envs,
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
@@ -3077,12 +3076,8 @@ class CloudVmRayBackend(backends.Backend):
                                 executable='python3',
                                 detach_run=detach_run)
 
-    def _execute_task_n_nodes(self,
-                              handle: ResourceHandle,
-                              task: task_lib.Task,
-                              job_id: int,
-                              detach_run: bool,
-                              setup_cmd: Optional[str] = None) -> None:
+    def _execute_task_n_nodes(self, handle: ResourceHandle, task: task_lib.Task,
+                              job_id: int, detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -3112,7 +3107,7 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
-                             setup_cmd=setup_cmd,
+                             setup_cmd=self._setup_cmd,
                              envs=task.envs,
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)

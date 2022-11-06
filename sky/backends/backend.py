@@ -75,15 +75,12 @@ class Backend:
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('execute')
-    def execute(self,
-                handle: ResourceHandle,
-                task: 'task_lib.Task',
-                detach_run: bool,
-                setup_cmd: Optional[str] = None) -> None:
+    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+                detach_run: bool) -> None:
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
-        return self._execute(handle, task, detach_run, setup_cmd=setup_cmd)
+        return self._execute(handle, task, detach_run)
 
     @timeline.event
     def post_execute(self, handle: ResourceHandle, down: bool) -> None:
@@ -131,11 +128,8 @@ class Backend:
                async_setup: bool) -> None:
         raise NotImplementedError
 
-    def _execute(self,
-                 handle: ResourceHandle,
-                 task: 'task_lib.Task',
-                 detach_run: bool,
-                 setup_cmd: Optional[str] = None) -> None:
+    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+                 detach_run: bool) -> None:
         raise NotImplementedError
 
     def _post_execute(self, handle: ResourceHandle, down: bool) -> None:

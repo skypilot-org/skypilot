@@ -239,11 +239,10 @@ def _execute(
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
-        setup_cmd = None
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages:
-            setup_cmd = backend.setup(handle, task, async_setup=async_setup)
+            backend.setup(handle, task, async_setup=async_setup)
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
@@ -254,7 +253,7 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                backend.execute(handle, task, detach_run, setup_cmd=setup_cmd)
+                backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
