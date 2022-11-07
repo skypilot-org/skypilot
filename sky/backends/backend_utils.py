@@ -1134,6 +1134,31 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     return head_ip
 
 
+def get_stable_cluster_internal_ips(
+        handle: backends.Backend.ResourceHandle) -> List[str]:
+    if handle.stable_cluster_internal_ips is not None:
+        return handle.stable_cluster_internal_ips
+
+    cluster_external_ips = get_node_ips(handle.cluster_yaml,
+                                        handle.launched_nodes,
+                                        handle=handle)
+    cluster_internal_ips = get_node_ips(handle.cluster_yaml,
+                                        handle.launched_nodes,
+                                        handle=handle,
+                                        get_internal_ips=True)
+    internal_external_ips = list(zip(cluster_internal_ips,
+                                     cluster_external_ips))
+
+    # Ensure head node is the first element, then sort based on the external
+    # IPs for stableness
+    stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+        internal_external_ips[1:], key=lambda x: x[1])
+    handle.stable_cluster_internal_ips = [
+        x[0] for x in stable_internal_external_ips
+    ]
+    return handle.stable_cluster_internal_ips
+
+
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
@@ -1618,9 +1643,9 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        external_ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if len(ips) == 0:
+        if len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
@@ -1628,7 +1653,8 @@ def _update_cluster_status_no_lock(
             # case, since the get_node_ips() does not require ray cluster to be
             # running.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(ips[0], *ssh_credentials)
+            runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     *ssh_credentials)
             returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
@@ -1637,7 +1663,9 @@ def _update_cluster_status_no_lock(
         # set the status to UP, as the `get_node_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
-        handle.head_ip = ips[0]
+        handle.head_ip = external_ips[0]
+        handle.stable_cluster_internal_ips = get_stable_cluster_internal_ips(
+            handle)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,

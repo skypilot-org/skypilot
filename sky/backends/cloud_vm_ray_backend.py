@@ -2295,30 +2295,6 @@ class CloudVmRayBackend(backends.Backend):
                 f'Cluster {cluster_name!r} is locked by {lock_path}. '
                 'Check to see if it is still being launched.') from e
 
-    def _get_stable_cluster_internal_ips(self,
-                                         handle: ResourceHandle) -> List[str]:
-        if handle.stable_cluster_internal_ips is not None:
-            return handle.stable_cluster_internal_ips
-
-        cluster_external_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                          handle.launched_nodes,
-                                                          handle=handle)
-        cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                          handle.launched_nodes,
-                                                          handle=handle,
-                                                          get_internal_ips=True)
-        internal_external_ips = list(
-            zip(cluster_internal_ips, cluster_external_ips))
-
-        # Ensure head node is the first element, then sort based on the external
-        # IPs for stableness
-        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
-            internal_external_ips[1:], key=lambda x: x[1])
-        handle.stable_cluster_internal_ips = [
-            x[0] for x in stable_internal_external_ips
-        ]
-        return handle.stable_cluster_internal_ips
-
     # --- CloudVMRayBackend Specific APIs ---
 
     def get_job_status(
@@ -3019,8 +2995,6 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(self.log_dir, 'tasks')
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
-        stable_cluster_internal_ips = self._get_stable_cluster_internal_ips(
-            handle)
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3030,7 +3004,8 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             1,
             accelerator_dict,
-            stable_cluster_internal_ips=stable_cluster_internal_ips)
+            stable_cluster_internal_ips=backend_utils.
+            get_stable_cluster_internal_ips(handle))
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3073,9 +3048,6 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
-        stable_cluster_internal_ips = self._get_stable_cluster_internal_ips(
-            handle)
-
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
@@ -3084,7 +3056,8 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=stable_cluster_internal_ips)
+            stable_cluster_internal_ips=backend_utils.
+            get_stable_cluster_internal_ips(handle))
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))

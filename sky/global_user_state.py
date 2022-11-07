@@ -181,6 +181,7 @@ def remove_cluster(cluster_name: str, terminate: bool):
         # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
         # will directly try to ssh, which leads to timeout.
         handle.head_ip = None
+        handle.stable_cluster_internal_ips = None
         _DB.cursor.execute(
             'UPDATE clusters SET handle=(?), status=(?) '
             'WHERE name=(?)', (
