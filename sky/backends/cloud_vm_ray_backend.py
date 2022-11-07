@@ -208,7 +208,7 @@ class RayCodeGen:
             self._code += [
                 textwrap.dedent(f"""\
                 _SETUP_CPUS = 0.0001
-                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETUP)
+                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
                 print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
                 total_num_nodes = len(ray.nodes())
                 setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
