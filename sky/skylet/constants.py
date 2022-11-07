@@ -8,3 +8,5 @@ SKY_REMOTE_RAY_VERSION = '2.0.1'
 UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'Found uninitialized local cluster {cluster}. Run this '
     'command to initialize it locally: sky launch -c {cluster} \'\'')
+
+JOB_ID_ENV_VAR = 'SKYPILOT_JOB_ID'
