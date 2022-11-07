@@ -434,11 +434,14 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
 
 def is_cluster_idle() -> bool:
     """Returns if the cluster is idle (no in-flight jobs)."""
+    in_progress_status = [
+        status.value for status in JobStatus.nonterminal_statuses()
+    ]
     rows = _CURSOR.execute(
         f"""\
         SELECT COUNT(*) FROM jobs
-        WHERE status IN ({','.join(['?'] * len(JobStatus.nonterminal_statuses()))})
-        """, [status.value for status in JobStatus.nonterminal_statuses()])
+        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        """, in_progress_status)
     for (count,) in rows:
         return count == 0
 
