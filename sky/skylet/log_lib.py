@@ -438,6 +438,7 @@ def tail_logs(job_owner: str,
                         start_stream = True
                     if start_stream:
                         print(line, end='', flush=True)
+            time.sleep(1)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

@@ -189,9 +189,12 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
         end_at = time.time()
         # status does not need to be set if the end_at is not null, since
         # the job must be in a terminal state already.
+        # Don't check the end_at for FAILED_SETUP, so that the generated
+        # ray program can overwrite the status.
+        check_end_at_str = ' AND end_at IS NULL' if status != JobStatus.FAILED_SETUP else ''
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), end_at=(?) '
-            'WHERE job_id=(?) AND end_at IS NULL',
+            f'WHERE job_id=(?) {check_end_at_str}',
             (status.value, end_at, job_id))
     else:
         _CURSOR.execute(
