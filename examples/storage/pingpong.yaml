@@ -27,5 +27,5 @@ setup: |
   git clone https://github.com/romilbhardwaj/sharedfs-pingpong.git
 
 run: |
-  num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
-  python -u sharedfs-pingpong/main.py --process-id ${SKY_NODE_RANK} --shared-path /sharedfs/ --num-processes $num_nodes
+  num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+  python -u sharedfs-pingpong/main.py --process-id ${SKYPILOT_NODE_RANK} --shared-path /sharedfs/ --num-processes $num_nodes

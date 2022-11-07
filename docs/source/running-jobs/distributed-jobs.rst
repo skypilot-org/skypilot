@@ -30,10 +30,10 @@ For example, here is a simple PyTorch Distributed training example:
   run: |
     cd pytorch-distributed-resnet
 
-    num_nodes=`echo "$SKY_NODE_IPS" | wc -l`
-    master_addr=`echo "$SKY_NODE_IPS" | head -n1`
-    python3 -m torch.distributed.launch --nproc_per_node=$SKY_NUM_GPUS_PER_NODE \
-      --nnodes=$num_nodes --node_rank=${SKY_NODE_RANK} --master_addr=$master_addr \
+    num_nodes=`echo "$SKYPILOT_NODE_IPS" | wc -l`
+    master_addr=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    python3 -m torch.distributed.launch --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+      --nnodes=$num_nodes --node_rank=${SKYPILOT_NODE_RANK} --master_addr=$master_addr \
       --master_port=8008 resnet_ddp.py --num_epochs 20
 
 In the above, :code:`num_nodes: 2` specifies that this task is to be run on 2
@@ -41,16 +41,16 @@ nodes. The :code:`setup` and :code:`run` commands are executed on both nodes.
 
 SkyPilot exposes these environment variables that can be accessed in a task's ``run`` commands:
 
-- :code:`SKY_NODE_RANK`: rank (an integer ID from 0 to :code:`num_nodes-1`) of
+- :code:`SKYPILOT_NODE_RANK`: rank (an integer ID from 0 to :code:`num_nodes-1`) of
   the node executing the task.
-- :code:`SKY_NODE_IPS`: a string of IP addresses of the nodes reserved to execute
+- :code:`SKYPILOT_NODE_IPS`: a string of IP addresses of the nodes reserved to execute
   the task, where each line contains one IP address.
 
-  - You can retrieve the number of nodes by :code:`echo "$SKY_NODE_IPS" | wc -l`
-    and the IP address of the third node by :code:`echo "$SKY_NODE_IPS" | sed -n
+  - You can retrieve the number of nodes by :code:`echo "$SKYPILOT_NODE_IPS" | wc -l`
+    and the IP address of the third node by :code:`echo "$SKYPILOT_NODE_IPS" | sed -n
     3p`.
 
   - To manipulate these IP addresses, you can also store them to a file in the
-    :code:`run` command with :code:`echo $SKY_NODE_IPS >> ~/sky_node_ips`.
-- :code:`SKY_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
+    :code:`run` command with :code:`echo $SKYPILOT_NODE_IPS >> ~/sky_node_ips`.
+- :code:`SKYPILOT_NUM_GPUS_PER_NODE`: number of GPUs reserved on each node to execute the
   task; the same as the count in ``accelerators: <name>:<count>`` (rounded up if a fraction).
