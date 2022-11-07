@@ -1485,6 +1485,8 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
+        - (optional) A cached stable list of internal IPs for all nodes
+            in a cluster. Filled in after a successful task execution.
         - (optional) Launched num nodes
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
@@ -1496,6 +1498,7 @@ class CloudVmRayBackend(backends.Backend):
                      cluster_name: str,
                      cluster_yaml: str,
                      head_ip: Optional[str] = None,
+                     stable_cluster_internal_ips: Optional[str] = None,
                      launched_nodes: Optional[int] = None,
                      launched_resources: Optional[
                          resources_lib.Resources] = None,
@@ -1506,6 +1509,7 @@ class CloudVmRayBackend(backends.Backend):
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
                                                       '~', 1)
             self.head_ip = head_ip
+            self.stable_cluster_internal_ips = stable_cluster_internal_ips
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -2293,6 +2297,9 @@ class CloudVmRayBackend(backends.Backend):
 
     def _get_stable_cluster_internal_ips(self,
                                          handle: ResourceHandle) -> List[str]:
+        if handle.stable_cluster_internal_ips is not None:
+            return handle.stable_cluster_internal_ips
+
         cluster_external_ips = backend_utils.get_node_ips(handle.cluster_yaml,
                                                           handle.launched_nodes,
                                                           handle=handle)
@@ -2307,7 +2314,10 @@ class CloudVmRayBackend(backends.Backend):
         # IPs for stableness
         stable_internal_external_ips = [internal_external_ips[0]] + sorted(
             internal_external_ips[1:], key=lambda x: x[1])
-        return [x[0] for x in stable_internal_external_ips]
+        handle.stable_cluster_internal_ips = [
+            x[0] for x in stable_internal_external_ips
+        ]
+        return handle.stable_cluster_internal_ips
 
     # --- CloudVMRayBackend Specific APIs ---
 
