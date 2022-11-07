@@ -211,11 +211,11 @@ class RayCodeGen:
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETUP)
                 print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
                 total_num_nodes = len(ray.nodes())
-                bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
-                pg = ray.util.placement_group(bundles, strategy='STRICT_SPREAD')
-                ray.get(pg.ready())
+                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
+                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
+                ray.get(setup_pg.ready())
                 setup_workers = [run_bash_command_with_log \\
-                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=pg, placement_group_bundle_index=i) \\
+                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
                     .remote(
                         setup_cmd,
                         os.path.expanduser({setup_log_path!r}),
@@ -1649,7 +1649,8 @@ class CloudVmRayBackend(backends.Backend):
         self._optimize_target = None
 
         # Command for running the setup script. It is only set when the
-        # setup needs to be run outside the self._setup().
+        # setup needs to be run outside the self._setup() and as part of
+        # a job (--detach-setup).
         self._setup_cmd = None
 
     # --- Implementation of Backend APIs ---
@@ -2090,6 +2091,8 @@ class CloudVmRayBackend(backends.Backend):
             subprocess_utils.run_in_parallel(_setup_node, runners)
 
         if detach_setup:
+            # Set setup_cmd and it will be run outside the self._setup() as part
+            # of a job (--detach-setup).
             self._setup_cmd = setup_cmd
             return
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')

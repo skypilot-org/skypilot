@@ -147,8 +147,11 @@ def _execute(
         skipping all setup steps.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
-      detach_setup: bool; whether to run the setup asynchronously.
-      detach_run: bool; whether to detach the process after the job submitted.
+      detach_setup: If True, run setup in non-interactive mode where ctrl-c
+        will not interrupt the setup process. Useful for long-running setup
+        commands.
+      detach_run: If True, as soon as a job is submitted, return from this
+        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -331,9 +334,11 @@ def launch(
             (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
             OptimizeTarget.TIME.
-        detach_setup: If True, run setup asynchronously.
-        detach_run: If True, run setup first, then detach from the
-            job's execution.
+        detach_setup: If True, run setup in non-interactive mode where ctrl-c
+            will not interrupt the setup process. Useful for long-running setup
+            commands.
+        detach_run: If True, as soon as a job is submitted, return from this
+            function and do not stream execution logs.
         no_setup: if True, do not re-run setup commands.
 
     Example:

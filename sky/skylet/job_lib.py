@@ -79,7 +79,7 @@ class JobStatus(enum.Enum):
     # directly, if the ray program fails to start.
     INIT = 'INIT'
     # Running the user's setup script.
-    SETUP = 'SETTING_UP'
+    SETTING_UP = 'SETTING_UP'
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
@@ -96,7 +96,7 @@ class JobStatus(enum.Enum):
 
     @classmethod
     def nonterminal_statuses(cls) -> List['JobStatus']:
-        return [cls.INIT, cls.SETUP, cls.PENDING, cls.RUNNING]
+        return [cls.INIT, cls.SETTING_UP, cls.PENDING, cls.RUNNING]
 
     def is_terminal(self):
         return self not in self.nonterminal_statuses()
@@ -109,15 +109,16 @@ _RAY_TO_JOB_STATUS_MAP = {
     # These are intentionally set to one status before, because:
     # 1. when the ray status indicates the job is PENDING the generated
     # python program should not be started yet, i.e. the job should be INIT.
-    # 2. when the ray status indicates the job is RUNNING the resources
-    # may not be allocated yet, i.e. the job should be PENDING.
-    # For case 2, update_job_status() would compare this mapped PENDING to
+    # 2. when the ray status indicates the job is RUNNING the job can be in
+    # setup or resources may not be allocated yet, i.e. the job should be
+    # SETTING_UP.
+    # For case 2, update_job_status() would compare this mapped SETTING_UP to
     # the status in our jobs DB and take the max. This is because the job's
     # generated ray program is the only place that can determine a job has
     # reserved resources and actually started running: it will set the
     # status in the DB to RUNNING.
     'PENDING': JobStatus.INIT,
-    'RUNNING': JobStatus.SETUP,
+    'RUNNING': JobStatus.SETTING_UP,
     'SUCCEEDED': JobStatus.SUCCEEDED,
     'FAILED': JobStatus.FAILED,
     'STOPPED': JobStatus.CANCELLED,
@@ -392,10 +393,11 @@ def update_job_status(job_owner: str,
                 # already been set to later state by the job. We skip the
                 # update.
                 # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
-                # `RUNNING` to our JobStatus.SETYO; if a job has already been
-                # set to JobStatus.RUNNING by the generated ray program,
-                # `original_status` (job status from our DB) would already have
-                # that value. So we take the max here to keep it at RUNNING.
+                # `RUNNING` to our JobStatus.SETTING_UP; if a job has already
+                # been set to JobStatus.PENDING or JobStatus.RUNNING by the
+                # generated ray program, `original_status` (job status from our
+                # DB) would already have that value. So we take the max here to
+                # keep it at later status.
                 status = max(status, original_status)
                 if status != original_status:  # Prevents redundant update.
                     _set_status_no_lock(job_id, status)
@@ -480,7 +482,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    status_list = [JobStatus.SETUP, JobStatus.PENDING, JobStatus.RUNNING]
+    status_list = [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
 
@@ -514,7 +516,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     # jobs to CANCELLED.
     if jobs is None:
         job_records = _get_jobs(
-            None, [JobStatus.SETUP, JobStatus.PENDING, JobStatus.RUNNING])
+            None, [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
 
@@ -535,7 +537,7 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
             continue
 
         if job['status'] in [
-                JobStatus.SETUP, JobStatus.PENDING, JobStatus.RUNNING
+                JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
         ]:
             set_status(job['job_id'], JobStatus.CANCELLED)
 

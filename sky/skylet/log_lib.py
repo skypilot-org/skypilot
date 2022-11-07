@@ -351,7 +351,7 @@ def _follow_job_logs(file,
             # Auto-exit the log tailing, if the job has finished. Check
             # the job status before query again to avoid unfinished logs.
             if status not in [
-                    job_lib.JobStatus.SETUP, job_lib.JobStatus.PENDING,
+                    job_lib.JobStatus.SETTING_UP, job_lib.JobStatus.PENDING,
                     job_lib.JobStatus.RUNNING
             ]:
                 if wait_last_logs:
@@ -416,7 +416,7 @@ def tail_logs(job_owner: str,
 
     start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
     if follow and status in [
-            job_lib.JobStatus.SETUP,
+            job_lib.JobStatus.SETTING_UP,
             job_lib.JobStatus.PENDING,
             job_lib.JobStatus.RUNNING,
     ]:

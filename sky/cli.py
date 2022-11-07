@@ -1059,17 +1059,21 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-@click.option('--detach-setup',
-              '-s',
-              default=False,
-              is_flag=True,
-              help='if True, run setup asynchronously.')
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-setup',
+    '-s',
+    default=False,
+    is_flag=True,
+    help=(
+        'If True, run setup in non-interactive mode where ctrl-c will not '
+        'interrupt the setup process. Useful for long-running setup commands.'))
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return to the system '
+          'and do not stream execution logs.'))
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
@@ -1217,12 +1221,13 @@ def launch(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run workdir syncing first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return to the system '
+          'and do not stream execution logs.'))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -2762,12 +2767,13 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return to the system '
+          'and do not stream execution logs.'))
 @click.option(
     '--retry-until-up',
     '-r',
