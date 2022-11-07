@@ -78,7 +78,10 @@ class JobStatus(enum.Enum):
     # not started yet. skylet can transit the state from INIT to FAILED
     # directly, if the ray program fails to start.
     INIT = 'INIT'
-    # Running the user's setup script.
+    # Running the user's setup script (only in effect if --detach-setup is
+    # set). Our update_job_status() can temporarily (for a short period) set
+    # the status to SETTING_UP, if the generated ray program has not set
+    # the status to PENDING or RUNNING yet.
     SETTING_UP = 'SETTING_UP'
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
@@ -91,9 +94,12 @@ class JobStatus(enum.Enum):
     SUCCEEDED = 'SUCCEEDED'
     # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
-    # The job setup failed (--detach-setup). It needs to be placed after
-    # the `FAILED` state, so that the status set by our generated ray
-    # program will not be overwritten by ray's job status (FAILED).
+    # The job setup failed (only in effect if --detach-setup is set). It
+    # needs to be placed after the `FAILED` state, so that the status
+    # set by our generated ray program will not be overwritten by
+    # ray's job status (FAILED).
+    # This is for a better UX, so that the user can find out the reason
+    # of the failure quickly.
     FAILED_SETUP = 'FAILED_SETUP'
     # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
@@ -121,6 +127,10 @@ _RAY_TO_JOB_STATUS_MAP = {
     # generated ray program is the only place that can determine a job has
     # reserved resources and actually started running: it will set the
     # status in the DB to RUNNING.
+    # If there is no setup specified in the task, as soon as it is started
+    # (ray's status becomes RUNNING), i.e. it will be very rare that the job
+    # will be set to SETTING_UP by the update_job_status, as our generated
+    # ray program will set the status to PENDING immediately.
     'PENDING': JobStatus.INIT,
     'RUNNING': JobStatus.SETTING_UP,
     'SUCCEEDED': JobStatus.SUCCEEDED,

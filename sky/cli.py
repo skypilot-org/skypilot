@@ -1064,15 +1064,17 @@ def cli():
     '-s',
     default=False,
     is_flag=True,
-    help=(
-        'If True, run setup in non-interactive mode where ctrl-c will not '
-        'interrupt the setup process. Useful for long-running setup commands.'))
+    help=
+    ('If True, run setup in non-interactive mode as part of the job itself. '
+     'You can safely ctrl-c to detach from logging, and it will not interrupt '
+     'the setup process. Setup can be cancelled by canceling the job via '
+     '`sky cancel`. Useful for long-running setup commands.'))
 @click.option(
     '--detach-run',
     '-d',
     default=False,
     is_flag=True,
-    help=('If True, as soon as a job is submitted, return to the system '
+    help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option('--docker',
               'backend_name',
@@ -1226,7 +1228,7 @@ def launch(
     '-d',
     default=False,
     is_flag=True,
-    help=('If True, as soon as a job is submitted, return to the system '
+    help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
@@ -2772,7 +2774,7 @@ def spot():
     '-d',
     default=False,
     is_flag=True,
-    help=('If True, as soon as a job is submitted, return to the system '
+    help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @click.option(
     '--retry-until-up',

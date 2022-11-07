@@ -231,7 +231,7 @@ class RayCodeGen:
                     job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
                     time.sleep(1)
-                    print('ERROR: {colorama.Fore.RED}Job {self.job_id} setup failed with '
+                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}'s setup failed with '
                         'return code list:{colorama.Style.RESET_ALL}',
                         setup_returncodes,
                         file=sys.stderr,
@@ -2090,19 +2090,15 @@ class CloudVmRayBackend(backends.Backend):
 
             num_nodes = len(ip_list)
             plural = 's' if num_nodes > 1 else ''
-            if detach_setup:
-                logger.info(
-                    f'{fore.CYAN}Preparing setup for {num_nodes} node{plural}.'
-                    f'{style.RESET_ALL}')
-            else:
+            if not detach_setup:
                 logger.info(
                     f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
                     f'{style.RESET_ALL}')
             subprocess_utils.run_in_parallel(_setup_node, runners)
 
         if detach_setup:
-            # Set setup_cmd and it will be run outside the self._setup() as part
-            # of a job (--detach-setup).
+            # Only set this when setup needs to be run outside the self._setup()
+            # as part of a job (--detach-setup).
             self._setup_cmd = setup_cmd
             return
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
