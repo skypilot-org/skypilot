@@ -91,7 +91,9 @@ class JobStatus(enum.Enum):
     SUCCEEDED = 'SUCCEEDED'
     # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
-    # SETUP FAILED.
+    # The job setup failed (--detach-setup). It needs to be placed after
+    # the `FAILED` state, so that the status set by our generated ray
+    # program will not be overwritten by ray's job status (FAILED).
     FAILED_SETUP = 'FAILED_SETUP'
     # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
