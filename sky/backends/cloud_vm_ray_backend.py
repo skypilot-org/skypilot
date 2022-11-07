@@ -334,6 +334,8 @@ class RayCodeGen:
                 ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
                 ip_list_str = '\\n'.join(ip_rank_list)
 
+                sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
+                # Environment starting with `SKY_` is deprecated.
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
         ]
