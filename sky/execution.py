@@ -114,6 +114,7 @@ def _execute(
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
+    detach_setup: bool = False,
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
@@ -146,7 +147,12 @@ def _execute(
         skipping all setup steps.
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
-      detach_run: bool; whether to detach the process after the job submitted.
+      detach_setup: If True, run setup in non-interactive mode as part of the
+        job itself. You can safely ctrl-c to detach from logging, and it will
+        not interrupt the setup process. To see the logs again after detaching,
+        use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
+      detach_run: If True, as soon as a job is submitted, return from this
+        function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
@@ -240,7 +246,7 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages:
-            backend.setup(handle, task)
+            backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
@@ -289,6 +295,7 @@ def launch(
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
 ) -> None:
@@ -328,8 +335,14 @@ def launch(
             (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
             OptimizeTarget.TIME.
-        detach_run: If True, run setup first (blocking), then detach from the
-            job's execution.
+        detach_setup: If True, run setup in non-interactive mode as part of the
+            job itself. You can safely ctrl-c to detach from logging, and it
+            will not interrupt the setup process. To see the logs again after
+            detaching, use `sky logs`. To cancel setup, cancel the job via
+            `sky cancel`. Useful for long-running setup
+            commands.
+        detach_run: If True, as soon as a job is submitted, return from this
+            function and do not stream execution logs.
         no_setup: if True, do not re-run setup commands.
 
     Example:
@@ -355,6 +368,7 @@ def launch(
         retry_until_up=retry_until_up,
         optimize_target=optimize_target,
         cluster_name=cluster_name,
+        detach_setup=detach_setup,
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
