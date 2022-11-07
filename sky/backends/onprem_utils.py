@@ -11,6 +11,7 @@ import click
 import rich.console as rich_console
 import yaml
 
+from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -479,6 +480,7 @@ def check_local_cloud_args(cloud: Optional[str] = None,
         yaml_config: User's task yaml loaded into a JSON dictionary.
     """
     yaml_cloud = None
+    enabled_clouds = global_user_state.get_enabled_clouds()
     if yaml_config is not None and 'resources' in yaml_config:
         yaml_cloud = yaml_config['resources'].get('cloud')
 
@@ -492,7 +494,9 @@ def check_local_cloud_args(cloud: Optional[str] = None,
                 '`cloud: local` or no cloud in YAML or CLI args.')
         return True
     else:
-        if cloud == 'local' or yaml_cloud == 'local':
+        if (cloud == 'local' or yaml_cloud == 'local' or
+            (len(enabled_clouds) == 1 and
+             isinstance(enabled_clouds, clouds.Local))):
             if cluster_name is not None:
                 raise click.UsageError(
                     f'Local cluster \'{cluster_name}\' does not exist. \n'
