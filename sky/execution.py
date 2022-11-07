@@ -149,8 +149,8 @@ def _execute(
         auto-generate a name.
       detach_setup: If True, run setup in non-interactive mode as part of the
         job itself. You can safely ctrl-c to detach from logging, and it will
-        not interrupt the setup process. Setup can be cancelled by canceling the
-        job via `sky cancel`. Useful for long-running setup commands.
+        not interrupt the setup process. To see the logs again after detaching,
+        use `sky logs`. To cancel setup, cancel the job via `sky cancel`.
       detach_run: If True, as soon as a job is submitted, return from this
         function and do not stream execution logs.
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
@@ -337,8 +337,9 @@ def launch(
             OptimizeTarget.TIME.
         detach_setup: If True, run setup in non-interactive mode as part of the
             job itself. You can safely ctrl-c to detach from logging, and it
-            will not interrupt the setup process. Setup can be cancelled by
-            canceling the job via `sky cancel`. Useful for long-running setup
+            will not interrupt the setup process. To see the logs again after
+            detaching, use `sky logs`. To cancel setup, cancel the job via
+            `sky cancel`. Useful for long-running setup
             commands.
         detach_run: If True, as soon as a job is submitted, return from this
             function and do not stream execution logs.

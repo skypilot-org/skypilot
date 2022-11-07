@@ -1067,8 +1067,9 @@ def cli():
     help=
     ('If True, run setup in non-interactive mode as part of the job itself. '
      'You can safely ctrl-c to detach from logging, and it will not interrupt '
-     'the setup process. Setup can be cancelled by canceling the job via '
-     '`sky cancel`. Useful for long-running setup commands.'))
+     'the setup process. To see the logs again after detaching, use `sky logs`.'
+     ' To cancel setup, cancel the job via `sky cancel`. Useful for long-'
+     'running setup commands.'))
 @click.option(
     '--detach-run',
     '-d',

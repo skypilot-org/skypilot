@@ -325,6 +325,8 @@ def test_n_node_job_queue():
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
             f'sky cancel {name} 1 2 3',
             f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            # Test the job status is correctly set to SETTING_UP, during the setup is running,
+            # and the job can be cancelled during the setup.
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
             f'sky cancel {name} 4',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
