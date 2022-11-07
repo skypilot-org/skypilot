@@ -89,6 +89,8 @@ class JobStatus(enum.Enum):
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
     SUCCEEDED = 'SUCCEEDED'
+    # SETUP FAILED.
+    SETUP_FAILED = 'SETUP_FAILED'
     # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
     # The job is cancelled by the user.

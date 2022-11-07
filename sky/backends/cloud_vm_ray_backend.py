@@ -226,9 +226,19 @@ class RayCodeGen:
                         with_ray=True,
                         use_sudo={is_local},
                     ) for i in range(total_num_nodes)]
-                ray.get(setup_workers)
-                time.sleep(1)
-                print('INFO: Setup finished.', file=sys.stderr, flush=True)""")
+                setup_returncodes = ray.get(setup_workers)
+                if sum(setup_returncodes) != 0:
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETUP_FAILED)
+                    # This waits for all streaming logs to finish.
+                    time.sleep(1)
+                    print('ERROR: {colorama.Fore.RED}Job {self.job_id} setup failed with '
+                        'return code list:{colorama.Style.RESET_ALL}',
+                        setup_returncodes,
+                        file=sys.stderr,
+                        flush=True)
+                    # Need this to set the job status in ray job to be FAILED.
+                    sys.exit(1)
+                """)
             ]
         self._code += [
             f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
