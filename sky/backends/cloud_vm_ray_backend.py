@@ -228,7 +228,7 @@ class RayCodeGen:
                     ) for i in range(total_num_nodes)]
                 setup_returncodes = ray.get(setup_workers)
                 if sum(setup_returncodes) != 0:
-                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SETUP_FAILED)
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
                     # This waits for all streaming logs to finish.
                     time.sleep(1)
                     print('ERROR: {colorama.Fore.RED}Job {self.job_id} setup failed with '
