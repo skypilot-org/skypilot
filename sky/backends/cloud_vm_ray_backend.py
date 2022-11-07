@@ -371,7 +371,7 @@ class RayCodeGen:
                 for k, v in env_vars.items())
         if job_run_id is not None:
             sky_env_vars_dict_str += (
-                f'\nsky_env_vars_dict[{constants.JOB_RUN_ID_ENV_VAR!r}]'
+                f'\nsky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
                 f' = {job_run_id!r}')
 
         logger.debug('Added Task with options: '
