@@ -561,7 +561,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
     task = copy.deepcopy(task)
-    run_id = common_utils.get_run_id()[:8]
+    run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
