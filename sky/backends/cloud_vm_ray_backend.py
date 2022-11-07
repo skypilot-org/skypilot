@@ -211,7 +211,7 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
-        cluster_internal_ips_sorted: Optional[List[str]] = None,
+        stable_cluster_internal_ips: Optional[List[str]] = None,
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -284,8 +284,8 @@ class RayCodeGen:
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
-                if {cluster_internal_ips_sorted!r} is not None:
-                    cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_internal_ips_sorted!r})}}
+                if {stable_cluster_internal_ips!r} is not None:
+                    cluster_ips_map = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
                     ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
                     ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
                     ip_list_str = '\\n'.join(ip_rank_list)
@@ -331,7 +331,6 @@ class RayCodeGen:
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
         # Build remote_task.options(...)
-        #   name=...
         #   resources=...
         #   num_gpus=...
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
@@ -3053,13 +3052,16 @@ class CloudVmRayBackend(backends.Backend):
                                                           handle.launched_nodes,
                                                           handle=handle,
                                                           get_internal_ips=True)
-        cluster_ip_pairs = list(zip(cluster_internal_ips, cluster_external_ips))
+        internal_external_ips = list(
+            zip(cluster_internal_ips, cluster_external_ips))
 
         # Ensure head node is the first element, then sort based on the external
         # IPs for stableness
-        cluster_ips_pairs_sorted = [cluster_ip_pairs[0]] + sorted(
-            cluster_ip_pairs[1:], key=lambda x: x[1])
-        cluster_internal_ips_sorted = [x[0] for x in cluster_ips_pairs_sorted]
+        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+            internal_external_ips[1:], key=lambda x: x[1])
+        stable_cluster_internal_ips = [
+            x[0] for x in stable_internal_external_ips
+        ]
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3069,7 +3071,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            cluster_internal_ips_sorted=cluster_internal_ips_sorted)
+            stable_cluster_internal_ips=stable_cluster_internal_ips)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
