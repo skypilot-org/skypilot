@@ -494,9 +494,12 @@ def check_local_cloud_args(cloud: Optional[str] = None,
                 '`cloud: local` or no cloud in YAML or CLI args.')
         return True
     else:
-        if (cloud == 'local' or yaml_cloud == 'local' or
-            (len(enabled_clouds) == 1 and
-             isinstance(enabled_clouds, clouds.Local))):
+        if (len(enabled_clouds) == 1 and
+                isinstance(enabled_clouds[0], clouds.Local)):
+            cloud = 'local'
+            click.secho('Defaulting to local cloud as there are no enabled '
+                        'public clouds in `sky check`.')
+        if cloud == 'local' or yaml_cloud == 'local':
             if cluster_name is not None:
                 raise click.UsageError(
                     f'Local cluster \'{cluster_name}\' does not exist. \n'
