@@ -1,7 +1,7 @@
 import os
 from typing import Optional
 
-DISABLE_CALLBACK = os.environ.get('SKY_DISABLE_CALLBACK',
+DISABLE_CALLBACK = os.environ.get('SKYPILOT_DISABLE_CALLBACK',
                                   'False').lower() in ('true', '1')
 
 

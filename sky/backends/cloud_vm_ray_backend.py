@@ -292,7 +292,9 @@ class RayCodeGen:
                 else:
                     ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
                     ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
-
+                
+                sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
+                # Environment starting with `SKY_` is deprecated.
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
         ]
@@ -384,9 +386,17 @@ class RayCodeGen:
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
+            sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
+            # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
+
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
+            sky_env_vars_dict['SKYPILOT_NODE_RANK'] = ip_rank_map[ip]
+            # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
+            
+            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\

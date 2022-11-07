@@ -40,9 +40,8 @@ class SpotController:
         # the user can have the same id for multiple recoveries.
         #   Example value: sky-2022-10-04-22-46-52-467694_id-17
         task_envs = self._task.envs or {}
-        task_envs[
-            constants.JOB_RUN_ID_ENV_VAR] = common_utils.get_global_job_id(
-                self.backend.run_timestamp, 'spot', self._job_id)
+        task_envs[constants.JOB_ID_ENV_VAR] = common_utils.get_global_job_id(
+            self.backend.run_timestamp, 'spot', self._job_id)
         self._task.set_envs(task_envs)
 
         spot_state.set_submitted(

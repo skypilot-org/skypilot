@@ -24,22 +24,22 @@ run: |
     exit 1
   fi
 
-  if [[ -z "$SKY_NODE_RANK" ]]; then
-    echo "SKY_NODE_RANK is not set"
+  if [[ -z "$SKYPILOT_NODE_RANK" ]]; then
+    echo "SKYPILOT_NODE_RANK is not set"
     exit 1
   else
-    echo "SKY_NODE_RANK is set to ${SKY_NODE_RANK}"
+    echo "SKYPILOT_NODE_RANK is set to ${SKYPILOT_NODE_RANK}"
   fi
 
-  if [[ -z "$SKY_NODE_IPS" ]]; then
-    echo "SKY_NODE_IPS is not set"
+  if [[ -z "$SKYPILOT_NODE_IPS" ]]; then
+    echo "SKYPILOT_NODE_IPS is not set"
     exit 1
   else
-    echo "SKY_NODE_IPS is set to ${SKY_NODE_IPS}"
-    echo "${SKY_NODE_IPS}"
-    echo "${SKY_NODE_IPS}" | wc -l | grep 2 || exit 1
+    echo "SKYPILOT_NODE_IPS is set to ${SKYPILOT_NODE_IPS}"
+    echo "${SKYPILOT_NODE_IPS}"
+    echo "${SKYPILOT_NODE_IPS}" | wc -l | grep 2 || exit 1
   fi
-  worker_addr=`echo "$SKY_NODE_IPS" | sed -n 2p`
+  worker_addr=`echo "$SKYPILOT_NODE_IPS" | sed -n 2p`
   echo Worker IP: $worker_addr
 
   if [[ -z "$SKYPILOT_JOB_ID" ]]; then
