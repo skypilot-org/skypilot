@@ -211,7 +211,7 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
-        stable_cluster_internal_ips: Optional[List[str]] = None,
+        stable_cluster_internal_ips: List[str],
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -284,15 +284,10 @@ class RayCodeGen:
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
-                if {stable_cluster_internal_ips!r} is not None:
-                    cluster_ips_map = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-                    ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
-                    ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
-                    ip_list_str = '\\n'.join(ip_rank_list)
-                else:
-                    cluster_ips_map = None  # This means it's a single-node task.
-                    ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
-                    ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
+                cluster_ips_map = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
+                ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
+                ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
+                ip_list_str = '\\n'.join(ip_rank_list)
 
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
@@ -378,17 +373,17 @@ class RayCodeGen:
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
             rank = ip_rank_map[ip]
 
-            if cluster_ips_map is not None:
+            if len(cluster_ips_map) == 1: # Single-node task on single-node cluter
+                name_str = '{task_name},' if {task_name!r} is not None else 'task,'
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
+            else: # Single-node or multi-node task on multi-node cluster
                 idx_in_cluster = cluster_ips_map[ip]
                 if cluster_ips_map[ip] == 0:
                     node_name = 'head'
                 else:
                     node_name = f'worker{{idx_in_cluster}}'
                 name_str = f'{{node_name}}, rank={{rank}},'
-                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{node_name}}.log'))
-            else: # Single-node task
-                name_str = '{task_name},' if {task_name!r} is not None else 'task,'
-                log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{node_name}}-{{ip}}.log'))
             sky_env_vars_dict['SKY_NODE_RANK'] = rank
             sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
 
@@ -2296,6 +2291,24 @@ class CloudVmRayBackend(backends.Backend):
                 f'Cluster {cluster_name!r} is locked by {lock_path}. '
                 'Check to see if it is still being launched.') from e
 
+    def _get_stable_cluster_internal_ips(self,
+                                         handle: ResourceHandle) -> List[str]:
+        cluster_external_ips = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                          handle.launched_nodes,
+                                                          handle=handle)
+        cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
+                                                          handle.launched_nodes,
+                                                          handle=handle,
+                                                          get_internal_ips=True)
+        internal_external_ips = list(
+            zip(cluster_internal_ips, cluster_external_ips))
+
+        # Ensure head node is the first element, then sort based on the external
+        # IPs for stableness
+        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+            internal_external_ips[1:], key=lambda x: x[1])
+        return [x[0] for x in stable_internal_external_ips]
+
     # --- CloudVMRayBackend Specific APIs ---
 
     def get_job_status(
@@ -2996,13 +3009,18 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(self.log_dir, 'tasks')
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
+        stable_cluster_internal_ips = self._get_stable_cluster_internal_ips(
+            handle)
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(
+            1,
+            accelerator_dict,
+            stable_cluster_internal_ips=stable_cluster_internal_ips)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3045,23 +3063,8 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
-        cluster_external_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                          handle.launched_nodes,
-                                                          handle=handle)
-        cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                          handle.launched_nodes,
-                                                          handle=handle,
-                                                          get_internal_ips=True)
-        internal_external_ips = list(
-            zip(cluster_internal_ips, cluster_external_ips))
-
-        # Ensure head node is the first element, then sort based on the external
-        # IPs for stableness
-        stable_internal_external_ips = [internal_external_ips[0]] + sorted(
-            internal_external_ips[1:], key=lambda x: x[1])
-        stable_cluster_internal_ips = [
-            x[0] for x in stable_internal_external_ips
-        ]
+        stable_cluster_internal_ips = self._get_stable_cluster_internal_ips(
+            handle)
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
