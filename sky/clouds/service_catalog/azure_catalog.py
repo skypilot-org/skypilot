@@ -5,11 +5,11 @@ instance types and pricing information for Azure.
 """
 from typing import Dict, List, Optional, Tuple
 
-from sky.clouds import cloud
+from sky import clouds as cloud_lib
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-_df = common.read_catalog('azure.csv')
+_df = common.read_catalog('azure/vms.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -60,8 +60,8 @@ def get_instance_type_for_accelerator(
                                                          acc_count=acc_count)
 
 
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+def get_region_zones_for_instance_type(
+        instance_type: str, use_spot: bool) -> List[cloud_lib.Region]:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 

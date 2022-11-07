@@ -76,6 +76,25 @@ If you have edited the ``file_mounts`` section (e.g., by adding some files) and 
 To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
 
 
+(Advanced) How to make SkyPilot use all global regions?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, SkyPilot only supports the US regions on different clouds for convenience. If you want to utilize all global regions, please run the following command:
+
+.. code-block:: bash
+
+  mkdir -p ~/.sky/catalogs/v4
+  cd ~/.sky/catalogs/v4
+  # Fetch all regions for AWS
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_aws --all-regions
+  # Fetch all regions for GCP
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
+  # Fetch all regions for Azure
+  python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
+
+To make your managed spot jobs potentially use all global regions, please log into the spot controller with ``ssh sky-spot-controller-<hash>`` 
+(the full name can be found in ``sky status``), and run the commands above.
+
 
 (Advanced) How to edit or update the regions or pricing information used by SkyPilot?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

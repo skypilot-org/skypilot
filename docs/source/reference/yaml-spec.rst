@@ -91,6 +91,11 @@ Available fields:
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
+      # You can also change the default OS version by choosing from the following image tags provided by SkyPilot:
+      #   image_id: skypilot:gpu-ubuntu-2004
+      #   image_id: skypilot:k80-ubuntu-2004
+      #   image_id: skypilot:gpu-ubuntu-1804
+      #   image_id: skypilot:k80-ubuntu-1804
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images

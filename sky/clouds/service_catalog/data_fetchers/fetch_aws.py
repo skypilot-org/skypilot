@@ -1,8 +1,11 @@
 """A script that queries AWS API to get instance types and pricing information.
 This script takes about 1 minute to finish.
 """
+import argparse
 import datetime
-from typing import Tuple, Union
+import os
+import subprocess
+from typing import List, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -134,8 +137,8 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         def get_memory_gib(row) -> float:
             if isinstance(row['MemoryInfo'], dict):
-                return row['MemoryInfo']['SizeInMiB'] // 1024
-            return int(row['Memory'].split(' GiB')[0])
+                return row['MemoryInfo']['SizeInMiB'] / 1024
+            return float(row['Memory'].split(' GiB')[0])
 
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
@@ -180,8 +183,8 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     return df
 
 
-def get_all_regions_instance_types_df():
-    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in REGIONS])
+def get_all_regions_instance_types_df(regions: List[str]) -> pd.DataFrame:
+    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in regions])
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -194,8 +197,92 @@ def get_all_regions_instance_types_df():
     return df
 
 
+# Fetch Images
+_GPU_TO_IMAGE_DATE = {
+    # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+    # Current AMIs:
+    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
+    #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (does not support torch==1.13.0+cu117)
+    #
+    # Use a list to fallback to newer AMI, as some regions like ap-southeast-3 does not have
+    # the older AMI.
+    'gpu': ['20220308', '20221101'],
+    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+    # Downgrade the AMI for K80 due as it is only compatible with
+    # NVIDIA driver lower than 470.
+    'k80': ['20211208']
+}
+_UBUNTU_VERSION = ['18.04', '20.04']
+
+
+def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
+    try:
+        image_id = subprocess.check_output(f"""\
+            aws ec2 describe-images --region {region} --owners amazon \\
+                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu {ubuntu_version}) {creation_date}"' \\
+                    'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
+            """,
+                                           shell=True)
+    except subprocess.CalledProcessError as e:
+        print(
+            f'Failed {region}, {ubuntu_version}, {creation_date}. Trying next date.'
+        )
+        print(f'{type(e)}: {e}')
+        image_id = None
+    else:
+        image_id = image_id.decode("utf-8").strip()
+    return image_id
+
+
+@ray.remote
+def get_image_row(region: str, ubuntu_version: str,
+                  cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
+    print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
+    creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
+    for date in creation_date:
+        image_id = get_image_id(region, ubuntu_version, date)
+        if image_id:
+            break
+    else:
+        # not found
+        print(
+            f'Failed to find image for {region}, {ubuntu_version}, {cpu_or_gpu}'
+        )
+    tag = f'skypilot:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
+    return tag, region, 'ubuntu', ubuntu_version, image_id, date
+
+
+def get_all_regions_images_df() -> pd.DataFrame:
+    workers = []
+    for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
+        for ubuntu_version in _UBUNTU_VERSION:
+            for region in ALL_REGIONS:
+                workers.append(
+                    get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
+
+    results = ray.get(workers)
+    results = pd.DataFrame(
+        results,
+        columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
+    return results
+
+
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--all-regions',
+        action='store_true',
+        help='Fetch all global regions, not just the U.S. ones.')
+    args = parser.parse_args()
+
+    regions = ALL_REGIONS if args.all_regions else US_REGIONS
+
     ray.init()
-    df = get_all_regions_instance_types_df()
-    df.to_csv('aws.csv', index=False)
-    print('AWS Service Catalog saved to aws.csv')
+    df = get_all_regions_instance_types_df(regions)
+    os.makedirs('aws', exist_ok=True)
+    df.to_csv('aws/vms.csv', index=False)
+    print('AWS Service Catalog saved to aws/vms.csv')
+
+    df = get_all_regions_images_df()
+    df.to_csv('aws/images.csv', index=False)
+    print('AWS Images saved to aws/images.csv')

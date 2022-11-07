@@ -116,8 +116,12 @@ class Resources:
         if self.image_id is not None:
             image_id = f', image_id={self.image_id!r}'
 
+        disk_size = ''
+        if self.disk_size != _DEFAULT_DISK_SIZE_GB:
+            disk_size = f', disk_size={self.disk_size}'
+
         return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args}{image_id})')
+                f'{accelerators}{accelerator_args}{image_id}{disk_size})')
 
     @property
     def cloud(self):
@@ -204,7 +208,12 @@ class Resources:
                     except ValueError:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
-            assert len(accelerators) == 1, accelerators
+
+            # Ignore check for the local cloud case.
+            # It is possible the accelerators dict can contain multiple
+            # types of accelerators for some on-prem clusters.
+            if not isinstance(self._cloud, clouds.Local):
+                assert len(accelerators) == 1, accelerators
 
             # Canonicalize the accelerator names.
             accelerators = {
@@ -384,17 +393,34 @@ class Resources:
             return
 
         if self.cloud is None:
-            raise ValueError('Cloud must be specified when image_id provided.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cloud must be specified when image_id is provided.')
 
         if not self._cloud.is_same_cloud(
                 clouds.AWS()) and not self._cloud.is_same_cloud(clouds.GCP()):
-            raise ValueError(
-                'image_id is only supported for AWS and GCP, please '
-                'explicitly specify the cloud.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'image_id is only supported for AWS and GCP, please '
+                    'explicitly specify the cloud.')
 
-        if self._cloud.is_same_cloud(clouds.AWS()) and self._region is None:
-            raise ValueError('image_id is only supported for AWS in a specific '
-                             'region, please explicitly specify the region.')
+        if (self._image_id.startswith('skypilot:') and
+                not self._cloud.is_image_tag_valid(self._image_id,
+                                                   self._region)):
+            region_or_zone = self._region or self._zone
+            region_str = f' ({region_or_zone})' if region_or_zone else ''
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Image tag {self._image_id} is not valid, please make sure'
+                    f' the tag exists in {self._cloud}{region_str}.')
+
+        if (self._cloud.is_same_cloud(clouds.AWS()) and
+                not self._image_id.startswith('skypilot:') and
+                self._region is None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'image_id is only supported for AWS in a specific '
+                    'region, please explicitly specify the region.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
