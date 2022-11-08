@@ -127,7 +127,7 @@ def validate_region_zone_impl(
 
     if zone is not None:
         maybe_region_df = filter_df
-        filter_df = filter_df[filter_df['Available'] == zone]
+        filter_df = filter_df[filter_df['AvailabilityZone'] == zone]
         if len(filter_df) == 0:
             region_str = f' for region {region!r}' if region else ''
             df = maybe_region_df if region else df
