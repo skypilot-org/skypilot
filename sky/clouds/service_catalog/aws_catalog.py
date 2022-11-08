@@ -19,7 +19,7 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def validate_region_zone(region: Optional[str], zone: Optional[str]):
+def validate_region_zone(region: Optional[str], zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     return common.validate_region_zone_impl(_df, region, zone)
 
 

@@ -100,7 +100,7 @@ def instance_type_exists(instance_type: str,
 
 def validate_region_zone(region_name: Optional[str],
                          zone_name: Optional[str],
-                         clouds: CloudFilter = None) -> bool:
+                         clouds: CloudFilter = None) -> Tuple[Optional[str], Optional[str]]:
     """Returns the zone by name."""
     return _map_clouds_catalog(clouds, 'validate_region_zone', region_name,
                                zone_name)

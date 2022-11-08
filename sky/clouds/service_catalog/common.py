@@ -101,7 +101,7 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 
 def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
-                              zone: Optional[str]):
+                              zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
@@ -113,30 +113,34 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
 
+    validated_region, validated_zone = region, zone
+
+    filter_df = df
     if region is not None:
-        all_regions = df['Region'].unique()
-        if region not in all_regions:
+        filter_df = filter_df[filter_df['Region'] == region]
+        if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                error_msg += _get_candidate_str(region, all_regions)
+                error_msg += _get_candidate_str(region, df['Region'].unique())
                 raise ValueError(error_msg)
 
     if zone is not None:
-        all_zones = df['AvailabilityZone'].unique()
-        if zone not in all_zones:
+        maybe_region_df = filter_df
+        filter_df = filter_df[filter_df['Available'] == zone]
+        if len(filter_df) == 0:
+            region_str = f' for region {region!r}' if region else ''
+            df = maybe_region_df if region else df
             with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid zone {zone!r}')
-                error_msg += _get_candidate_str(zone, all_zones)
+                error_msg = (f'Invalid zone {zone!r}{region_str}')
+                error_msg += _get_candidate_str(zone, maybe_region_df['AvailabilityZone'].unique())
                 raise ValueError(error_msg)
+        region_df = filter_df['Region'].unique()
+        assert len(region_df) == 1, 'Zone should be unique across regions.'
+        validated_region = region_df[0]
+    return validated_region, validated_zone
+            
 
-    if region is not None and zone is not None:
-        if zone not in df[df['Region'] == region]['AvailabilityZone'].unique():
-            with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid zone {zone!r} for region {region!r}')
-                error_msg += _get_candidate_str(
-                    zone,
-                    df[df['Region'] == region]['AvailabilityZone'].unique())
-                raise ValueError(error_msg)
+    
 
 
 def get_hourly_cost_impl(
