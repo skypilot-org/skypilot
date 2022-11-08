@@ -100,8 +100,9 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
-def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
-                              zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def validate_region_zone_impl(
+        df: pd.DataFrame, region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
@@ -132,15 +133,13 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
             df = maybe_region_df if region else df
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid zone {zone!r}{region_str}')
-                error_msg += _get_candidate_str(zone, maybe_region_df['AvailabilityZone'].unique())
+                error_msg += _get_candidate_str(
+                    zone, maybe_region_df['AvailabilityZone'].unique())
                 raise ValueError(error_msg)
         region_df = filter_df['Region'].unique()
         assert len(region_df) == 1, 'Zone should be unique across regions.'
         validated_region = region_df[0]
     return validated_region, validated_zone
-            
-
-    
 
 
 def get_hourly_cost_impl(

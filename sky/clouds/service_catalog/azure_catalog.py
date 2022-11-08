@@ -16,7 +16,9 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def validate_region_zone(region: Optional[str], zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+def validate_region_zone(
+        region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')

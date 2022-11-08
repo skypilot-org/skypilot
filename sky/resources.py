@@ -14,6 +14,7 @@ logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
 
+
 class Resources:
     """A cloud resource bundle.
 
@@ -267,9 +268,10 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when region/zone are specified.')
 
-        # Validate whether region and zone exist in the catalog, and set the region
-        # if zone is specified.
-        self._region, self._zone = self._cloud.validate_region_zone(region, zone)
+        # Validate whether region and zone exist in the catalog, and set the
+        # region if zone is specified.
+        self._region, self._zone = self._cloud.validate_region_zone(
+            region, zone)
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -406,11 +408,12 @@ class Resources:
                     'image_id is only supported for AWS and GCP, please '
                     'explicitly specify the cloud.')
 
-        if self._region is not None and None not in self._image_id:
+        if (self._region is not None and None not in self._image_id and
+                self._region not in self._image_id):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'image_id should contain the image for the specified region '
-                    f'{self._region}.')
+                    'image_id should contain the image for the specified '
+                    f'region {self._region}.')
 
         for region, image_id in self._image_id.items():
             region = region or self._region
@@ -423,8 +426,7 @@ class Resources:
                         f' the tag exists in {self._cloud}{region_str}.')
 
             if (self._cloud.is_same_cloud(clouds.AWS()) and
-                    not self._image_id.startswith('skypilot:') and
-                    region is None):
+                    not image_id.startswith('skypilot:') and region is None):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'image_id is only supported for AWS in a specific '
@@ -591,7 +593,7 @@ class Resources:
         )
         assert len(override) == 0
         return resources
-    
+
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
         """Returns whether this Resources is valid on given region and zones"""
         if self.region is not None and self.region != region:
@@ -602,7 +604,6 @@ class Resources:
             if None not in self.image_id and region not in self.image_id:
                 return False
         return True
-    
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
