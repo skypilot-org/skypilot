@@ -438,7 +438,7 @@ class RayCodeGen:
                 else:
                     node_name = f'worker{{idx_in_cluster}}'
                 name_str = f'{{node_name}}, rank={{rank}},'
-                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{node_name}}-{{ip}}.log'))
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{rank}}-{{node_name}}.log'))
             sky_env_vars_dict['SKYPILOT_NODE_RANK'] = rank
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_RANK'] = rank
