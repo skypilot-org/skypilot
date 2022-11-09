@@ -53,6 +53,12 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
     return log_utils.create_table(field_names, **table_kwargs)
 
 
+# Checks if there is public cloud enabled.
+def _is_public_cloud_disabled(enabled_clouds: List[clouds.Cloud]):
+    return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
+                                                   clouds.Local)
+
+
 class Optimizer:
     """Optimizer: assigns best resources to user tasks."""
 
@@ -826,7 +832,7 @@ def _fill_in_launchable_resources(
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
     enabled_clouds = global_user_state.get_enabled_clouds()
-    if len(enabled_clouds) == 0 and try_fix_with_sky_check:
+    if _is_public_cloud_disabled(enabled_clouds) and try_fix_with_sky_check:
         check.check(quiet=True)
         return _fill_in_launchable_resources(task, blocked_launchable_resources,
                                              False)
