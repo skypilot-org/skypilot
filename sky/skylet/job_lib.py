@@ -2,10 +2,10 @@
 
 This is a remote utility module that provides job queue functionality.
 """
-import datetime
 import enum
 import os
 import pathlib
+import psutil
 import shlex
 import subprocess
 import time
@@ -13,6 +13,7 @@ import typing
 from typing import Any, Dict, List, Optional, Tuple
 
 import filelock
+import getpass
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -66,7 +67,7 @@ def create_table(cursor, conn):
         job_id INTEGER,
         run_cmd TEXT,
         submit INTEGER,
-        created_time TIMESTAMP default CURRENT_TIMESTAMP
+        created_time INTEGER
     )""")
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
@@ -203,8 +204,8 @@ class JobScheduler:
     """Class for general job scheduler"""
 
     def queue(self, job_id: int, cmd: str) -> None:
-        _CURSOR.execute('INSERT INTO pending_jobs VALUES (?,?,?)',
-                        (job_id, cmd, 0))
+        _CURSOR.execute('INSERT INTO pending_jobs VALUES (?,?,?,?)',
+                        (job_id, cmd, 0, int(time.time())))
         _CONN.commit()
         set_status(job_id, JobStatus.PENDING)
         self.run_next_if_possible()
@@ -241,8 +242,10 @@ class FIFOScheduler(JobScheduler):
         return _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id')
 
     def run_next_if_possible(self) -> None:
+        job_owner = getpass.getuser()
+        update_status(job_owner)
         jobs = list(self._get_jobs())
-        for job_id, run_cmd, submit in jobs:
+        for job_id, run_cmd, submit, _ in jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = self._get_job_status(job_id)
                 if status is False or status != JobStatus.PENDING:
@@ -391,6 +394,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 def _get_pending_jobs():
     rows = _CURSOR.execute('SELECT job_id, created_time FROM pending_jobs')
+    rows = list(rows)
     return [int(row[0]) for row in rows], [int(row[1]) for row in rows]
 
 
@@ -422,24 +426,25 @@ def update_job_status(job_owner: str,
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
     job_details = dict()
-    ray_job_ids_set = set([make_ray_job_id(job_id, job_owner) for job_id in job_ids])
+    ray_job_ids_set = set(
+        make_ray_job_id(job_id, job_owner) for job_id in job_ids)
     for job_detail in job_detail_lists:
         if job_detail.submission_id in ray_job_ids_set:
             job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(job_ids)
     pending_jobs, start_times = _get_pending_jobs()
+    assert len(pending_jobs) == len(start_times)
     for i, job_id in enumerate(job_ids):
         ray_job_id = make_ray_job_id(job_id, job_owner)
         if ray_job_id in job_details:
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
-            idx = pending_jobs.indexof(job_id)
-            # if start_times[i] < :
-            #     job_statuses[i] = JobStatus.FAILED
-            # else:
-            #     job_statuses[i] = JobStatus.PENDING
-            job_statuses[i] = JobStatus.PENDING
+            idx = pending_jobs.index(job_id)
+            if start_times[idx] < psutil.boot_time():
+                job_statuses[i] = JobStatus.FAILED
+            else:
+                job_statuses[i] = JobStatus.PENDING
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
 

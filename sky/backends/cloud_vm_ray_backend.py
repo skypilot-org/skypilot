@@ -3001,6 +3001,22 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
+
+        if task.spot_task is not None:
+            resources_str = backend_utils.get_task_resources_str(task.spot_task)
+            code = [
+                'from sky.spot import spot_state',
+                f'spot_state.set_pending('
+                f'{job_id}, {task.spot_task.name!r}, {resources_str!r})',
+            ]
+            code = ';'.join(code)
+            code = f'python -c "{code}"'
+
+            _, _, _ = self.run_on_head(handle,
+                                       code,
+                                       stream_logs=True,
+                                       require_outputs=True)
+
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
                              is_local=is_local)

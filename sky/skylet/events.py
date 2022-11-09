@@ -1,5 +1,4 @@
 """skylet events"""
-import getpass
 import math
 import os
 import re
@@ -50,6 +49,7 @@ class SkyletEvent:
 
     def _run(self):
         raise NotImplementedError
+
 
 class JobSchedulerEvent(SkyletEvent):
     """Skylet event for scheduling jobs"""
