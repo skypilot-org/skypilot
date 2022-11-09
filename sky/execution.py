@@ -17,7 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import colorama
 
@@ -43,44 +43,51 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 OptimizeTarget = optimizer.OptimizeTarget
-_MAX_SPOT_JOB_LENGTH = 10
 
 # Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
 _ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
-Expected a sky.Dag but received a string.
+Expected a sky.Task or sky.Dag but received a string.
 
-If you meant to run a command, make it a Task's run command and wrap as a Dag:
+If you meant to run a command, make it a Task's run command:
 
-  def to_dag(command, gpu=None):
-      with sky.Dag() as dag:
-          sky.Task(run=command).set_resources(
-              sky.Resources(accelerators=gpu))
-      return dag
+    task = sky.Task(run=command)
 
 The command can then be run as:
 
-  sky.exec(to_dag(cmd), cluster_name=..., ...)
+  sky.exec(task, cluster_name=..., ...)
   # Or use {'V100': 1}, 'V100:0.5', etc.
-  sky.exec(to_dag(cmd, gpu='V100'), cluster_name=..., ...)
+  task.set_resources(sky.Resources(accelerators='V100:1'))
+  sky.exec(task, cluster_name=..., ...)
 
-  sky.launch(to_dag(cmd), ...)
+  sky.launch(task, ...)
 
-  sky.spot_launch(to_dag(cmd), ...)
+  sky.spot_launch(task, ...)
 """.strip()
 
 
-def _type_check_dag(dag):
-    """Raises TypeError if 'dag' is not a 'sky.Dag'."""
+def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
+    """Convert the entrypoint to a sky.Dag.
+
+    Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
+    """
     # Not suppressing stacktrace: when calling this via API user may want to
     # see their own program in the stacktrace. Our CLI impl would not trigger
     # these errors.
-    if isinstance(dag, str):
+    if isinstance(entrypoint, str):
         raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
-    elif not isinstance(dag, sky.Dag):
-        raise TypeError('Expected a sky.Dag but received argument of type: '
-                        f'{type(dag)}')
+    elif isinstance(entrypoint, sky.Dag):
+        return copy.deepcopy(entrypoint)
+    elif isinstance(entrypoint, task_lib.Task):
+        entrypoint = copy.deepcopy(entrypoint)
+        with sky.Dag() as dag:
+            dag.add(entrypoint)
+        return dag
+    else:
+        raise TypeError(
+            'Expected a sky.Task or sky.Dag but received argument of type: '
+            f'{type(entrypoint)}')
 
 
 class Stage(enum.Enum):
@@ -93,13 +100,13 @@ class Stage(enum.Enum):
     SETUP = enum.auto()
     PRE_EXEC = enum.auto()
     EXEC = enum.auto()
-    TEARDOWN = enum.auto()
+    DOWN = enum.auto()
 
 
 def _execute(
-    dag: sky.Dag,
+    entrypoint: Union['sky.Task', 'sky.Dag'],
     dryrun: bool = False,
-    teardown: bool = False,
+    down: bool = False,
     stream_logs: bool = True,
     handle: Any = None,
     backend: Optional[backends.Backend] = None,
@@ -111,17 +118,20 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
 ) -> None:
-    """Runs a DAG.
+    """Execute a entrypoint.
 
-    If the DAG has not been optimized yet, this will call sky.optimize() for
-    the caller.
+    If sky.Task is given or DAG has not been optimized yet, this will call
+    sky.optimize() for the caller.
 
     Args:
-      dag: sky.Dag.
+      entrypoint: sky.Task or sky.Dag.
       dryrun: bool; if True, only print the provision info (e.g., cluster
         yaml).
-      teardown: bool; whether to teardown the launched resources after
-        execution.
+      down: bool; whether to tear down the launched resources after all jobs
+        finish (successfully or abnormally). If idle_minutes_to_autostop is
+        also set, the cluster will be torn down after the specified idle time.
+        Note that if errors occur during provisioning/data syncing/setting up,
+        the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
       handle: Any; if provided, execution will use an existing backend cluster
         handle instead of provisioning a new one.
@@ -137,11 +147,11 @@ def _execute(
       cluster_name: Name of the cluster to create/reuse.  If None,
         auto-generate a name.
       detach_run: bool; whether to detach the process after the job submitted.
-      autostop_idle_minutes: int; if provided, the cluster will be set to
+      idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
     """
-    _type_check_dag(dag)
+    dag = _convert_to_dag(entrypoint)
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -157,16 +167,36 @@ def _execute(
             cluster_name)
         cluster_exists = existing_handle is not None
 
+    stages = stages if stages is not None else list(Stage)
+
     backend = backend if backend is not None else backends.CloudVmRayBackend()
-    if not isinstance(backend, backends.CloudVmRayBackend
-                     ) and idle_minutes_to_autostop is not None:
+    if isinstance(backend, backends.CloudVmRayBackend):
+        if down and idle_minutes_to_autostop is None:
+            # Use auto{stop,down} to terminate the cluster after the task is
+            # done.
+            idle_minutes_to_autostop = 0
+        if idle_minutes_to_autostop is not None:
+            if idle_minutes_to_autostop == 0:
+                # idle_minutes_to_autostop=0 can cause the following problem:
+                # After we set the autostop in the PRE_EXEC stage with -i 0,
+                # it could be possible that the cluster immediately found
+                # itself have no task running and start the auto{stop,down}
+                # process, before the task is submitted in the EXEC stage.
+                verb = 'torn down' if down else 'stopped'
+                logger.info(f'{colorama.Style.DIM}The cluster will '
+                            f'be {verb} after 1 minutes of idleness '
+                            '(after all jobs finish).'
+                            f'{colorama.Style.RESET_ALL}')
+                idle_minutes_to_autostop = 1
+            stages.remove(Stage.DOWN)
+    elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and (stages is None or Stage.OPTIMIZE in stages):
+    if not cluster_exists and Stage.OPTIMIZE in stages:
         if task.best_resources is None:
             # TODO: fix this for the situation where number of requested
             # accelerators is not an integer.
@@ -186,7 +216,7 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
-        if stages is None or Stage.PROVISION in stages:
+        if Stage.PROVISION in stages:
             if handle is None:
                 handle = backend.provision(task,
                                            task.best_resources,
@@ -199,33 +229,35 @@ def _execute(
             logger.info('Dry run finished.')
             return
 
-        if stages is None or Stage.SYNC_WORKDIR in stages:
+        if Stage.SYNC_WORKDIR in stages:
             if task.workdir is not None:
                 backend.sync_workdir(handle, task.workdir)
 
-        if stages is None or Stage.SYNC_FILE_MOUNTS in stages:
+        if Stage.SYNC_FILE_MOUNTS in stages:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
         if no_setup:
             logger.info('Setup commands skipped.')
-        elif stages is None or Stage.SETUP in stages:
+        elif Stage.SETUP in stages:
             backend.setup(handle, task)
 
-        if stages is None or Stage.PRE_EXEC in stages:
+        if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
-                backend.set_autostop(handle, idle_minutes_to_autostop)
+                backend.set_autostop(handle,
+                                     idle_minutes_to_autostop,
+                                     down=down)
 
-        if stages is None or Stage.EXEC in stages:
+        if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
                 backend.execute(handle, task, detach_run)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
-                backend.post_execute(handle, teardown)
+                backend.post_execute(handle, down)
 
-        if stages is None or Stage.TEARDOWN in stages:
-            if teardown:
+        if Stage.DOWN in stages:
+            if down and idle_minutes_to_autostop is None:
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
@@ -248,49 +280,75 @@ def _execute(
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-    dag: sky.Dag,
+    task: Union['sky.Task', 'sky.Dag'],
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     dryrun: bool = False,
-    teardown: bool = False,
+    down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
     optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
     no_setup: bool = False,
-):
-    """Launch a sky.DAG (rerun setup if cluster exists).
+) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Launch a task.
+
+    The task's setup and run commands are executed under the task's workdir
+    (when specified, it is synced to remote cluster).  The task undergoes job
+    queue scheduling on the cluster.
+
+    Currently, the first argument must be a sky.Task, or (EXPERIMENTAL advanced
+    usage) a sky.Dag. In the latter case, currently it must contain a single
+    task; support for pipelines/general DAGs are in experimental branches.
 
     Args:
-        dag: sky.DAG to launch.
+        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
             auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
             up.
-        idle_minutes_to_autostop: if provided, the cluster will be auto-stop
-            after this many minutes of idleness.
-        no_setup: if true, the cluster will not re-run setup instructions
+        idle_minutes_to_autostop: automatically stop the cluster after this
+            many minute of idleness, i.e., no running or pending jobs in the
+            cluster's job queue. Idleness starts counting after
+            setup/file_mounts are done; the clock gets reset whenever there
+            are running/pending jobs in the job queue. Setting this flag is
+            equivalent to running ``sky.launch(..., detach_run=True, ...)``
+            and then ``sky.autostop(idle_minutes=<minutes>)``. If not set,
+            the cluster will not be autostopped.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually launch the cluster.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
+            OptimizeTarget.TIME.
+        detach_run: If True, run setup first (blocking), then detach from the
+            job's execution.
+        no_setup: if True, do not re-run setup commands.
 
-    Examples:
-        >>> import sky
-        >>> with sky.Dag() as dag:
-        >>>     task = sky.Task(run='echo hello SkyPilot')
-        >>>     task.set_resources(
-        ...             sky.Resources(
-        ...                 cloud=sky.AWS(),
-        ...                 accelerators='V100:4'
-        ...             )
-        ...     )
-        >>> sky.launch(dag, cluster_name='my-cluster')
+    Example:
+        .. code-block:: python
+
+            import sky
+            task = sky.Task(run='echo hello SkyPilot')
+            task.set_resources(
+                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+            sky.launch(task, cluster_name='my-cluster')
 
     """
+    entrypoint = task
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.launch')
     _execute(
-        dag=dag,
+        entrypoint=entrypoint,
         dryrun=dryrun,
-        teardown=teardown,
+        down=down,
         stream_logs=stream_logs,
         handle=None,
         backend=backend,
@@ -305,15 +363,63 @@ def launch(
 
 @usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
-    dag: sky.Dag,
+    task: Union['sky.Task', 'sky.Dag'],
     cluster_name: str,
     dryrun: bool = False,
-    teardown: bool = False,
+    down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: OptimizeTarget = OptimizeTarget.COST,
     detach_run: bool = False,
-):
+) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Execute a task on an existing cluster.
+
+    This function performs two actions:
+
+    (1) workdir syncing, if the task has a workdir specified;
+    (2) executing the task's ``run`` commands.
+
+    All other steps (provisioning, setup commands, file mounts syncing) are
+    skipped.  If any of those specifications changed in the task, this function
+    will not reflect those changes.  To ensure a cluster's setup is up to date,
+    use ``sky.launch()`` instead.
+
+    Execution and scheduling behavior:
+
+    - The task will undergo job queue scheduling, respecting any specified
+      resource requirement. It can be executed on any node of the cluster with
+      enough resources.
+    - The task is run under the workdir (if specified).
+    - The task is run non-interactively (without a pseudo-terminal or
+      pty), so interactive commands such as ``htop`` do not work.
+      Use ``ssh my_cluster`` instead.
+
+    Args:
+        task: sky.Task, or sky.Dag (experimental; 1-task only) containing the
+          task to execute.
+        cluster_name: name of an existing cluster to execute the task.
+        down: Tear down the cluster after all jobs finish (successfully or
+            abnormally). If --idle-minutes-to-autostop is also set, the
+            cluster will be torn down after the specified idle time.
+            Note that if errors occur during provisioning/data syncing/setting
+            up, the cluster will not be torn down for debugging purposes.
+        dryrun: if True, do not actually execute the task.
+        stream_logs: if True, show the logs in the terminal.
+        backend: backend to use.  If None, use the default backend
+            (CloudVMRayBackend).
+        detach_run: if True, detach from logging once the task has been
+            submitted.
+
+    Raises:
+        ValueError: if the specified cluster does not exist or is not in UP
+            status.
+    """
+    entrypoint = task
+    if isinstance(entrypoint, sky.Dag):
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
+            'deprecated. Pass sky.Task instead.'
+            f'{colorama.Style.RESET_ALL}')
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
@@ -325,13 +431,12 @@ def exec(  # pylint: disable=redefined-builtin
         if status != global_user_state.ClusterStatus.UP:
             raise ValueError(f'Cluster {cluster_name!r} is not up.  '
                              'Use `sky status` to check the status.')
-    _execute(dag=dag,
+    _execute(entrypoint=entrypoint,
              dryrun=dryrun,
-             teardown=teardown,
+             down=down,
              stream_logs=stream_logs,
              handle=handle,
              backend=backend,
-             optimize_target=optimize_target,
              stages=[
                  Stage.SYNC_WORKDIR,
                  Stage.EXEC,
@@ -340,19 +445,22 @@ def exec(  # pylint: disable=redefined-builtin
              detach_run=detach_run)
 
 
+@usage_lib.entrypoint
 def spot_launch(
-    dag: sky.Dag,
+    task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
     retry_until_up: bool = False,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed spot job.
 
     Please refer to the sky.cli.spot_launch for the document.
 
     Args:
-        dag: DAG to launch.
+        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
+          managed spot job.
         name: Name of the spot job.
         detach_run: Whether to detach the run.
 
@@ -360,10 +468,11 @@ def spot_launch(
         ValueError: cluster does not exist.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
+    entrypoint = task
     if name is None:
         name = backend_utils.generate_cluster_name()
 
-    _type_check_dag(dag)
+    dag = _convert_to_dag(entrypoint)
     assert len(dag.tasks) == 1, ('Only one task is allowed in a spot launch.',
                                  dag)
     task = dag.tasks[0]
@@ -385,7 +494,7 @@ def spot_launch(
               f'{colorama.Style.RESET_ALL}')
         return
 
-    task = _translate_local_file_mounts(task)
+    task = _maybe_translate_local_file_mounts_and_sync_up(task)
 
     with tempfile.NamedTemporaryFile(prefix=f'spot-task-{name}-',
                                      mode='w') as f:
@@ -406,16 +515,15 @@ def spot_launch(
                 'retry_until_up': retry_until_up,
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
-        with sky.Dag() as spot_dag:
-            controller_task = task_lib.Task.from_yaml(yaml_path)
-            controller_task.spot_task = task
-            assert len(controller_task.resources) == 1
+        controller_task = task_lib.Task.from_yaml(yaml_path)
+        controller_task.spot_task = task
+        assert len(controller_task.resources) == 1
         print(f'{colorama.Fore.YELLOW}'
               f'Launching managed spot job {name} from spot controller...'
               f'{colorama.Style.RESET_ALL}')
         print('Launching spot controller...')
         _execute(
-            dag=spot_dag,
+            entrypoint=controller_task,
             stream_logs=stream_logs,
             cluster_name=controller_name,
             detach_run=detach_run,
@@ -425,7 +533,17 @@ def spot_launch(
         )
 
 
-def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
+def _maybe_translate_local_file_mounts_and_sync_up(
+        task: task_lib.Task) -> task_lib.Task:
+    """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
+
+    Eagerly syncing up local->Storage ensures Storage->VM would work at task
+    launch time.
+
+    If there are no local source paths to be translated, this function would
+    still sync up any storage mounts with local source paths (which do not
+    undergo translation).
+    """
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
@@ -434,10 +552,17 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
+    copy_mounts = task.get_local_to_remote_file_mounts()
+    if copy_mounts is None:
+        copy_mounts = {}
+
+    has_local_source_paths = (task.workdir is not None) or copy_mounts
+    if has_local_source_paths:
+        logger.info(
+            f'{colorama.Fore.YELLOW}Translating file_mounts with local '
+            f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
+
     # Step 1: Translate the workdir to SkyPilot storage.
-    logger.info(
-        f'{colorama.Fore.YELLOW}Translating file_mounts with local '
-        f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
     new_storage_mounts = dict()
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
@@ -467,9 +592,6 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # TODO(zhwu): Optimize this by:
     # 1. Use the same bucket for all the mounts.
     # 2. When the src is the same, use the same bucket.
-    copy_mounts = task.get_local_to_remote_file_mounts()
-    if copy_mounts is None:
-        copy_mounts = {}
     copy_mounts_with_file_in_src = dict()
     for i, (dst, src) in enumerate(copy_mounts.items()):
         task.file_mounts.pop(dst)
@@ -492,9 +614,6 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    original_storage_mounts = {}
-    if task.storage_mounts is not None:
-        original_storage_mounts = task.storage_mounts
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         spot.constants.SPOT_FM_LOCAL_TMP_DIR.format(id=run_id))
@@ -525,7 +644,7 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
         sources = list(src_to_file_id.keys())
         sources_str = '\n\t'.join(sources)
         logger.info('Source files in file_mounts will be synced to '
-                    f'cloud storage {bucket_name}:'
+                    f'cloud storage {file_bucket_name}:'
                     f'\n\t{sources_str}')
     task.update_storage_mounts(new_storage_mounts)
 
@@ -533,8 +652,11 @@ def _translate_local_file_mounts(task: task_lib.Task) -> task_lib.Task:
     # Upload the local source to a bucket. The task will not be executed
     # locally, so we need to upload the files/folders to the bucket manually
     # here before sending the task to the remote spot controller.
-    logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                f'{colorama.Style.RESET_ALL} See sky storage ls')
+    if task.storage_mounts:
+        # There may be existing (non-translated) storage mounts, so log this
+        # whenever task.storage_mounts is non-empty.
+        logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
+                    f'{colorama.Style.RESET_ALL} See: sky storage ls')
     task.sync_storage_mounts()
 
     # Step 5: Add the file download into the file mounts, such as

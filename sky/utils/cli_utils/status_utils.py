@@ -1,15 +1,34 @@
 """Utilities for sky status."""
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 import click
 import colorama
 
 from sky import backends
+from sky import spot
 from sky.backends import backend_utils
 from sky.utils import common_utils
-from sky.utils.cli_utils import cli_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
+
+
+def _truncate_long_string(s: str, max_length: int = 35) -> str:
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'  # Use '…'?
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'
 
 
 class StatusColumn:
@@ -28,13 +47,19 @@ class StatusColumn:
     def calc(self, record):
         val = self.calc_func(record)
         if self.trunc_length != 0:
-            val = cli_utils.truncate_long_string(str(val), self.trunc_length)
+            val = _truncate_long_string(str(val), self.trunc_length)
         return val
 
 
-def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
-    """Compute cluster table values and display."""
-    # TODO(zhwu): Update the information for auto-stop clusters.
+def show_status_table(cluster_records: List[Dict[str, Any]],
+                      show_all: bool,
+                      reserved_group_name: Optional[str] = None) -> int:
+    """Compute cluster table values and display.
+
+    Returns:
+        Number of pending auto{stop,down} clusters.
+    """
+    # TODO(zhwu): Update the information for autostop clusters.
 
     status_columns = [
         StatusColumn('NAME', _get_name),
@@ -68,14 +93,20 @@ def show_status_table(cluster_records: List[Dict[str, Any]], show_all: bool):
         pending_autostop += _is_pending_autostop(record)
 
     if cluster_records:
+        if reserved_group_name is not None:
+            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{autostop_minutes}min)'
+                       f'{colorama.Style.RESET_ALL}')
+        else:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                       f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-        if pending_autostop:
-            click.echo(
-                '\n'
-                f'You have {pending_autostop} clusters with autostop scheduled.'
-                ' Refresh statuses with: `sky status --refresh`.')
     else:
         click.echo('No existing clusters.')
+    return pending_autostop
 
 
 def show_local_status_table(local_clusters: List[str]):
@@ -147,7 +178,7 @@ def show_local_status_table(local_clusters: List[str]):
             # RESOURCES
             resources_str,
             # COMMAND
-            cli_utils.truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
+            _truncate_long_string(command_str, _COMMAND_TRUNC_LENGTH),
         ]
         names.append(cluster_name)
         cluster_table.add_row(row)
@@ -208,10 +239,17 @@ def _get_zone(cluster_status):
 
 
 def _get_autostop(cluster_status):
-    autostop_str = '-'
+    autostop_str = ''
+    separtion = ''
     if cluster_status['autostop'] >= 0:
         # TODO(zhwu): check the status of the autostop cluster.
-        autostop_str = str(cluster_status['autostop']) + ' min'
+        autostop_str = str(cluster_status['autostop']) + 'm'
+        separtion = ' '
+
+    if cluster_status['to_down']:
+        autostop_str += f'{separtion}(down)'
+    if autostop_str == '':
+        autostop_str = '-'
     return autostop_str
 
 

@@ -150,6 +150,9 @@ def run_with_log(
         # Sudo case is encountered when submitting
         # a job for Sky on-prem, when a non-admin user submits a job.
         subprocess.run(f'sudo mkdir -p {dirname}', shell=True, check=True)
+        subprocess.run(f'sudo touch {log_path}; sudo chmod a+rwx {log_path}',
+                       shell=True,
+                       check=True)
         # Hack: Subprocess Popen does not accept sudo.
         # subprocess.Popen in local mode with shell=True does not work,
         # as it does not understand what -H means for sudo.
@@ -241,6 +244,7 @@ def make_task_bash_script(codegen: str,
     # set -a is used for exporting all variables functions to the environment
     # so that bash `user_script` can access `conda activate`. Detail: #436.
     # Reference: https://www.gnu.org/software/bash/manual/html_node/The-Set-Builtin.html # pylint: disable=line-too-long
+    # PYTHONUNBUFFERED is used to disable python output buffering.
     script = [
         textwrap.dedent(f"""\
             #!/bin/bash
@@ -248,6 +252,7 @@ def make_task_bash_script(codegen: str,
             set -a
             . $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh > /dev/null 2>&1 || true
             set +a
+            export PYTHONUNBUFFERED=1
             cd {constants.SKY_REMOTE_WORKDIR}"""),
     ]
     if env_vars is not None:
@@ -363,8 +368,17 @@ def _follow_job_logs(file,
 def tail_logs(job_owner: str,
               job_id: int,
               log_dir: Optional[str],
-              spot_job_id: Optional[int] = None) -> None:
-    """Tail the logs of a job."""
+              spot_job_id: Optional[int] = None,
+              follow: bool = True) -> None:
+    """Tail the logs of a job.
+
+    Args:
+        job_owner: The owner username of the job.
+        job_id: The job id.
+        log_dir: The log directory of the job.
+        spot_job_id: The spot job id (for logging info only to avoid confusion).
+        follow: Whether to follow the logs or print the logs so far and exit.
+    """
     job_str = f'job {job_id}'
     if spot_job_id is not None:
         job_str = f'spot job {spot_job_id}'
@@ -403,21 +417,28 @@ def tail_logs(job_owner: str,
         time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status(job_owner, [job_id], silent=True)[0]
 
-    if status in [job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING]:
+    start_stream_at = 'INFO: Tip: use Ctrl-C to exit log'
+    if follow and status in [
+            job_lib.JobStatus.RUNNING, job_lib.JobStatus.PENDING
+    ]:
         # Not using `ray job logs` because it will put progress bar in
         # multiple lines.
         with open(log_path, 'r', newline='') as log_file:
             # Using `_follow` instead of `tail -f` to streaming the whole
             # log and creating a new process for tail.
-            for line in _follow_job_logs(
-                    log_file,
-                    job_id=job_id,
-                    start_streaming_at='INFO: Tip: use Ctrl-C to exit log'):
+            for line in _follow_job_logs(log_file,
+                                         job_id=job_id,
+                                         start_streaming_at=start_stream_at):
                 print(line, end='', flush=True)
     else:
         try:
+            start_stream = False
             with open(log_path, 'r') as f:
-                print(f.read())
+                for line in f.readlines():
+                    if start_stream_at in line:
+                        start_stream = True
+                    if start_stream:
+                        print(line, end='', flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

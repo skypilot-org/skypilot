@@ -8,3 +8,4 @@ docs/build/
 docs/_build/
 build/
 sky_logs/
+sky/clouds/service_catalog/data_fetchers/*.csv

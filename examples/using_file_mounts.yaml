@@ -30,6 +30,7 @@ file_mounts:
 
   ~/tmpfile: ~/tmpfile
   ~/a/b/c/tmpfile: ~/tmpfile
+  ~/tmpfile2: ~/tmp-workdir/tmp file
 
   # Intermediate dirs are created and chown-ed to $USER if they don't already
   # exist.  Thus they can be used too, e.g., 'mkdir -p /data/logs'.  See 'run'.
@@ -56,6 +57,7 @@ file_mounts:
 
   # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
   relative_dir: ~/tmp-workdir
+  ./dotslash_relative_dir: ~/tmp-workdir
 
   #############################################
   #  Sync from Google Cloud Storage (gsutil)  #
@@ -101,8 +103,9 @@ run: |
   ls -lthr ~/.ssh/
 
   ls -lthr ~/
-  ls -lthr ~/relative_dir
-  ls -lthr ~/relative_dir/
+  ls -lthr ~/sky_workdir/relative_dir
+  ls -lthr ~/sky_workdir/relative_dir/
+  ls -lthr ~/sky_workdir/dotslash_relative_dir/
 
   du -schL /train-00001-of-01024
   wc -l /train-00001-of-01024

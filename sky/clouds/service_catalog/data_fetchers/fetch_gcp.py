@@ -3,6 +3,8 @@
 Google Cloud does not have an API for querying TPU/GPU offerings, so we crawl
 the information from GCP websites.
 """
+import argparse
+import os
 import re
 
 from lxml import html
@@ -16,6 +18,9 @@ GCP_GPU_PRICING_URL = 'https://cloud.google.com/compute/gpus-pricing'
 GCP_GPU_ZONES_URL = 'https://cloud.google.com/compute/docs/gpus/gpu-regions-zones'
 
 NOT_AVAILABLE_STR = 'Not available in this region'
+
+ALL_REGION_PREFIX = ''
+US_REGION_PREFIX = 'us-'
 
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
 UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
@@ -35,7 +40,7 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 # FIXME(woosuk): This URL can change.
-A2_PRICING_URL = '/compute/vm-instance-pricing_04e9ea153c2ab1ea37254107b92dc081d4459ca9fe9a46ef5b39e5d63353f089.frame'  # pylint: disable=line-too-long
+A2_PRICING_URL = '/compute/vm-instance-pricing_34568c2efd1858a89d6f5b0f1cdd171bbea1cdcba646e9771e6ef4028238086f.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
         'vCPUs': 12,
@@ -235,7 +240,7 @@ def get_vm_price_table(url):
     if 'InstanceType' in df.columns:
         # Price table for pre-defined instance types.
         instance_type = df['InstanceType'].iloc[0]
-        if instance_type == 'a2-highgpu-1g':
+        if instance_type in ['a2-highgpu-1g', 'a2-ultragpu-1g']:
             # The A2 price table includes the GPU cost.
             return None
 
@@ -333,7 +338,7 @@ def get_a2_df():
     return a2_df
 
 
-def get_vm_df():
+def get_vm_df(region_prefix: str):
     """Generates the GCP service catalog for host VMs."""
     vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
     # Skip the table for "Suspended VM instances".
@@ -370,7 +375,7 @@ def get_vm_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    vm_df = vm_df[vm_df['Region'].str.startswith('us-')]
+    vm_df = vm_df[vm_df['Region'].str.startswith(region_prefix)]
     return vm_df
 
 
@@ -478,7 +483,7 @@ def get_gpu_zones(url):
     return df
 
 
-def get_gpu_df():
+def get_gpu_df(region_prefix: str):
     """Generates the GCP service catalog for GPUs."""
     gpu_price_table_url = get_iframe_sources(GCP_GPU_PRICING_URL)
     assert len(gpu_price_table_url) == 1
@@ -526,7 +531,7 @@ def get_gpu_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    gpu_df = gpu_df[gpu_df['Region'].str.startswith('us-')]
+    gpu_df = gpu_df[gpu_df['Region'].str.startswith(region_prefix)]
     return gpu_df
 
 
@@ -565,8 +570,16 @@ def get_tpu_df():
 
 
 if __name__ == '__main__':
-    vm_df = get_vm_df()
-    gpu_df = get_gpu_df()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--all-regions',
+        action='store_true',
+        help='Fetch all global regions, not just the U.S. ones.')
+    args = parser.parse_args()
+    region_prefix = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
+
+    vm_df = get_vm_df(region_prefix)
+    gpu_df = get_gpu_df(region_prefix)
     tpu_df = get_tpu_df()
     catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
 
@@ -579,5 +592,6 @@ if __name__ == '__main__':
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
 
-    catalog_df.to_csv('gcp.csv', index=False)
-    print('GCP Service Catalog saved to gcp.csv')
+    os.makedirs('gcp', exist_ok=True)
+    catalog_df.to_csv('gcp/vms.csv', index=False)
+    print('GCP Service Catalog saved to gcp/vms.csv')

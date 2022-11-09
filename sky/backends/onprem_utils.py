@@ -14,6 +14,7 @@ import yaml
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.skylet import constants
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -153,8 +154,9 @@ def get_local_cluster_config_or_error(cluster_name: str) -> Dict[str, Any]:
     raise ValueError(f'Cluster config {local_file} not found.')
 
 
-def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
-    """Checks if the Sky dependencies are properly installed on the machine.
+def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
+    """Checks if SkyPilot dependencies are present on the machine. Installs
+    them if not already installed.
 
     This function checks for the following dependencies on the root user:
         - Sky
@@ -174,38 +176,56 @@ def check_local_installation(ips: List[str], auth_config: Dict[str, str]):
     ssh_credentials = (ssh_user, ssh_key, 'sky-admin-deploy')
     runners = command_runner.SSHCommandRunner.make_runner_list(
         ips, *ssh_credentials)
+    sky_ray_version = constants.SKY_REMOTE_RAY_VERSION
 
-    def _check_dependencies(runner: command_runner.SSHCommandRunner) -> None:
-        # Checks for global python3 installation.
+    def _install_and_check_dependencies(
+            runner: command_runner.SSHCommandRunner) -> None:
+        # Checks for python3 installation.
         backend_utils.run_command_and_handle_ssh_failure(
-            runner,
-            'sudo python3 --version',
+            runner, ('python3 --version'),
             failure_message=f'Python3 is not installed on {runner.ip}.')
 
-        # Checks for global Ray installation (accessible by all users).
+        # Checks for pip3 installation.
         backend_utils.run_command_and_handle_ssh_failure(
-            runner,
-            'sudo ray --version',
+            runner, ('pip3 --version'),
+            failure_message=f'Pip3 is not installed on {runner.ip}.')
+
+        # If Ray does not exist, installs Ray.
+        backend_utils.run_command_and_handle_ssh_failure(
+            runner, (f'ray --version || '
+                     f'(pip3 install ray[default]=={sky_ray_version})'),
             failure_message=f'Ray is not installed on {runner.ip}.')
 
-        # Checks for global Sky installation (accessible by all users). When
-        # Sky's job submission code is ran on a user's account, Sky calls the
-        # Ray cluster to prepare the user's job. Due to Ray's limitations,
-        # this is ran under the admin's environment, which requires Sky to be
-        # installed globally.
-        # TODO(mluo): Make Sky admin only.
+        # If Ray exists, check Ray version. If the version does not match
+        # raise an error.
         backend_utils.run_command_and_handle_ssh_failure(
             runner,
-            'sudo sky --help',
+            f'ray --version | grep {sky_ray_version}',
+            failure_message=(
+                f'Ray (on {runner.ip}) does not match skypilot\'s'
+                f' requirement for ray=={sky_ray_version}.'
+                f' Make sure that the correct version of ray is installed.'))
+
+        # Checks for Sky installation. When Sky's job submission code is ran
+        # on a user's account, Sky calls the Ray cluster to prepare the user's
+        # job. Due to Ray's limitations, this is ran under the admin's
+        # environment, which requires Sky to be installed globally. NOTE: This
+        # package is installed from PyPI and may not contain any changes made
+        # since the last SkyPilot release. If required, please install
+        # skypilot from source on the onprem machine(s) before running sky
+        # admin deploy
+        backend_utils.run_command_and_handle_ssh_failure(
+            runner,
+            'sky --help || (pip3 install skypilot)',
             failure_message=f'Sky is not installed on {runner.ip}.')
 
         # Patches global Ray.
         backend_utils.run_command_and_handle_ssh_failure(
-            runner, ('sudo python3 -c "from sky.skylet.ray_patches '
+            runner, ('python3 -c "from sky.skylet.ray_patches '
                      'import patch; patch()"'),
             failure_message=f'Failed to patch ray on {runner.ip}.')
 
-    subprocess_utils.run_in_parallel(_check_dependencies, runners)
+    subprocess_utils.run_in_parallel(_install_and_check_dependencies, runners)
 
 
 def get_local_cluster_accelerators(
@@ -246,7 +266,11 @@ def get_local_cluster_accelerators(
                             'T4',
                             'P4',
                             'K80',
-                            'A100',]
+                            'A100',
+                            '1080',
+                            '2080',
+                            'A5000'
+                            'A6000']
         accelerators_dict = {}
         for acc in all_accelerators:
             output_str = os.popen(f'lspci | grep \\'{acc}\\'').read()
@@ -330,7 +354,7 @@ def launch_ray_on_local_cluster(
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
-                'sudo ray stop -f',
+                'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
 
         subprocess_utils.run_in_parallel(_stop_ray_workers,
@@ -338,9 +362,10 @@ def launch_ray_on_local_cluster(
 
     # Launching Ray on the head node.
     head_resources = json.dumps(custom_resources[0], separators=(',', ':'))
-    head_cmd = ('sudo ray start --head --port=6379 '
+    head_gpu_count = sum(list(custom_resources[0].values()))
+    head_cmd = ('ray start --head --port=6379 '
                 '--object-manager-port=8076 --dashboard-port 8265 '
-                f'--resources={head_resources!r}')
+                f'--resources={head_resources!r} --num-gpus={head_gpu_count}')
 
     with console.status('[bold cyan]Launching ray cluster on head'):
         backend_utils.run_command_and_handle_ssh_failure(
@@ -374,14 +399,16 @@ def launch_ray_on_local_cluster(
             runner, idx = runner_tuple
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
-                'sudo ray stop -f',
+                'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
 
             worker_resources = json.dumps(custom_resources[idx + 1],
                                           separators=(',', ':'))
-            worker_cmd = (f'sudo ray start --address={head_ip}:6379 '
+            worker_gpu_count = sum(list(custom_resources[idx + 1].values()))
+            worker_cmd = (f'ray start --address={head_ip}:6379 '
                           '--object-manager-port=8076 --dashboard-port 8265 '
-                          f'--resources={worker_resources!r}')
+                          f'--resources={worker_resources!r} '
+                          f'--num-gpus={worker_gpu_count}')
             backend_utils.run_command_and_handle_ssh_failure(
                 runner,
                 worker_cmd,
@@ -430,7 +457,7 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
     cluster_config['python'] = backend_utils.run_command_and_handle_ssh_failure(
         head_runner,
-        'sudo which python3',
+        'which python3',
         failure_message='Failed to obtain admin python path.').split()[0]
 
     cluster_name = cluster_config['cluster']['name']

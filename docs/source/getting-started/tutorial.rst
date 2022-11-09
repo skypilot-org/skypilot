@@ -33,14 +33,14 @@ and the commands to run:
     set -e  # Exit if any command failed.
     git clone https://github.com/huggingface/transformers/ || true
     cd transformers
-    pip3 install .
+    pip install .
     cd examples/pytorch/text-classification
-    pip3 install -r requirements.txt
+    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
 
   run: |
     set -e  # Exit if any command failed.
     cd transformers/examples/pytorch/text-classification
-    python3 run_glue.py \
+    python run_glue.py \
       --model_name_or_path bert-base-cased \
       --dataset_name imdb  \
       --do_train \
