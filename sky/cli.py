@@ -1628,6 +1628,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         core.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
+    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+        click.echo(str(e))
+        sys.exit(1)
 
 
 @cli.command(cls=_DocumentedCodeCommand)

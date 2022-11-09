@@ -370,7 +370,7 @@ def _check_cluster_available(cluster_name: str,
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist.{colorama.Style.RESET_ALL} skipped.')
+                f'exist; skipped.{colorama.Style.RESET_ALL}')
     backend = backend_utils.get_backend_from_handle(handle)
     if isinstance(backend, backends.LocalDockerBackend):
         # LocalDockerBackend does not support job queues
