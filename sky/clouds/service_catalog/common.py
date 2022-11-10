@@ -1,6 +1,7 @@
 """Common utilities for service catalog."""
+import enum
 import os
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple, Union
 
 import difflib
 import requests
@@ -17,6 +18,59 @@ logger = sky_logging.init_logger(__name__)
 _CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
                             constants.CATALOG_SCHEMA_VERSION)
 os.makedirs(_CATALOG_DIR, exist_ok=True)
+
+
+def filter_spot(df: pd.DataFrame, use_spot: bool) -> pd.DataFrame:
+    if use_spot:
+        # For spot instances, the spot price should be non-null.
+        return df[~df['SpotPrice'].isna()]
+    else:
+        # For on-demand instances, the price should be non-null.
+        return df[~df['Price'].isna()]
+
+
+def apply_filter(
+    df: pd.DataFrame,
+    key: str,
+    val: Union[int, float, str, List[str]],
+) -> pd.DataFrame:
+    # Exact match.
+    if key in [
+            'Region',
+            'AvailabilityZone',
+            'InstanceType',      
+    ]:
+        return df[df[key].str.lower() == val.lower()]
+    if key in ['AcceleratorName', 'AcceleratorCount']:
+        return df[df[key] == val]
+
+    if key == 'InstanceFamily':
+        val = [v.lower() for v in val]
+        return df[df['InstanceFamily'].str.lower().isin(val)]
+
+    # For num_vcpus and cpu_memory, allow searching with lower bound.
+    if key == 'vCPUs':
+        if isinstance(val, str) and val.endswith('+'):
+            return df[df['vCPUs'] >= float(val[:-1])]
+        else:
+            return df[df['vCPUs'] == float(val)]
+    if key == 'MemoryGiB':
+        if isinstance(val, str) and val.endswith('+'):
+            return df[df['MemoryGiB'] >= float(val[:-1])]
+        else:
+            return df[df['MemoryGiB'] == float(val)]
+
+    assert False, f'Unknown key: {key}'
+
+
+def apply_filters(
+    df: pd.DataFrame,
+    filters: Dict[str, Union[None, int, float, str]],
+) -> pd.DataFrame:
+    for key, val in filters.items():
+        if val is not None:
+            df = apply_filter(df, key, val)
+    return df
 
 
 class InstanceTypeInfo(NamedTuple):

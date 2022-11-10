@@ -162,8 +162,13 @@ class Cloud:
     def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
+    @classmethod
+    def get_default_instance_families(cls) -> List[str]:
+        raise NotImplementedError
+
+    @classmethod
     def get_feasible_resources(
-        self, resource_filter: 'resources.ResourceFilter'
+        cls, resource_filter: 'resources.ResourceFilter'
     ) -> List['resources.Resource']:
         raise NotImplementedError
 

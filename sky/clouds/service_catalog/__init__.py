@@ -46,6 +46,11 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
     return results
 
 
+def get_feasible_resources(resource_filter, clouds: CloudFilter = None) -> List:
+    return _map_clouds_catalog(clouds, 'get_feasible_resources',
+                               resource_filter)
+
+
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
