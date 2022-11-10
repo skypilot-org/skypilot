@@ -9,7 +9,9 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
+import sky
 from sky import exceptions
+from sky import resources
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
@@ -121,6 +123,142 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
         4: (96, 624),  # except for us-east1-c, europe-west1-d, europe-west1-b
     }
 }
+
+
+def _get_instance_family(instance_type: Optional[str]) -> Optional[str]:
+    if pd.isna(instance_type):
+        return None
+    return instance_type.split('-')[0].lower()
+
+
+def _is_valid(resource: resources.Resource) -> bool:
+    if resource.accelerator is None:
+        if resource.instance_family == 'a2':
+            # A2 machines should be used with A100 GPUs.
+            return False
+        else:
+            return True
+
+    acc_name = resource.accelerator.name
+    acc_count = resource.accelerator.count
+
+    if acc_name.startswith('tpu'):
+        if acc_count != 1:
+            return False
+        if resource.instance_type == 'tpu-vm':
+            return True
+        else:
+            return resource.instance_family == 'n1'
+
+    if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        if acc_count not in _A100_INSTANCE_TYPE_DICTS[acc_name]:
+            return False
+        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+        return resource.instance_type == instance_type
+
+    if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
+        return False
+    if acc_count not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name]:
+        return False
+    max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
+    if acc_name == 'K80' and acc_count == 8:
+        if resource.zone in ['asia-east1-a', 'us-east1-d']:
+            max_memory = 416
+    elif acc_name == 'P100' and acc_count == 4:
+        if resource.zone in ['us-east1-c', 'europe-west1-d', 'europe-west1-b']:
+            max_cpus = 64
+            max_memory = 208
+
+    if resource.num_vcpus > max_cpus:
+        return False
+    if resource.cpu_memory > max_memory:
+        return False
+    return True
+
+
+def get_feasible_resources(
+        resource_filter: resources.ResourceFilter) -> List[resources.Resource]:
+    df = _df
+    if 'InstanceFamily' not in df.columns:
+        # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
+        df['InstanceFamily'] = df['InstanceType'].apply(_get_instance_family)
+
+    if resource_filter.use_spot is not None:
+        df = common.filter_spot(df, resource_filter.use_spot)
+
+    # Search the accelerator first.
+    acc_df = None
+    if resource_filter.accelerator is not None:
+        acc_filter = {
+            'AcceleratorName': resource_filter.accelerator.name,
+            'AcceleratorCount': resource_filter.accelerator.count,
+        }
+        acc_df = common.apply_filters(df, acc_filter)
+        if acc_df.empty:
+            return []
+
+    # Search the host VM.
+    if resource_filter.instance_type == 'tpu-vm':
+        # Treat TPU VM as a special case.
+        if resource_filter.accelerator is None:
+            return []
+        elif not resource_filter.accelerator.name.startswith('tpu'):
+            return []
+    else:
+        filters = {
+            'InstanceType': resource_filter.instance_type,
+            'InstanceFamily': resource_filter.instance_families,
+            'vCPUs': resource_filter.num_vcpus,
+            'MemoryGiB': resource_filter.cpu_memory,
+            'Region': resource_filter.region,
+            'AvailabilityZone': resource_filter.zone,
+        }
+        vm_df = common.apply_filters(df, filters)
+        if vm_df.empty:
+            return []
+
+    if resource_filter.accelerator is None:
+        df = vm_df
+    else:
+        assert acc_df is not None
+        if resource_filter.instance_type == 'tpu-vm':
+            df = acc_df.copy()
+            # TODO: Add tpu-vm to the catalog.
+            df['InstanceType'] = 'tpu-vm'
+            df['InstanceFamily'] = 'tpu-vm' # FIXME
+            df['vCPUs'] = 96 # FIXME
+            df['MemoryGiB'] = 624 # FIXME
+        else:
+            # Join the two dataframes.
+            acc_df = acc_df[[
+                'Region',
+                'AvailabilityZone',
+                'AcceleratorName',
+                'AcceleratorCount',
+            ]]
+            df = pd.merge(vm_df, acc_df, on=['Region', 'AvailabilityZone'])
+
+    gcp = sky.GCP()
+    feasible_resources = [
+        resources.Resource(
+            num_nodes=resource_filter.num_nodes,
+            cloud=gcp,
+            region=row.Region,
+            zone=row.AvailabilityZone,
+            instance_type=row.InstanceType,
+            instance_family=row.InstanceFamily,
+            num_vcpus=row.vCPUs,
+            cpu_memory=row.MemoryGiB,
+            accelerator=resource_filter.accelerator,
+            use_spot=resource_filter.use_spot,
+            spot_recovery=resource_filter.spot_recovery,
+            disk_size=resource_filter.disk_size,
+            image_id=resource_filter.image_id,
+        ) for row in df.itertuples()
+    ]
+
+    # Filter out invalid combinations.
+    return [r for r in feasible_resources if _is_valid(r)]
 
 
 def _is_power_of_two(x: int) -> bool:

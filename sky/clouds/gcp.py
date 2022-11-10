@@ -267,6 +267,93 @@ class GCP(clouds.Cloud):
 
         return resources_vars
 
+    @classmethod
+    def get_default_instance_families(cls) -> List[str]:
+        # General-purpose VMs that provide the latest x86-64 Intel and AMD CPUs
+        # without any accelerator or optimized storage.
+        return ['n2', 'n2d']
+
+    @classmethod
+    def get_feasible_resources(
+        cls, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.Resource']:
+        r = resource_filter.copy()
+        if r.accelerator is None:
+            if r.instance_type is not None or r.instance_families is not None:
+                # If the user specified the instance type or families,
+                # directly query the service catalog.
+                return service_catalog.get_feasible_resources(r, clouds='gcp')
+            else:
+                # Otherwise, use the default instance families.
+                r.instance_families = cls.get_default_instance_families()
+                return service_catalog.get_feasible_resources(r, clouds='gcp')
+
+        if r.accelerator.name.startswith('tpu'):
+            # TPU
+            if r.accelerator.args is None:
+                r.accelerator.args = {}
+            if 'tpu_vm' not in r.accelerator.args:
+                r.accelerator.args['tpu_vm'] = False
+
+            if r.accelerator.args['tpu_vm']:
+                # TPU VM
+                # The instance type must be 'tpu-vm'.
+                if r.instance_type is None:
+                    r.instance_type = 'tpu-vm'
+                elif r.instance_type != 'tpu-vm':
+                    return []
+                r.instance_families = None
+                r.accelerator.args['runtime_version'] = 'tpu-vm-base'
+            else:
+                # TPU Node
+                if 'runtime_version' not in r.accelerator.args:
+                    r.accelerator.args['runtime_version'] = '2.5.0'
+
+                # Only N1 machines can be used for TPU host VMs.
+                if r.instance_type is None:
+                    if r.instance_families is None:
+                        r.instance_families = ['n1']
+                    elif 'n1' in r.instance_families:
+                        r.instance_families = ['n1']
+                    else:
+                        return []
+                elif not r.instance_type.startswith('n1-'):
+                    return []
+        else:
+            # GPU
+            if r.accelerator.args is not None:
+                return []
+
+            if r.accelerator.name in ['A100', 'A100-80GB']:
+                # A100 can only be attached to A2 machines.
+                if r.instance_type is None:
+                    if r.instance_families is None:
+                        r.instance_families = ['a2']
+                    elif 'a2' in r.instance_families:
+                        r.instance_families = ['a2']
+                    else:
+                        return []
+                elif not r.instance_type.startswith('a2-'):
+                    return []
+            else:
+                # Other GPUs can only be attached to N1 machines.
+                if r.instance_type is None:
+                    if r.instance_families is None:
+                        r.instance_families = ['n1']
+                    elif 'n1' in r.instance_families:
+                        r.instance_families = ['n1']
+                    else:
+                        return []
+                elif not r.instance_type.startswith('n1-'):
+                    return []
+
+        return service_catalog.get_feasible_resources(r, clouds='gcp')
+
+    def get_fuzzy_match_resources(
+        self, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.Resource']:
+        return []
+
     def get_feasible_launchable_resources(self, resources):
         fuzzy_candidate_list = []
         if resources.instance_type is not None:
