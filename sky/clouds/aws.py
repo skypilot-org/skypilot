@@ -235,6 +235,43 @@ class AWS(clouds.Cloud):
             'image_id': image_id,
         }
 
+    @classmethod
+    def get_default_instance_families(cls) -> List[str]:
+        # These instance families provide the latest x86-64 Intel and AMD CPUs
+        # without any accelerator or optimized storage.
+        return ['m6i', 'm6a', 'c6i', 'c6a', 'r6i', 'r6a']
+
+    @classmethod
+    def get_feasible_resources(
+        cls, resource_filter: 'resources_lib.ResourceFilter'
+    ) -> List['resources_lib.Resource']:
+        r = resource_filter.copy()
+        # AWS-specific semantic checks.
+        if r.image_id is not None:
+            if r.region is not None or r.zone is not None:
+                return []
+        if r.accelerator is not None and r.accelerator.args is not None:
+            return []
+
+        # If the user specified the instance type or families,
+        # directly query the service catalog.
+        if r.instance_type is not None or r.instance_families is not None:
+            return service_catalog.get_feasible_resources(r, clouds='aws')
+
+        # If the user specified the accelerator,
+        # use it to infer the instance types.
+        if r.accelerator is not None:
+            return service_catalog.get_feasible_resources(r, clouds='aws')
+
+        # Otherwise, use the default instance families.
+        r.instance_families = cls.get_default_instance_families()
+        return service_catalog.get_feasible_resources(r, clouds='aws')
+
+    def get_fuzzy_match_resources(
+        self, resource_filter: 'resources_lib.ResourceFilter'
+    ) -> List['resources_lib.Resource']:
+        return []
+
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
         fuzzy_candidate_list = []
