@@ -279,7 +279,7 @@ class Resource:
         self.disk_size = disk_size
         self.image_id = image_id
 
-        # The price is cached after the first call to get_hourly_price.
+        # The price is cached by the first call to get_hourly_price.
         self._hourly_price = None
 
     def get_hourly_price(self) -> float:
