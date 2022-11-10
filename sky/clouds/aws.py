@@ -236,6 +236,10 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
+    def get_hourly_price(cls, resource: 'resources_lib.Resource') -> float:
+        return service_catalog.get_hourly_price(resource, clouds='aws')
+
+    @classmethod
     def get_default_instance_families(cls) -> List[str]:
         # These instance families provide the latest x86-64 Intel and AMD CPUs
         # without any accelerator or optimized storage.

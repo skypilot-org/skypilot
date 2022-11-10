@@ -163,6 +163,10 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def get_hourly_price(cls, resource: 'resources.Resource') -> float:
+        raise NotImplementedError
+
+    @classmethod
     def get_default_instance_families(cls) -> List[str]:
         raise NotImplementedError
 

@@ -1,5 +1,4 @@
 """Common utilities for service catalog."""
-import enum
 import os
 from typing import Dict, List, NamedTuple, Optional, Tuple, Union
 
@@ -38,7 +37,7 @@ def apply_filter(
     if key in [
             'Region',
             'AvailabilityZone',
-            'InstanceType',      
+            'InstanceType',
     ]:
         return df[df[key].str.lower() == val.lower()]
     if key in ['AcceleratorName', 'AcceleratorCount']:
@@ -71,6 +70,21 @@ def apply_filters(
         if val is not None:
             df = apply_filter(df, key, val)
     return df
+
+
+def get_hourly_price_impl(
+    df: pd.DataFrame,
+    instance_type: str,
+    zone: str,
+    use_spot: bool,
+) -> float:
+    df = df[df['InstanceType'] == instance_type]
+    df = df[df['AvailabilityZone'] == zone]
+    assert len(df) == 1
+    if use_spot:
+        return df['SpotPrice'].iloc[0]
+    else:
+        return df['Price'].iloc[0]
 
 
 class InstanceTypeInfo(NamedTuple):

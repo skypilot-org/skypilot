@@ -268,6 +268,10 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     @classmethod
+    def get_hourly_price(cls, resource: 'resources.Resource') -> float:
+        return service_catalog.get_hourly_price(resource, clouds='gcp')
+
+    @classmethod
     def get_default_instance_families(cls) -> List[str]:
         # General-purpose VMs that provide the latest x86-64 Intel and AMD CPUs
         # without any accelerator or optimized storage.

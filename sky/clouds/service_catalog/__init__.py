@@ -46,6 +46,12 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
     return results
 
 
+# FIXME: annotate types.
+def get_hourly_price(resource, clouds: CloudFilter = None) -> float:
+    return _map_clouds_catalog(clouds, 'get_hourly_price', resource)
+
+
+# FIXME: annotate types.
 def get_feasible_resources(resource_filter, clouds: CloudFilter = None) -> List:
     return _map_clouds_catalog(clouds, 'get_feasible_resources',
                                resource_filter)

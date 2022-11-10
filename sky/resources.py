@@ -279,11 +279,13 @@ class Resource:
         self.disk_size = disk_size
         self.image_id = image_id
 
+    def get_hourly_price(self) -> float:
+        hourly_price = self.cloud.get_hourly_price(self)
+        return self.num_nodes * hourly_price
+
     def get_cost(self, seconds: float) -> float:
         hours = seconds / 3600.0
-        # TODO
-        hourly_price = self.cloud.get_hourly_price()
-        return hours * hourly_price
+        return hours * self.get_hourly_price()
 
     def __repr__(self) -> str:
         return (f'Resource(num_nodes={self.num_nodes}, '

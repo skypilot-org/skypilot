@@ -65,6 +65,11 @@ def get_feasible_resources(
     ]
 
 
+def get_hourly_price(resource: resources.Resource) -> float:
+    return common.get_hourly_price_impl(_df, resource.instance_type,
+                                        resource.zone, resource.use_spot)
+
+
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 

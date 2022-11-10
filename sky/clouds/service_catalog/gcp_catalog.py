@@ -225,9 +225,9 @@ def get_feasible_resources(
             df = acc_df.copy()
             # TODO: Add tpu-vm to the catalog.
             df['InstanceType'] = 'tpu-vm'
-            df['InstanceFamily'] = 'tpu-vm' # FIXME
-            df['vCPUs'] = 96 # FIXME
-            df['MemoryGiB'] = 624 # FIXME
+            df['InstanceFamily'] = 'tpu-vm'  # FIXME
+            df['vCPUs'] = 96  # FIXME
+            df['MemoryGiB'] = 624  # FIXME
         else:
             # Join the two dataframes.
             acc_df = acc_df[[
@@ -259,6 +259,27 @@ def get_feasible_resources(
 
     # Filter out invalid combinations.
     return [r for r in feasible_resources if _is_valid(r)]
+
+
+def get_hourly_price(resource: resources.Resource) -> float:
+    if resource.instance_type == 'tpu-vm':
+        host_price = 0.0
+    else:
+        host_price = common.get_hourly_price_impl(_df, resource.instance_type,
+                                                  resource.zone,
+                                                  resource.use_spot)
+
+    acc_price = 0.0
+    if resource.accelerator is not None:
+        df = _df[_df['AcceleratorName'] == resource.accelerator.name]
+        df = df[df['AcceleratorCount'] == resource.accelerator.count]
+        df = df[df['AvailabilityZone'] == resource.zone]
+        assert len(df) == 1
+        if resource.use_spot:
+            acc_price = df['SpotPrice'].iloc[0]
+        else:
+            acc_price = df['Price'].iloc[0]
+    return host_price + acc_price
 
 
 def _is_power_of_two(x: int) -> bool:
