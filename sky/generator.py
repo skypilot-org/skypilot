@@ -20,13 +20,14 @@ class CandidateGenerator:
 
     def _get_feasible_clouds(
             self, cloud: Optional[clouds.Cloud]) -> List[clouds.Cloud]:
-        feasible_clouds = []
-        for c in self.enabled_clouds:
-            if cloud is None:
-                feasible_clouds.append(c)
-            elif cloud.is_same_cloud(c):
-                feasible_clouds.append(c)
+        if cloud is None:
+            feasible_clouds = self.enabled_clouds
+        else:
+            feasible_clouds = [cloud]
 
+        assert str(cloud) != 'Local'
+        # FIXME(woosuk): Exclude local cloud for now.
+        feasible_clouds = [c for c in feasible_clouds if str(c) != 'Local']
         if feasible_clouds:
             # Found a cloud that matches the filter.
             return feasible_clouds
@@ -64,6 +65,7 @@ class CandidateGenerator:
             # Found resources that match the filter.
             return feasible_resources
 
+        return []
         # No feasible resources found. Try to find a fuzzy match.
         fuzzy_match_resources = []
         for cloud in feasible_clouds:
