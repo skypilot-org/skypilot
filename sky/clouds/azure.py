@@ -203,6 +203,45 @@ class Azure(clouds.Cloud):
             **image_config
         }
 
+    @classmethod
+    def get_default_instance_families(cls) -> List[str]:
+        # These instance families provide the latest x86-64 Intel and AMD CPUs
+        # without any accelerator or optimized storage.
+        return ['D_v5', 'Das_v5', 'E_v5', 'Eas_v5']
+
+    @classmethod
+    def get_feasible_resources(
+        cls, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.Resource']:
+        r = resource_filter.copy()
+        # Azure-specific semantic check.
+        if r.zone is not None:
+            return []
+        if r.image_id is not None:
+            return []
+        if r.accelerator is not None and r.accelerator.args is not None:
+            return []
+
+        # If the user specified the instance type or families,
+        # directly query the service catalog.
+        if r.instance_type is not None or r.instance_families is not None:
+            return service_catalog.get_feasible_resources(r, clouds='azure')
+
+        # If the user specified the accelerator,
+        # use it to infer the instance types.
+        if r.accelerator is not None:
+            return service_catalog.get_feasible_resources(r, clouds='azure')
+
+        # Otherwise, use the default instance families.
+        r.instance_families = cls.get_default_instance_families()
+        r.instance_families = [f.lower() for f in r.instance_families]
+        return service_catalog.get_feasible_resources(r, clouds='azure')
+
+    def get_fuzzy_match_resources(
+        self, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.Resource']:
+        return []
+
     def get_feasible_launchable_resources(self, resources):
         if resources.use_spot:
             # TODO(zhwu): our azure subscription offer ID does not support spot.

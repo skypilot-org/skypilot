@@ -3,13 +3,88 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
+import re
 from typing import Dict, List, Optional, Tuple
 
+import sky
+from sky import resources
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
 _df = common.read_catalog('azure.csv')
+
+
+def _get_instance_family(instance_type: str) -> str:
+    if instance_type.startswith('Basic_A'):
+        return 'basic_a'
+
+    assert instance_type.startswith('Standard_')
+    # Remove the 'Standard_' prefix.
+    instance_type = instance_type[len('Standard_'):]
+    # Remove the '_Promo' suffix if exists.
+    if '_Promo' in instance_type:
+        instance_type = instance_type[:-len('_Promo')]
+
+    # FIXME(woosuk): Use better regex.
+    if '-' in instance_type:
+        x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
+        instance_type = x.group(1) + '_' + x.group(5)
+    else:
+        x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
+        instance_type = x.group(1) + x.group(3)
+    return instance_type
+
+
+def get_feasible_resources(
+        resource_filter: resources.ResourceFilter) -> List[resources.Resource]:
+    df = _df
+    if 'AvailabilityZone' not in df.columns:
+        # TODO(woosuk): Add the 'AvailabilityZone' column to the catalog.
+        df['AvailabilityZone'] = df['Region']
+    if 'InstanceFamily' not in df.columns:
+        # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
+        df['InstanceFamily'] = df['InstanceType'].apply(_get_instance_family)
+
+    if resource_filter.use_spot is not None:
+        df = common.filter_spot(df, resource_filter.use_spot)
+
+    if resource_filter.accelerator is None:
+        acc_name = None
+        acc_count = None
+    else:
+        acc_name = resource_filter.accelerator.name
+        acc_count = resource_filter.accelerator.count
+    filters = {
+        'InstanceType': resource_filter.instance_type,
+        'InstanceFamily': resource_filter.instance_families,
+        'AcceleratorName': acc_name,
+        'AcceleratorCount': acc_count,
+        'vCPUs': resource_filter.num_vcpus,
+        'MemoryGiB': resource_filter.cpu_memory,
+        'Region': resource_filter.region,
+        'AvailabilityZone': resource_filter.zone,
+    }
+    df = common.apply_filters(df, filters)
+
+    azure = sky.Azure()
+    return [
+        resources.Resource(
+            num_nodes=resource_filter.num_nodes,
+            cloud=azure,
+            region=row.Region,
+            zone=row.AvailabilityZone,
+            instance_type=row.InstanceType,
+            instance_family=row.InstanceFamily,
+            num_vcpus=row.vCPUs,
+            cpu_memory=row.MemoryGiB,
+            accelerator=resource_filter.accelerator,
+            use_spot=resource_filter.use_spot,
+            spot_recovery=resource_filter.spot_recovery,
+            disk_size=resource_filter.disk_size,
+            image_id=resource_filter.image_id,
+        ) for row in df.itertuples()
+    ]
 
 
 def instance_type_exists(instance_type: str) -> bool:
