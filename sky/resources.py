@@ -279,9 +279,14 @@ class Resource:
         self.disk_size = disk_size
         self.image_id = image_id
 
+        # The price is cached after the first call to get_hourly_price.
+        self.hourly_price = None
+
     def get_hourly_price(self) -> float:
-        hourly_price = self.cloud.get_hourly_price(self)
-        return self.num_nodes * hourly_price
+        if self.hourly_price is None:
+            per_node_price = self.cloud.get_hourly_price(self)
+            self.hourly_price = self.num_nodes * per_node_price
+        return self.hourly_price
 
     def get_cost(self, seconds: float) -> float:
         hours = seconds / 3600.0
