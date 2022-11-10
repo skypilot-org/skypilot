@@ -54,7 +54,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_lib.CLOUD_REGISTRY.from_str(filename.split('.csv')[0])
+    cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -67,6 +67,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
                 with ux_utils.print_exception_no_traceback():
                     raise e
         # Save the catalog to a local file.
+        os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
         with open(catalog_path, 'w') as f:
             f.write(r.text)
         logger.info(f'A new {cloud} catalog has been downloaded to '
@@ -325,3 +326,36 @@ def accelerator_in_region_or_zone_impl(
         return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
         return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
+
+
+# Images
+def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
+                               region: Optional[str]) -> Optional[str]:
+    """Returns the image ID for the given tag and region.
+
+    If region is None, there must be only one image with the given tag.
+
+    Returns None if a region (or globally if region is None) does not have
+    an image that matches the tag.
+    """
+    df = df[df['Tag'] == tag]
+    if region is not None:
+        df = df[df['Region'] == region]
+    assert len(df) <= 1, ('Multiple images found for tag '
+                          f'{tag} in region {region}')
+    if len(df) == 0:
+        return None
+    image_id = df['ImageId'].iloc[0]
+    if pd.isna(image_id):
+        return None
+    return image_id
+
+
+def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
+                            region: Optional[str]) -> bool:
+    """Returns True if the image tag is valid."""
+    df = df[df['Tag'] == tag]
+    if region is not None:
+        df = df[df['Region'] == region]
+    df = df.dropna(subset=['ImageId'])
+    return len(df) > 0

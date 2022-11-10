@@ -16,11 +16,12 @@ num_nodes: 2
 
 setup: |
   echo "running setup"
+  sleep 80
 
 run: |
   timestamp=$(date +%s)
   conda env list
-  for i in {1..120}; do
+  for i in {1..240}; do
     echo "$timestamp $i"
     sleep 1
   done

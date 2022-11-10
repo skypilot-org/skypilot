@@ -20,7 +20,7 @@ setup: |
     git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
-    pip install -r requirements.txt
+    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
 run: |
@@ -36,7 +36,7 @@ run: |
     --max_seq_length 384 \
     --doc_stride 128 \
     --report_to wandb \
-    --run_name $SKYPILOT_RUN_ID \
+    --run_name $SKYPILOT_JOB_ID \
     --output_dir /checkpoint/bert_qa/ \
     --save_total_limit 10 \
     --save_steps 1000

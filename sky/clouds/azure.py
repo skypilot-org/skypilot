@@ -297,11 +297,6 @@ class Azure(clouds.Cloud):
         return service_catalog.instance_type_exists(instance_type,
                                                     clouds='azure')
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region,
-                                                    zone,
-                                                    clouds='azure')
-
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,

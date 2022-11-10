@@ -666,6 +666,7 @@ def _launch_with_confirm(
     *,
     dryrun: bool,
     detach_run: bool,
+    detach_setup: bool = False,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
@@ -726,6 +727,7 @@ def _launch_with_confirm(
             dryrun=dryrun,
             stream_logs=True,
             cluster_name=cluster,
+            detach_setup=detach_setup,
             detach_run=detach_run,
             backend=backend,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -1057,12 +1059,24 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-setup',
+    '-s',
+    default=False,
+    is_flag=True,
+    help=
+    ('If True, run setup in non-interactive mode as part of the job itself. '
+     'You can safely ctrl-c to detach from logging, and it will not interrupt '
+     'the setup process. To see the logs again after detaching, use `sky logs`.'
+     ' To cancel setup, cancel the job via `sky cancel`. Useful for long-'
+     'running setup commands.'))
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
@@ -1116,7 +1130,6 @@ def cli():
               required=False,
               help='Skip confirmation prompt.')
 @click.option('--no-setup',
-              '-n',
               is_flag=True,
               default=False,
               required=False,
@@ -1126,6 +1139,7 @@ def launch(
     entrypoint: str,
     cluster: Optional[str],
     dryrun: bool,
+    detach_setup: bool,
     detach_run: bool,
     backend_name: Optional[str],
     name: Optional[str],
@@ -1190,6 +1204,7 @@ def launch(
         backend,
         cluster,
         dryrun=dryrun,
+        detach_setup=detach_setup,
         detach_run=detach_run,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -1209,12 +1224,13 @@ def launch(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run workdir syncing first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -1566,6 +1582,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         core.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
+    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+        click.echo(str(e))
+        sys.exit(1)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2754,12 +2773,13 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @click.option(
     '--retry-until-up',
     '-r',
