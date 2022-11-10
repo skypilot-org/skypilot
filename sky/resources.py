@@ -1,4 +1,5 @@
 """Resources: compute requirements of Tasks."""
+import copy
 from typing import Dict, List, Optional, Union
 
 from sky import clouds
@@ -17,18 +18,26 @@ _DEFAULT_DISK_SIZE_GB = 256
 
 class Accelerator:
 
-    # FIXME: count can be float?
-    def __init__(self, name: str, count: int, args: Dict[str, str]) -> None:
+    def __init__(self, name: str, count: int,
+                 args: Optional[Dict[str, str]]) -> None:
         self.name = accelerator_registry.canonicalize_accelerator_name(name)
         self.count = count
         self.args = args
 
     def __repr__(self) -> str:
-        return f'<Accelerator: {self.name} x {self.count}> {self.args}'
+        return f'<Accelerator: {self.name}x{self.count}>'
 
     def __eq__(self, other) -> bool:
-        return (self.name == other.name and self.count == other.count and
-                self.args == other.args)
+        if self.name != other.name:
+            return False
+        if self.count != other.count:
+            return False
+        if self.args is None:
+            return other.args is None
+        elif other.args is None:
+            return False
+        else:
+            return self.args == other.args
 
 
 # FIXME: rename this as Resources
@@ -38,11 +47,11 @@ class ResourceFilter:
     def __init__(
         self,
         num_nodes: Optional[int] = None,
-        cloud: Optional[str] = None,
+        cloud: Union[None, str, clouds.Cloud] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         instance_type: Optional[str] = None,
-        instance_family: Optional[str] = None,
+        instance_families: Union[None, str, List[str]] = None,
         num_vcpus: Union[None, float, str] = None,
         cpu_memory: Union[None, float, str] = None,
         accelerators: Union[None, str] = None,
@@ -59,7 +68,7 @@ class ResourceFilter:
         self.region = region
         self.zone = zone
         self.instance_type = instance_type
-        self.instance_family = instance_family
+        self.instance_families = instance_families
         self.num_vcpus = num_vcpus
         self.cpu_memory = cpu_memory
         self._accelerators = accelerators
@@ -71,7 +80,8 @@ class ResourceFilter:
         self.disk_size = disk_size
         self.image_id = image_id
 
-        self.accelerator = None
+        # These fields can be set by canonicalization.
+        self.accelerator: Optional[Accelerator] = None
 
         self._check_syntax()
         self._check_input_types()
@@ -98,21 +108,27 @@ class ResourceFilter:
     def _check_type(self, field: str, expected_type) -> None:
         val = getattr(self, field)
         if val is not None and not isinstance(val, expected_type):
+            if field.startswith('_'):
+                field = field[1:]
+            if isinstance(expected_type, tuple):
+                expected_type = ' or '.join([t.__name__ for t in expected_type])
+            else:
+                expected_type = expected_type.__name__
             with ux_utils.print_exception_no_traceback():
                 raise TypeError(f'Expected Resources.{field} to be '
                                 f'{expected_type}, found {type(val)}.')
 
     def _check_input_types(self) -> None:
         self._check_type('num_nodes', int)
-        self._check_type('cloud', str)
+        self._check_type('cloud', (str, clouds.Cloud))
         self._check_type('region', str)
         self._check_type('zone', str)
         self._check_type('instance_type', str)
-        self._check_type('instance_family', str)
+        self._check_type('instance_families', (str, list))
         self._check_type('num_vcpus', (float, int, str))
         self._check_type('cpu_memory', (float, int, str))
-        self._check_type('accelerators', str)
-        self._check_type('accelerator_args', dict)
+        self._check_type('_accelerators', str)
+        self._check_type('_accelerator_args', dict)
         self._check_type('use_spot', bool)
         self._check_type('spot_recovery', str)
         self._check_type('disk_size', int)
@@ -120,7 +136,8 @@ class ResourceFilter:
 
     def _canonicalize(self) -> None:
         if self.cloud is not None:
-            self.cloud = self.cloud.upper()
+            if isinstance(self.cloud, str):
+                self.cloud = clouds.CLOUD_REGISTRY.from_str(self.cloud)
         if self.region is not None:
             self.region = self.region.lower()
         if self.zone is not None:
@@ -128,22 +145,28 @@ class ResourceFilter:
         if self.instance_type is not None:
             # NOTE: Some azure instance types use uppercase letters.
             self.instance_type = self.instance_type.lower()
-        if self.instance_family is not None:
-            self.instance_family = self.instance_family.lower()
+        if self.instance_families is not None:
+            if isinstance(self.instance_families, str):
+                self.instance_families = [self.instance_families]
+            self.instance_families = [f.lower() for f in self.instance_families]
+        if self.num_vcpus is not None:
+            self.num_vcpus = str(self.num_vcpus)
+        if self.cpu_memory is not None:
+            self.cpu_memory = str(self.cpu_memory)
         if self.spot_recovery is not None:
             self.spot_recovery = self.spot_recovery.upper()
 
         if self._accelerators is None:
             return
-        accelerators = self._accelerators
-        if ':' not in accelerators:
-            acc_name = accelerators
+        # Parse accelerators.
+        if ':' not in self._accelerators:
+            acc_name = self._accelerators
             acc_count = 1
         else:
-            splits = accelerators.split(':')
-            parse_error = ('The "accelerators" field as a str '
-                           'should be <name> or <name>:<cnt>. '
-                           f'Found: {accelerators!r}')
+            splits = self._accelerators.split(':')
+            parse_error = ('The "accelerators" field must be '
+                           'either <name> or <name>:<cnt>. '
+                           f'Found: {self._accelerators!r}')
             if len(splits) != 2:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(parse_error)
@@ -170,8 +193,9 @@ class ResourceFilter:
             self.spot_recovery = spot.SPOT_DEFAULT_STRATEGY
 
     def _check_semantics(self) -> None:
-        num_vcpus = self.num_vcpus
-        if isinstance(self.num_vcpus, str):
+        # TODO(woosuk): Use regex to parse num_vcpus and cpu_memory.
+        if self.num_vcpus is not None:
+            parse_error = 'num_vcpus must be either <cnt> or <cnt>+.'
             if self.num_vcpus.endswith('+'):
                 num_vcpus_str = self.num_vcpus[:-1]
             else:
@@ -180,13 +204,13 @@ class ResourceFilter:
                 num_vcpus = float(num_vcpus_str)
             except ValueError:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('') from None
-        if num_vcpus <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('num_vcpus must be positive.')
+                    raise ValueError(parse_error) from None
+            if num_vcpus <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('num_vcpus must be positive.')
 
-        cpu_memory = self.cpu_memory
-        if isinstance(self.cpu_memory, str):
+        if self.cpu_memory is not None:
+            parse_error = 'cpu_memory must be either <size> or <size>+.'
             if self.cpu_memory.endswith('+'):
                 cpu_memory_str = self.cpu_memory[:-1]
             else:
@@ -195,10 +219,10 @@ class ResourceFilter:
                 cpu_memory = float(cpu_memory_str)
             except ValueError:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('') from None
-        if cpu_memory <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('cpu_memory must be positive.')
+                    raise ValueError(parse_error) from None
+            if cpu_memory <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('cpu_memory must be positive.')
 
         if (self.spot_recovery is not None and
                 self.spot_recovery not in spot.SPOT_STRATEGIES):
@@ -209,6 +233,14 @@ class ResourceFilter:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('OS disk size must be larger than 50GB. '
                                  f'Got {self.disk_size} GB.')
+
+    def copy(self) -> 'Resources':
+        # FIXME
+        return copy.deepcopy(self)
+
+    def __repr__(self) -> str:
+        # TODO
+        pass
 
 
 # FIXME: rename this
@@ -222,21 +254,25 @@ class Resource:
         region: str,
         zone: str,
         instance_type: str,
+        instance_family: str,
         num_vcpus: float,
-        memory_size: float,
+        cpu_memory: float,
         accelerator: Optional[Accelerator],
         use_spot: bool,
         spot_recovery: str,
         disk_size: int,
         image_id: Optional[str],
     ) -> None:
+        # NOTE: instance_type and instance_family need NOT be lower-cased.
+        # They follow the values in the cloud catalogs.
         self.num_nodes = num_nodes
         self.cloud = cloud
         self.region = region
         self.zone = zone
         self.instance_type = instance_type
+        self.instance_family = instance_family
         self.num_vcpus = num_vcpus
-        self.memory_size = memory_size
+        self.cpu_memory = cpu_memory
         self.accelerator = accelerator
         self.use_spot = use_spot
         self.spot_recovery = spot_recovery
@@ -248,6 +284,21 @@ class Resource:
         # TODO
         hourly_price = self.cloud.get_hourly_price()
         return hours * hourly_price
+
+    def __repr__(self) -> str:
+        return (f'Resource(num_nodes={self.num_nodes}, '
+                f'cloud={self.cloud}, '
+                f'region={self.region}, '
+                f'zone={self.zone}, '
+                f'instance_type={self.instance_type}, '
+                f'instance_family={self.instance_family}, '
+                f'num_vcpus={self.num_vcpus}, '
+                f'cpu_memory={self.cpu_memory}, '
+                f'accelerator={self.accelerator}, '
+                f'use_spot={self.use_spot}, '
+                f'spot_recovery={self.spot_recovery}, '
+                f'disk_size={self.disk_size}, '
+                f'image_id={self.image_id})')
 
 
 class Resources:

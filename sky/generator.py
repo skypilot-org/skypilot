@@ -1,4 +1,3 @@
-
 from typing import List, Optional
 
 import colorama
@@ -20,8 +19,7 @@ class CandidateGenerator:
         self.retry = True
 
     def _get_feasible_clouds(
-        self, cloud: Optional[clouds.Cloud]
-    ) -> List[clouds.Cloud]:
+            self, cloud: Optional[clouds.Cloud]) -> List[clouds.Cloud]:
         feasible_clouds = []
         for c in self.enabled_clouds:
             if cloud is None:
@@ -69,7 +67,8 @@ class CandidateGenerator:
         # No feasible resources found. Try to find a fuzzy match.
         fuzzy_match_resources = []
         for cloud in feasible_clouds:
-            fuzzy_match_resources += cloud.get_fuzzy_match_resources(resource_filter)
+            fuzzy_match_resources += cloud.get_fuzzy_match_resources(
+                resource_filter)
         logger.info(f'No resource satisfying {resource_filter} found.')
         logger.info(f'Did you mean: '
                     f'{colorama.Fore.CYAN}'
