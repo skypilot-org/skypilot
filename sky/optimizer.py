@@ -54,12 +54,6 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
     return log_utils.create_table(field_names, **table_kwargs)
 
 
-# Checks if there is public cloud enabled.
-def _is_public_cloud_disabled(enabled_clouds: List[clouds.Cloud]):
-    return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
-                                                   clouds.Local)
-
-
 class Optimizer:
     """Optimizer: assigns best resources to user tasks."""
 
