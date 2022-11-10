@@ -12,7 +12,6 @@ import rich.console as rich_console
 import yaml
 
 from sky import check
-from sky import clouds
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -469,13 +468,6 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     common_utils.dump_yaml(abs_yaml_path, cluster_config)
 
 
-# Checks if there is public cloud enabled.
-def _is_public_cloud_disabled():
-    enabled_clouds = global_user_state.get_enabled_clouds()
-    return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
-                                                   clouds.Local)
-
-
 # Currently, programmatic API doesn't check this.
 def check_local_cloud_args(cloud: Optional[str] = None,
                            cluster_name: Optional[str] = None,
@@ -501,9 +493,9 @@ def check_local_cloud_args(cloud: Optional[str] = None,
                 '`cloud: local` or no cloud in YAML or CLI args.')
         return True
     else:
-        if _is_public_cloud_disabled():
+        if backend_utils.is_public_cloud_disabled():
             check.check(quiet=True)
-            if _is_public_cloud_disabled():
+            if backend_utils.is_public_cloud_disabled():
                 raise click.UsageError('Cloud access is not set up. '
                                        'Run: `sky check`')
         if cloud == 'local' or yaml_cloud == 'local':
