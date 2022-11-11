@@ -2057,8 +2057,8 @@ def validate_schema(obj, schema, err_msg_prefix=''):
             raise ValueError(err_msg)
 
 
-# Checks if there is public cloud enabled.
 def is_public_cloud_disabled():
+    """Checks if none of the public clouds are enabled."""
     enabled_clouds = global_user_state.get_enabled_clouds()
     return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
                                                    clouds.Local)

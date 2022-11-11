@@ -496,8 +496,8 @@ def check_local_cloud_args(cloud: Optional[str] = None,
         if backend_utils.is_public_cloud_disabled():
             check.check(quiet=True)
             if backend_utils.is_public_cloud_disabled():
-                raise click.UsageError('Cloud access is not set up. '
-                                       'Run: `sky check`')
+                raise RuntimeError('Cloud access is not set up. '
+                                   'Run: `sky check`')
         if cloud == 'local' or yaml_cloud == 'local':
             if cluster_name is not None:
                 raise click.UsageError(
