@@ -243,6 +243,15 @@ class Optimizer:
                 launchable_resources = {
                     k: v for k, v in launchable_resources.items() if v
                 }
+                if len(launchable_resources) == 0:
+                    error_msg = (
+                        f'No launchable resource found for task {node}. '
+                        'To fix: relax its resource requirements.\n'
+                        'Hint: \'sky show-gpus --all\' '
+                        'to list available accelerators.\n'
+                        '      \'sky check\' to check the enabled clouds.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(error_msg)
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -252,15 +261,6 @@ class Optimizer:
 
             num_resources = len(node.get_resources())
             for orig_resources, launchable_list in launchable_resources.items():
-                if not launchable_list:
-                    error_msg = (
-                        f'No launchable resource found for task {node}. '
-                        'To fix: relax its resource requirements.\n'
-                        'Hint: \'sky show-gpus --all\' '
-                        'to list available accelerators.\n'
-                        '      \'sky check\' to check the enabled clouds.')
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ResourcesUnavailableError(error_msg)
                 if num_resources == 1 and node.time_estimator_func is None:
                     logger.debug(
                         'Defaulting the task\'s estimated time to 1 hour.')

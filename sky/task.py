@@ -323,10 +323,17 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.pop('resources', None)
-        resources = sky.Resources.from_yaml_config(resources)
+        resources_config = config.pop('resources', None)
 
-        task.set_resources({resources})
+        resources = set()
+        if isinstance(resources_config['accelerators'], list):
+            for acc in resources_config['accelerators']:
+                tmp_resource = resources_config.copy()
+                tmp_resource['accelerators'] = acc
+                resources.add(sky.Resources.from_yaml_config(tmp_resource))
+        else:
+            resources = {sky.Resources.from_yaml_config(resources_config)}
+        task.set_resources(resources)
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
