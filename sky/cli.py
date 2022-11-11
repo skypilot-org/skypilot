@@ -958,14 +958,13 @@ def _make_task_from_entrypoint_with_overrides(
 
     new_resources_set = set()
     for res in task.resources:
-        new_resources = res.copy(**override_params)
-
         # TODO(wei-lin): move this validation into Python API.
-        if new_resources.accelerators is not None:
-            acc, _ = list(new_resources.accelerators.items())[0]
+        if res.accelerators is not None:
+            acc, _ = list(res.accelerators.items())[0]
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster is not supported. '
                                  f'Got num_nodes={task.num_nodes}.')
+        new_resources = res.copy(**override_params)
         new_resources_set.add(new_resources)
     task.set_resources(new_resources_set)
 

@@ -326,7 +326,9 @@ class Task:
         resources_config = config.pop('resources', None)
 
         resources = set()
-        if isinstance(resources_config['accelerators'], list):
+        # Translate config with a list of accelerators to a set of resources.
+        if (resources_config.get('accelerators') is not None and
+                isinstance(resources_config['accelerators'], list)):
             for acc in resources_config['accelerators']:
                 tmp_resource = resources_config.copy()
                 tmp_resource['accelerators'] = acc
