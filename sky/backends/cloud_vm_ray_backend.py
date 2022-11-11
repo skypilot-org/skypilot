@@ -1133,17 +1133,14 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(message)
 
     def _tpu_pod_setup(self, cluster_yaml: str,
-                       cluster_handle: 'backends.Backend.ResourceHandle',
-                       num_nodes: int):
+                       cluster_handle: 'backends.Backend.ResourceHandle'):
         """Completes setup and start Ray cluster on TPU VM Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        all_ips = backend_utils.get_node_ips(cluster_yaml,
-                                             num_nodes,
-                                             handle=cluster_handle)
+        all_ips = backend_utils.get_stable_cluster_ips(cluster_handle)
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
         if len(all_ips) != num_tpu_devices:
@@ -1331,7 +1328,7 @@ class RetryingVmProvisioner(object):
         if tpu_utils.is_tpu_vm_pod(resources):
             logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
                         f'{style.RESET_ALL}')
-            self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
+            self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
         if num_nodes == 1 and returncode == 0:
@@ -1545,8 +1542,8 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
-        - (optional) A cached stable list of internal IPs for all nodes
-            in a cluster. Filled in after a successful task execution.
+        - (optional) A cached stable list of (internal IP, external IP) tuples
+         for all nodes in a cluster. Filled in after successful task execution.
         - (optional) Launched num nodes
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
@@ -1557,8 +1554,7 @@ class CloudVmRayBackend(backends.Backend):
                      *,
                      cluster_name: str,
                      cluster_yaml: str,
-                     head_ip: Optional[str] = None,
-                     stable_cluster_internal_ips: Optional[str] = None,
+                     stable_internal_external_ips: Optional[str] = None,
                      launched_nodes: Optional[int] = None,
                      launched_resources: Optional[
                          resources_lib.Resources] = None,
@@ -1568,8 +1564,7 @@ class CloudVmRayBackend(backends.Backend):
             self.cluster_name = cluster_name
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
                                                       '~', 1)
-            self.head_ip = head_ip
-            self.stable_cluster_internal_ips = stable_cluster_internal_ips
+            self.stable_internal_external_ips = stable_internal_external_ips
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -1655,6 +1650,13 @@ class CloudVmRayBackend(backends.Backend):
         @property
         def cluster_yaml(self):
             return os.path.expanduser(self._cluster_yaml)
+
+        @property
+        def head_ip(self):
+            if self.stable_internal_external_ips:
+                return self.stable_internal_external_ips[0][1]
+            else:
+                return None
 
         def __setstate__(self, state):
             self._version = self._VERSION
@@ -1852,10 +1854,17 @@ class CloudVmRayBackend(backends.Backend):
                 return
             cluster_config_file = config_dict['ray']
 
+            handle = self.ResourceHandle(
+                cluster_name=cluster_name,
+                cluster_yaml=cluster_config_file,
+                launched_nodes=config_dict['launched_nodes'],
+                launched_resources=config_dict['launched_resources'],
+                # TPU.
+                tpu_create_script=config_dict.get('tpu-create-script'),
+                tpu_delete_script=config_dict.get('tpu-delete-script'))
+
             if 'tpu_name' in config_dict:
-                self._set_tpu_name(cluster_config_file,
-                                   config_dict['launched_nodes'],
-                                   config_dict['tpu_name'])
+                self._set_tpu_name(handle, config_dict['tpu_name'])
 
             if config_dict['launched_nodes'] == 1 and config_dict[
                     'head_ip'] is not None:
@@ -1864,25 +1873,11 @@ class CloudVmRayBackend(backends.Backend):
                 head_ip = config_dict['head_ip']
                 ip_list = [head_ip]
             else:
-                # NOTE: querying node_ips is expensive, observed 1node GCP >=4s.
-                with timeline.Event('backend.provision.get_node_ips'):
-                    ip_list = backend_utils.get_node_ips(
-                        cluster_config_file,
-                        config_dict['launched_nodes'],
-                        head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                        worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
-                    head_ip = ip_list[0]
-
-            handle = self.ResourceHandle(
-                cluster_name=cluster_name,
-                cluster_yaml=cluster_config_file,
-                # Cache head ip in the handle to speed up ssh operations.
-                head_ip=head_ip,
-                launched_nodes=config_dict['launched_nodes'],
-                launched_resources=config_dict['launched_resources'],
-                # TPU.
-                tpu_create_script=config_dict.get('tpu-create-script'),
-                tpu_delete_script=config_dict.get('tpu-delete-script'))
+                # Caches the stable list of the IPs in the handle.
+                ip_list = backend_utils.get_stable_cluster_ips(
+                    handle,
+                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
@@ -1968,9 +1963,7 @@ class CloudVmRayBackend(backends.Backend):
         # e.g., in CLI.  So we should rerun rsync_up.
         fore = colorama.Fore
         style = colorama.Style
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = backend_utils.get_stable_cluster_ips(handle)
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -2050,10 +2043,8 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = backend_utils.get_node_ips(
-                handle.cluster_yaml,
-                handle.launched_nodes,
-                handle=handle,
+            ip_list = backend_utils.get_stable_cluster_ips(
+                handle,
                 head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
                 worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
@@ -2447,9 +2438,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
                         f'{style.RESET_ALL}')
 
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = backend_utils.get_stable_cluster_ips(handle)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2787,9 +2776,8 @@ class CloudVmRayBackend(backends.Backend):
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
-        max_attempts = 1 if use_cached_head_ip else _HEAD_IP_MAX_ATTEMPTS
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
-                                            max_attempts)
+                                            _HEAD_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
@@ -2854,12 +2842,11 @@ class CloudVmRayBackend(backends.Backend):
                                                        to_provision,
                                                        task.num_nodes)
 
-    def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
-                      tpu_name: str) -> None:
+    def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
+        ip_list = backend_utils.get_stable_cluster_ips(handle)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            cluster_config_file)
+            handle.cluster_yaml)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, *ssh_credentials)
@@ -2890,9 +2877,7 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = backend_utils.get_stable_cluster_ips(handle)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3036,9 +3021,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = backend_utils.get_stable_cluster_ips(handle)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3084,8 +3067,8 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             1,
             accelerator_dict,
-            stable_cluster_internal_ips=backend_utils.
-            get_stable_cluster_internal_ips(handle))
+            stable_cluster_internal_ips=backend_utils.get_stable_cluster_ips(
+                handle, get_internal_ips=True))
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3143,8 +3126,8 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=backend_utils.
-            get_stable_cluster_internal_ips(handle))
+            stable_cluster_internal_ips=backend_utils.get_stable_cluster_ips(
+                handle, get_internal_ips=True))
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))

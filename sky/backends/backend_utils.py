@@ -1136,18 +1136,44 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     return head_ip
 
 
-def get_stable_cluster_internal_ips(
-        handle: backends.Backend.ResourceHandle) -> List[str]:
-    if handle.stable_cluster_internal_ips is not None:
-        return handle.stable_cluster_internal_ips
+@timeline.event
+def get_stable_cluster_ips(handle: backends.Backend.ResourceHandle,
+                           cluster_external_ips: List[str] = None,
+                           cluster_internal_ips: List[str] = None,
+                           get_internal_ips: bool = False,
+                           head_ip_max_attempts: int = 1,
+                           worker_ip_max_attempts: int = 1,
+                           use_cached_ips: bool = True) -> List[str]:
+    """Returns a stable list of (internal IP, external IP) tuples.
+    The lists of cluster IPs that are passed must correspond to each other.
+    """
+    if use_cached_ips and handle.stable_internal_external_ips is not None:
+        if get_internal_ips:
+            return [ips[0] for ips in handle.stable_internal_external_ips]
+        else:
+            return [ips[1] for ips in handle.stable_internal_external_ips]
 
-    cluster_external_ips = get_node_ips(handle.cluster_yaml,
-                                        handle.launched_nodes,
-                                        handle=handle)
-    cluster_internal_ips = get_node_ips(handle.cluster_yaml,
-                                        handle.launched_nodes,
-                                        handle=handle,
-                                        get_internal_ips=True)
+    if cluster_external_ips is None:
+        cluster_external_ips = get_node_ips(
+            handle.cluster_yaml,
+            handle.launched_nodes,
+            handle=handle,
+            head_ip_max_attempts=head_ip_max_attempts,
+            worker_ip_max_attempts=worker_ip_max_attempts,
+            get_internal_ips=False)
+    if cluster_internal_ips is None:
+        cluster_internal_ips = get_node_ips(
+            handle.cluster_yaml,
+            handle.launched_nodes,
+            handle=handle,
+            head_ip_max_attempts=head_ip_max_attempts,
+            worker_ip_max_attempts=worker_ip_max_attempts,
+            get_internal_ips=True)
+
+    assert len(cluster_external_ips) == len(
+        cluster_internal_ips
+    ), 'length of external IPs and internal IPs must be the same'
+
     internal_external_ips = list(zip(cluster_internal_ips,
                                      cluster_external_ips))
 
@@ -1155,10 +1181,11 @@ def get_stable_cluster_internal_ips(
     # IPs for stableness
     stable_internal_external_ips = [internal_external_ips[0]] + sorted(
         internal_external_ips[1:], key=lambda x: x[1])
-    handle.stable_cluster_internal_ips = [
-        x[0] for x in stable_internal_external_ips
-    ]
-    return handle.stable_cluster_internal_ips
+    handle.stable_internal_external_ips = stable_internal_external_ips
+    if get_internal_ips:
+        return [ips[0] for ips in handle.stable_internal_external_ips]
+    else:
+        return [ips[1] for ips in handle.stable_internal_external_ips]
 
 
 @timeline.event
@@ -1287,20 +1314,10 @@ def get_head_ip(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    assert not use_cached_head_ip or max_attempts == 1, (
-        'Cannot use cached_head_ip when max_attempts is not 1')
-    if use_cached_head_ip:
-        if handle.head_ip is None:
-            # This happens for INIT clusters (e.g., exit 1 in setup).
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cluster\'s head IP not found; is it up? To fix: '
-                    'run a successful launch first (`sky launch`) to ensure'
-                    ' the cluster status is UP (`sky status`).')
-        head_ip = handle.head_ip
+    if use_cached_head_ip and handle.stable_internal_external_ips:
+        return handle.stable_internal_external_ips[0][1]
     else:
-        head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
-    return head_ip
+        return query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
 
 
 def run_command_and_handle_ssh_failure(
@@ -1645,7 +1662,7 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        external_ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        external_ips = get_stable_cluster_ips(handle)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
         if len(external_ips) == 0:
             raise exceptions.FetchIPError(
@@ -1662,12 +1679,11 @@ def _update_cluster_status_no_lock(
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `get_node_ips` function uses ray
+        # set the status to UP, as the `get_stable_cluster_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
-        handle.head_ip = external_ips[0]
-        handle.stable_cluster_internal_ips = get_stable_cluster_internal_ips(
-            handle)
+        # Caches the stable list of cluster IPs in the handle.
+        get_stable_cluster_ips(handle, cluster_external_ips=external_ips)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
