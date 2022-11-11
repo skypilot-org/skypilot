@@ -62,7 +62,7 @@ SkyPilot exposes these environment variables that can be accessed in a task's ``
 
 
 Launching a multi-node task (new cluster)
------------------------------------------
+-------------------------------------------------
 
 When using ``sky launch`` to launch a multi-node task on **a new cluster**, the following happens in sequence:
 
@@ -72,7 +72,7 @@ When using ``sky launch`` to launch a multi-node task on **a new cluster**, the 
 4. ``run`` commands are executed on all nodes.
 
 Launching a multi-node task (existing cluster)
------------------------------------------
+-------------------------------------------------
 
 When using ``sky launch`` to launch a multi-node task on **an existing cluster**, the cluster may have more nodes than the current task's ``num_nodes`` requirement.
 
@@ -83,10 +83,16 @@ The following happens in sequence:
 3. ``setup`` commands are executed on **all nodes** of the cluster. (barrier)
 4. ``run`` commands are executed on **the subset of nodes** scheduled to execute the task, which may be fewer than the cluster size.
 
+.. tip::
+
+  To skip rerunning the setup commands, use either ``sky launch --no-setup ...``
+  (performs steps 1, 2, 4 above) or ``sky exec`` (performs step 2 (workdir only)
+  and step 4).
+
 Executing a task on the head node only
 -----------------------------------------
 To execute a task on the head node only (a common scenario for tools like
-``mpirun``), use the ``SKY_NODE_RANK`` environment variable as follows:
+``mpirun``), use the ``SKYPILOT_NODE_RANK`` environment variable as follows:
 
 .. code-block:: yaml
 
