@@ -71,7 +71,6 @@ def get_resources_schema():
                 }, {
                     'type': 'object',
                     'required': [],
-                    'additionalProperties': True,
                 }]
             }
         }

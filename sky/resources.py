@@ -89,7 +89,7 @@ class Resources:
 
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {None: image_id}
+            self._image_id = {self._region: image_id}
 
         self._set_accelerators(accelerators, accelerator_args)
 
@@ -408,12 +408,14 @@ class Resources:
                     'image_id is only supported for AWS and GCP, please '
                     'explicitly specify the cloud.')
 
-        if (self._region is not None and None not in self._image_id and
-                self._region not in self._image_id):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'image_id should contain the image for the specified '
-                    f'region {self._region}.')
+        if self._region is not None:
+            if self._region not in self._image_id:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'image_id should contain the image for the specified '
+                        f'region {self._region}.')
+            # Narrow down the image_id to the specified region.
+            self._image_id = {self._region: self._image_id[self._region]}
 
         for region, image_id in self._image_id.items():
             region = region or self._region
@@ -526,8 +528,20 @@ class Resources:
             return False
         # self.zone <= other.zone
 
-        if (self.image_id is not None and self.image_id != other.image_id):
-            return False
+        if self.image_id is not None:
+            if other.image_id is None:
+                return False
+            if other.region is None:
+                # Current image_id should be a subset of other.image_id
+                if not self.image_id.items() <= other.image_id.items():
+                    return False
+            else:
+                this_image = (self.image_id.get(other.region) or
+                              self.image_id.get(None))
+                other_image = (other.image_id.get(other.region) or
+                               other.image_id.get(None))
+                if this_image != other_image:
+                    return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
