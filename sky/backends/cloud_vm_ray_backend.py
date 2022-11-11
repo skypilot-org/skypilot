@@ -1669,7 +1669,8 @@ class CloudVmRayBackend(backends.Backend):
             if valid_resource is None:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Requested resources do not match the existing cluster.\n'
+                        'Requested resources do not match the existing '
+                        'cluster.\n'
                         f'  Requested:\t{requested_resource_str}\n'
                         f'  Existing:\t{handle.launched_nodes}x '
                         f'{handle.launched_resources}\n'
@@ -1680,10 +1681,10 @@ class CloudVmRayBackend(backends.Backend):
             task_resources = list(task.resources)[0]
             # If only one resource is specified,
             # check Requested_resources <= actual_resources.
-            # Special handling for local cloud case, which assumes a cluster can
-            # be heterogeneous. Here, launched_resources is a list of custom
-            # accelerators per node, and Resources.less_demanding_than determines
-            # how many nodes satisfy task resource requirements.
+            # Special handling for local cloud case, which assumes a cluster
+            # can be heterogeneous. Here, launched_resources is a list of
+            # custom accelerators per node, and Resources.less_demanding_than
+            # determines how many nodes satisfy task resource requirements.
             if not (task.num_nodes <= handle.launched_nodes and
                     task_resources.less_demanding_than(
                         launched_resources,
@@ -1693,8 +1694,9 @@ class CloudVmRayBackend(backends.Backend):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
                             'Task requested resources in region '
-                            f'{task_resources.region!r}, but the existing cluster '
-                            f'is in region {launched_resources.region!r}.')
+                            f'{task_resources.region!r}, but the existing '
+                            'cluster is in region '
+                            f'{launched_resources.region!r}.')
                 if (task_resources.zone is not None and
                         task_resources.zone != launched_resources.zone):
                     zone_str = (f'is in zone {launched_resources.zone!r}.'
@@ -1703,11 +1705,12 @@ class CloudVmRayBackend(backends.Backend):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesMismatchError(
                             'Task requested resources in zone '
-                            f'{task_resources.zone!r}, but the existing cluster '
-                            f'{zone_str}')
+                            f'{task_resources.zone!r}, but the existing '
+                            f'cluster {zone_str}')
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ResourcesMismatchError(
-                        'Requested resources do not match the existing cluster.\n'
+                        'Requested resources do not match the existing '
+                        'cluster.\n'
                         f'  Requested:\t{task.num_nodes}x {task_resources} \n'
                         f'  Existing:\t{handle.launched_nodes}x '
                         f'{handle.launched_resources}\n'
