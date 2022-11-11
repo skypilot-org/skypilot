@@ -414,8 +414,8 @@ class Resources:
             if self._region not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'image_id {self._image_id} should contain the image for the specified '
-                        f'region {self._region}.')
+                        f'image_id {self._image_id} should contain the image '
+                        f'for the specified region {self._region}.')
             # Narrow down the image_id to the specified region.
             self._image_id = {self._region: self._image_id[self._region]}
 

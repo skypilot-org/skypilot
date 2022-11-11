@@ -185,7 +185,7 @@ def test_image_id_dict():
         [
             # Use image id dict.
             f'sky launch -y -c {name} examples/per_region_images.yaml',
-            f'sky exec {name} examples/per_region_images.py',
+            f'sky exec {name} examples/per_region_images.yaml',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
