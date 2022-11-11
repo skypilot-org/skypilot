@@ -3,6 +3,7 @@ import ast
 import enum
 import getpass
 import inspect
+import math
 import json
 import os
 import pathlib
@@ -62,7 +63,7 @@ _PATH_SIZE_MEGABYTES_WARN_THRESHOLD = 256
 
 # Timeout (seconds) for provision progress: if in this duration no new nodes
 # are launched, abort and failover.
-_NODES_LAUNCHING_PROGRESS_TIMEOUT = 60
+_NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
 
 # Time gap between retries after failing to provision in all possible places.
 # Used only if --retry-until-up is set.
@@ -90,6 +91,9 @@ _TEARDOWN_PURGE_WARNING = (
     f'{colorama.Style.RESET_ALL}')
 
 _TPU_NOT_FOUND_ERROR = 'ERROR: (gcloud.compute.tpus.delete) NOT_FOUND'
+
+_CTRL_C_TIP_MESSAGE = ('INFO: Tip: use Ctrl-C to exit log streaming '
+                       '(task will not be killed).')
 
 _MAX_RAY_UP_RETRY = 5
 
@@ -147,6 +151,9 @@ class RayCodeGen:
     def add_prologue(self,
                      job_id: int,
                      spot_task: Optional['task_lib.Task'] = None,
+                     setup_cmd: Optional[str] = None,
+                     envs: Optional[Dict[str, str]] = None,
+                     setup_log_path: Optional[str] = None,
                      is_local: bool = False) -> None:
         assert not self._has_prologue, 'add_prologue() called twice?'
         self._has_prologue = True
@@ -181,12 +188,11 @@ class RayCodeGen:
             from sky.utils import log_utils
 
             SKY_REMOTE_WORKDIR = {constants.SKY_REMOTE_WORKDIR!r}
-            job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)
 
             ray.init(address={ray_address!r}, namespace='__sky__{job_id}__', log_to_driver=True)
-
             run_fn = None
-            futures = []"""),
+            futures = []
+            """),
             # FIXME: This is a hack to make sure that the functions can be found
             # by ray.remote. This should be removed once we have a better way to
             # specify dependencies for ray.
@@ -196,6 +202,46 @@ class RayCodeGen:
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
+            f'setup_cmd = {setup_cmd!r}'
+        ]
+        if setup_cmd is not None:
+            self._code += [
+                textwrap.dedent(f"""\
+                _SETUP_CPUS = 0.0001
+                job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
+                print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
+                total_num_nodes = len(ray.nodes())
+                setup_bundles = [{{"CPU": _SETUP_CPUS}} for _ in range(total_num_nodes)]
+                setup_pg = ray.util.placement_group(setup_bundles, strategy='STRICT_SPREAD')
+                ray.get(setup_pg.ready())
+                setup_workers = [run_bash_command_with_log \\
+                    .options(name='setup', num_cpus=_SETUP_CPUS, placement_group=setup_pg, placement_group_bundle_index=i) \\
+                    .remote(
+                        setup_cmd,
+                        os.path.expanduser({setup_log_path!r}),
+                        getpass.getuser(),
+                        job_id={self.job_id},
+                        env_vars={envs!r},
+                        stream_logs=True,
+                        with_ray=True,
+                        use_sudo={is_local},
+                    ) for i in range(total_num_nodes)]
+                setup_returncodes = ray.get(setup_workers)
+                if sum(setup_returncodes) != 0:
+                    job_lib.set_status({self.job_id!r}, job_lib.JobStatus.FAILED_SETUP)
+                    # This waits for all streaming logs to finish.
+                    time.sleep(1)
+                    print('ERROR: {colorama.Fore.RED}Job {self.job_id}\\'s setup failed with '
+                        'return code list:{colorama.Style.RESET_ALL}',
+                        setup_returncodes,
+                        file=sys.stderr,
+                        flush=True)
+                    # Need this to set the job status in ray job to be FAILED.
+                    sys.exit(1)
+                """)
+            ]
+        self._code += [
+            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
         ]
         if spot_task is not None:
             # Add the spot job to spot queue table.
@@ -246,15 +292,15 @@ class RayCodeGen:
                     **gpu_dict,
                 })
 
-        pack_mode = 'STRICT_SPREAD'
         self._code += [
             textwrap.dedent(f"""\
-                pg = ray_util.placement_group({json.dumps(bundles)}, {pack_mode!r})
+                pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
                 plural = 's' if {num_nodes} > 1 else ''
-                node_str = f'{num_nodes} node' + plural + '.'
-                print('INFO: Tip: use Ctrl-C to exit log streaming (task will not be killed).\\n'
-                      'INFO: Waiting for task resources on ' + node_str +
-                      ' This will block if the cluster is full.',
+                node_str = f'{num_nodes} node{{plural}}'
+                
+                message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
+                message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
+                print(message,
                       file=sys.stderr,
                       flush=True)
                 # FIXME: This will print the error message from autoscaler if
@@ -291,7 +337,9 @@ class RayCodeGen:
                 else:
                     ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
                     ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
-
+                
+                sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
+                # Environment starting with `SKY_` is deprecated.
                 sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
         ]
@@ -317,6 +365,7 @@ class RayCodeGen:
     def add_ray_task(self,
                      bash_script: str,
                      task_name: Optional[str],
+                     job_run_id: str,
                      ray_resources_dict: Optional[Dict[str, float]],
                      log_path: str,
                      env_vars: Dict[str, str] = None,
@@ -339,17 +388,19 @@ class RayCodeGen:
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
+        num_gpus = 0
         num_gpus_str = ''
         if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
                 ('There can only be one type of accelerator per instance.'
                  f' Found: {ray_resources_dict}.')
+            num_gpus = list(ray_resources_dict.values())[0]
             resources_str = f', resources={json.dumps(ray_resources_dict)}'
 
             # Passing this ensures that the Ray remote task gets
             # CUDA_VISIBLE_DEVICES set correctly.  If not passed, that flag
             # would be force-set to empty by Ray.
-            num_gpus_str = f', num_gpus={list(ray_resources_dict.values())[0]}'
+            num_gpus_str = f', num_gpus={num_gpus}'
             # `num_gpus` should be empty when the accelerator is not GPU.
             # FIXME: use a set of GPU types.
             resources_key = list(ray_resources_dict.keys())[0]
@@ -363,6 +414,10 @@ class RayCodeGen:
             sky_env_vars_dict_str = '\n'.join(
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
                 for k, v in env_vars.items())
+        if job_run_id is not None:
+            sky_env_vars_dict_str += (
+                f'\nsky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
+                f' = {job_run_id!r}')
 
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
@@ -376,9 +431,18 @@ class RayCodeGen:
         log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
+            sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
+            # Environment starting with `SKY_` is deprecated.
+            sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
+
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
+            sky_env_vars_dict['SKYPILOT_NODE_RANK'] = ip_rank_map[ip]
+            # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
-            sky_env_vars_dict['SKY_JOB_ID'] = {self.job_id}
+            
+            sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
+            # Environment starting with `SKY_` is deprecated.
+            sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
                     .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
@@ -1609,6 +1673,11 @@ class CloudVmRayBackend(backends.Backend):
         self._dag = None
         self._optimize_target = None
 
+        # Command for running the setup script. It is only set when the
+        # setup needs to be run outside the self._setup() and as part of
+        # a job (--detach-setup).
+        self._setup_cmd = None
+
     # --- Implementation of Backend APIs ---
 
     def register_info(self, **kwargs) -> None:
@@ -1993,7 +2062,8 @@ class CloudVmRayBackend(backends.Backend):
         self._execute_file_mounts(handle, all_file_mounts)
         self._execute_storage_mounts(handle, storage_mounts)
 
-    def _setup(self, handle: ResourceHandle, task: task_lib.Task) -> None:
+    def _setup(self, handle: ResourceHandle, task: task_lib.Task,
+               detach_setup: bool) -> Optional[str]:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
@@ -2020,17 +2090,20 @@ class CloudVmRayBackend(backends.Backend):
             runners = command_runner.SSHCommandRunner.make_runner_list(
                 ip_list, *ssh_credentials)
 
+            # Need this `-i` option to make sure `source ~/.bashrc` work
+            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+
             def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
                 runner.rsync(source=setup_sh_path,
                              target=f'/tmp/{setup_file}',
                              up=True,
                              stream_logs=False)
-                # Need this `-i` option to make sure `source ~/.bashrc` work
-                cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+                if detach_setup:
+                    return
                 setup_log_path = os.path.join(self.log_dir,
                                               f'setup-{runner.ip}.log')
                 returncode = runner.run(
-                    cmd,
+                    setup_cmd,
                     log_path=setup_log_path,
                     process_stream=False,
                 )
@@ -2063,14 +2136,22 @@ class CloudVmRayBackend(backends.Backend):
                     return err_msg
 
                 subprocess_utils.handle_returncode(returncode=returncode,
-                                                   command=cmd,
+                                                   command=setup_cmd,
                                                    error_msg=error_message)
 
             num_nodes = len(ip_list)
             plural = 's' if num_nodes > 1 else ''
-            logger.info(f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
-                        f'{style.RESET_ALL}')
+            if not detach_setup:
+                logger.info(
+                    f'{fore.CYAN}Running setup on {num_nodes} node{plural}.'
+                    f'{style.RESET_ALL}')
             subprocess_utils.run_in_parallel(_setup_node, runners)
+
+        if detach_setup:
+            # Only set this when setup needs to be run outside the self._setup()
+            # as part of a job (--detach-setup).
+            self._setup_cmd = setup_cmd
+            return
         logger.info(f'{fore.GREEN}Setup completed.{style.RESET_ALL}')
         end = time.time()
         logger.debug(f'Setup took {end - start} seconds.')
@@ -3025,6 +3106,9 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
+                             setup_cmd=self._setup_cmd,
+                             envs=task.envs,
+                             setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
 
@@ -3033,12 +3117,16 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
+        job_run_id = common_utils.get_global_job_id(
+            self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
+
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_ray_task(
             bash_script=command_for_node,
             env_vars=task.envs,
             task_name=task.name,
+            job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
             log_path=log_path,
             use_sudo=use_sudo)
@@ -3082,6 +3170,9 @@ class CloudVmRayBackend(backends.Backend):
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
+                             setup_cmd=self._setup_cmd,
+                             envs=task.envs,
+                             setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
@@ -3092,6 +3183,10 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
+
+        job_run_id = common_utils.get_global_job_id(
+            self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
+
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
         for i in range(num_actual_nodes):
@@ -3106,6 +3201,7 @@ class CloudVmRayBackend(backends.Backend):
                 bash_script=command_for_node,
                 env_vars=task.envs,
                 task_name=name,
+                job_run_id=job_run_id,
                 ray_resources_dict=accelerator_dict,
                 log_path=log_path,
                 gang_scheduling_id=i,

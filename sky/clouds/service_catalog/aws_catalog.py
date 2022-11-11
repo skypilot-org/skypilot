@@ -3,12 +3,16 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
+import typing
 from typing import Dict, List, Optional, Tuple
 
-from sky.clouds import cloud
 from sky.clouds.service_catalog import common
 
-_df = common.read_catalog('aws.csv')
+if typing.TYPE_CHECKING:
+    from sky.clouds import cloud
+
+_df = common.read_catalog('aws/vms.csv')
+_image_df = common.read_catalog('aws/images.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -57,9 +61,19 @@ def get_instance_type_for_accelerator(
 
 
 def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+                                       use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
-    return common.get_region_zones(df, use_spot)
+    region_list = common.get_region_zones(df, use_spot)
+    # Hack: Enforce US regions are always tried first:
+    #   [US regions sorted by price] + [non-US regions sorted by price]
+    us_region_list = []
+    other_region_list = []
+    for region in region_list:
+        if region.name.startswith('us-'):
+            us_region_list.append(region)
+        else:
+            other_region_list.append(region)
+    return us_region_list + other_region_list
 
 
 def list_accelerators(gpus_only: bool,
@@ -69,3 +83,13 @@ def list_accelerators(gpus_only: bool,
     """Returns all instance types in AWS offering accelerators."""
     return common.list_accelerators_impl('AWS', _df, gpus_only, name_filter,
                                          case_sensitive)
+
+
+def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
+    """Returns the image id from the tag."""
+    return common.get_image_id_from_tag_impl(_image_df, tag, region)
+
+
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
+    """Returns whether the image tag is valid."""
+    return common.is_image_tag_valid_impl(_image_df, tag, region)
