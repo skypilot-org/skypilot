@@ -1656,12 +1656,14 @@ class CloudVmRayBackend(backends.Backend):
             for resource in task.resources:
                 task_resources = resource
                 if (task.num_nodes <= handle.launched_nodes and
-                    task_resources.less_demanding_than(
-                        launched_resources, requested_num_nodes=task.num_nodes)):
+                        task_resources.less_demanding_than(
+                            launched_resources,
+                            requested_num_nodes=task.num_nodes)):
                     valid_resource = resource
                     break
                 else:
-                    requested_resource_list.append(f'{task.num_nodes}x {resource}')
+                    requested_resource_list.append(
+                        f'{task.num_nodes}x {resource}')
 
             requested_resource_str = ', '.join(requested_resource_list)
             if valid_resource is None:
@@ -1684,7 +1686,8 @@ class CloudVmRayBackend(backends.Backend):
             # how many nodes satisfy task resource requirements.
             if not (task.num_nodes <= handle.launched_nodes and
                     task_resources.less_demanding_than(
-                        launched_resources, requested_num_nodes=task.num_nodes)):
+                        launched_resources,
+                        requested_num_nodes=task.num_nodes)):
                 if (task_resources.region is not None and
                         task_resources.region != launched_resources.region):
                     with ux_utils.print_exception_no_traceback():
