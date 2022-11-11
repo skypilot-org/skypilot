@@ -90,6 +90,8 @@ class Resources:
         self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id}
+        elif isinstance(image_id, dict) and None in image_id:
+            self._image_id = {self._region: image_id[None]}
 
         self._set_accelerators(accelerators, accelerator_args)
 
@@ -412,7 +414,7 @@ class Resources:
             if self._region not in self._image_id:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'image_id should contain the image for the specified '
+                        f'image_id {self._image_id} should contain the image for the specified '
                         f'region {self._region}.')
             # Narrow down the image_id to the specified region.
             self._image_id = {self._region: self._image_id[self._region]}
