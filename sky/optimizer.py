@@ -238,6 +238,9 @@ class Optimizer:
                         blocked_launchable_resources
                     )
                 node_to_candidate_map[node] = cloud_candidates
+
+                # Remove candidate that is not launchable.
+                launchable_resources = {k: v for k, v in launchable_resources.items() if v}
             else:
                 # Dummy sink node.
                 launchable_resources = node.get_resources()
@@ -877,13 +880,14 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
-                logger.info(f'No resource satisfying {resources.accelerators} '
-                            f'on {clouds_list}.')
+                hint_str = (f'No resource satisfying {resources.accelerators} '
+                            f'on {clouds_list}.\n')
                 if len(all_fuzzy_candidates) > 0:
-                    logger.info('Did you mean: '
+                    hint_str += ('Did you mean: '
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
+                raise ValueError(hint_str)
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_launchable_resources)

@@ -465,10 +465,9 @@ class Task:
 
         This is EXPERIMENTAL.
         """
+        # If time estimator is not set, assume 1 hour.
         if self.time_estimator_func is None:
-            raise NotImplementedError(
-                'Node [{}] does not have a cost model set; '
-                'call set_time_estimator() first'.format(self))
+            return 3600
         return self.time_estimator_func(resources)
 
     def set_file_mounts(self, file_mounts: Optional[Dict[str, str]]) -> 'Task':
@@ -788,9 +787,8 @@ class Task:
 
         add_if_not_none('name', self.name)
 
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
+        if self.best_resources is not None:
+            resources = self.best_resources
             add_if_not_none('resources', resources.to_yaml_config())
         add_if_not_none('num_nodes', self.num_nodes)
 
