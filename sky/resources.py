@@ -417,8 +417,8 @@ class Resources:
             # Narrow down the image_id to the specified region.
             self._image_id = {self._region: self._image_id[self._region]}
 
+        # Check the image_id's are valid.
         for region, image_id in self._image_id.items():
-            region = region or self._region
             if (image_id.startswith('skypilot:') and
                     not self._cloud.is_image_tag_valid(image_id, region)):
                 region_str = f' ({region})' if region else ''
