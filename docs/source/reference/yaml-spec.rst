@@ -1,11 +1,13 @@
 .. _yaml-spec:
 
-YAML Configuration
+Task YAML
 ==================
 
-SkyPilot provides the ability to specify a task, its resource requirements, and take
-advantage of many other features provided using a YAML interface. Below, we
-describe all fields available.
+SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
+
+Task YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (:meth:`sky.Task.from_yaml`).
+
+Available fields:
 
 .. code-block:: yaml
 
@@ -89,6 +91,11 @@ describe all fields available.
       #
       # AWS
       # To find AWS AMI ids: https://leaherb.com/how-to-find-an-aws-marketplace-ami-image-id
+      # You can also change the default OS version by choosing from the following image tags provided by SkyPilot:
+      #   image_id: skypilot:gpu-ubuntu-2004
+      #   image_id: skypilot:k80-ubuntu-2004
+      #   image_id: skypilot:gpu-ubuntu-1804
+      #   image_id: skypilot:k80-ubuntu-1804
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
