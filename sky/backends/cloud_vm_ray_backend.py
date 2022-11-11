@@ -1150,7 +1150,7 @@ class RetryingVmProvisioner(object):
 
         # Get the private IP of head node for connecting Ray cluster.
         head_runner = command_runner.SSHCommandRunner(all_ips[0],
-                                                      *ssh_credentials)
+                                                      **ssh_credentials)
         cmd_str = 'python3 -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
         rc, stdout, stderr = head_runner.run(cmd_str,
                                              stream_logs=False,
@@ -1992,7 +1992,7 @@ class CloudVmRayBackend(backends.Backend):
 
         # TODO(zhwu): refactor this with backend_utils.parallel_cmd_with_rsync
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
+            ip_list, **ssh_credentials)
 
         def _sync_workdir_node(runner: command_runner.SSHCommandRunner) -> None:
             runner.rsync(
@@ -2051,8 +2051,12 @@ class CloudVmRayBackend(backends.Backend):
                 worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
+            # Disable connection sharing for setup script to avoid old
+            # connections being reused, which may cause stale ssh agent
+            # forwarding.
+            ssh_credentials.pop('ssh_control_name')
             runners = command_runner.SSHCommandRunner.make_runner_list(
-                ip_list, *ssh_credentials)
+                ip_list, **ssh_credentials)
 
             # Need this `-i` option to make sure `source ~/.bashrc` work
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
@@ -2135,7 +2139,7 @@ class CloudVmRayBackend(backends.Backend):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 *ssh_credentials)
+                                                 **ssh_credentials)
         with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
             fp.write(codegen)
             fp.flush()
@@ -2153,8 +2157,8 @@ class CloudVmRayBackend(backends.Backend):
         assert executable == 'python3', executable
         cd = f'cd {SKY_REMOTE_WORKDIR}'
 
-        ssh_user = ssh_credentials[0]
-        ray_job_id = job_lib.make_ray_job_id(job_id, ssh_user)
+        ray_job_id = job_lib.make_ray_job_id(job_id,
+                                             ssh_credentials['ssh_user'])
         if isinstance(handle.launched_resources.cloud, clouds.Local):
             # Ray Multitenancy is unsupported.
             # (Git Issue) https://github.com/ray-project/ray/issues/6800
@@ -2231,9 +2235,9 @@ class CloudVmRayBackend(backends.Backend):
         """Generates and prepares job submission code for local clusters."""
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        ssh_user = ssh_credentials[0]
+        ssh_user = ssh_credentials['ssh_user']
         runner = command_runner.SSHCommandRunner(handle.head_ip,
-                                                 *ssh_credentials)
+                                                 **ssh_credentials)
         remote_log_dir = self.log_dir
         with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
             fp.write(ray_command)
@@ -2446,7 +2450,7 @@ class CloudVmRayBackend(backends.Backend):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
+            ip_list, **ssh_credentials)
 
         def _rsync_down(args) -> None:
             """Rsync down logs from remote nodes.
@@ -2785,7 +2789,7 @@ class CloudVmRayBackend(backends.Backend):
                                             max_attempts)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
-        runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+        runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
         if under_remote_workdir:
             cmd = f'cd {SKY_REMOTE_WORKDIR} && {cmd}'
 
@@ -2855,7 +2859,7 @@ class CloudVmRayBackend(backends.Backend):
             cluster_config_file)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
+            ip_list, **ssh_credentials)
 
         def _setup_tpu_name_on_node(
                 runner: command_runner.SSHCommandRunner) -> None:
@@ -2889,7 +2893,7 @@ class CloudVmRayBackend(backends.Backend):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
+            ip_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'file_mounts.log')
 
         # Check the files and warn
@@ -3035,7 +3039,7 @@ class CloudVmRayBackend(backends.Backend):
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
-            ip_list, *ssh_credentials)
+            ip_list, **ssh_credentials)
         log_path = os.path.join(self.log_dir, 'storage_mounts.log')
 
         for dst, storage_obj in storage_mounts.items():
