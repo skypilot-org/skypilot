@@ -107,7 +107,7 @@ class SSHCommandRunner:
         ip: str,
         ssh_user: str,
         ssh_private_key: str,
-        ssh_control_name: str = '__default__',
+        ssh_control_name: Optional[str] = '__default__',
     ):
         """Initialize SSHCommandRunner.
 
