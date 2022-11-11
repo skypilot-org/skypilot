@@ -10,5 +10,5 @@ task.set_resources({
     sky.Resources(sky.GCP(), accelerators={'K80': 1}),
 })
 
-sky.launch(task, cluster_name=f'my-cluster', stream_logs=False, down=False)
-sky.exec(task, cluster_name='my-cluster', stream_logs=True)
+sky.launch(task, cluster_name=f'my-cluster-2', stream_logs=False, down=False)
+sky.exec(task, cluster_name='my-cluster-2', stream_logs=True)
