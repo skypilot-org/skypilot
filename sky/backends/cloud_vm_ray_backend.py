@@ -414,10 +414,8 @@ class RayCodeGen:
         ]
 
         if env_vars is not None:
-            sky_env_vars_dict_str.extend(
-                f'sky_env_vars_dict[{k!r}] = {v!r}'
-                for k, v in env_vars.items()
-            )
+            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
+                                         for k, v in env_vars.items())
         if job_run_id is not None:
             sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
@@ -3097,8 +3095,8 @@ class CloudVmRayBackend(backends.Backend):
         job_run_id = task.envs.get(
             constants.JOB_ID_ENV_VAR,
             common_utils.get_global_job_id(self.run_timestamp,
-                                            cluster_name=handle.cluster_name,
-                                            job_id=job_id))
+                                           cluster_name=handle.cluster_name,
+                                           job_id=job_id))
 
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3163,14 +3161,14 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
-        
+
         # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
         # set by the controller.
         job_run_id = task.envs.get(
             constants.JOB_ID_ENV_VAR,
             common_utils.get_global_job_id(self.run_timestamp,
-                                            cluster_name=handle.cluster_name,
-                                            job_id=job_id))
+                                           cluster_name=handle.cluster_name,
+                                           job_id=job_id))
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.

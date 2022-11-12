@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.backends import backend_utils
-from sky.utils import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
