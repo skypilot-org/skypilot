@@ -412,7 +412,7 @@ class RayCodeGen:
             """)
 
         if env_vars is not None:
-            sky_env_vars_dict_str = '\n'.join(
+            sky_env_vars_dict_str += '\n'.join(
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
                 for k, v in env_vars.items())
         if job_run_id is not None:
