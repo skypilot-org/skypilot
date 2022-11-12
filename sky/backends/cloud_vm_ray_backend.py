@@ -208,7 +208,9 @@ class RayCodeGen:
             self._code += [
                 textwrap.dedent(f"""\
                 _SETUP_CPUS = 0.0001
-                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string. We unset it so that user setup command may properly use this env var.
+                # The setup command will be run as a ray task with num_cpus=_SETUP_CPUS as the
+                # requirement; this means Ray will set CUDA_VISIBLE_DEVICES to an empty string.
+                # We unset it so that user setup command may properly use this env var.
                 setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
                 print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
