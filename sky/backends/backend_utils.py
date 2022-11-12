@@ -1794,7 +1794,10 @@ def get_clusters(
         ]
 
     def _is_local_cluster(record):
-        cluster_resources = record['handle'].launched_resources
+        handle = record['handle']
+        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+            return False
+        cluster_resources = handle.launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
 
     if cloud_filter == CloudFilter.LOCAL:
