@@ -313,7 +313,7 @@ def test_env_check():
     test = Test(
         'env_check',
         [
-            f'sky launch -y -c {name} examples/env_check.yaml',
+            f'sky launch -y -c {name} --detach-setup examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
