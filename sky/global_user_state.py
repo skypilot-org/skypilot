@@ -14,7 +14,7 @@ import pickle
 import time
 import uuid
 import typing
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional, Set
 
 from sky import clouds
 from sky.utils import db_utils
@@ -119,7 +119,7 @@ class StorageStatus(enum.Enum):
 def add_or_update_cluster(
     cluster_name: str,
     cluster_handle: 'backends.Backend.ResourceHandle',
-    task: Any,
+    requested_resources: Optional[Set[Any]],
     ready: bool,
     is_launch: bool = True,
 ):
@@ -142,10 +142,9 @@ def add_or_update_cluster(
 
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    requested_resources = None
-    if task and not usage_intervals:
-        assert len(task.resources) == 1, task.resources
-        requested_resources = list(task.resources)[0]
+    if requested_resources and not usage_intervals:
+        assert len(requested_resources) == 1, requested_resources
+        requested_resources = list(requested_resources)[0]
 
     if not usage_intervals:
         usage_intervals = []

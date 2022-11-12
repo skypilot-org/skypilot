@@ -1617,7 +1617,7 @@ def _update_cluster_status_no_lock(
         handle.head_ip = ips[0]
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
-                                                task=None,
+                                                requested_resources=None,
                                                 ready=True,
                                                 is_launch=False)
         return record

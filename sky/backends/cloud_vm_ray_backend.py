@@ -952,7 +952,7 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(
                 cluster_name,
                 cluster_handle=handle,
-                task=task,
+                requested_resources=task.resources,
                 ready=False,
             )
 
@@ -1863,7 +1863,7 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.add_or_update_cluster(
                     cluster_name,
                     handle,
-                    task,
+                    task.resources,
                     ready=True,
                 )
                 usage_lib.messages.usage.update_final_cluster_status(
