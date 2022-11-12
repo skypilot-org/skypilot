@@ -342,7 +342,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         '#RECOVERIES', 'STATUS'
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'SKYPILOT_JOB_ID']
+        columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
 
     status_counts = collections.defaultdict(int)
@@ -377,7 +377,6 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
                 job['cluster_resources'],
                 job['region'],
             ])
-            values.append(job['job_id_env_var'])
         job_table.add_row(values)
     status_str = ', '.join([
         f'{count} {status}' for status, count in sorted(status_counts.items())

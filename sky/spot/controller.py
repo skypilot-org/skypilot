@@ -49,8 +49,7 @@ class SpotController:
             self._job_id,
             self._task_name,
             self.backend.run_timestamp,
-            resources_str=backend_utils.get_task_resources_str(self._task),
-            job_id_env_var=job_id_env_var)
+            resources_str=backend_utils.get_task_resources_str(self._task))
         logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
