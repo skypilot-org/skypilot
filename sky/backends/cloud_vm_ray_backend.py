@@ -904,13 +904,10 @@ class RetryingVmProvisioner(object):
                 use_spot=to_provision.use_spot,
         ):
             # Only retry requested region/zones or all if not specified.
-            if (to_provision.region is not None and
-                    region.name != to_provision.region):
+            zone_names = [zone.name for zone in zones]
+            if not to_provision.valid_on_region_zones(region.name, zone_names):
                 continue
             if to_provision.zone is not None:
-                zones_name = [zone.name for zone in zones]
-                if to_provision.zone not in zones_name:
-                    continue
                 zones = [clouds.Zone(name=to_provision.zone)]
             yield (region, zones)
 

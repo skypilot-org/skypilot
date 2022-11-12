@@ -216,11 +216,10 @@ def _interactive_node_cli_command(cli_func):
                                  help=('Automatically stop the cluster after '
                                        'this many minutes of idleness, i.e. '
                                        'no running or pending jobs in the '
-                                       'cluster\'s job queue. Idleness starts '
-                                       'counting after setup/file_mounts are '
-                                       'done; the clock gets reset whenever '
-                                       'there are running/pending jobs in the '
-                                       'job queue. If not set, the cluster '
+                                       'cluster\'s job queue. Idleness gets '
+                                       'reset whenever setting-up/running/'
+                                       'pending jobs are found in the job '
+                                       'queue. If not set, the cluster '
                                        'will not be auto-stopped.'))
     autodown = click.option('--down',
                             default=False,
@@ -763,10 +762,9 @@ def _create_and_ssh_into_node(
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
         idle_minutes_to_autostop: Automatically stop the cluster after
-                                  specified minutes of idleness. Idleness
-                                  starts counting after setup/file_mounts are
-                                  done; the clock gets reset whenever there
-                                  are running/pending jobs in the job queue.
+                                  specified minutes of idleness. Idleness gets
+                                  reset whenever setting-up/running/pending
+                                  jobs are found in the job queue.
         down: If true, autodown the cluster after all jobs finish. If
               idle_minutes_to_autostop is also set, the cluster will be torn
               down after the specified idle time.
@@ -1096,9 +1094,8 @@ def cli():
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
@@ -1763,9 +1760,8 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))

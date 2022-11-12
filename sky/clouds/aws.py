@@ -115,8 +115,13 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _get_image_id(cls, region_name: str, instance_type: str,
-                      image_id: Optional[str]) -> str:
+                      image_id: Optional[Dict[str, str]]) -> str:
         if image_id is not None:
+            if None in image_id:
+                image_id = image_id[None]
+            else:
+                assert region_name in image_id, image_id
+                image_id = image_id[region_name]
             if image_id.startswith('skypilot:'):
                 image_id = service_catalog.get_image_id_from_tag(image_id,
                                                                  region_name,
