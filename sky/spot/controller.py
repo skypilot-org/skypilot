@@ -40,15 +40,18 @@ class SpotController:
         # the user can have the same id for multiple recoveries.
         #   Example value: sky-2022-10-04-22-46-52-467694_id-17
         task_envs = self._task.envs or {}
-        task_envs[constants.JOB_ID_ENV_VAR] = common_utils.get_global_job_id(
+        job_id_env_var = common_utils.get_global_job_id(
             self.backend.run_timestamp, 'spot', self._job_id)
+        task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
         self._task.set_envs(task_envs)
 
         spot_state.set_submitted(
             self._job_id,
             self._task_name,
             self.backend.run_timestamp,
-            resources_str=backend_utils.get_task_resources_str(self._task))
+            resources_str=backend_utils.get_task_resources_str(self._task),
+            job_id_env_var=job_id_env_var)
+        logger.info(f'Submitted with $SKY_JOB_ID: {job_id_env_var}')
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(

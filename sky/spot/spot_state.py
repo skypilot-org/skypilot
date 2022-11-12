@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.utils import db_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -32,6 +33,9 @@ _CURSOR.execute("""\
     last_recovered_at FLOAT DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
     job_duration FLOAT DEFAULT 0)""")
+
+db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'job_id_env_var', 'TEXT')
+
 # job_duration is the time a job actually runs before last_recover,
 # excluding the provision and recovery time.
 # If the job is not finished:
@@ -43,7 +47,7 @@ _CONN.commit()
 columns = [
     'job_id', 'job_name', 'resources', 'submitted_at', 'status',
     'run_timestamp', 'start_at', 'end_at', 'last_recovered_at',
-    'recovery_count', 'job_duration'
+    'recovery_count', 'job_duration', 'job_id_env_var'
 ]
 
 
@@ -89,7 +93,7 @@ def set_pending(job_id: int, name: str, resources_str: str):
 
 
 def set_submitted(job_id: int, name: str, run_timestamp: str,
-                  resources_str: str):
+                  resources_str: str, job_id_env_var: str):
     """Set the job to submitted."""
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make the
     # log directory and submission time align with each other, so as to make
@@ -104,10 +108,11 @@ def set_submitted(job_id: int, name: str, run_timestamp: str,
         resources=(?),
         submitted_at=(?),
         status=(?),
-        run_timestamp=(?)
+        run_timestamp=(?),
+        job_id_env_var=(?)
         WHERE job_id=(?)""",
         (name, resources_str, submit_time, SpotStatus.SUBMITTED.value,
-         run_timestamp, job_id))
+         run_timestamp, job_id_env_var, job_id))
     _CONN.commit()
 
 
