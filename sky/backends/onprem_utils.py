@@ -492,7 +492,6 @@ def check_local_cloud_args(cloud: Optional[str] = None,
                 '`cloud: local` or no cloud in YAML or CLI args.')
         return True
     else:
-        backend_utils.check_public_cloud_enabled()
         if cloud == 'local' or yaml_cloud == 'local':
             if cluster_name is not None:
                 raise click.UsageError(
