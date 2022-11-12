@@ -208,6 +208,9 @@ class RayCodeGen:
             self._code += [
                 textwrap.dedent(f"""\
                 _SETUP_CPUS = 0.0001
+                # Unset CUDA_VISIBLE_DEVICES (set by ray), since the setup command
+                # may need to detect the number of GPUs on the machine.
+                setup_cmd = 'unset CUDA_VISIBLE_DEVICES; ' + setup_cmd
                 job_lib.set_status({job_id!r}, job_lib.JobStatus.SETTING_UP)
                 print({_CTRL_C_TIP_MESSAGE!r}, file=sys.stderr, flush=True)
                 total_num_nodes = len(ray.nodes())
@@ -2041,6 +2044,7 @@ class CloudVmRayBackend(backends.Backend):
             f.write(setup_script)
             f.flush()
             setup_sh_path = f.name
+            print(setup_sh_path)
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
             ip_list = backend_utils.get_node_ips(
