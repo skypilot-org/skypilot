@@ -842,8 +842,9 @@ def _fill_in_launchable_resources(
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'Task {task} requires {resources.cloud} which is not '
-                    'enabled. Run `sky check` to enable access to it, '
-                    'or change the cloud requirement.')
+                    'enabled. To enable access, or change the cloud '
+                    f'requirement, run {colorama.StyleBRIGHT}sky check '
+                    f'{colorama.Style.RESET_ALL}')
         elif resources.is_launchable():
             if isinstance(resources.cloud, clouds.GCP):
                 # Check if the host VM satisfies the max vCPU and memory limits.
