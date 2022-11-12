@@ -2066,8 +2066,9 @@ def check_public_cloud_enabled():
 
     def _no_public_cloud():
         enabled_clouds = global_user_state.get_enabled_clouds()
-        return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
-                                                       clouds.Local)
+        return (len(enabled_clouds) == 0 or
+                (len(enabled_clouds) == 1 and
+                 isinstance(enabled_clouds[0], clouds.Local)))
 
     if not _no_public_cloud():
         return
