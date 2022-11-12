@@ -687,7 +687,7 @@ def _launch_with_confirm(
         except RuntimeError as e:
             # Catch the exception where the public cloud is not enabled, and
             # only print the error message without the error type.
-            click.echo(e)
+            click.secho(e, fg='yellow')
             sys.exit(1)
         dag = sky.optimize(dag)
     task = dag.tasks[0]
