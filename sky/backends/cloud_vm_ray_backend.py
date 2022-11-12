@@ -2044,7 +2044,6 @@ class CloudVmRayBackend(backends.Backend):
             f.write(setup_script)
             f.flush()
             setup_sh_path = f.name
-            print(setup_sh_path)
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
             ip_list = backend_utils.get_node_ips(
