@@ -1794,7 +1794,7 @@ def autostop(
     is_flag=True,
     required=False,
     help=('Force start the cluster even if it is already UP. Useful for '
-          'upgrading SkyPilot runtime.'))
+          'upgrading the SkyPilot runtime on the cluster.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
