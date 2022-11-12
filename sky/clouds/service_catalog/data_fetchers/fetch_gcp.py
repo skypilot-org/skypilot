@@ -11,6 +11,7 @@ from lxml import html
 import pandas as pd
 import requests
 
+# pylint: disable=line-too-long
 GCP_URL = 'https://cloud.google.com'
 GCP_VM_PRICING_URL = 'https://cloud.google.com/compute/vm-instance-pricing'
 GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
@@ -319,7 +320,8 @@ def get_a2_df():
             cpu = spec['vCPUs']
             memory = spec['MemoryGiB']
             price = per_cpu_price * cpu + per_memory_price * memory
-            spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
+            spot_price = (per_cpu_spot_price * cpu +
+                          per_memory_spot_price * memory)
             table.append(
                 [instance_type, cpu, memory, price, spot_price, region])
     a2_df = pd.DataFrame(table,
@@ -564,8 +566,8 @@ def get_tpu_df():
     # Add columns for the service catalog.
     tpu_df['InstanceType'] = None
     tpu_df['GpuInfo'] = tpu_df['AcceleratorName']
-    gpu_df['vCPUs'] = None
-    gpu_df['MemoryGiB'] = None
+    tpu_df['vCPUs'] = None
+    tpu_df['MemoryGiB'] = None
     return tpu_df
 
 
@@ -576,18 +578,18 @@ if __name__ == '__main__':
         action='store_true',
         help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
-    region_prefix = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
+    region_prefix_filter = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
 
-    vm_df = get_vm_df(region_prefix)
-    gpu_df = get_gpu_df(region_prefix)
-    tpu_df = get_tpu_df()
-    catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
+    processed_vm_df = get_vm_df(region_prefix_filter)
+    processed_gpu_df = get_gpu_df(region_prefix_filter)
+    processed_tpu_df = get_tpu_df()
+    catalog_df = pd.concat([processed_vm_df, processed_gpu_df, processed_tpu_df])
 
     # Filter out unsupported VMs from the catalog.
     for vm in UNSUPPORTED_VMS:
         # NOTE: The `InstanceType` column can be NaN.
-        catalog_df = catalog_df[
-            catalog_df['InstanceType'].str.startswith(vm) != True]
+        catalog_df = catalog_df[not catalog_df['InstanceType'].str.startswith(vm
+                                                                             )]
 
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
