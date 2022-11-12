@@ -155,6 +155,7 @@ def test_region():
             f'sky launch -y -c {name} --region us-west-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -171,6 +172,89 @@ def test_zone():
             f'sky exec {name} examples/minimal.yaml --zone us-west-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
+        ],
+        f'sky down -y {name} {name}-2 {name}-3',
+    )
+    run_one_test(test)
+
+
+def test_image_id_dict():
+    name = _get_cluster_name()
+    test = Test(
+        'image_id_dict',
+        [
+            # Use image id dict.
+            f'sky launch -y -c {name} examples/per_region_images.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} "ls ~"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name} {name}-2 {name}-3',
+    )
+    run_one_test(test)
+
+
+def test_image_id_dict_with_region():
+    name = _get_cluster_name()
+    test = Test(
+        'image_id_dict_with_region',
+        [
+            # Use region to filter image_id dict.
+            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml && exit 1 || true',
+            f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
+            f'sky launch -y -c {name} --region us-west-1 examples/per_region_images.yaml',
+            # Should success because the image id match for the region.
+            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+            f'sky status --all | grep {name} | grep us-west-1',  # Ensure the region is correct.
+            # Ensure exec works.
+            f'sky exec {name} --region us-west-1 examples/per_region_images.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} --cloud aws --region us-west-1 "ls ~"',
+            f'sky exec {name} "ls ~"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_image_id_dict_with_zone():
+    name = _get_cluster_name()
+    test = Test(
+        'image_id_dict_with_region',
+        [
+            # Use zone to filter image_id dict.
+            f'sky launch -y -c {name} --zone us-west-2b examples/per_region_images.yaml && exit 1 || true',
+            f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
+            f'sky launch -y -c {name} --zone us-west-1a examples/per_region_images.yaml',
+            # Should success because the image id match for the zone.
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            # Fail due to image id mismatch.
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+            f'sky status --all | grep {name} | grep us-west-1a',  # Ensure the zone is correct.
+            # Ensure exec works.
+            f'sky exec {name} --zone us-west-1a examples/per_region_images.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} --cloud aws --region us-west-1 "ls ~"',
+            f'sky exec {name} "ls ~"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
     )

@@ -181,12 +181,12 @@ def start(
         cluster_name: name of the cluster to start.
         idle_minutes_to_autostop: automatically stop the cluster after this
             many minute of idleness, i.e., no running or pending jobs in the
-            cluster's job queue. Idleness starts counting after
-            setup/file_mounts are done; the clock gets reset whenever there
-            are running/pending jobs in the job queue. Setting this flag is
-            equivalent to running ``sky.launch(..., detach_run=True, ...)``
-            and then ``sky.autostop(idle_minutes=<minutes>)``. If not set,
-            the cluster will not be autostopped.
+            cluster's job queue. Idleness gets reset whenever setting-up/
+            running/pending jobs are found in the job queue. Setting this
+            flag is equivalent to running
+            ``sky.launch(..., detach_run=True, ...)`` and then
+            ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
+            cluster will not be autostopped.
         retry_until_up: whether to retry launching the cluster until it is
             up.
         down: Autodown the cluster: tear down the cluster after specified

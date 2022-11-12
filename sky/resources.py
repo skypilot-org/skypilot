@@ -57,7 +57,7 @@ class Resources:
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Optional[str] = None,
+        image_id: Union[Dict[str, str], str, None] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -88,6 +88,10 @@ class Resources:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
         self._image_id = image_id
+        if isinstance(image_id, str):
+            self._image_id = {self._region: image_id}
+        elif isinstance(image_id, dict) and None in image_id:
+            self._image_id = {self._region: image_id[None]}
 
         self._set_accelerators(accelerators, accelerator_args)
 
@@ -114,7 +118,10 @@ class Resources:
 
         image_id = ''
         if self.image_id is not None:
-            image_id = f', image_id={self.image_id!r}'
+            if None in self.image_id:
+                image_id = f', image_id={self.image_id[None]}'
+            else:
+                image_id = f', image_id={self.image_id!r}'
 
         disk_size = ''
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
@@ -175,7 +182,7 @@ class Resources:
         return self._disk_size
 
     @property
-    def image_id(self) -> Optional[str]:
+    def image_id(self) -> Optional[Dict[str, str]]:
         return self._image_id
 
     def _set_accelerators(
@@ -263,11 +270,10 @@ class Resources:
                 raise ValueError(
                     'Cloud must be specified when region/zone are specified.')
 
-        # Validate whether region and zone exist in the catalog.
-        self._cloud.validate_region_zone(region, zone)
-
-        self._region = region
-        self._zone = zone
+        # Validate whether region and zone exist in the catalog, and set the
+        # region if zone is specified.
+        self._region, self._zone = self._cloud.validate_region_zone(
+            region, zone)
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -404,23 +410,31 @@ class Resources:
                     'image_id is only supported for AWS and GCP, please '
                     'explicitly specify the cloud.')
 
-        if (self._image_id.startswith('skypilot:') and
-                not self._cloud.is_image_tag_valid(self._image_id,
-                                                   self._region)):
-            region_or_zone = self._region or self._zone
-            region_str = f' ({region_or_zone})' if region_or_zone else ''
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Image tag {self._image_id} is not valid, please make sure'
-                    f' the tag exists in {self._cloud}{region_str}.')
+        if self._region is not None:
+            if self._region not in self._image_id:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'image_id {self._image_id} should contain the image '
+                        f'for the specified region {self._region}.')
+            # Narrow down the image_id to the specified region.
+            self._image_id = {self._region: self._image_id[self._region]}
 
-        if (self._cloud.is_same_cloud(clouds.AWS()) and
-                not self._image_id.startswith('skypilot:') and
-                self._region is None):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'image_id is only supported for AWS in a specific '
-                    'region, please explicitly specify the region.')
+        # Check the image_id's are valid.
+        for region, image_id in self._image_id.items():
+            if (image_id.startswith('skypilot:') and
+                    not self._cloud.is_image_tag_valid(image_id, region)):
+                region_str = f' ({region})' if region else ''
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Image tag {image_id} is not valid, please make sure'
+                        f' the tag exists in {self._cloud}{region_str}.')
+
+            if (self._cloud.is_same_cloud(clouds.AWS()) and
+                    not image_id.startswith('skypilot:') and region is None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'image_id is only supported for AWS in a specific '
+                        'region, please explicitly specify the region.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
@@ -516,8 +530,20 @@ class Resources:
             return False
         # self.zone <= other.zone
 
-        if (self.image_id is not None and self.image_id != other.image_id):
-            return False
+        if self.image_id is not None:
+            if other.image_id is None:
+                return False
+            if other.region is None:
+                # Current image_id should be a subset of other.image_id
+                if not self.image_id.items() <= other.image_id.items():
+                    return False
+            else:
+                this_image = (self.image_id.get(other.region) or
+                              self.image_id.get(None))
+                other_image = (other.image_id.get(other.region) or
+                               other.image_id.get(None))
+                if this_image != other_image:
+                    return False
 
         if (self._instance_type is not None and
                 self._instance_type != other.instance_type):
@@ -583,6 +609,17 @@ class Resources:
         )
         assert len(override) == 0
         return resources
+
+    def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
+        """Returns whether this Resources is valid on given region and zones"""
+        if self.region is not None and self.region != region:
+            return False
+        if self.zone is not None and self.zone not in zones:
+            return False
+        if self.image_id is not None:
+            if None not in self.image_id and region not in self.image_id:
+                return False
+        return True
 
     @classmethod
     def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
