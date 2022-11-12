@@ -9,6 +9,8 @@ setup: |
   echo "here"
   echo "export TEST_VAR=test" >> ~/.bashrc
   [[ -v CUDA_VISIBLE_DEVICES ]] && exit 1 || exit 0
+  export CUDA_VISIBLE_DEVICES=1
+  [[ -v CUDA_VISIBLE_DEVICES ]] && exit 0 || exit 1
 
 run: |
   if [[ -z "${TEST_VAR}" ]]; then
