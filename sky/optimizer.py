@@ -843,7 +843,7 @@ def _fill_in_launchable_resources(
                 raise exceptions.ResourcesUnavailableError(
                     f'Task {task} requires {resources.cloud} which is not '
                     'enabled. To enable access, or change the cloud '
-                    f'requirement, run {colorama.StyleBRIGHT}sky check '
+                    f'requirement, run {colorama.Style.BRIGHT}sky check '
                     f'{colorama.Style.RESET_ALL}')
         elif resources.is_launchable():
             if isinstance(resources.cloud, clouds.GCP):
