@@ -2076,5 +2076,6 @@ def check_public_cloud_enabled():
     sky_check.check(quiet=True)
     if _no_public_cloud():
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Cloud access is not set up. Run: '
+            raise RuntimeError(
+                'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
