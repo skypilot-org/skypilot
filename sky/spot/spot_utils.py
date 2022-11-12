@@ -352,15 +352,13 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         job_duration = log_utils.readable_time_duration(0,
                                                         job['job_duration'],
                                                         absolute=True)
-        ago_suffix = ' ago' if show_all else ''
-        submitted = log_utils.readable_time_duration(job['submitted_at'],
-                                                     absolute=show_all)
+        submitted = log_utils.readable_time_duration(job['submitted_at'])
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            submitted + ago_suffix if submitted != '-' else submitted,
+            submitted if submitted != '-' else submitted,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
@@ -373,10 +371,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
             status_counts[job['status'].value] += 1
         if show_all:
             # STARTED
-            started = log_utils.readable_time_duration(job['start_at'],
-                                                       absolute=True)
-            if started != '-':
-                started += ago_suffix
+            started = log_utils.readable_time_duration(job['start_at'])
             values.append(started)
             values.extend([
                 job['cluster_resources'],

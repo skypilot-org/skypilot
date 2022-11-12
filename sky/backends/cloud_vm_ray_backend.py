@@ -3092,11 +3092,13 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        job_run_id = task.envs.get(
-            constants.JOB_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=job_id))
+        if task.spot_task is None:
+            # Don't set JOB_ID_ENV_VAR if it is a spot controller task.
+            job_run_id = task.envs.get(
+                constants.JOB_ID_ENV_VAR,
+                common_utils.get_global_job_id(self.run_timestamp,
+                                               cluster_name=handle.cluster_name,
+                                               job_id=job_id))
 
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3162,11 +3164,13 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        job_run_id = task.envs.get(
-            constants.JOB_ID_ENV_VAR,
-            common_utils.get_global_job_id(self.run_timestamp,
-                                           cluster_name=handle.cluster_name,
-                                           job_id=job_id))
+        if task.spot_task is None:
+            # Don't set JOB_ID_ENV_VAR if it is a spot controller task.
+            job_run_id = task.envs.get(
+                constants.JOB_ID_ENV_VAR,
+                common_utils.get_global_job_id(self.run_timestamp,
+                                               cluster_name=handle.cluster_name,
+                                               job_id=job_id))
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.
