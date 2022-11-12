@@ -404,21 +404,26 @@ class RayCodeGen:
         resources_str += ', placement_group=pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
 
-        sky_env_vars_dict_str = textwrap.dedent(f"""\
+        sky_env_vars_dict_str = [
+            textwrap.dedent("""\
             sky_env_vars_dict = dict()
             sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
             """)
+        ]
 
         if env_vars is not None:
-            sky_env_vars_dict_str += '\n'.join(
+            sky_env_vars_dict_str += [
                 f'sky_env_vars_dict[{k!r}] = {v!r}'
-                for k, v in env_vars.items())
+                for k, v in env_vars.items()
+            ]
         if job_run_id is not None:
-            sky_env_vars_dict_str += (
-                f'\nsky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
-                f' = {job_run_id!r}')
+            sky_env_vars_dict_str += [
+                f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
+                f' = {job_run_id!r}'
+            ]
+        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
