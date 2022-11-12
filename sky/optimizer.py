@@ -827,10 +827,7 @@ def _fill_in_launchable_resources(
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
     enabled_clouds = global_user_state.get_enabled_clouds()
-    if backend_utils.is_public_cloud_disabled() and try_fix_with_sky_check:
-        check.check(quiet=True)
-        return _fill_in_launchable_resources(task, blocked_launchable_resources,
-                                             False)
+    backend_utils.check_public_cloud_enabled()
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(resources_lib.Resources)
     if blocked_launchable_resources is None:
