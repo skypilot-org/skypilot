@@ -266,7 +266,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 break
             # The job can be cancelled by the user or the controller (when the
             # the cluster is partially preempted).
-            logger.info('INFO: (Log streaming) The job is cancelled. Waiting '
+            logger.info('INFO: (Log streaming) Job is cancelled. Waiting '
                         'for the status update in '
                         f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         else:
