@@ -200,7 +200,8 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = '[bold cyan]Waiting for controller (Controller status: {})[/]'
+    status_msg = ('[bold cyan]Waiting for controller, controller status: {}.[/]'
+                  'It may take a few minutes.')
     status_display = rich.status.Status('[bold cyan]Waiting for logs...[/]')
     with status_display:
         while (controller_status != job_lib.JobStatus.RUNNING and
@@ -253,7 +254,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'INFO: The log is not ready yet{status_help_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 status_display.update('[bold cyan]Waiting for the spot job'
-                                      f'{status_help_str}[/]')
+                                      f'{status_help_str}.[/] It may take '
+                                      'a few minutes.')
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
