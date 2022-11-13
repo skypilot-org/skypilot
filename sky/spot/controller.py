@@ -86,8 +86,23 @@ class SpotController:
                                                    self._cluster_name)
 
             if job_status is not None and not job_status.is_terminal():
-                # The job is healthy, continue to monitor the job status.
-                continue
+                need_recovery = False
+                if self._task.num_nodes > 1:
+                    # Check the cluster status for multi-node jobs, since the
+                    # job may not be set to FAILED immediately when only some
+                    # of the nodes are preempted.
+                    (cluster_status,
+                     handle) = backend_utils.refresh_cluster_status_handle(
+                         self._cluster_name, force_refresh=True)
+                    if cluster_status != global_user_state.ClusterStatus.UP:
+                        # recover the cluster if it is not up.
+                        logger.info(f'Cluster status {cluster_status.value}. '
+                                    'Recovering...')
+                        need_recovery = True
+                if not need_recovery:
+                    # The job and cluster are healthy, continue to monitor the
+                    # job status.
+                    continue
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 end_time = spot_utils.get_job_timestamp(self.backend,
@@ -97,12 +112,9 @@ class SpotController:
                 spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
-            assert (job_status is None or
-                    job_status == job_lib.JobStatus.FAILED), (
-                        f'The job should not be {job_status.value}.')
             if job_status == job_lib.JobStatus.FAILED:
-                # Check the status of the spot cluster. It can be STOPPED or UP,
-                # where STOPPED means partially down.
+                # Check the status of the spot cluster. If it is not UP,
+                # the cluster is preempted.
                 (cluster_status,
                  handle) = backend_utils.refresh_cluster_status_handle(
                      self._cluster_name, force_refresh=True)
