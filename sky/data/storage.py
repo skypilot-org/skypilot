@@ -953,7 +953,8 @@ class S3Store(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = 'sudo conda install -y -c conda-forge s3fs-fuse'
-        mount_cmd = f's3fs {self.bucket.name} {mount_path}'
+        mount_cmd = ('s3fs -o allow_other '
+                     f'{self.bucket.name} {mount_path}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
