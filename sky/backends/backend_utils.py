@@ -1138,13 +1138,14 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 
 @timeline.event
 def get_stable_cluster_ips(handle: backends.Backend.ResourceHandle,
-                           cluster_external_ips: List[str] = None,
-                           cluster_internal_ips: List[str] = None,
+                           cluster_external_ips: Optional[List[str]] = None,
+                           cluster_internal_ips: Optional[List[str]] = None,
                            get_internal_ips: bool = False,
                            head_ip_max_attempts: int = 1,
                            worker_ip_max_attempts: int = 1,
                            use_cached_ips: bool = True) -> List[str]:
     """Returns a stable list of (internal IP, external IP) tuples.
+
     The lists of cluster IPs that are passed must correspond to each other.
     """
     if use_cached_ips and handle.stable_internal_external_ips is not None:

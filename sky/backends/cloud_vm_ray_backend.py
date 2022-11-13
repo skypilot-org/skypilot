@@ -329,14 +329,14 @@ class RayCodeGen:
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
-                cluster_ips_map = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
-                ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
-                ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
-                ip_list_str = '\\n'.join(ip_rank_list)
+                cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
+                job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+                job_ip_rank_map = {{ip: i for i, ip in enumerate(job_ip_rank_list)}}
+                job_ip_list_str = '\\n'.join(job_ip_rank_list)
 
-                sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
+                sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
                 # Environment starting with `SKY_` is deprecated.
-                sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
+                sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
                 """),
         ]
 
@@ -426,14 +426,14 @@ class RayCodeGen:
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
-            rank = ip_rank_map[ip]
+            rank = job_ip_rank_map[ip]
 
-            if len(cluster_ips_map) == 1: # Single-node task on single-node cluter
+            if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
                 name_str = '{task_name},' if {task_name!r} is not None else 'task,'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
             else: # Single-node or multi-node task on multi-node cluster
-                idx_in_cluster = cluster_ips_map[ip]
-                if cluster_ips_map[ip] == 0:
+                idx_in_cluster = cluster_ips_to_node_id[ip]
+                if cluster_ips_to_node_id[ip] == 0:
                     node_name = 'head'
                 else:
                     node_name = f'worker{{idx_in_cluster}}'
@@ -1554,7 +1554,7 @@ class CloudVmRayBackend(backends.Backend):
                      *,
                      cluster_name: str,
                      cluster_yaml: str,
-                     stable_internal_external_ips: Optional[str] = None,
+                     stable_internal_external_ips: Optional[List[Tuple[str, str]]] = None,
                      launched_nodes: Optional[int] = None,
                      launched_resources: Optional[
                          resources_lib.Resources] = None,
@@ -1564,6 +1564,8 @@ class CloudVmRayBackend(backends.Backend):
             self.cluster_name = cluster_name
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
                                                       '~', 1)
+            # List of (internal_ip, external_ip) tuples for all the nodes
+            # in the cluster, sorted by the external ips.
             self.stable_internal_external_ips = stable_internal_external_ips
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
