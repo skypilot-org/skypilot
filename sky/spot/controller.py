@@ -92,8 +92,8 @@ class SpotController:
                     # job may not FAILED immediately when part of the nodes are
                     # preempted.
                     (cluster_status,
-                        handle) = backend_utils.refresh_cluster_status_handle(
-                            self._cluster_name, force_refresh=True)
+                     handle) = backend_utils.refresh_cluster_status_handle(
+                         self._cluster_name, force_refresh=True)
                     if cluster_status != global_user_state.ClusterStatus.UP:
                         # recover the cluster if it is not up.
                         need_recovery = True

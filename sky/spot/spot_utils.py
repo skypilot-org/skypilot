@@ -265,7 +265,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             f'(status: {job_status.value}).')
                 break
             logger.info('INFO: (Log streaming) The job is cancelled. Waiting '
-                        'for the controller process to update the status.')
+                        'for the controller process to update the status in '
+                        f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         else:
             logger.info(
                 f'INFO: (Log streaming) Got return code {returncode}. Retrying '
