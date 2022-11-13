@@ -89,13 +89,15 @@ class SpotController:
                 need_recovery = False
                 if self._task.num_nodes > 1:
                     # Check the cluster status for multi-node jobs, since the
-                    # job may not FAILED immediately when part of the nodes are
-                    # preempted.
+                    # job may not be set to FAILED immediately when only some
+                    # of the nodes are preempted.
                     (cluster_status,
                      handle) = backend_utils.refresh_cluster_status_handle(
                          self._cluster_name, force_refresh=True)
                     if cluster_status != global_user_state.ClusterStatus.UP:
                         # recover the cluster if it is not up.
+                        logger.info(f'Cluster status {cluster_status.value}. '
+                                    'Recovering...')
                         need_recovery = True
                 if not need_recovery:
                     # The job and cluster are healthy, continue to monitor the
@@ -112,7 +114,7 @@ class SpotController:
 
             if job_status == job_lib.JobStatus.FAILED:
                 # Check the status of the spot cluster. If it is not UP,
-                # the cluster is preempted
+                # the cluster is preempted.
                 (cluster_status,
                  handle) = backend_utils.refresh_cluster_status_handle(
                      self._cluster_name, force_refresh=True)
