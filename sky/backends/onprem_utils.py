@@ -11,7 +11,6 @@ import click
 import rich.console as rich_console
 import yaml
 
-from sky import check
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
@@ -493,11 +492,6 @@ def check_local_cloud_args(cloud: Optional[str] = None,
                 '`cloud: local` or no cloud in YAML or CLI args.')
         return True
     else:
-        if backend_utils.is_public_cloud_disabled():
-            check.check(quiet=True)
-            if backend_utils.is_public_cloud_disabled():
-                raise RuntimeError('Cloud access is not set up. '
-                                   'Run: `sky check`')
         if cloud == 'local' or yaml_cloud == 'local':
             if cluster_name is not None:
                 raise click.UsageError(

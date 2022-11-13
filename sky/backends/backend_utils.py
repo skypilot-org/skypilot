@@ -2064,8 +2064,21 @@ def validate_schema(obj, schema, err_msg_prefix=''):
             raise ValueError(err_msg)
 
 
-def is_public_cloud_disabled():
-    """Checks if none of the public clouds are enabled."""
-    enabled_clouds = global_user_state.get_enabled_clouds()
-    return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
-                                                   clouds.Local)
+def check_public_cloud_enabled():
+    """Checks if any of the public clouds is enabled."""
+
+    def _no_public_cloud():
+        enabled_clouds = global_user_state.get_enabled_clouds()
+        return (len(enabled_clouds) == 0 or
+                (len(enabled_clouds) == 1 and
+                 isinstance(enabled_clouds[0], clouds.Local)))
+
+    if not _no_public_cloud():
+        return
+
+    sky_check.check(quiet=True)
+    if _no_public_cloud():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Cloud access is not set up. Run: '
+                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
