@@ -202,7 +202,9 @@ def get_instance_type_for_accelerator(
     return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
-def validate_region_zone(region: Optional[str], zone: Optional[str]):
+def validate_region_zone(
+        region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     return common.validate_region_zone_impl(_df, region, zone)
 
 

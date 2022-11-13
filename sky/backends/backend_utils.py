@@ -1794,7 +1794,10 @@ def get_clusters(
         ]
 
     def _is_local_cluster(record):
-        cluster_resources = record['handle'].launched_resources
+        handle = record['handle']
+        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+            return False
+        cluster_resources = handle.launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
 
     if cloud_filter == CloudFilter.LOCAL:
@@ -2059,3 +2062,10 @@ def validate_schema(obj, schema, err_msg_prefix=''):
     if err_msg:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(err_msg)
+
+
+def is_public_cloud_disabled():
+    """Checks if none of the public clouds are enabled."""
+    enabled_clouds = global_user_state.get_enabled_clouds()
+    return len(enabled_clouds) == 1 and isinstance(enabled_clouds[0],
+                                                   clouds.Local)
