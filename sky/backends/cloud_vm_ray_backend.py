@@ -315,7 +315,6 @@ class RayCodeGen:
                       file=sys.stderr,
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
-                sky_env_vars_dict = dict()
                 """)
         ]
 
@@ -341,10 +340,6 @@ class RayCodeGen:
                 else:
                     ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
                     ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
-                
-                sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
-                # Environment starting with `SKY_` is deprecated.
-                sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
                 """),
         ]
 
@@ -369,7 +364,7 @@ class RayCodeGen:
     def add_ray_task(self,
                      bash_script: str,
                      task_name: Optional[str],
-                     job_run_id: str,
+                     job_run_id: Optional[str],
                      ray_resources_dict: Optional[Dict[str, float]],
                      log_path: str,
                      env_vars: Dict[str, str] = None,
@@ -413,15 +408,24 @@ class RayCodeGen:
         resources_str += ', placement_group=pg'
         resources_str += f', placement_group_bundle_index={gang_scheduling_id}'
 
-        sky_env_vars_dict_str = ''
+        sky_env_vars_dict_str = [
+            textwrap.dedent("""\
+            sky_env_vars_dict = dict()
+            sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
+            # Environment starting with `SKY_` is deprecated.
+            sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
+            """)
+        ]
+
         if env_vars is not None:
-            sky_env_vars_dict_str = '\n'.join(
-                f'sky_env_vars_dict[{k!r}] = {v!r}'
-                for k, v in env_vars.items())
+            sky_env_vars_dict_str.extend(f'sky_env_vars_dict[{k!r}] = {v!r}'
+                                         for k, v in env_vars.items())
         if job_run_id is not None:
-            sky_env_vars_dict_str += (
-                f'\nsky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
-                f' = {job_run_id!r}')
+            sky_env_vars_dict_str += [
+                f'sky_env_vars_dict[{constants.JOB_ID_ENV_VAR!r}]'
+                f' = {job_run_id!r}'
+            ]
+        sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         logger.debug('Added Task with options: '
                      f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
@@ -3099,8 +3103,13 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        job_run_id = common_utils.get_global_job_id(
-            self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
+        # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
+        # set by the controller.
+        job_run_id = task.envs.get(
+            constants.JOB_ID_ENV_VAR,
+            common_utils.get_global_job_id(self.run_timestamp,
+                                           cluster_name=handle.cluster_name,
+                                           job_id=job_id))
 
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3166,8 +3175,13 @@ class CloudVmRayBackend(backends.Backend):
             run_fn_name = task.run.__name__
             codegen.register_run_fn(run_fn_code, run_fn_name)
 
-        job_run_id = common_utils.get_global_job_id(
-            self.run_timestamp, cluster_name=handle.cluster_name, job_id=job_id)
+        # If it is a managed spot job, the JOB_ID_ENV_VAR will have been already
+        # set by the controller.
+        job_run_id = task.envs.get(
+            constants.JOB_ID_ENV_VAR,
+            common_utils.get_global_job_id(self.run_timestamp,
+                                           cluster_name=handle.cluster_name,
+                                           job_id=job_id))
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.

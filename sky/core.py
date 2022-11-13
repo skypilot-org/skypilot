@@ -115,20 +115,21 @@ def report() -> List[Dict[str, Any]]:
 
 
 def _start(
-        cluster_name: str,
-        idle_minutes_to_autostop: Optional[int] = None,
-        retry_until_up: bool = False,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes_to_autostop: Optional[int] = None,
+    retry_until_up: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    force: bool = False,
 ) -> backends.Backend.ResourceHandle:
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
     if handle is None:
         raise ValueError(f'Cluster {cluster_name!r} does not exist.')
-    if cluster_status == global_user_state.ClusterStatus.UP:
+    if not force and cluster_status == global_user_state.ClusterStatus.UP:
         print(f'Cluster {cluster_name!r} is already up.')
         return
-    assert cluster_status in (
+    assert force or cluster_status in (
         global_user_state.ClusterStatus.INIT,
         global_user_state.ClusterStatus.STOPPED), cluster_status
 
@@ -158,10 +159,11 @@ def _start(
 
 @usage_lib.entrypoint
 def start(
-        cluster_name: str,
-        idle_minutes_to_autostop: Optional[int] = None,
-        retry_until_up: bool = False,
-        down: bool = False,  # pylint: disable=redefined-outer-name
+    cluster_name: str,
+    idle_minutes_to_autostop: Optional[int] = None,
+    retry_until_up: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    force: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart a cluster.
@@ -192,6 +194,8 @@ def start(
         down: Autodown the cluster: tear down the cluster after specified
             minutes of idle time after all jobs finish (successfully or
             abnormally). Requires ``idle_minutes_to_autostop`` to be set.
+        force: whether to force start the cluster even if it is already up.
+            Useful for upgrading SkyPilot runtime.
 
     Raises:
         ValueError: the specified cluster does not exist; or if ``down`` is set
@@ -203,7 +207,11 @@ def start(
     if down and idle_minutes_to_autostop is None:
         raise ValueError(
             '`idle_minutes_to_autostop` must be set if `down` is True.')
-    _start(cluster_name, idle_minutes_to_autostop, retry_until_up, down)
+    _start(cluster_name,
+           idle_minutes_to_autostop,
+           retry_until_up,
+           down,
+           force=force)
 
 
 @usage_lib.entrypoint
