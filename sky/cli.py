@@ -1783,6 +1783,14 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
+@click.option(
+    '--force',
+    '-f',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Force start the cluster even if it is already UP. Useful for '
+          'upgrading the SkyPilot runtime on the cluster.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
@@ -1791,7 +1799,8 @@ def start(
         yes: bool,
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool):
+        retry_until_up: bool,
+        force: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
@@ -1879,7 +1888,8 @@ def start(
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if cluster_status == global_user_state.ClusterStatus.UP:
+            if (not force and
+                    cluster_status == global_user_state.ClusterStatus.UP):
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -1892,7 +1902,8 @@ def start(
                 #    This is dangerous and unwanted behavior!
                 click.echo(f'Cluster {name} already has status UP.')
                 continue
-            assert cluster_status in (
+
+            assert force or cluster_status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append(name)
@@ -1914,7 +1925,8 @@ def start(
             core.start(name,
                        idle_minutes_to_autostop,
                        retry_until_up,
-                       down=down)
+                       down=down,
+                       force=force)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
