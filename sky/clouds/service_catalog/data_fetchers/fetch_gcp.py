@@ -583,7 +583,8 @@ if __name__ == '__main__':
     processed_vm_df = get_vm_df(region_prefix_filter)
     processed_gpu_df = get_gpu_df(region_prefix_filter)
     processed_tpu_df = get_tpu_df()
-    catalog_df = pd.concat([processed_vm_df, processed_gpu_df, processed_tpu_df])
+    catalog_df = pd.concat(
+        [processed_vm_df, processed_gpu_df, processed_tpu_df])
 
     # Filter out unsupported VMs from the catalog.
     for vm in UNSUPPORTED_VMS:
