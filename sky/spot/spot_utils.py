@@ -260,12 +260,16 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             job_statuses = backend.get_job_status(handle, stream_logs=False)
             job_status = list(job_statuses.values())[0]
             assert job_status is not None, 'No job found.'
-            logger.info(f'Logs finished for job {job_id} '
-                        f'(status: {job_status.value}).')
-            break
-        logger.info(
-            f'INFO: (Log streaming) Got return code {returncode}. Retrying '
-            f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            if job_status != job_lib.JobStatus.CANCELLED:
+                logger.info(f'Logs finished for job {job_id} '
+                            f'(status: {job_status.value}).')
+                break
+            logger.info('INFO: (Log streaming) The job is cancelled. Waiting '
+                        'for the controller process to update the status.')
+        else:
+            logger.info(
+                f'INFO: (Log streaming) Got return code {returncode}. Retrying '
+                f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot queue again.
