@@ -1148,11 +1148,11 @@ def get_stable_cluster_ips(handle: backends.Backend.ResourceHandle,
 
     The lists of cluster IPs that are passed must correspond to each other.
     """
-    if use_cached_ips and handle.stable_internal_external_ips is not None:
-        if get_internal_ips:
-            return [ips[0] for ips in handle.stable_internal_external_ips]
-        else:
-            return [ips[1] for ips in handle.stable_internal_external_ips]
+    if use_cached_ips:
+        if get_internal_ips and handle.internal_ips is not None:
+            return handle.internal_ips
+        elif handle.external_ips is not None:
+            return handle.external_ips
 
     if cluster_external_ips is None:
         cluster_external_ips = get_node_ips(
@@ -1184,9 +1184,9 @@ def get_stable_cluster_ips(handle: backends.Backend.ResourceHandle,
         internal_external_ips[1:], key=lambda x: x[1])
     handle.stable_internal_external_ips = stable_internal_external_ips
     if get_internal_ips:
-        return [ips[0] for ips in handle.stable_internal_external_ips]
-    else:
-        return [ips[1] for ips in handle.stable_internal_external_ips]
+        return handle.internal_ips
+    elif handle.external_ips:
+        return handle.external_ips
 
 
 @timeline.event
@@ -1315,8 +1315,8 @@ def get_head_ip(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    if use_cached_head_ip and handle.stable_internal_external_ips:
-        return handle.stable_internal_external_ips[0][1]
+    if use_cached_head_ip and handle.head_ip is not None:
+        return handle.head_ip
     else:
         return query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
 

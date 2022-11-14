@@ -1548,18 +1548,19 @@ class CloudVmRayBackend(backends.Backend):
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
-        _VERSION = 2
+        _VERSION = 3
 
-        def __init__(self,
-                     *,
-                     cluster_name: str,
-                     cluster_yaml: str,
-                     stable_internal_external_ips: Optional[List[Tuple[str, str]]] = None,
-                     launched_nodes: Optional[int] = None,
-                     launched_resources: Optional[
-                         resources_lib.Resources] = None,
-                     tpu_create_script: Optional[str] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(
+                self,
+                *,
+                cluster_name: str,
+                cluster_yaml: str,
+                stable_internal_external_ips: Optional[List[Tuple[str,
+                                                                  str]]] = None,
+                launched_nodes: Optional[int] = None,
+                launched_resources: Optional[resources_lib.Resources] = None,
+                tpu_create_script: Optional[str] = None,
+                tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
@@ -1577,6 +1578,8 @@ class CloudVmRayBackend(backends.Backend):
             return (f'ResourceHandle('
                     f'\n\tcluster_name={self.cluster_name},'
                     f'\n\thead_ip={self.head_ip},'
+                    f'\n\tinternal_ips={self.internal_ips},'
+                    f'\n\texternal_ips={self.external_ips},'
                     '\n\tcluster_yaml='
                     f'{self.cluster_yaml}, '
                     f'\n\tlaunched_resources={self.launched_nodes}x '
@@ -1654,9 +1657,23 @@ class CloudVmRayBackend(backends.Backend):
             return os.path.expanduser(self._cluster_yaml)
 
         @property
+        def internal_ips(self):
+            if self.stable_internal_external_ips is not None:
+                return [ips[0] for ips in self.stable_internal_external_ips]
+            else:
+                return None
+
+        @property
+        def external_ips(self):
+            if self.stable_internal_external_ips is not None:
+                return [ips[1] for ips in self.stable_internal_external_ips]
+            else:
+                return None
+
+        @property
         def head_ip(self):
-            if self.stable_internal_external_ips:
-                return self.stable_internal_external_ips[0][1]
+            if self.external_ips is not None:
+                return self.external_ips[0]
             else:
                 return None
 
@@ -1669,8 +1686,18 @@ class CloudVmRayBackend(backends.Backend):
                 state.pop('cluster_region', None)
             if version < 2:
                 state['_cluster_yaml'] = state.pop('cluster_yaml')
+            if version < 3:
+                head_ip = state.pop('head_ip', None)
 
             self.__dict__.update(state)
+
+            # Because the get_stable_cluster_ips uses the handle, we call
+            # it on the existing instance after the state is updated
+            if version < 3 and head_ip is not None:
+                self.stable_internal_external_ips = \
+                     backend_utils.get_stable_cluster_ips(self,
+                     use_cached_ips=False)
+
             self._update_cluster_region()
 
     def __init__(self):
