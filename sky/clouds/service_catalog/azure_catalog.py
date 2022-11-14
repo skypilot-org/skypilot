@@ -6,6 +6,8 @@ instance types and pricing information for Azure.
 import re
 from typing import Dict, List, Optional, Tuple
 
+import pandas as pd
+
 import sky
 from sky import resources
 from sky.clouds import cloud
@@ -67,24 +69,32 @@ def get_feasible_resources(
     }
     df = common.apply_filters(df, filters)
 
+    feasible_resources = []
     azure = sky.Azure()
-    return [
-        resources.Resource(
-            num_nodes=resource_filter.num_nodes,
-            cloud=azure,
-            region=row.Region,
-            zone=row.AvailabilityZone,
-            instance_type=row.InstanceType,
-            instance_family=row.InstanceFamily,
-            num_vcpus=row.vCPUs,
-            cpu_memory=row.MemoryGiB,
-            accelerator=resource_filter.accelerator,
-            use_spot=resource_filter.use_spot,
-            spot_recovery=resource_filter.spot_recovery,
-            disk_size=resource_filter.disk_size,
-            image_id=resource_filter.image_id,
-        ) for row in df.itertuples()
-    ]
+    for row in df.itertuples():
+        if pd.isna(row.AcceleratorName) or pd.isna(row.AcceleratorCount):
+            acc = None
+        else:
+            acc = resources.Accelerator(name=row.AcceleratorName,
+                                        count=int(row.AcceleratorCount),
+                                        args=None)
+        feasible_resources.append(
+            resources.Resource(
+                num_nodes=resource_filter.num_nodes,
+                cloud=azure,
+                region=row.Region,
+                zone=row.AvailabilityZone,
+                instance_type=row.InstanceType,
+                instance_family=row.InstanceFamily,
+                num_vcpus=float(row.vCPUs),
+                cpu_memory=float(row.MemoryGiB),
+                accelerator=acc,
+                use_spot=resource_filter.use_spot,
+                spot_recovery=resource_filter.spot_recovery,
+                disk_size=resource_filter.disk_size,
+                image_id=resource_filter.image_id,
+            ))
+    return feasible_resources
 
 
 def get_hourly_price(resource: resources.Resource) -> float:
