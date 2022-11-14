@@ -60,6 +60,7 @@ class SpotController:
     def start(self):
         """Start the controller."""
         try:
+            self._handle_signal()
             controller_task = _controller_run.remote(self)
             # Signal can interrupt the underlying controller process.
             ready, _ = ray.wait([controller_task], timeout=0)
