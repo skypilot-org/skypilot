@@ -76,6 +76,8 @@ class SpotController:
                         pass
                     raise e
                 ready, _ = ray.wait([controller_task], timeout=1)
+            # Need this to get the exception from the controller task.
+            ray.get(controller_task)
         except exceptions.SpotUserCancelledError as e:
             logger.info(e)
             spot_state.set_cancelled(self.job_id)
