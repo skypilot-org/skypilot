@@ -861,7 +861,7 @@ def test_spot_cancellation():
         'managed-spot-cancellation',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
-            'sleep 180',
+            'sleep 60',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
             # Test cancelling the spot job during launching.
             f'sky spot cancel -y -n {name}',
@@ -874,20 +874,25 @@ def test_spot_cancellation():
              '--output text | grep terminated'),
             # Test cancelling the spot job during running.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 "sleep 1000"  -y -d',
+            'sleep 300',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
-            (f'aws ec2 describe-instances --region {region} '
+            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text | grep terminated'),
+             'Name=tag:ray-node-type,Values=worker '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
             'sleep 50',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            'sleep 90',
             (f'aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text | wc -l | grep 0'),
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text | grep terminated'),
         ])
     run_one_test(test)
 
