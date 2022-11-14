@@ -830,7 +830,7 @@ def test_spot_recovery_multi_node():
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
-        'managed-spot-recovery',
+        'managed-spot-recovery-multi',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
             'sleep 360',
@@ -853,6 +853,44 @@ def test_spot_recovery_multi_node():
     )
     run_one_test(test)
 
+def test_spot_cancellation():
+    name = _get_cluster_name()
+    region = 'us-west-2'
+    test = Test(
+        'managed-spot-cancellation',
+        [
+            f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
+            'sleep 180',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
+            # Test cancelling the spot job during launching.
+            f'sky spot cancel -y -n {name}',
+            'sleep 5',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',
+            'sleep 90',
+            (f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:ray-cluster-name,Values={name}* '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text | wc -l | grep 0'),
+            # Test cancelling the spot job during running.
+            f'sky spot launch --cloud aws --region {region} -n {name}-2 "sleep 1000"  -y -d',
+            # Terminate the cluster manually.
+            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
+            'sleep 50',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RECOVERING"',
+            f'sky spot cancel -y -n {name}-2',
+            'sleep 5',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            (f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text | wc -l | grep 0'),
+        ]
+    )
+    run_one_test(test)
 
 # ---------- Testing storage for managed spot ----------
 def test_spot_storage():
