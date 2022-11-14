@@ -856,7 +856,7 @@ def test_spot_recovery_multi_node():
 
 def test_spot_cancellation():
     name = _get_cluster_name()
-    region = 'us-west-2'
+    region = 'us-east-2'
     test = Test(
         'managed-spot-cancellation',
         [
@@ -885,7 +885,7 @@ def test_spot_cancellation():
             'sleep 50',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-2',
-            'sleep 5',
+            'sleep 10',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
             'sleep 90',
             (f'aws ec2 describe-instances --region {region} '
