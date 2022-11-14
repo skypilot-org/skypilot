@@ -1315,10 +1315,18 @@ def get_head_ip(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    if use_cached_head_ip and handle.head_ip is not None:
-        return handle.head_ip
+    if use_cached_head_ip:
+        if handle.head_ip is None:
+            # This happens for INIT clusters (e.g., exit 1 in setup).
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cluster\'s head IP not found; is it up? To fix: '
+                    'run a successful launch first (`sky launch`) to ensure'
+                    ' the cluster status is UP (`sky status`).')
+        head_ip = handle.head_ip
     else:
-        return query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
+        head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
+    return head_ip
 
 
 def run_command_and_handle_ssh_failure(
@@ -1663,7 +1671,7 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        external_ips = get_stable_cluster_ips(handle)
+        external_ips = get_stable_cluster_ips(handle, use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
         if len(external_ips) == 0:
             raise exceptions.FetchIPError(
@@ -1683,8 +1691,6 @@ def _update_cluster_status_no_lock(
         # set the status to UP, as the `get_stable_cluster_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
-        # Caches the stable list of cluster IPs in the handle.
-        get_stable_cluster_ips(handle, cluster_external_ips=external_ips)
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
