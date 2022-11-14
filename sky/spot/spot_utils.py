@@ -178,7 +178,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    return (f'{identity_str} scheduled to be cancelle.')
+    return f'{identity_str} scheduled to be cancelle.'
 
 
 def cancel_job_by_name(job_name: str) -> str:
