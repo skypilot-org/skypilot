@@ -867,7 +867,7 @@ def test_spot_cancellation():
             f'sky spot cancel -y -n {name}',
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',
-            'sleep 90',
+            'sleep 100',
             (f'aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}* '
              f'--query Reservations[].Instances[].State[].Name '
@@ -880,7 +880,6 @@ def test_spot_cancellation():
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
-             'Name=tag:ray-node-type,Values=worker '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 50',
