@@ -211,7 +211,8 @@ class Azure(clouds.Cloud):
     def get_default_instance_families(cls) -> List[str]:
         # These instance families provide the latest x86-64 Intel and AMD CPUs
         # without any accelerator or optimized storage.
-        return ['D_v5', 'Das_v5', 'E_v5', 'Eas_v5']
+        default_instance_families = ['D_v5', 'Das_v5', 'E_v5', 'Eas_v5']
+        return [f.lower() for f in default_instance_families]
 
     @classmethod
     def get_feasible_resources(
@@ -238,7 +239,6 @@ class Azure(clouds.Cloud):
 
         # Otherwise, use the default instance families.
         r.instance_families = cls.get_default_instance_families()
-        r.instance_families = [f.lower() for f in r.instance_families]
         return service_catalog.get_feasible_resources(r, clouds='azure')
 
     def get_fuzzy_match_resources(
