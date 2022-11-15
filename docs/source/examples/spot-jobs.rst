@@ -111,7 +111,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     cd /code && git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
-    pip install -r requirements.txt
+    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
   run: |
