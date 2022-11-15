@@ -55,7 +55,9 @@ def parse_readme(readme: str) -> str:
     readme = footnote_re.sub(r'<sup>[\1]</sup>', readme)
 
     # Remove the dark mode switcher
-    mode_re = re.compile(r'<picture>[\n ]*<source media=.*>[\n ]*<img(.*)>[\n ]*</picture>', re.MULTILINE)
+    mode_re = re.compile(
+        r'<picture>[\n ]*<source media=.*>[\n ]*<img(.*)>[\n ]*</picture>',
+        re.MULTILINE)
     readme = mode_re.sub(r'<img\1>', readme)
     return readme
 
