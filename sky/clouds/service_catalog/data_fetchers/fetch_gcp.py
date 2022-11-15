@@ -589,8 +589,8 @@ if __name__ == '__main__':
     # Filter out unsupported VMs from the catalog.
     for vm in UNSUPPORTED_VMS:
         # NOTE: The `InstanceType` column can be NaN.
-        catalog_df = catalog_df[not catalog_df['InstanceType'].str.startswith(vm
-                                                                             )]
+        catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith(
+            vm).ne(True)]
 
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
