@@ -47,11 +47,17 @@ def find_version(*filepath):
         raise RuntimeError('Unable to find version string.')
 
 
-def parse_footnote(readme: str) -> str:
-    """Parse the footnote from the README.md file."""
+def parse_readme(readme: str) -> str:
+    """Parse the README.md file to be pypi compatible."""
+    # Replace the footnotes.
     readme = readme.replace('<!-- Footnote -->', '#')
     footnote_re = re.compile(r'\[\^([0-9]+)\]')
-    return footnote_re.sub(r'<sup>[\1]</sup>', readme)
+    readme = footnote_re.sub(r'<sup>[\1]</sup>', readme)
+
+    # Remove the dark mode switcher
+    mode_re = re.compile(r'<picture>[\n ]*<source media=.*>[\n ]*<img(.*)>[\n ]*</picture>', re.MULTILINE)
+    readme = mode_re.sub(r'<img\1>', readme)
+    return readme
 
 
 install_requires = [
