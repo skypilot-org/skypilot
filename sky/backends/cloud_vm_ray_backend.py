@@ -1344,7 +1344,6 @@ class RetryingVmProvisioner(object):
             head_ip = re.search(
                 r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
                 stdout[position + 1:]).group(1)
-            # head_ip = stdout[position + 1:].strip()
             if not backend_utils.is_ip(head_ip):
                 # Something's wrong. Ok to not return a head_ip.
                 head_ip = None
