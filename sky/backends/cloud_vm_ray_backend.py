@@ -1341,9 +1341,8 @@ class RetryingVmProvisioner(object):
             # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
             # Use a regex to extract the IP address.
-            ip_list = re.findall(
-                backend_utils.IP_ADDR_REGEX,
-                stdout[position + 1:])
+            ip_list = re.findall(backend_utils.IP_ADDR_REGEX,
+                                 stdout[position + 1:])
             # If something's wrong. Ok to not return a head_ip.
             head_ip = None
             if len(ip_list) == 1:
