@@ -204,22 +204,30 @@ class Azure(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.Resource') -> float:
+    def get_hourly_price(cls, resource: 'resources.ClusterResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='azure')
 
     @classmethod
+    def is_subset_of(cls, instance_family_a: str,
+                     instance_family_b: str) -> bool:
+        return service_catalog.is_subset_of(instance_family_a,
+                                            instance_family_b,
+                                            clouds='azure')
+
+    @classmethod
     def get_default_instance_families(cls) -> List[str]:
-        # These instance families provide the latest x86-64 Intel and AMD CPUs
-        # without any accelerator or optimized storage.
-        default_instance_families = ['D_v5', 'Das_v5', 'E_v5', 'Eas_v5']
-        return [f.lower() for f in default_instance_families]
+        return service_catalog.get_default_instance_families(clouds='azure')
 
     @classmethod
     def get_feasible_resources(
-        cls, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.Resource']:
+        cls,
+        resource_filter: 'resources.ResourceFilter',
+        get_smallest_vms: bool,
+    ) -> List['resources.ClusterResources']:
         r = resource_filter.copy()
         # Azure-specific semantic check.
+        if r.use_spot:
+            return []
         if r.zone is not None:
             return []
         if r.image_id is not None:
@@ -230,21 +238,22 @@ class Azure(clouds.Cloud):
         # If the user specified the instance type or families,
         # directly query the service catalog.
         if r.instance_type is not None or r.instance_families is not None:
-            return service_catalog.get_feasible_resources(r, clouds='azure')
+            return service_catalog.get_feasible_resources(r,
+                                                          get_smallest_vms,
+                                                          clouds='azure')
 
         # If the user specified the accelerator,
         # use it to infer the instance types.
         if r.accelerator is not None:
-            return service_catalog.get_feasible_resources(r, clouds='azure')
+            return service_catalog.get_feasible_resources(r,
+                                                          get_smallest_vms,
+                                                          clouds='azure')
 
         # Otherwise, use the default instance families.
         r.instance_families = cls.get_default_instance_families()
-        return service_catalog.get_feasible_resources(r, clouds='azure')
-
-    def get_fuzzy_match_resources(
-        self, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.Resource']:
-        return []
+        return service_catalog.get_feasible_resources(r,
+                                                      get_smallest_vms,
+                                                      clouds='azure')
 
     def get_feasible_launchable_resources(self, resources):
         if resources.use_spot:

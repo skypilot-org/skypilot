@@ -131,7 +131,7 @@ def _get_instance_family(instance_type: Optional[str]) -> Optional[str]:
     return instance_type.split('-')[0].lower()
 
 
-def _is_valid(resource: resources.Resource) -> bool:
+def _is_valid(resource: resources.ClusterResources) -> bool:
     if resource.accelerator is None:
         if resource.instance_family == 'a2':
             # A2 machines should be used with A100 GPUs.
@@ -177,7 +177,9 @@ def _is_valid(resource: resources.Resource) -> bool:
 
 
 def get_feasible_resources(
-        resource_filter: resources.ResourceFilter) -> List[resources.Resource]:
+    resource_filter: resources.ResourceFilter,
+    get_smallest_vms: bool = False,
+) -> List[resources.ClusterResources]:
     df = _df
     if 'InstanceFamily' not in df.columns:
         # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
@@ -238,9 +240,15 @@ def get_feasible_resources(
             ]]
             df = pd.merge(vm_df, acc_df, on=['Region', 'AvailabilityZone'])
 
+    if get_smallest_vms:
+        grouped = df.groupby(['InstanceFamily', 'Region', 'AvailabilityZone'])
+        price_str = 'SpotPrice' if resource_filter.use_spot else 'Price'
+        df = df.loc[grouped[price_str].idxmin()]
+    df = df.reset_index(drop=True)
+
     gcp = sky.GCP()
     feasible_resources = [
-        resources.Resource(
+        resources.ClusterResources(
             num_nodes=resource_filter.num_nodes,
             cloud=gcp,
             region=row.Region,
@@ -261,7 +269,19 @@ def get_feasible_resources(
     return [r for r in feasible_resources if _is_valid(r)]
 
 
-def get_hourly_price(resource: resources.Resource) -> float:
+def is_subset_of(instance_family_a: str, instance_family_b: str) -> bool:
+    if instance_family_a == instance_family_b:
+        return True
+    return False
+
+
+def get_default_instance_families() -> List[str]:
+    # These instance families provide the latest x86-64 Intel and AMD CPUs
+    # without any accelerator or optimized storage.
+    return ['n2', 'n2d']
+
+
+def get_hourly_price(resource: resources.ClusterResources) -> float:
     if resource.instance_type == 'tpu-vm':
         host_price = 0.0
     else:

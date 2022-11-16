@@ -163,7 +163,12 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.Resource') -> float:
+    def get_hourly_price(cls, resource: 'resources.ClusterResources') -> float:
+        raise NotImplementedError
+
+    @classmethod
+    def is_subset_of(cls, instance_family_a: str,
+                     instance_family_b: str) -> bool:
         raise NotImplementedError
 
     @classmethod
@@ -172,13 +177,8 @@ class Cloud:
 
     @classmethod
     def get_feasible_resources(
-        cls, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.Resource']:
-        raise NotImplementedError
-
-    def get_fuzzy_match_resources(
-        self, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.Resource']:
+            cls, resource_filter: 'resources.ResourceFilter',
+            get_smallest_vms: bool) -> List['resources.ClusterResources']:
         raise NotImplementedError
 
     def get_feasible_launchable_resources(self, resources):

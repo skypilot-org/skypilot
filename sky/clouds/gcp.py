@@ -268,29 +268,40 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.Resource') -> float:
+    def get_hourly_price(cls, resource: 'resources.ClusterResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='gcp')
 
     @classmethod
+    def is_subset_of(cls, instance_family_a: str,
+                     instance_family_b: str) -> bool:
+        return service_catalog.is_subset_of(instance_family_a,
+                                            instance_family_b,
+                                            clouds='gcp')
+
+    @classmethod
     def get_default_instance_families(cls) -> List[str]:
-        # General-purpose VMs that provide the latest x86-64 Intel and AMD CPUs
-        # without any accelerator or optimized storage.
-        return ['n2', 'n2d']
+        return service_catalog.get_default_instance_families(clouds='gcp')
 
     @classmethod
     def get_feasible_resources(
-        cls, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.Resource']:
+        cls,
+        resource_filter: 'resources.ResourceFilter',
+        get_smallest_vms: bool,
+    ) -> List['resources.ClusterResources']:
         r = resource_filter.copy()
         if r.accelerator is None:
             if r.instance_type is not None or r.instance_families is not None:
                 # If the user specified the instance type or families,
                 # directly query the service catalog.
-                return service_catalog.get_feasible_resources(r, clouds='gcp')
+                return service_catalog.get_feasible_resources(r,
+                                                              get_smallest_vms,
+                                                              clouds='gcp')
             else:
                 # Otherwise, use the default instance families.
                 r.instance_families = cls.get_default_instance_families()
-                return service_catalog.get_feasible_resources(r, clouds='gcp')
+                return service_catalog.get_feasible_resources(r,
+                                                              get_smallest_vms,
+                                                              clouds='gcp')
 
         if r.accelerator.name.startswith('tpu'):
             # TPU
@@ -351,12 +362,9 @@ class GCP(clouds.Cloud):
                 elif not r.instance_type.startswith('n1-'):
                     return []
 
-        return service_catalog.get_feasible_resources(r, clouds='gcp')
-
-    def get_fuzzy_match_resources(
-        self, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.Resource']:
-        return []
+        return service_catalog.get_feasible_resources(r,
+                                                      get_smallest_vms,
+                                                      clouds='gcp')
 
     def get_feasible_launchable_resources(self, resources):
         fuzzy_candidate_list = []

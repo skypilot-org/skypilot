@@ -236,19 +236,27 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources_lib.Resource') -> float:
+    def get_hourly_price(cls,
+                         resource: 'resources_lib.ClusterResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='aws')
 
     @classmethod
+    def is_subset_of(cls, instance_family_a: str,
+                     instance_family_b: str) -> bool:
+        return service_catalog.is_subset_of(instance_family_a,
+                                            instance_family_b,
+                                            clouds='aws')
+
+    @classmethod
     def get_default_instance_families(cls) -> List[str]:
-        # These instance families provide the latest x86-64 Intel and AMD CPUs
-        # without any accelerator or optimized storage.
-        return ['m6i', 'm6a', 'c6i', 'c6a', 'r6i', 'r6a']
+        return service_catalog.get_default_instance_families(clouds='aws')
 
     @classmethod
     def get_feasible_resources(
-        cls, resource_filter: 'resources_lib.ResourceFilter'
-    ) -> List['resources_lib.Resource']:
+        cls,
+        resource_filter: 'resources_lib.ResourceFilter',
+        get_smallest_vms: bool,
+    ) -> List['resources_lib.ClusterResources']:
         r = resource_filter.copy()
         # AWS-specific semantic checks.
         if r.image_id is not None:
@@ -260,21 +268,22 @@ class AWS(clouds.Cloud):
         # If the user specified the instance type or families,
         # directly query the service catalog.
         if r.instance_type is not None or r.instance_families is not None:
-            return service_catalog.get_feasible_resources(r, clouds='aws')
+            return service_catalog.get_feasible_resources(r,
+                                                          get_smallest_vms,
+                                                          clouds='aws')
 
         # If the user specified the accelerator,
         # use it to infer the instance types.
         if r.accelerator is not None:
-            return service_catalog.get_feasible_resources(r, clouds='aws')
+            return service_catalog.get_feasible_resources(r,
+                                                          get_smallest_vms,
+                                                          clouds='aws')
 
         # Otherwise, use the default instance families.
         r.instance_families = cls.get_default_instance_families()
-        return service_catalog.get_feasible_resources(r, clouds='aws')
-
-    def get_fuzzy_match_resources(
-        self, resource_filter: 'resources_lib.ResourceFilter'
-    ) -> List['resources_lib.Resource']:
-        return []
+        return service_catalog.get_feasible_resources(r,
+                                                      get_smallest_vms,
+                                                      clouds='aws')
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):

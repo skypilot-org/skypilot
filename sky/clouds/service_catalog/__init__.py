@@ -11,6 +11,7 @@ from sky.clouds.service_catalog.constants import (
 )
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky.clouds import cloud
     from sky.clouds.service_catalog import common
 
@@ -47,14 +48,28 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
 
 
 # FIXME: annotate types.
-def get_hourly_price(resource, clouds: CloudFilter = None) -> float:
+def get_hourly_price(resource: 'resources.ClusterResources',
+                     clouds: CloudFilter = None) -> float:
     return _map_clouds_catalog(clouds, 'get_hourly_price', resource)
 
 
+def get_default_instance_families(clouds: CloudFilter = None) -> List[str]:
+    return _map_clouds_catalog(clouds, 'get_default_instance_families')
+
+
+def is_subset_of(instance_family_a: str,
+                 instance_family_b: str,
+                 clouds: CloudFilter = None) -> bool:
+    return _map_clouds_catalog(clouds, 'is_subset_of', instance_family_a,
+                               instance_family_b)
+
+
 # FIXME: annotate types.
-def get_feasible_resources(resource_filter, clouds: CloudFilter = None) -> List:
+def get_feasible_resources(resource_filter: 'resources.ResourceFilter',
+                           get_smallest_vms: bool,
+                           clouds: CloudFilter = None) -> List:
     return _map_clouds_catalog(clouds, 'get_feasible_resources',
-                               resource_filter)
+                               resource_filter, get_smallest_vms)
 
 
 def list_accelerators(

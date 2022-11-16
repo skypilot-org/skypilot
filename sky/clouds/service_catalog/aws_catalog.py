@@ -20,7 +20,9 @@ def _get_instance_family(instance_type: str) -> str:
 
 
 def get_feasible_resources(
-        resource_filter: resources.ResourceFilter) -> List[resources.Resource]:
+    resource_filter: resources.ResourceFilter,
+    get_smallest_vms: bool,
+) -> List[resources.ClusterResources]:
     df = _df
     if 'InstanceFamily' not in df.columns:
         # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
@@ -47,6 +49,12 @@ def get_feasible_resources(
     }
     df = common.apply_filters(df, filters)
 
+    if get_smallest_vms:
+        grouped = df.groupby(['InstanceFamily', 'Region', 'AvailabilityZone'])
+        price_str = 'SpotPrice' if resource_filter.use_spot else 'Price'
+        df = df.loc[grouped[price_str].idxmin()]
+    df = df.reset_index(drop=True)
+
     feasible_resources = []
     aws = sky.AWS()
     for row in df.itertuples():
@@ -57,7 +65,7 @@ def get_feasible_resources(
                                         count=int(row.AcceleratorCount),
                                         args=None)
         feasible_resources.append(
-            resources.Resource(
+            resources.ClusterResources(
                 num_nodes=resource_filter.num_nodes,
                 cloud=aws,
                 region=row.Region,
@@ -75,7 +83,25 @@ def get_feasible_resources(
     return feasible_resources
 
 
-def get_hourly_price(resource: resources.Resource) -> float:
+def is_subset_of(instance_family_a: str, instance_family_b: str) -> bool:
+    if instance_family_a == instance_family_b:
+        return True
+    includes_both = lambda l: instance_family_a in l and instance_family_b in l
+    if includes_both(['m6i', 'c6i', 'r6i', 'm6id', 'c6id', 'r6id']):
+        return True
+    if includes_both(['m6a', 'c6a', 'r6a', 'm6ad', 'c6ad', 'r6ad']):
+        return True
+    # TODO: add more rules.
+    return False
+
+
+def get_default_instance_families() -> List[str]:
+    # These instance families provide the latest x86-64 Intel and AMD CPUs
+    # without any accelerator or optimized storage.
+    return ['m6i', 'm6a', 'c6i', 'c6a', 'r6i', 'r6a']
+
+
+def get_hourly_price(resource: resources.ClusterResources) -> float:
     return common.get_hourly_price_impl(_df, resource.instance_type,
                                         resource.zone, resource.use_spot)
 
