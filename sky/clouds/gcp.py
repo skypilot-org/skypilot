@@ -279,33 +279,6 @@ class GCP(clouds.Cloud):
                                             clouds='gcp')
 
     @classmethod
-    def _get_minimum_host_size(
-        cls,
-        acc_name: str,
-        acc_count: int,
-    ) -> Tuple[Optional[float], Optional[float]]:
-        # Move this function to gcp_catalog?
-        if acc_name.startswith('tpu'):
-            # TPUs.
-            assert acc_count == 1
-            num_tpu_cores = int(acc_name.split('-')[2])
-            num_vcpus = min(1.0 * num_vcpus, 96.0)
-            cpu_memory = min(4.0 * num_tpu_cores, 624.0)
-        elif acc_name in ['K80', 'P4', 'T4']:
-            # Low-end GPUs.
-            num_vcpus = 4.0 * acc_count
-            cpu_memory = 16.0 * acc_count
-        elif acc_name in ['V100', 'P100']:
-            # Mid-range GPUs.
-            num_vcpus = 8.0 * acc_count
-            cpu_memory = 32.0 * acc_count
-        else:
-            # High-end GPUs (e.g., A100)
-            num_vcpus = None
-            cpu_memory = None
-        return num_vcpus, cpu_memory
-
-    @classmethod
     def get_default_instance_families(cls) -> List[str]:
         return service_catalog.get_default_instance_families(clouds='gcp')
 
@@ -350,53 +323,10 @@ class GCP(clouds.Cloud):
                 # TPU Node
                 if 'runtime_version' not in r.accelerator.args:
                     r.accelerator.args['runtime_version'] = '2.5.0'
-
-                # Only N1 machines can be used for TPU host VMs.
-                if r.instance_type is None:
-                    if r.instance_families is None:
-                        r.instance_families = ['n1']
-                    elif 'n1' in r.instance_families:
-                        r.instance_families = ['n1']
-                    else:
-                        return []
-                elif not r.instance_type.startswith('n1-'):
-                    return []
         else:
             # GPU
             if r.accelerator.args is not None:
                 return []
-
-            if r.accelerator.name in ['A100', 'A100-80GB']:
-                # A100 can only be attached to A2 machines.
-                if r.instance_type is None:
-                    if r.instance_families is None:
-                        r.instance_families = ['a2']
-                    elif 'a2' in r.instance_families:
-                        r.instance_families = ['a2']
-                    else:
-                        return []
-                elif not r.instance_type.startswith('a2-'):
-                    return []
-            else:
-                # Other GPUs can only be attached to N1 machines.
-                if r.instance_type is None:
-                    if r.instance_families is None:
-                        r.instance_families = ['n1']
-                    elif 'n1' in r.instance_families:
-                        r.instance_families = ['n1']
-                    else:
-                        return []
-                elif not r.instance_type.startswith('n1-'):
-                    return []
-
-        if r.instance_type != 'tpu-vm':
-            if r.num_vcpus is None and r.cpu_memory is None:
-                min_vcpus, min_memory = cls._get_minimum_host_size(
-                    r.accelerator.name, r.accelerator.count)
-                if min_vcpus is not None:
-                    r.num_vcpus = f'{min_vcpus}+'
-                if min_memory is not None:
-                    r.cpu_memory = f'{min_memory}+'
         return service_catalog.get_feasible_resources(r,
                                                       get_smallest_vms,
                                                       clouds='gcp')

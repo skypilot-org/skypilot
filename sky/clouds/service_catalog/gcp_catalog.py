@@ -26,10 +26,6 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
-# This can be switched between n1 and n2.
-# n2 is not allowed for launching GPUs.
-_DEFAULT_HOST_VM_FAMILY = 'n1'
-
 # TODO(zongheng): fix A100 info directly in catalog.
 # https://cloud.google.com/blog/products/compute/a2-vms-with-nvidia-a100-gpus-are-ga
 # count -> vm type
@@ -47,49 +43,6 @@ _A100_INSTANCE_TYPE_DICTS = {
         4: 'a2-ultragpu-4g',
         8: 'a2-ultragpu-8g',
     }
-}
-
-# Number of CPU cores per GPU based on the AWS setting.
-# GCP A100 has its own instance type mapping.
-# Refer to sky/clouds/service_catalog/gcp_catalog.py
-_NUM_ACC_TO_NUM_CPU = {
-    # Based on p2 on AWS.
-    'K80': {
-        1: 4,
-        2: 8,
-        4: 16,
-        8: 32,
-        16: 64,
-    },
-    # Based on p3 on AWS.
-    'V100': {
-        1: 8,
-        2: 16,
-        4: 32,
-        8: 64
-    },
-    # Based on g4dn on AWS.
-    'T4': {
-        1: 4,
-        2: 8,  # AWS does not support 2x T4.
-        4: 48,
-        # 8x T4 is not supported by GCP.
-    },
-    # P100 is not supported on AWS, and Azure NCv2 has a weird CPU count.
-    'P100': {
-        1: 8,
-        2: 16,
-        4: 32,
-        8: 64
-    },
-    # P4 and other GPUs/TPUs are not supported on aws and azure.
-    'DEFAULT': {
-        1: 8,
-        2: 16,
-        4: 32,
-        8: 64,
-        16: 128
-    },
 }
 
 # num_gpus -> (max_num_cpus, max_memory_gb)
@@ -134,32 +87,22 @@ def _get_instance_family(instance_type: Optional[str]) -> Optional[str]:
 def _is_valid(resource: resources.ClusterResources) -> bool:
     if resource.accelerator is None:
         if resource.instance_family == 'a2':
-            # A2 machines should be used with A100 GPUs.
+            # A2 machines should be used together with A100 GPUs.
             return False
         else:
+            # No accelerator, no problem.
             return True
 
     acc_name = resource.accelerator.name
     acc_count = resource.accelerator.count
 
     if acc_name.startswith('tpu'):
-        if acc_count != 1:
-            return False
-        if resource.instance_type == 'tpu-vm':
-            return True
-        else:
-            return resource.instance_family == 'n1'
+        # TODO: Investigate the host VM restrictions for TPU Nodes.
+        return True
 
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        if acc_count not in _A100_INSTANCE_TYPE_DICTS[acc_name]:
-            return False
-        instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
-        return resource.instance_type == instance_type
+        return True
 
-    if acc_name not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY:
-        return False
-    if acc_count not in _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name]:
-        return False
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
     if acc_name == 'K80' and acc_count == 8:
         if resource.zone in ['asia-east1-a', 'us-east1-d']:
@@ -174,6 +117,31 @@ def _is_valid(resource: resources.ClusterResources) -> bool:
     if resource.cpu_memory > max_memory:
         return False
     return True
+
+
+def _get_default_host_size(
+    acc_name: str,
+    acc_count: int,
+) -> Tuple[Optional[float], Optional[float]]:
+    if acc_name.startswith('tpu'):
+        # TPUs.
+        assert acc_count == 1
+        num_tpu_cores = int(acc_name.split('-')[2])
+        num_vcpus = min(1.0 * num_tpu_cores, 96.0)
+        cpu_memory = min(4.0 * num_tpu_cores, 624.0)
+    elif acc_name in ['K80', 'P4', 'T4']:
+        # Low-end GPUs.
+        num_vcpus = 4.0 * acc_count
+        cpu_memory = 16.0 * acc_count
+    elif acc_name in ['V100', 'P100']:
+        # Mid-range GPUs.
+        num_vcpus = 8.0 * acc_count
+        cpu_memory = 32.0 * acc_count
+    else:
+        # High-end GPUs (e.g., A100)
+        num_vcpus = None
+        cpu_memory = None
+    return num_vcpus, cpu_memory
 
 
 def get_feasible_resources(
@@ -191,13 +159,57 @@ def get_feasible_resources(
     # Search the accelerator first.
     acc_df = None
     if resource_filter.accelerator is not None:
+        acc_name = resource_filter.accelerator.name
+        acc_count = resource_filter.accelerator.count
         acc_filter = {
-            'AcceleratorName': resource_filter.accelerator.name,
-            'AcceleratorCount': resource_filter.accelerator.count,
+            'AcceleratorName': acc_name,
+            'AcceleratorCount': acc_count,
         }
         acc_df = common.apply_filters(df, acc_filter)
         if acc_df.empty:
             return []
+
+        # Set the host VM type that matches the accelerator.
+        if resource_filter.instance_type == 'tpu-vm':
+            # TPU VM.
+            pass
+        elif acc_name in _A100_INSTANCE_TYPE_DICTS:
+            # A100 GPUs are attached to fixed size VMs.
+            assert acc_count in _A100_INSTANCE_TYPE_DICTS[acc_name]
+            instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
+            if resource_filter.instance_type is None:
+                resource_filter.instance_type = instance_type
+            elif resource_filter.instance_type != instance_type:
+                return []
+
+            # A100 can be only attached to A2 machines.
+            if resource_filter.instance_families is None:
+                resource_filter.instance_families = ['a2']
+            elif 'a2' in resource_filter.instance_families:
+                resource_filter.instance_families = ['a2']
+            else:
+                return []
+        else:
+            # TPUs and other GPUs.
+            # These accelerators can be only attached to N1 machines.
+            if resource_filter.instance_families is None:
+                resource_filter.instance_families = ['n1']
+            elif 'n1' in resource_filter.instance_families:
+                resource_filter.instance_families = ['n1']
+            else:
+                return []
+
+            if resource_filter.instance_type is None:
+                if (resource_filter.num_vcpus is None and
+                        resource_filter.cpu_memory is None):
+                    min_vcpus, min_memory = _get_default_host_size(
+                        acc_name, acc_count)
+                    if min_vcpus is not None:
+                        resource_filter.num_vcpus = f'{min_vcpus}+'
+                    if min_memory is not None:
+                        resource_filter.cpu_memory = f'{min_memory}+'
+            elif not resource_filter.instance_type.startswith('n1-'):
+                return []
 
     # Search the host VM.
     if resource_filter.instance_type == 'tpu-vm':
@@ -227,9 +239,9 @@ def get_feasible_resources(
             df = acc_df.copy()
             # TODO: Add tpu-vm to the catalog.
             df['InstanceType'] = 'tpu-vm'
-            df['InstanceFamily'] = 'tpu-vm'  # FIXME
-            df['vCPUs'] = 96  # FIXME
-            df['MemoryGiB'] = 624  # FIXME
+            df['InstanceFamily'] = 'tpu-vm'
+            df['vCPUs'] = 96.0
+            df['MemoryGiB'] = 624.0
         else:
             # Join the two dataframes.
             vm_df = vm_df.drop(columns=['AcceleratorName', 'AcceleratorCount'])
@@ -340,45 +352,6 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     if instance_type == 'TPU-VM':
         return None
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
-
-
-def get_instance_type_for_accelerator(
-        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
-    """Fetch instance types with similar CPU count for given accelerator.
-
-    Return: a list with a single matched instance type and a list of candidates
-    with fuzzy search (should be empty as it must have already been generated in
-    caller).
-    """
-    (instance_list,
-     fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         df=_df, acc_name=acc_name, acc_count=acc_count)
-    if instance_list is None:
-        return None, fuzzy_candidate_list
-
-    if acc_name in _A100_INSTANCE_TYPE_DICTS:
-        # If A100 is used, host VM type must be A2.
-        # https://cloud.google.com/compute/docs/gpus#a100-gpus
-        return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
-    if acc_name not in _NUM_ACC_TO_NUM_CPU:
-        acc_name = 'DEFAULT'
-
-    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
-    # The (acc_name, acc_count) should be validated in the caller.
-    assert num_cpus is not None, (acc_name, acc_count)
-    mem_type = 'highmem'
-    # patches for the number of cores per GPU, as some of the combinations
-    # are not supported by GCP.
-    if _DEFAULT_HOST_VM_FAMILY == 'n1':
-        if num_cpus < 96:
-            num_cpus = _closest_power_of_two(num_cpus)
-        else:
-            num_cpus = 96
-    else:
-        if num_cpus > 80:
-            mem_type = 'standard'
-    # The fuzzy candidate should have already been fetched in the caller.
-    return [f'{_DEFAULT_HOST_VM_FAMILY}-{mem_type}-{num_cpus}'], []
 
 
 def validate_region_zone(region: Optional[str], zone: Optional[str]):
