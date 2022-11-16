@@ -232,6 +232,7 @@ def get_feasible_resources(
             df['MemoryGiB'] = 624  # FIXME
         else:
             # Join the two dataframes.
+            vm_df = vm_df.drop(columns=['AcceleratorName', 'AcceleratorCount'])
             acc_df = acc_df[[
                 'Region',
                 'AvailabilityZone',
