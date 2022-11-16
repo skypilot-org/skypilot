@@ -1340,7 +1340,11 @@ class RetryingVmProvisioner(object):
             # Optimization: Try parse head ip from 'ray up' stdout.
             # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
-            head_ip = stdout[position + 1:].strip()
+            # Use a regex to extract the IP address.
+            head_ip = re.search(
+                r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})',
+                stdout[position + 1:]).group(1)
+            # head_ip = stdout[position + 1:].strip()
             if not backend_utils.is_ip(head_ip):
                 # Something's wrong. Ok to not return a head_ip.
                 head_ip = None
