@@ -60,6 +60,12 @@ def create_table(cursor, conn):
         handle BLOB,
         last_use TEXT,
         status TEXT)""")
+    # Table for Storage Historyu
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS storage_history (
+        storage_hash TEXT PRIMARY KEY,
+        name TEXT,
+        usage_intervals BLOB)""")
     # For backward compatibility.
     # TODO(zhwu): Remove this function after all users have migrated to
     # the latest version of SkyPilot.
@@ -74,6 +80,9 @@ def create_table(cursor, conn):
                                  'INTEGER DEFAULT 0')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
+                                 'TEXT DEFAULT null')
+
+    db_utils.add_column_to_table(cursor, conn, 'storage', 'storage_hash',
                                  'TEXT DEFAULT null')
     conn.commit()
 
@@ -452,6 +461,40 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _DB.conn.commit()
 
 
+def _get_storage_hash(storage_name: str) -> Optional[str]:
+    rows = _DB.cursor.execute('SELECT storage FROM storage WHERE name=(?)',
+                              (storage_name,))
+    for (storage_hash,) in rows:
+        if storage_hash is None:
+            return None
+        return storage_hash
+
+
+def _set_storage_usage_intervals(storage_hash: str,
+                                 usage_intervals: Dict[str, Any]) -> None:
+    _DB.cursor.execute(
+        'UPDATE storage_history SET usage_intervals=(?) WHERE storage_hash=(?)',
+        (
+            pickle.dumps(usage_intervals),
+            storage_hash,
+        ))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Storage hash {storage_hash} not found.')
+
+
+def _get_storage_usage_intervals(storage_hash: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'SELECT usage_intervals FROM storage_history WHERE storage_hash=(?)',
+        (storage_hash,))
+    for (usage_intervals,) in rows:
+        if usage_intervals is None:
+            return None
+        return pickle.loads(usage_intervals)
+
+
 def add_or_update_storage(storage_name: str,
                           storage_handle: 'Storage.StorageMetadata',
                           storage_status: StorageStatus):
@@ -465,14 +508,60 @@ def add_or_update_storage(storage_name: str,
     if not status_check(storage_status):
         raise ValueError(f'Error in updating global state. Storage Status '
                          f'{storage_status} is passed in incorrectly')
-    _DB.cursor.execute('INSERT OR REPLACE INTO storage VALUES (?, ?, ?, ?, ?)',
-                       (storage_name, storage_launched_at, handle, last_use,
-                        storage_status.value))
+
+    storage_hash = _get_storage_hash(storage_name) or str(uuid.uuid4())
+
+    usage_intervals = _get_storage_usage_intervals(storage_hash)
+
+    if not usage_intervals:
+        usage_intervals = []
+
+    # if this is the storage init or we are starting after a stop
+    if len(usage_intervals) == 0 or usage_intervals[-1][-1]:
+        usage_intervals.append((storage_launched_at, None))
+
+    _DB.cursor.execute(
+        'INSERT OR REPLACE INTO storage VALUES (?, ?, ?, ?, ?, ?)',
+        (storage_name, storage_launched_at, handle, last_use,
+         storage_status.value, storage_hash))
+
+    _DB.cursor.execute(
+        'INSERT or REPLACE INTO storage_history'
+        '(storage_hash, name, usage_intervals) '
+        'VALUES ('
+        # hash
+        '?, '
+        # name
+        '?, '
+        # requested resources
+        '?, '
+        # launched resources
+        '?, '
+        # usage intervals
+        '?)',
+        (
+            # hash
+            storage_hash,
+            # name
+            storage_name,
+            # usage intervals
+            pickle.dumps(usage_intervals),
+        ))
+
     _DB.conn.commit()
 
 
 def remove_storage(storage_name: str):
     """Removes Storage from Database"""
+    storage_hash = _get_cluster_hash(storage_name)
+    usage_intervals = _get_storage_usage_intervals(storage_hash)
+
+    if usage_intervals:
+        start_time = usage_intervals.pop()[0]
+        end_time = int(time.time())
+        usage_intervals.append((start_time, end_time))
+        _set_storage_usage_intervals(storage_hash, usage_intervals)
+
     _DB.cursor.execute('DELETE FROM storage WHERE name=(?)', (storage_name,))
     _DB.conn.commit()
 
@@ -533,7 +622,7 @@ def get_storage_names_start_with(starts_with: str) -> List[str]:
 def get_storage() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('select * from storage')
     records = []
-    for name, launched_at, handle, last_use, status in rows:
+    for name, launched_at, handle, last_use, status, storage_hash in rows:
         # TODO: use namedtuple instead of dict
         records.append({
             'name': name,
@@ -541,6 +630,8 @@ def get_storage() -> List[Dict[str, Any]]:
             'handle': pickle.loads(handle),
             'last_use': last_use,
             'status': StorageStatus[status],
+            'hash': storage_hash,
+            'cost': get_cost_for_storage(name),
         })
     return records
 
@@ -554,10 +645,10 @@ def get_cost_for_cluster(cluster_name: str,) -> float:
 
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
+    return get_cost_for_cluster_usage_intervals(cluster_hash, usage_intervals)
 
 
-def get_cost_for_usage_intervals(
+def get_cost_for_cluster_usage_intervals(
     cluster_hash: str,
     usage_intervals: List[Tuple[int, int]],
 ) -> float:
@@ -577,4 +668,28 @@ def get_cost_for_usage_intervals(
 
     cost = (resources.get_cost(total_duration) * num_nodes)
 
+    return cost
+
+
+def get_cost_for_storage(storage_name: str,) -> float:
+
+    storage_hash = _get_storage_hash(storage_name)
+
+    if storage_hash is None:
+        return 0
+
+    usage_intervals = _get_cluster_usage_intervals(storage_hash)
+
+    total_duration = 0
+
+    for i, (start_time, end_time) in enumerate(usage_intervals):
+        # duration from latest start time to time of query
+        if end_time is None:
+            assert i == len(usage_intervals) - 1, i
+            end_time = int(time.time())
+        start_time, end_time = int(start_time), int(end_time)
+        total_duration += end_time - start_time
+
+    # TODO: fetch actual unit cost given storage configuration
+    cost = total_duration
     return cost

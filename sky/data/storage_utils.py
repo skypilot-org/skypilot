@@ -21,6 +21,7 @@ def format_storage_table(storages: List[Dict[str, Any]]) -> str:
         'CREATED',
         'STORE',
         'COMMAND',
+        'COST',
         'STATUS',
     ])
 
@@ -35,6 +36,8 @@ def format_storage_table(storages: List[Dict[str, Any]]) -> str:
             ', '.join([s.value for s in row['store']]),
             # COMMAND
             row['last_use'],
+            # COST
+            row['cost'],
             # STATUS
             row['status'].value,
         ])
