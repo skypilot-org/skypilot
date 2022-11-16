@@ -252,9 +252,8 @@ class ResourceFilter:
                 val = dict(val)
             resources_fields[field] = val
         assert not config, f'Invalid resource args: {config.keys()}'
-        return ResourceFilter(**resources_fields)
+        return cls(**resources_fields)
 
-    @classmethod
     def to_yaml_config(self) -> Dict[str, Union[str, int]]:
         # TODO: implement this.
         config = {}
