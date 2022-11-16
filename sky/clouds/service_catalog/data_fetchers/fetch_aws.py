@@ -249,6 +249,8 @@ def get_image_row(region: str, ubuntu_version: str,
         print(
             f'Failed to find image for {region}, {ubuntu_version}, {cpu_or_gpu}'
         )
+    if date is None:
+        raise ValueError(f'Could not find the creation date for {cpu_or_gpu}.')
     tag = f'skypilot:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
