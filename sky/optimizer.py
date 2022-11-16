@@ -153,7 +153,7 @@ class Optimizer:
         num_nodes = resource_filter.num_nodes
         plural = 's' if num_nodes > 1 else ''
         logger.info(f'{colorama.Style.BRIGHT}'
-                    f'Considered resources ({num_nodes} node{plural}):'
+                    f'Best resources ({num_nodes} node{plural}):'
                     f'{colorama.Style.RESET_ALL}')
         table = _create_table(columns)
         table.add_rows(rows)
