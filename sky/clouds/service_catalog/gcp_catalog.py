@@ -138,9 +138,7 @@ def _get_default_host_size(
         num_vcpus = 8.0 * acc_count
         cpu_memory = 32.0 * acc_count
     else:
-        # High-end GPUs (e.g., A100)
-        num_vcpus = None
-        cpu_memory = None
+        assert False
     return num_vcpus, cpu_memory
 
 
