@@ -143,8 +143,11 @@ class Optimizer:
         worst_resources = max(available_resources,
                               key=lambda r: r.get_hourly_price())
         worst_price = worst_resources.get_hourly_price()
-        logger.info('Estimated price: '
-                    f'${best_price:.2f}/hr - ${worst_price:.2f}/hr')
+        if best_price == worst_price:
+            logger.info(f'Estimated price: ${best_price:.2f}/hr')
+        else:
+            logger.info('Estimated price: '
+                        f'${best_price:.2f}/hr - ${worst_price:.2f}/hr')
 
         # Print the table.
         num_nodes = resource_filter.num_nodes
