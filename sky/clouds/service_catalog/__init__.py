@@ -47,7 +47,6 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
     return results
 
 
-# FIXME: annotate types.
 def get_hourly_price(resource: 'resources.ClusterResources',
                      clouds: CloudFilter = None) -> float:
     return _map_clouds_catalog(clouds, 'get_hourly_price', resource)
@@ -64,7 +63,6 @@ def is_subset_of(instance_family_a: str,
                                instance_family_b)
 
 
-# FIXME: annotate types.
 def get_feasible_resources(resource_filter: 'resources.ResourceFilter',
                            get_smallest_vms: bool,
                            clouds: CloudFilter = None) -> List:
