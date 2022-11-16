@@ -80,8 +80,10 @@ A2_INSTANCE_TYPES = {
     },
 }
 
-# Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones
-NO_A100_16G_ZONES = ['asia-northeast3-a', 'asia-northeast3-b', 'us-west4-b']
+# Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones#limitations
+NO_A100_16G_ZONES = [
+    'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f',
+    'europe-west4-a', 'europe-west4-b', 'asia-southeast1-c']
 
 # For the TPU catalog, we maintain our own location/pricing table.
 # NOTE: The CSV files do not completely align with the data in the websites.
