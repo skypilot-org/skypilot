@@ -27,7 +27,7 @@
 
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
-SkyPilot abstracts away cloud infra burden:
+SkyPilot abstracts away the cloud infra burden:
 - Launch jobs & clusters on any cloud (AWS, Azure, GCP)
 - Find scarce resources across zones/regions/clouds
 - Queue jobs & use cloud object stores
@@ -36,7 +36,7 @@ SkyPilot cuts your cloud costs:
 * [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with auto-recovery from preemptions
 * [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters 
 * [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): find best VM types for your jobs
-* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
+* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds, *even resuming a spot job in the cheapest location each time it's preempted!*
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
@@ -86,7 +86,7 @@ Prepare the workdir by cloning:
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
 
-Launch with `sky launch`:
+Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/reference/quota.html) is needed for this example):
 ```bash
 sky launch my_task.yaml
 ```
