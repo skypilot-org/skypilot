@@ -1346,10 +1346,13 @@ class RetryingVmProvisioner(object):
             # Optimization: Try parse head ip from 'ray up' stdout.
             # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
-            head_ip = stdout[position + 1:].strip()
-            if not backend_utils.is_ip(head_ip):
-                # Something's wrong. Ok to not return a head_ip.
-                head_ip = None
+            # Use a regex to extract the IP address.
+            ip_list = re.findall(backend_utils.IP_ADDR_REGEX,
+                                 stdout[position + 1:])
+            # If something's wrong. Ok to not return a head_ip.
+            head_ip = None
+            if len(ip_list) == 1:
+                head_ip = ip_list[0]
             return (self.GangSchedulingStatus.CLUSTER_READY, stdout, stderr,
                     head_ip)
 
