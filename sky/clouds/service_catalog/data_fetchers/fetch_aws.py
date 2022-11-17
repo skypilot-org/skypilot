@@ -47,8 +47,9 @@ USEFUL_COLUMNS = [
 ]
 
 # NOTE: the hard-coded us-east-1 URL is not a typo. AWS pricing endpoint is
-# only available in this region, but it serves pricing information for all regions.
-PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'
+# only available in this region, but it serves pricing information for all
+# regions.
+PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
 
 
 @ray.remote
@@ -143,7 +144,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         def get_additional_columns(row) -> pd.Series:
             acc_name, acc_count = get_acc_info(row)
             # AWS p3dn.24xlarge offers a different V100 GPU.
-            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/
+            # See https://aws.amazon.com/blogs/compute/optimizing-deep-learning-on-p3-and-p3dn-with-efa/ # pylint: disable=line-too-long
             if row['InstanceType'] == 'p3dn.24xlarge':
                 acc_name = 'V100-32GB'
             if row['InstanceType'] == 'p4de.24xlarge':
@@ -177,7 +178,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         # patch the GpuInfo for p4de.24xlarge
         df.loc[df['InstanceType'] == 'p4de.24xlarge', 'GpuInfo'] = 'A100-80GB'
         df = df[USEFUL_COLUMNS]
-    except Exception as e:
+    except Exception as e:  # pylint: disable=broad-except
         print(f'{region} failed with {e}')
         return region
     return df
@@ -224,13 +225,12 @@ def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
             """,
                                            shell=True)
     except subprocess.CalledProcessError as e:
-        print(
-            f'Failed {region}, {ubuntu_version}, {creation_date}. Trying next date.'
-        )
+        print(f'Failed {region}, {ubuntu_version}, {creation_date}. '
+              'Trying next date.')
         print(f'{type(e)}: {e}')
         image_id = None
     else:
-        image_id = image_id.decode("utf-8").strip()
+        image_id = image_id.decode('utf-8').strip()
     return image_id
 
 
@@ -239,6 +239,7 @@ def get_image_row(region: str, ubuntu_version: str,
                   cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
+    date = None
     for date in creation_date:
         image_id = get_image_id(region, ubuntu_version, date)
         if image_id:
@@ -248,6 +249,8 @@ def get_image_row(region: str, ubuntu_version: str,
         print(
             f'Failed to find image for {region}, {ubuntu_version}, {cpu_or_gpu}'
         )
+    if date is None:
+        raise ValueError(f'Could not find the creation date for {cpu_or_gpu}.')
     tag = f'skypilot:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
@@ -275,14 +278,14 @@ if __name__ == '__main__':
         help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
 
-    regions = ALL_REGIONS if args.all_regions else US_REGIONS
+    region_filter = ALL_REGIONS if args.all_regions else US_REGIONS
 
     ray.init()
-    df = get_all_regions_instance_types_df(regions)
+    instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('aws', exist_ok=True)
-    df.to_csv('aws/vms.csv', index=False)
+    instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
-    df = get_all_regions_images_df()
-    df.to_csv('aws/images.csv', index=False)
+    image_df = get_all_regions_images_df()
+    image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
