@@ -49,14 +49,11 @@ class Optimizer:
 
     @staticmethod
     def optimize(
-        resource_filter: resources.ResourceFilter,
-        blocked_resources: List[resources.ClusterResources],
+        feasible_resources: List[resources.ClusterResources],
+        blocked_resources: List[resources.ClusterResources] = [],
         quiet: bool = True,
     ) -> Optional[resources.ClusterResources]:
         # TODO(woosuk): Consider data locality in optimization.
-        candidate_generator = generator.CandidateGenerator()
-        feasible_resources = candidate_generator.get_feasible_resources(
-            resource_filter, get_smallest_vms=True)
         available_resources = []
         for r in feasible_resources:
             for b in blocked_resources:
@@ -150,7 +147,8 @@ class Optimizer:
                         f'${best_price:.2f}/hr - ${worst_price:.2f}/hr')
 
         # Print the table.
-        num_nodes = resource_filter.num_nodes
+        # Here we assume that every resource has the same num_nodes.
+        num_nodes = best_resources[0].num_nodes
         plural = 's' if num_nodes > 1 else ''
         logger.info(f'{colorama.Style.BRIGHT}'
                     f'Best resources ({num_nodes} node{plural}):'
