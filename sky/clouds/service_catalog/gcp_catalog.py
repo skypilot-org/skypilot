@@ -84,23 +84,20 @@ def _get_instance_family(instance_type: Optional[str]) -> Optional[str]:
     return instance_type.split('-')[0].lower()
 
 
-def _is_valid(resource: resources.ClusterResources) -> bool:
+def _check_host_vm_limit(resource: resources.ClusterResources) -> bool:
     if resource.accelerator is None:
-        if resource.instance_family == 'a2':
-            # A2 machines should be used together with A100 GPUs.
-            return False
-        else:
-            # No accelerator, no problem.
-            return True
+        # No accelerator, no problem.
+        return True
 
     acc_name = resource.accelerator.name
     acc_count = resource.accelerator.count
 
     if acc_name.startswith('tpu'):
-        # TODO: Investigate the host VM restrictions for TPU Nodes.
+        # TODO: Investigate the host VM limits for TPU Nodes.
         return True
 
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
+        # A100s are attached to fixed-size A2 VMs.
         return True
 
     max_cpus, max_memory = _NUM_ACC_TO_MAX_CPU_AND_MEMORY[acc_name][acc_count]
@@ -153,6 +150,11 @@ def get_feasible_resources(
 
     if resource_filter.use_spot is not None:
         df = common.filter_spot(df, resource_filter.use_spot)
+
+    # Users cannot use A2 machines without A100 GPUs.
+    if resource_filter.instance_family == 'a2':
+        if resource_filter.accelerator is None:
+            return []
 
     # Search the accelerator first.
     acc_df = None
@@ -277,7 +279,7 @@ def get_feasible_resources(
     ]
 
     # Filter out invalid combinations.
-    return [r for r in feasible_resources if _is_valid(r)]
+    return [r for r in feasible_resources if _check_host_vm_limit(r)]
 
 
 def is_subset_of(instance_family_a: str, instance_family_b: str) -> bool:
