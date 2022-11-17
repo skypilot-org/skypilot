@@ -120,16 +120,14 @@ def _check_host_vm_limit(resource: resources.ClusterResources) -> bool:
     return True
 
 
-def _get_default_host_size(
-    acc_name: str,
-    acc_count: int,
-) -> Tuple[Optional[float], Optional[float]]:
+def _get_default_host_size(acc_name: str,
+                           acc_count: int) -> Tuple[float, float]:
     if _is_tpu(acc_name):
         # TPUs.
         assert acc_count == 1
         num_tpu_cores = int(acc_name.split('-')[2])
-        num_vcpus = min(1.0 * num_tpu_cores, 96.0)
-        cpu_memory = min(4.0 * num_tpu_cores, 624.0)
+        num_vcpus = 1.0 * num_tpu_cores
+        cpu_memory = 4.0 * num_tpu_cores
     elif acc_name in ['K80', 'P4', 'T4']:
         # Low-end GPUs.
         num_vcpus = 4.0 * acc_count
@@ -140,6 +138,8 @@ def _get_default_host_size(
         cpu_memory = 32.0 * acc_count
     else:
         assert False
+    num_vcpus = min(num_vcpus, 96.0)
+    cpu_memory = min(cpu_memory, 624.0)
     return num_vcpus, cpu_memory
 
 
@@ -205,14 +205,13 @@ def get_feasible_resources(
                 return []
 
             if resource_filter.instance_type is None:
+                # If not specified, provide the default host VM size.
                 if (resource_filter.num_vcpus is None and
                         resource_filter.cpu_memory is None):
                     min_vcpus, min_memory = _get_default_host_size(
                         acc_name, acc_count)
-                    if min_vcpus is not None:
-                        resource_filter.num_vcpus = f'{min_vcpus}+'
-                    if min_memory is not None:
-                        resource_filter.cpu_memory = f'{min_memory}+'
+                    resource_filter.num_vcpus = f'{min_vcpus}+'
+                    resource_filter.cpu_memory = f'{min_memory}+'
             elif _get_instance_family(resource_filter.instance_type) != 'n1':
                 return []
 
