@@ -52,10 +52,11 @@ class TestReservedClustersOperations:
                                              instance_type='p3.2xlarge',
                                              region='us-east-1'),
         )
-        global_user_state.add_or_update_cluster('test-cluster1',
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True)
+        global_user_state.add_or_update_cluster(
+            'test-cluster1',
+            handle,
+            requested_resources=handle.launched_resources,
+            ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
@@ -66,10 +67,11 @@ class TestReservedClustersOperations:
                                              accelerators={'A100': 4},
                                              region='us-west1'),
         )
-        global_user_state.add_or_update_cluster('test-cluster2',
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True)
+        global_user_state.add_or_update_cluster(
+            'test-cluster2',
+            handle,
+            requested_resources=handle.launched_resources,
+            ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
@@ -79,10 +81,11 @@ class TestReservedClustersOperations:
                                              instance_type='Standard_D4s_v3',
                                              region='eastus'),
         )
-        global_user_state.add_or_update_cluster('test-cluster3',
-                                                handle,
-                                                requested_resources=None,
-                                                ready=False)
+        global_user_state.add_or_update_cluster(
+            'test-cluster3',
+            handle,
+            requested_resources=handle.launched_resources,
+            ready=False)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name=spot.SPOT_CONTROLLER_NAME,
             cluster_yaml='/tmp/spot_controller.yaml',
@@ -92,10 +95,11 @@ class TestReservedClustersOperations:
                                              instance_type='m4.2xlarge',
                                              region='us-west-1'),
         )
-        global_user_state.add_or_update_cluster(spot.SPOT_CONTROLLER_NAME,
-                                                handle,
-                                                requested_resources=None,
-                                                ready=True)
+        global_user_state.add_or_update_cluster(
+            spot.SPOT_CONTROLLER_NAME,
+            handle,
+            requested_resources=handle.launched_resources,
+            ready=True)
 
     @pytest.mark.timeout(60)
     def test_down_spot_controller(self, _mock_cluster_state, monkeypatch):

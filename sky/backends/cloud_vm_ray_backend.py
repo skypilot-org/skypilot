@@ -890,7 +890,7 @@ class RetryingVmProvisioner(object):
         self,
         to_provision: resources_lib.Resources,
         num_nodes: int,
-        task: task_lib.Task,
+        resources: resources_lib.Resources,
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
@@ -952,7 +952,7 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(
                 cluster_name,
                 cluster_handle=handle,
-                requested_resources=task.resources,
+                requested_resources=resources,
                 ready=False,
             )
 
@@ -1398,7 +1398,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
-                    task=task,
+                    resources=task.resources,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -2639,7 +2639,7 @@ class CloudVmRayBackend(backends.Backend):
                                          terminate=terminate)
 
         if cluster_cost:
-            logger.info(f'Total cost of cluster is $ {cluster_cost:.2f}')
+            logger.info(f'Estimated cost of cluster is... $ {cluster_cost:.2f}')
 
         if terminate:
             # Clean up TPU creation/deletion scripts

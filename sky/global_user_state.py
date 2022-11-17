@@ -40,11 +40,26 @@ def create_table(cursor, conn):
         last_use TEXT,
         status TEXT,
         autostop INTEGER DEFAULT -1)""")
+
     # Table for Cluster History
+    # usage_intervals: List[Tuple[int, int]]/
+    # Specifies start and end timestamps of cluster.
+    # When the last end time is None, the cluster is still UP.
+    # Example: [(start1, end1), (start2, end2), (start3, None)]
+
+    # requested_resources: Set[resource_lib.Resource]
+    # Requested resources fetched from task that user specifies.
+
+    # launched_resources: Optional[resources_lib.Resources]
+    # Actual launched resources fetched from handle for cluster.
+
+    # num_nodes: Optional[int] number of nodes launched.
+
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS cluster_history (
         cluster_hash TEXT PRIMARY KEY,
         name TEXT,
+        num_nodes int,
         requested_resources BLOB,
         launched_resources BLOB,
         usage_intervals BLOB)""")
@@ -132,26 +147,29 @@ def add_or_update_cluster(
 
     cluster_hash = _get_cluster_hash(cluster_name) or str(uuid.uuid4())
 
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+
+    # first time a cluster is being launched
+    if not usage_intervals:
+        assert requested_resources is not None
+        usage_intervals = []
+
+    # if this is the cluster init or we are starting after a stop
+    if len(usage_intervals) == 0 or usage_intervals[-1][-1] is not None:
+        usage_intervals.append((cluster_launched_at, None))
+
     def get_launched_resources_from_handle(
             handle: Optional['backends.Backend.ResourceHandle']):
         launched_resources = handle.launched_resources
         launched_nodes = handle.launched_nodes
         return (launched_nodes, launched_resources)
 
-    launched_resources = get_launched_resources_from_handle(cluster_handle)
+    num_nodes, launched_resources = get_launched_resources_from_handle(
+        cluster_handle)
 
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
-
-    if requested_resources and not usage_intervals:
+    if requested_resources:
         assert len(requested_resources) == 1, requested_resources
         requested_resources = list(requested_resources)[0]
-
-    if not usage_intervals:
-        usage_intervals = []
-
-    # if this is the cluster init or we are starting after a stop
-    if len(usage_intervals) == 0 or usage_intervals[-1][-1]:
-        usage_intervals.append((cluster_launched_at, None))
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
@@ -205,7 +223,7 @@ def add_or_update_cluster(
 
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
-        '(cluster_hash, name, requested_resources, '
+        '(cluster_hash, name, num_nodes, requested_resources, '
         'launched_resources, usage_intervals) '
         'VALUES ('
         # hash
@@ -216,6 +234,8 @@ def add_or_update_cluster(
         '?, '
         # launched resources
         '?, '
+        # number of nodes
+        '?, '
         # usage intervals
         '?)',
         (
@@ -223,6 +243,8 @@ def add_or_update_cluster(
             cluster_hash,
             # name
             cluster_name,
+            # number of nodes
+            num_nodes,
             # requested resources
             pickle.dumps(requested_resources),
             # launched resources
@@ -373,14 +395,18 @@ def _get_cluster_hash(cluster_name: str) -> Optional[str]:
 
 def get_launched_resources_from_cluster_hash(
         cluster_hash: str) -> Optional[Tuple[int, Any]]:
+
     rows = _DB.cursor.execute(
-        'SELECT launched_resources FROM cluster_history WHERE cluster_hash=(?)',
-        (cluster_hash,))
-    for (launched_resources,) in rows:
-        if launched_resources is None:
+        'SELECT num_nodes, launched_resources '
+        'FROM cluster_history WHERE cluster_hash=(?)', (cluster_hash,))
+    for (
+            num_nodes,
+            launched_resources,
+    ) in rows:
+        if num_nodes is None or launched_resources is None:
             return None
         launched_resources = pickle.loads(launched_resources)
-        return launched_resources
+        return num_nodes, launched_resources
 
 
 def get_cluster_from_name(
