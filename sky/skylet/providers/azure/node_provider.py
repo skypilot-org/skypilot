@@ -352,13 +352,15 @@ class AzureNodeProvider(NodeProvider):
                 except Exception as e:
                     logger.warning("Failed to delete disk: {}".format(e))
 
+    @synchronized
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
         return self.cached_nodes[node_id]
 
     def _get_cached_node(self, node_id):
-        if node_id in self.cached_nodes:
-            return self.cached_nodes[node_id]
+        node = self.cached_nodes.get(node_id)
+        if node is not None:
+            return node
         return self._get_node(node_id=node_id)
 
     @staticmethod
