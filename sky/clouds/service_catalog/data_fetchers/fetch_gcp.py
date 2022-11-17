@@ -526,12 +526,12 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
     return catalog_df
 
 
-def get_catalog_df(region_prefix_filter: str) -> pd.DataFrame:
+def get_catalog_df(region_prefix: str) -> pd.DataFrame:
     """Generates the GCP catalog by combining CPU, GPU, and TPU catalogs."""
-    gpu_df = get_gpu_df(region_prefix_filter)
+    gpu_df = get_gpu_df(region_prefix)
     df = gpu_df[gpu_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
     a100_zones = df['AvailabilityZone'].unique().tolist()
-    vm_df = get_vm_df(region_prefix_filter, a100_zones)
+    vm_df = get_vm_df(region_prefix, a100_zones)
     tpu_df = get_tpu_df()
     catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
     catalog_df = post_process_a2_price(catalog_df)
@@ -555,8 +555,8 @@ if __name__ == '__main__':
         help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
 
-    region_prefix = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
-    gcp_catalog_df = get_catalog_df(region_prefix)
+    region_prefix_filter = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
+    gcp_catalog_df = get_catalog_df(region_prefix_filter)
 
     os.makedirs('gcp', exist_ok=True)
     gcp_catalog_df.to_csv('gcp/vms.csv', index=False)
