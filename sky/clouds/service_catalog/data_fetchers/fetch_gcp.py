@@ -514,7 +514,7 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
         else:
             return row['Price'] - a100['Price'].iloc[0]
 
-    # Deduct the A100 GPU price from the a2 price.
+    # Deduct the A100 GPU price from the A2 "total" price.
     catalog_df['Price'] = catalog_df.apply(_deduct_a100_price, axis=1)
     catalog_df['SpotPrice'] = catalog_df.apply(_deduct_a100_price,
                                                axis=1,
