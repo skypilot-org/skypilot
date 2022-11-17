@@ -223,7 +223,7 @@ def _controller_run(spot_controller: SpotController):
 
 
 if __name__ == '__main__':
-    ray.init('auto')
+    ray.init()
     parser = argparse.ArgumentParser()
     parser.add_argument('--job-id',
                         required=True,
