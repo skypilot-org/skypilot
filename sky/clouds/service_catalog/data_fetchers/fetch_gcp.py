@@ -6,6 +6,7 @@ the information from GCP websites.
 import argparse
 import os
 import re
+from typing import List
 
 from lxml import html
 import pandas as pd
@@ -39,49 +40,8 @@ GPU_TYPES_TO_COUNTS = {
     'K80': [1, 2, 4, 8],
 }
 
-# FIXME(woosuk): This URL can change.
-A2_PRICING_URL = '/compute/vm-instance-pricing_34568c2efd1858a89d6f5b0f1cdd171bbea1cdcba646e9771e6ef4028238086f.frame'  # pylint: disable=line-too-long
-A2_INSTANCE_TYPES = {
-    'a2-highgpu-1g': {
-        'vCPUs': 12,
-        'MemoryGiB': 85,
-    },
-    'a2-highgpu-2g': {
-        'vCPUs': 24,
-        'MemoryGiB': 170,
-    },
-    'a2-highgpu-4g': {
-        'vCPUs': 48,
-        'MemoryGiB': 340,
-    },
-    'a2-highgpu-8g': {
-        'vCPUs': 96,
-        'MemoryGiB': 680,
-    },
-    'a2-megagpu-16g': {
-        'vCPUs': 96,
-        'MemoryGiB': 1360,
-    },
-    'a2-ultragpu-1g': {
-        'vCPUs': 12,
-        'MemoryGiB': 170,
-    },
-    'a2-ultragpu-2g': {
-        'vCPUs': 24,
-        'MemoryGiB': 340,
-    },
-    'a2-ultragpu-4g': {
-        'vCPUs': 48,
-        'MemoryGiB': 680,
-    },
-    'a2-ultragpu-8g': {
-        'vCPUs': 96,
-        'MemoryGiB': 1360,
-    },
-}
-
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones#limitations
-NO_A100_16G_ZONES = [
+A100_16G_ZONES = [
     'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f',
     'europe-west4-a', 'europe-west4-b', 'asia-southeast1-c']
 
@@ -238,15 +198,11 @@ def get_vm_price_table(url):
     if df.empty:
         return None
 
-    instance_type = None
     if 'InstanceType' in df.columns:
         # Price table for pre-defined instance types.
-        instance_type = df['InstanceType'].iloc[0]
-        if instance_type in ['a2-highgpu-1g', 'a2-ultragpu-1g']:
-            # The A2 price table includes the GPU cost.
-            return None
+        # NOTE: The price of A2 machines includes the price of A100 GPUs,
+        # and thus is modified later by post_process_a2_price().
 
-        # Price table for specific VM types.
         df = df[[
             'InstanceType',
             'vCPUs',
@@ -301,46 +257,7 @@ def get_vm_zones(url):
     return df
 
 
-def get_a2_df():
-    a2_pricing = get_vm_price_table(GCP_URL + A2_PRICING_URL)
-    cpu_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined vCPUs']
-    memory_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined Memory']
-
-    table = []
-    for region in a2_pricing['Region'].unique():
-        per_cpu_price = cpu_pricing[cpu_pricing['Region'] ==
-                                    region]['Price'].values[0]
-        per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] ==
-                                         region]['SpotPrice'].values[0]
-        per_memory_price = memory_pricing[memory_pricing['Region'] ==
-                                          region]['Price'].values[0]
-        per_memory_spot_price = memory_pricing[memory_pricing['Region'] ==
-                                               region]['SpotPrice'].values[0]
-
-        for instance_type, spec in A2_INSTANCE_TYPES.items():
-            cpu = spec['vCPUs']
-            memory = spec['MemoryGiB']
-            price = per_cpu_price * cpu + per_memory_price * memory
-            spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
-            table.append(
-                [instance_type, cpu, memory, price, spot_price, region])
-    a2_df = pd.DataFrame(table,
-                         columns=[
-                             'InstanceType',
-                             'vCPUs',
-                             'MemoryGiB',
-                             'Price',
-                             'SpotPrice',
-                             'Region',
-                         ])
-
-    a2_df['AcceleratorName'] = None
-    a2_df['AcceleratorCount'] = None
-    a2_df['GpuInfo'] = None
-    return a2_df
-
-
-def get_vm_df(region_prefix: str):
+def get_vm_df(region_prefix: str, a100_zones: List[str]):
     """Generates the GCP service catalog for host VMs."""
     vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
     # Skip the table for "Suspended VM instances".
@@ -350,12 +267,15 @@ def get_vm_df(region_prefix: str):
     vm_dfs = [
         df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
     ]
-
-    # Handle A2 instance types separately.
-    a2_df = get_a2_df()
-    vm_df = pd.concat(vm_dfs + [a2_df])
+    vm_df = pd.concat(vm_dfs)
 
     vm_zones = get_vm_zones(GCP_VM_ZONES_URL)
+    # Manually add A2 machines to the zones with A100 GPUs.
+    # This is necessary because GCP_VM_ZONES_URL is not up to date.
+    df = pd.DataFrame.from_dict({'AvailabilityZone': a100_zones, 'MachineType': 'A2'})
+    vm_zones = pd.concat([vm_zones, df], ignore_index=True)
+    vm_zones = vm_zones.drop_duplicates()
+
     # Remove regions not in the pricing data.
     zone_to_region = lambda x: x[:-2]
     vm_zones['Region'] = vm_zones['AvailabilityZone'].apply(zone_to_region)
@@ -477,11 +397,6 @@ def get_gpu_zones(url):
     # Explode Availability Zone.
     df['AvailabilityZone'] = df['AvailabilityZone'].str.split(' ')
     df = df.explode('AvailabilityZone', ignore_index=True)
-
-    # Remove "(except a2-megagpu-16g)"
-    # The exceptional zones will be handled manually.
-    df['AcceleratorName'] = df['AcceleratorName'].apply(
-        lambda x: x.replace(' (except a2-megagpu-16g)', ''))
     return df
 
 
@@ -520,10 +435,10 @@ def get_gpu_df(region_prefix: str):
     gpu_df['Price'] = gpu_df['AcceleratorCount'] * gpu_df['Price']
     gpu_df['SpotPrice'] = gpu_df['AcceleratorCount'] * gpu_df['SpotPrice']
 
-    # Consider the zones that do not have 16xA100 machines.
-    gpu_df = gpu_df[~(gpu_df['AvailabilityZone'].isin(NO_A100_16G_ZONES) &
-                      (gpu_df['AcceleratorName'] == 'A100') &
-                      (gpu_df['AcceleratorCount'] == 16))]
+    # 16xA100 is only supported in certain zones.
+    gpu_df = gpu_df[(gpu_df['AcceleratorName'] != 'A100') |
+                    (gpu_df['AcceleratorCount'] != 16) |
+                    (gpu_df['AvailabilityZone'].isin(A100_16G_ZONES))]
 
     # Add columns for the service catalog.
     gpu_df['InstanceType'] = None
@@ -571,6 +486,38 @@ def get_tpu_df():
     return tpu_df
 
 
+def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
+    a100_df = catalog_df[catalog_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
+
+    def _deduct_a100_price(row, spot: bool = False) -> float:
+        instance_type = row['InstanceType']
+        if pd.isna(instance_type) or not instance_type.startswith('a2'):
+            return row['SpotPrice'] if spot else row['Price']
+
+        zone = row['AvailabilityZone']
+        a100_type = 'A100-80GB' if 'ultragpu' in instance_type else 'A100'
+        a100_count = int(instance_type.split('-')[-1][:-1])
+        a100 = a100_df[(a100_df['AcceleratorName'] == a100_type) &
+                       (a100_df['AcceleratorCount'] == a100_count) &
+                       (a100_df['AvailabilityZone'] == zone)]
+        if a100.empty:
+            # Invalid.
+            return None
+        if spot:
+            return row['SpotPrice'] - a100['SpotPrice'].iloc[0]
+        else:
+            return row['Price'] - a100['Price'].iloc[0]
+
+    # Deduct the A100 GPU price from the a2 price.
+    catalog_df['Price'] = catalog_df.apply(_deduct_a100_price, axis=1)
+    catalog_df['SpotPrice'] = catalog_df.apply(_deduct_a100_price, axis=1, args=(True,))
+
+    # Remove invalid A2 instances.
+    catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith('a2').ne(True) |
+                            (catalog_df['Price'].notna())]
+    return catalog_df
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -580,10 +527,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     region_prefix = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
 
-    vm_df = get_vm_df(region_prefix)
     gpu_df = get_gpu_df(region_prefix)
+    df = gpu_df[gpu_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
+    a100_zones = df['AvailabilityZone'].unique().tolist()
+    vm_df = get_vm_df(region_prefix, a100_zones)
     tpu_df = get_tpu_df()
     catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
+    catalog_df = post_process_a2_price(catalog_df)
 
     # Filter out unsupported VMs from the catalog.
     for vm in UNSUPPORTED_VMS:
