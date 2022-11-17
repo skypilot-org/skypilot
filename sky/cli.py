@@ -956,7 +956,8 @@ def _make_task_from_entrypoint_with_overrides(
         else:
             override_params['spot_recovery'] = spot_recovery
 
-    new_resources_set = set()
+    task.set_resources_override(override_params)
+
     for res in task.resources:
         # TODO(wei-lin): move this validation into Python API.
         if res.accelerators is not None:
@@ -964,9 +965,6 @@ def _make_task_from_entrypoint_with_overrides(
             if acc.startswith('tpu-') and task.num_nodes > 1:
                 raise ValueError('Multi-node TPU cluster is not supported. '
                                  f'Got num_nodes={task.num_nodes}.')
-        new_resources = res.copy(**override_params)
-        new_resources_set.add(new_resources)
-    task.set_resources(new_resources_set)
 
     if num_nodes is not None:
         task.num_nodes = num_nodes

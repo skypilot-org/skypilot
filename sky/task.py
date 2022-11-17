@@ -155,6 +155,7 @@ class Task:
         self.estimated_outputs_size_gigabytes = None
         # Default to CPUNode
         self.resources = {sky.Resources()}
+        self.resources_pref_list = None
         self.time_estimator_func = None
         self.file_mounts = None
 
@@ -325,17 +326,24 @@ class Task:
 
         resources_config = config.pop('resources', None)
 
-        resources = set()
-        # Translate config with a list of accelerators to a set of resources.
-        if (resources_config.get('accelerators') is not None and
-                isinstance(resources_config['accelerators'], list)):
+        # Translate config of a list of accelerators to a set of resources.
+        if resources_config.get('accelerators') is not None:
+            tmp_resources_list = []
             for acc in resources_config['accelerators']:
                 tmp_resource = resources_config.copy()
                 tmp_resource['accelerators'] = acc
-                resources.add(sky.Resources.from_yaml_config(tmp_resource))
+                tmp_resources_list.append(
+                    sky.Resources.from_yaml_config(tmp_resource))
+
+            if isinstance(resources_config['accelerators'], dict):
+                final_resources = set(tmp_resources_list)
+            elif isinstance(resources_config['accelerators'], list):
+                final_resources = tmp_resources_list
+            else:
+                raise ValueError('Accelerators must be a list or a set.')
         else:
-            resources = {sky.Resources.from_yaml_config(resources_config)}
-        task.set_resources(resources)
+            final_resources = {sky.Resources.from_yaml_config(resources_config)}
+        task.set_resources(final_resources)
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -437,7 +445,8 @@ class Task:
 
     def set_resources(
         self, resources: Union['resources_lib.Resources',
-                               Set['resources_lib.Resources']]
+                               Set['resources_lib.Resources'],
+                               List['resources_lib.Resources']]
     ) -> 'Task':
         """Sets the required resources to execute this task.
 
@@ -452,9 +461,32 @@ class Task:
         Returns:
           self: The current task, with resources set.
         """
+        # Reset the preference list.
+        self.resources_pref_list = None
         if isinstance(resources, sky.Resources):
             resources = {resources}
+        if isinstance(resources, list):
+            self.resources_pref_list = resources
+            resources = set(resources)
         self.resources = resources
+        return self
+
+    def set_resources_override(self, override_params: Dict[str, Any]) -> 'Task':
+        """Sets the override parameters for the resources."""
+        if self.resources_pref_list is not None:
+            res_ord = self.resources_pref_list
+        else:
+            res_ord = self.resources
+
+        new_resources_list = []
+        for res in res_ord:
+            new_resources = res.copy(**override_params)
+            new_resources_list.append(new_resources)
+
+        if self.resources_pref_list is not None:
+            self.set_resources(new_resources_list)
+        else:
+            self.set_resources(set(new_resources_list))
         return self
 
     def get_resources(self):

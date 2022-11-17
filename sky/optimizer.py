@@ -97,11 +97,17 @@ class Optimizer:
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
         try:
-            unused_best_plan = Optimizer._optimize_objective(
-                dag,
-                minimize_cost=minimize == OptimizeTarget.COST,
-                blocked_launchable_resources=blocked_launchable_resources,
-                quiet=quiet)
+            if _is_dag_with_res_list(dag):
+                # Honor the user's choice.
+                logger.info('Using user-specified resource list.')
+                Optimizer._set_resources_by_user_order(
+                    dag, blocked_launchable_resources)
+            else:
+                unused_best_plan = Optimizer._optimize_objective(
+                    dag,
+                    minimize_cost=minimize == OptimizeTarget.COST,
+                    blocked_launchable_resources=blocked_launchable_resources,
+                    quiet=quiet)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
             # optimization fails.
@@ -698,7 +704,7 @@ class Optimizer:
                     cost = f'{cost / 3600:.2f}'
 
                 row = [*_get_resources_element_list(resources), cost, '']
-                if resources == best_plan[task]:
+                if resources.is_same_resources(best_plan[task]):
                     # Use tick sign for the chosen resources.
                     row[-1] = (colorama.Fore.GREEN + '   ' + u'\u2714' +
                                colorama.Style.RESET_ALL)
@@ -789,12 +795,75 @@ class Optimizer:
                 Optimizer._print_candidates(node_to_candidate_map)
         return best_plan
 
+    @staticmethod
+    def _set_resources_by_user_order(
+        dag: 'dag_lib.Dag',
+        blocked_launchable_resources: Optional[List[
+            resources_lib.Resources]] = None,
+        quiet: bool = False,
+    ) -> Dict[Task, resources_lib.Resources]:
+        import networkx as nx  # pylint: disable=import-outside-toplevel
+        graph = dag.get_graph()
+        topo_order = list(nx.topological_sort(graph))
+
+        node_to_cost_map, node_to_candidate_map = \
+            Optimizer._estimate_nodes_cost_or_time(
+                topo_order,
+                True,
+                blocked_launchable_resources)
+
+        best_plan = {}
+        best_plan[topo_order[0]] = DummyResources(DummyCloud(), None)
+        best_plan[topo_order[-1]] = DummyResources(DummyCloud(), None)
+
+        for node_i, node in enumerate(topo_order):
+            if 0 < node_i < len(topo_order) - 1:
+                # Convert partial resource labels to launchable resources.
+                launchable_resources, _ = \
+                    _fill_in_launchable_resources(
+                        node,
+                        blocked_launchable_resources
+                    )
+                # Remove candidate that is not launchable.
+                launchable_resources = {
+                    k: v for k, v in launchable_resources.items() if v
+                }
+                best_resource = None
+                for res in node.resources_pref_list:
+                    if len(launchable_resources[res]) > 0:
+                        # Choose the cheapest launchable resource.
+                        launchable_res_sorted = sorted(
+                            launchable_resources[res],
+                            key=lambda x: x.get_cost(3600))
+                        best_resource = launchable_res_sorted[0]
+                        break
+                if best_resource is None:
+                    error_msg = (
+                        f'No launchable resource found for task {node}. '
+                        'To fix: relax its resource requirements.\n'
+                        'Hint: \'sky show-gpus --all\' '
+                        'to list available accelerators.\n'
+                        '      \'sky check\' to check the enabled clouds.')
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ResourcesUnavailableError(error_msg)
+                node.best_resources = best_resource
+                best_plan[node] = best_resource
+
+        total_time = Optimizer._compute_total_time(graph, topo_order, best_plan)
+        total_cost = Optimizer._compute_total_cost(graph, topo_order, best_plan)
+        if not quiet:
+            Optimizer.print_optimized_plan(graph, topo_order, best_plan,
+                                           total_time, total_cost,
+                                           node_to_cost_map, True)
+            if not env_options.Options.MINIMIZE_LOGGING.get():
+                Optimizer._print_candidates(node_to_candidate_map)
+
 
 class DummyResources(resources_lib.Resources):
     """A dummy Resources that has zero egress cost from/to."""
 
     def __repr__(self) -> str:
-        return DummyResources._REPR
+        return 'dummy'
 
     def get_cost(self, seconds):
         return 0
@@ -895,3 +964,13 @@ def _fill_in_launchable_resources(
             launchable[resources], blocked_launchable_resources)
 
     return launchable, cloud_candidates
+
+
+def _is_dag_with_res_list(dag: 'dag_lib.Dag') -> bool:
+    import networkx as nx  # pylint: disable=import-outside-toplevel
+    graph = dag.get_graph()
+    topo_order = list(nx.topological_sort(graph))
+    for node in topo_order:
+        if node.resources_pref_list is not None:
+            return True
+    return False
