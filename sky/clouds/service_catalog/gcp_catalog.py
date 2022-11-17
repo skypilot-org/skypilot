@@ -84,6 +84,10 @@ def _get_instance_family(instance_type: Optional[str]) -> Optional[str]:
     return instance_type.split('-')[0].lower()
 
 
+def _is_tpu(acc_name: str) -> bool:
+    return acc_name.startswith('tpu-')
+
+
 def _check_host_vm_limit(resource: resources.ClusterResources) -> bool:
     if resource.accelerator is None:
         # No accelerator, no problem.
@@ -92,7 +96,7 @@ def _check_host_vm_limit(resource: resources.ClusterResources) -> bool:
     acc_name = resource.accelerator.name
     acc_count = resource.accelerator.count
 
-    if acc_name.startswith('tpu'):
+    if _is_tpu(acc_name):
         # TODO: Investigate the host VM limits for TPU Nodes.
         return True
 
@@ -120,7 +124,7 @@ def _get_default_host_size(
     acc_name: str,
     acc_count: int,
 ) -> Tuple[Optional[float], Optional[float]]:
-    if acc_name.startswith('tpu'):
+    if _is_tpu(acc_name):
         # TPUs.
         assert acc_count == 1
         num_tpu_cores = int(acc_name.split('-')[2])
@@ -152,7 +156,8 @@ def get_feasible_resources(
         df = common.filter_spot(df, resource_filter.use_spot)
 
     # Users cannot use A2 machines without A100 GPUs.
-    if resource_filter.instance_family == 'a2':
+    if (_get_instance_family(resource_filter.instance_type) == 'a2' or
+            resource_filter.instance_families == ['a2']):
         if resource_filter.accelerator is None:
             return []
 
@@ -208,7 +213,7 @@ def get_feasible_resources(
                         resource_filter.num_vcpus = f'{min_vcpus}+'
                     if min_memory is not None:
                         resource_filter.cpu_memory = f'{min_memory}+'
-            elif not resource_filter.instance_type.startswith('n1-'):
+            elif _get_instance_family(resource_filter.instance_type) != 'n1':
                 return []
 
     # Search the host VM.
@@ -216,7 +221,7 @@ def get_feasible_resources(
         # Treat TPU VM as a special case.
         if resource_filter.accelerator is None:
             return []
-        elif not resource_filter.accelerator.name.startswith('tpu'):
+        elif not _is_tpu(resource_filter.accelerator.name):
             return []
     else:
         filters = {
