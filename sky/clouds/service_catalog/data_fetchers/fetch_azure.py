@@ -31,7 +31,8 @@ US_REGIONS = [
 def get_regions() -> Tuple[str]:
     """Get all available regions."""
     proc = subprocess.run(
-        'az account list-locations  --query "[?not_null(metadata.latitude)] .{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json',
+        'az account list-locations  --query "[?not_null(metadata.latitude)] '
+        '.{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json',
         shell=True,
         check=True,
         stdout=subprocess.PIPE)
@@ -56,12 +57,12 @@ USEFUL_COLUMNS = [
 
 def get_pricing_url(region: Optional[str] = None) -> str:
     filters = [
-        "serviceName eq 'Virtual Machines'",
-        "priceType eq 'Consumption'",
+        'serviceName eq \'Virtual Machines\'',
+        'priceType eq \'Consumption\'',
     ]
     if region is not None:
-        filters.append(f"armRegionName eq '{region}'")
-    filters_str = urllib.parse.quote(" and ".join(filters))
+        filters.append(f'armRegionName eq \'{region}\'')
+    filters_str = urllib.parse.quote(' and '.join(filters))
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
 
@@ -99,15 +100,15 @@ def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
 
 @ray.remote
 def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
-    print(f'Fetching SKU list')
+    print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
-        f'az vm list-skus --all',
+        'az vm list-skus --all',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
     )
-    print(f'Done fetching SKUs')
+    print('Done fetching SKUs')
     items = json.loads(proc.stdout.decode('ascii'))
     filtered_items = []
     for item in items:
@@ -154,7 +155,7 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         get_all_regions_pricing_df.remote(region_set),
         get_sku_df.remote(region_set),
     ])
-    print(f'Processing dataframes')
+    print('Processing dataframes')
     df.drop_duplicates(inplace=True)
 
     df = df[df['unitPrice'] > 0]
@@ -248,10 +249,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     ray.init()
-    regions = get_regions() if args.all_regions else US_REGIONS
-    regions = set(regions)
+    region_filter = get_regions() if args.all_regions else US_REGIONS
+    region_filter = set(region_filter)
 
-    df = get_all_regions_instance_types_df(regions)
+    instance_df = get_all_regions_instance_types_df(region_filter)
     os.makedirs('azure', exist_ok=True)
-    df.to_csv('azure/vms.csv', index=False)
+    instance_df.to_csv('azure/vms.csv', index=False)
     print('Azure Service Catalog saved to azure/vms.csv')
