@@ -819,21 +819,23 @@ class Optimizer:
         for node_i, node in enumerate(topo_order):
             if 0 < node_i < len(topo_order) - 1:
                 # Convert partial resource labels to launchable resources.
-                launchable_resources, _ = \
+                launchable_resources_map, _ = \
                     _fill_in_launchable_resources(
                         node,
                         blocked_launchable_resources
                     )
                 # Remove candidate that is not launchable.
-                launchable_resources = {
-                    k: v for k, v in launchable_resources.items() if v
+                launchable_resources_map = {
+                    k: v for k, v in launchable_resources_map.items() if v
                 }
                 best_resource = None
                 for res in node.resources_pref_list:
-                    if len(launchable_resources[res]) > 0:
+                    launchable_resources = launchable_resources_map.get(res)
+                    if launchable_resources is not None and len(
+                            launchable_resources) > 0:
                         # Choose the cheapest launchable resource.
                         launchable_res_sorted = sorted(
-                            launchable_resources[res],
+                            launchable_resources,
                             key=lambda x: x.get_cost(3600))
                         best_resource = launchable_res_sorted[0]
                         break
