@@ -68,7 +68,7 @@ class SpotController:
                 try:
                     self._handle_signal()
                 except exceptions.SpotUserCancelledError as e:
-                    logger.info('Cancelling...')
+                    logger.info(f'Cancelling spot job {self.job_id}...')
                     try:
                         ray.cancel(controller_task)
                         ray.get(controller_task)
