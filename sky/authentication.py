@@ -15,7 +15,7 @@ from cryptography.hazmat.backends import default_backend
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import aws, gcp
+from sky.adaptors import gcp
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -90,14 +90,14 @@ def setup_aws_authentication(config):
     # around the number of keys limit and permission issues with
     # ec2.describe_key_pairs.
     for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config']['UserData'] = (textwrap.dedent(f"""\
+        config['available_node_types'][node_type]['node_config']['UserData'] = (
+            textwrap.dedent(f"""\
             #cloud-config
             users:
             - name: ubuntu
               ssh-authorized-keys:
                 - {public_key}
-            """
-        ))
+            """))
     return config
 
 
@@ -245,7 +245,7 @@ def setup_gcp_authentication(config):
     ssh_keys = project_keys.split('\n') if project_keys else []
 
     # Generating ssh key if it does not exist
-    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
+    _, public_key = get_or_generate_keys()
 
     # Check if ssh key in Google Project's metadata
     public_key_token = public_key.split(' ')[1]
