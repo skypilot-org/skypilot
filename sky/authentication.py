@@ -94,7 +94,7 @@ def setup_aws_authentication(config):
             textwrap.dedent(f"""\
             #cloud-config
             users:
-            - name: ubuntu
+            - name: {config['auth']['ssh_user']}
               ssh-authorized-keys:
                 - {public_key}
             """))
