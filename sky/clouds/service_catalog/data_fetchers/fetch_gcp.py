@@ -12,6 +12,7 @@ from lxml import html
 import pandas as pd
 import requests
 
+# pylint: disable=line-too-long
 GCP_URL = 'https://cloud.google.com'
 GCP_VM_PRICING_URL = 'https://cloud.google.com/compute/vm-instance-pricing'
 GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
@@ -43,7 +44,8 @@ GPU_TYPES_TO_COUNTS = {
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones#limitations
 A100_16G_ZONES = [
     'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f',
-    'europe-west4-a', 'europe-west4-b', 'asia-southeast1-c']
+    'europe-west4-a', 'europe-west4-b', 'asia-southeast1-c'
+]
 
 # For the TPU catalog, we maintain our own location/pricing table.
 # NOTE: The CSV files do not completely align with the data in the websites.
@@ -272,7 +274,10 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]):
     vm_zones = get_vm_zones(GCP_VM_ZONES_URL)
     # Manually add A2 machines to the zones with A100 GPUs.
     # This is necessary because GCP_VM_ZONES_URL is not up to date.
-    df = pd.DataFrame.from_dict({'AvailabilityZone': a100_zones, 'MachineType': 'A2'})
+    df = pd.DataFrame.from_dict({
+        'AvailabilityZone': a100_zones,
+        'MachineType': 'A2',
+    })
     vm_zones = pd.concat([vm_zones, df], ignore_index=True)
     vm_zones = vm_zones.drop_duplicates()
 
@@ -481,13 +486,14 @@ def get_tpu_df():
     # Add columns for the service catalog.
     tpu_df['InstanceType'] = None
     tpu_df['GpuInfo'] = tpu_df['AcceleratorName']
-    gpu_df['vCPUs'] = None
-    gpu_df['MemoryGiB'] = None
+    tpu_df['vCPUs'] = None
+    tpu_df['MemoryGiB'] = None
     return tpu_df
 
 
 def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
-    a100_df = catalog_df[catalog_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
+    a100_df = catalog_df[catalog_df['AcceleratorName'].isin(
+        ['A100', 'A100-80GB'])]
 
     def _deduct_a100_price(row, spot: bool = False) -> float:
         instance_type = row['InstanceType']
@@ -510,11 +516,34 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
 
     # Deduct the A100 GPU price from the a2 price.
     catalog_df['Price'] = catalog_df.apply(_deduct_a100_price, axis=1)
-    catalog_df['SpotPrice'] = catalog_df.apply(_deduct_a100_price, axis=1, args=(True,))
+    catalog_df['SpotPrice'] = catalog_df.apply(_deduct_a100_price,
+                                               axis=1,
+                                               args=(True,))
 
     # Remove invalid A2 instances.
-    catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith('a2').ne(True) |
-                            (catalog_df['Price'].notna())]
+    catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith('a2').
+                            ne(True) | (catalog_df['Price'].notna())]
+    return catalog_df
+
+
+def get_catalog_df(region_prefix_filter: str):
+    """Generates the GCP catalog by combining CPU, GPU, and TPU catalogs."""
+    gpu_df = get_gpu_df(region_prefix_filter)
+    df = gpu_df[gpu_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
+    a100_zones = df['AvailabilityZone'].unique().tolist()
+    vm_df = get_vm_df(region_prefix_filter, a100_zones)
+    tpu_df = get_tpu_df()
+    catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
+    catalog_df = post_process_a2_price(catalog_df)
+
+    # Filter out unsupported VMs from the catalog.
+    for vm in UNSUPPORTED_VMS:
+        # NOTE: The `InstanceType` column can be NaN.
+        catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith(
+            vm).ne(True)]
+
+    # Reorder the columns.
+    catalog_df = catalog_df[COLUMNS]
     return catalog_df
 
 
@@ -525,25 +554,10 @@ if __name__ == '__main__':
         action='store_true',
         help='Fetch all global regions, not just the U.S. ones.')
     args = parser.parse_args()
+
     region_prefix = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
-
-    gpu_df = get_gpu_df(region_prefix)
-    df = gpu_df[gpu_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
-    a100_zones = df['AvailabilityZone'].unique().tolist()
-    vm_df = get_vm_df(region_prefix, a100_zones)
-    tpu_df = get_tpu_df()
-    catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
-    catalog_df = post_process_a2_price(catalog_df)
-
-    # Filter out unsupported VMs from the catalog.
-    for vm in UNSUPPORTED_VMS:
-        # NOTE: The `InstanceType` column can be NaN.
-        catalog_df = catalog_df[
-            catalog_df['InstanceType'].str.startswith(vm) != True]
-
-    # Reorder the columns.
-    catalog_df = catalog_df[COLUMNS]
+    gcp_catalog_df = get_catalog_df(region_prefix)
 
     os.makedirs('gcp', exist_ok=True)
-    catalog_df.to_csv('gcp/vms.csv', index=False)
+    gcp_catalog_df.to_csv('gcp/vms.csv', index=False)
     print('GCP Service Catalog saved to gcp/vms.csv')
