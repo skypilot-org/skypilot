@@ -7,6 +7,7 @@ import subprocess
 import sys
 import textwrap
 import time
+from typing import Any, Dict, Tuple
 
 import colorama
 from cryptography.hazmat.primitives import serialization
@@ -33,7 +34,7 @@ PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
 PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
 
 
-def generate_rsa_key_pair():
+def _generate_rsa_key_pair() -> Tuple[str, str]:
     key = rsa.generate_private_key(backend=default_backend(),
                                    public_exponent=65537,
                                    key_size=2048)
@@ -50,7 +51,8 @@ def generate_rsa_key_pair():
     return public_key, private_key
 
 
-def save_key_pair(private_key_path, public_key_path, private_key, public_key):
+def _save_key_pair(private_key_path: str, public_key_path: str,
+                   private_key: str, public_key: str) -> None:
     private_key_dir = os.path.dirname(private_key_path)
     os.makedirs(private_key_dir, exist_ok=True)
 
@@ -65,27 +67,23 @@ def save_key_pair(private_key_path, public_key_path, private_key, public_key):
         f.write(public_key)
 
 
-def get_or_generate_keys():
-    """Returns private and public keys from the given paths.
-
-    If the private_key_path is not provided or does not exist, then a new
-    keypair is generated and written to the path.
-    """
+def get_or_generate_keys() -> Tuple[str, str]:
+    """Returns the abosulte public and private key paths."""
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
     if private_key_path is None or not os.path.exists(private_key_path):
-        public_key, private_key = generate_rsa_key_pair()
-        save_key_pair(private_key_path, public_key_path, private_key,
-                      public_key)
+        public_key, private_key = _generate_rsa_key_pair()
+        _save_key_pair(private_key_path, public_key_path, private_key,
+                       public_key)
     else:
         assert os.path.exists(public_key_path)
-        public_key = open(public_key_path, 'rb').read().decode('utf-8')
-        private_key = open(private_key_path, 'rb').read().decode('utf-8')
-    return private_key, public_key
+    return private_key_path, public_key_path
 
 
-def setup_aws_authentication(config):
-    _, public_key = get_or_generate_keys()
+def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
     # Use cloud init in UserData to set up the authorized_keys to get
     # around the number of keys limit and permission issues with
     # ec2.describe_key_pairs.
@@ -103,7 +101,8 @@ def setup_aws_authentication(config):
 
 # Reference:
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
-def _wait_for_compute_global_operation(project_name, operation_name, compute):
+def _wait_for_compute_global_operation(project_name: str, operation_name: str,
+                                       compute: Any) -> None:
     """Poll for global compute operation until finished."""
     logger.debug('wait_for_compute_global_operation: '
                  'Waiting for operation {} to finish...'.format(operation_name))
@@ -133,10 +132,8 @@ def _wait_for_compute_global_operation(project_name, operation_name, compute):
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
 @gcp.import_package
-def setup_gcp_authentication(config):
-    get_or_generate_keys()
-    private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
-    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    private_key_path, public_key_path = get_or_generate_keys()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -244,8 +241,9 @@ def setup_gcp_authentication(config):
          if item['key'] == 'ssh-keys'), {}).get('value', '')
     ssh_keys = project_keys.split('\n') if project_keys else []
 
-    # Generating ssh key if it does not exist
-    _, public_key = get_or_generate_keys()
+    # Get public key from file.
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
 
     # Check if ssh key in Google Project's metadata
     public_key_token = public_key.split(' ')[1]
@@ -285,8 +283,7 @@ def setup_gcp_authentication(config):
     return config
 
 
-# Takes in config, a yaml dict and outputs a postprocessed dict
-def setup_azure_authentication(config):
+def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
