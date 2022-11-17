@@ -73,6 +73,10 @@ class SpotController:
                         ray.cancel(controller_task)
                         ray.get(controller_task)
                     except ray.exceptions.RayTaskError:
+                        # When the controller task is cancelled, it will raise
+                        # ray.exceptions.RayTaskError, which can be ignored,
+                        # since the SpotUserCancelledError will be raised and
+                        # handled later.
                         pass
                     raise e
                 ready, _ = ray.wait([controller_task], timeout=1)
