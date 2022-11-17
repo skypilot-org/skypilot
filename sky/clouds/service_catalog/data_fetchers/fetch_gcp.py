@@ -6,7 +6,7 @@ the information from GCP websites.
 import argparse
 import os
 import re
-from typing import List
+from typing import Dict, List
 
 from lxml import html
 import pandas as pd
@@ -77,13 +77,13 @@ COLUMNS = [
 ]
 
 
-def get_iframe_sources(url):
+def get_iframe_sources(url: str) -> List[str]:
     page = requests.get(url)
     tree = html.fromstring(page.content)
     return tree.xpath('//iframe/@src')
 
 
-def get_regions(doc):
+def get_regions(doc: str) -> Dict[str, str]:
     # Get the dictionary of regions.
     # E.g., 'kr': 'asia-northeast3'
     regions = doc.xpath('//md-option')
@@ -97,7 +97,7 @@ def get_regions(doc):
 # TODO(woosuk): parallelize this function using Ray.
 # Currently, 'HTML parser error : Tag md-option invalid' is raised
 # when the function is parallelized by Ray.
-def get_vm_price_table(url):
+def get_vm_price_table(url: str) -> pd.DataFrame:
     page = requests.get(url)
     doc = html.fromstring(page.content)
     regions = get_regions(doc)
@@ -170,7 +170,7 @@ def get_vm_price_table(url):
     }
     df.rename(columns=column_remapping, inplace=True)
 
-    def parse_memory(memory_str):
+    def parse_memory(memory_str: str) -> float:
         if 'GB' in memory_str:
             return float(memory_str.replace('GB', ''))
         else:
@@ -178,7 +178,7 @@ def get_vm_price_table(url):
 
     pattern = re.compile(r'\$?(.*?)\s?/')
 
-    def parse_price(price_str):
+    def parse_price(price_str: str) -> float:
         if NOT_AVAILABLE_STR in price_str:
             return None
         try:
@@ -227,7 +227,7 @@ def get_vm_price_table(url):
     return df
 
 
-def get_vm_zones(url):
+def get_vm_zones(url: str) -> pd.DataFrame:
     df = pd.read_html(url)[0]
     column_remapping = {
         'Zones': 'AvailabilityZone',
@@ -238,7 +238,7 @@ def get_vm_zones(url):
     # Remove unnecessary columns.
     df = df[['AvailabilityZone', 'MachineType']]
 
-    def parse_machine_type_list(list_str):
+    def parse_machine_type_list(list_str: str) -> List[str]:
         machine_types = list_str.split(', ')
         returns = []
         # Handle the typos in the GCP web page.
@@ -259,7 +259,7 @@ def get_vm_zones(url):
     return df
 
 
-def get_vm_df(region_prefix: str, a100_zones: List[str]):
+def get_vm_df(region_prefix: str, a100_zones: List[str]) -> pd.DataFrame:
     """Generates the GCP service catalog for host VMs."""
     vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
     # Skip the table for "Suspended VM instances".
@@ -306,7 +306,7 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]):
     return vm_df
 
 
-def get_gpu_price_table(url):
+def get_gpu_price_table(url) -> pd.DataFrame:
     page = requests.get(url)
     doc = html.fromstring(page.content)
     regions = get_regions(doc)
@@ -368,7 +368,7 @@ def get_gpu_price_table(url):
     # Parse the prices.
     pattern = re.compile(r'\$?(.*?)\s?per GPU')
 
-    def parse_price(price_str):
+    def parse_price(price_str: str) -> float:
         if NOT_AVAILABLE_STR in price_str:
             return None
         try:
@@ -386,7 +386,7 @@ def get_gpu_price_table(url):
     return df
 
 
-def get_gpu_zones(url):
+def get_gpu_zones(url) -> pd.DataFrame:
     page = requests.get(url)
     df = pd.read_html(page.text.replace('<br>', '\n'))[0]
     column_remapping = {
@@ -405,7 +405,7 @@ def get_gpu_zones(url):
     return df
 
 
-def get_gpu_df(region_prefix: str):
+def get_gpu_df(region_prefix: str) -> pd.DataFrame:
     """Generates the GCP service catalog for GPUs."""
     gpu_price_table_url = get_iframe_sources(GCP_GPU_PRICING_URL)
     assert len(gpu_price_table_url) == 1
@@ -457,7 +457,7 @@ def get_gpu_df(region_prefix: str):
     return gpu_df
 
 
-def get_tpu_df():
+def get_tpu_df() -> pd.DataFrame:
     """Generates the GCP service catalog for TPUs."""
     tpu_zones = pd.read_csv(GCP_TPU_ZONES_URL)
     tpu_pricing = pd.read_csv(GCP_TPU_PRICING_URL)
@@ -495,7 +495,7 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
     a100_df = catalog_df[catalog_df['AcceleratorName'].isin(
         ['A100', 'A100-80GB'])]
 
-    def _deduct_a100_price(row, spot: bool = False) -> float:
+    def _deduct_a100_price(row: pd.Series, spot: bool = False) -> float:
         instance_type = row['InstanceType']
         if pd.isna(instance_type) or not instance_type.startswith('a2'):
             return row['SpotPrice'] if spot else row['Price']
@@ -526,7 +526,7 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
     return catalog_df
 
 
-def get_catalog_df(region_prefix_filter: str):
+def get_catalog_df(region_prefix_filter: str) -> pd.DataFrame:
     """Generates the GCP catalog by combining CPU, GPU, and TPU catalogs."""
     gpu_df = get_gpu_df(region_prefix_filter)
     df = gpu_df[gpu_df['AcceleratorName'].isin(['A100', 'A100-80GB'])]
