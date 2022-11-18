@@ -326,11 +326,13 @@ class Task:
 
         resources_config = config.pop('resources', None)
 
-        # Translate config of a list of accelerators to a set of resources.
+        # Translate accelerators field to potential multiple resources.
         if resources_config.get('accelerators') is not None:
             accelerators = resources_config.get('accelerators')
             if isinstance(accelerators, str):
                 accelerators = {accelerators}
+            elif isinstance(accelerators, dict):
+                accelerators = [f'{k}:{v}' for k, v in accelerators.items()]
 
             tmp_resources_list = []
             for acc in accelerators:
