@@ -206,11 +206,11 @@ def get_feasible_resources(
 
             if resource_filter.instance_type is None:
                 # If not specified, provide the default host VM size.
-                if (resource_filter.num_vcpus is None and
-                        resource_filter.cpu_memory is None):
-                    min_vcpus, min_memory = _get_default_host_size(
-                        acc_name, acc_count)
-                    resource_filter.num_vcpus = f'{min_vcpus}+'
+                min_vcpus, min_memory = _get_default_host_size(
+                    acc_name, acc_count)
+                if resource_filter.num_vcpus is None:
+                    resource_filter.num_vcpus = f'{min_vcpus}+' 
+                if resource_filter.cpu_memory is None:
                     resource_filter.cpu_memory = f'{min_memory}+'
             elif _get_instance_family(resource_filter.instance_type) != 'n1':
                 return []
