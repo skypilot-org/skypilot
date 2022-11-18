@@ -13,7 +13,6 @@ import pandas as pd
 import requests
 
 # pylint: disable=line-too-long
-GCP_URL = 'https://cloud.google.com'
 GCP_VM_PRICING_URL = 'https://cloud.google.com/compute/vm-instance-pricing'
 GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
 GCP_GPU_PRICING_URL = 'https://cloud.google.com/compute/gpus-pricing'
@@ -265,7 +264,7 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]) -> pd.DataFrame:
     # Skip the table for "Suspended VM instances".
     vm_price_table_urls = vm_price_table_urls[:-1]
 
-    vm_dfs = [get_vm_price_table(GCP_URL + url) for url in vm_price_table_urls]
+    vm_dfs = [get_vm_price_table(url) for url in vm_price_table_urls]
     vm_dfs = [
         df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
     ]
@@ -409,7 +408,7 @@ def get_gpu_df(region_prefix: str) -> pd.DataFrame:
     """Generates the GCP service catalog for GPUs."""
     gpu_price_table_url = get_iframe_sources(GCP_GPU_PRICING_URL)
     assert len(gpu_price_table_url) == 1
-    gpu_pricing = get_gpu_price_table(GCP_URL + gpu_price_table_url[0])
+    gpu_pricing = get_gpu_price_table(gpu_price_table_url[0])
     gpu_zones = get_gpu_zones(GCP_GPU_ZONES_URL)
 
     # Remove zones not in the pricing data.
