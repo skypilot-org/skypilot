@@ -68,10 +68,10 @@ def _save_key_pair(private_key_path: str, public_key_path: str,
 
 
 def get_or_generate_keys() -> Tuple[str, str]:
-    """Returns the abosulte public and private key paths."""
+    """Returns the aboslute public and private key paths."""
     private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
     public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
-    if private_key_path is None or not os.path.exists(private_key_path):
+    if not os.path.exists(private_key_path):
         public_key, private_key = _generate_rsa_key_pair()
         _save_key_pair(private_key_path, public_key_path, private_key,
                        public_key)
