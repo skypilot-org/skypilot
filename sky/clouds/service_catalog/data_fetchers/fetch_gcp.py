@@ -40,8 +40,9 @@ GPU_TYPES_TO_COUNTS = {
     'K80': [1, 2, 4, 8],
 }
 
+# VMs with 16 A100 GPUs only appear in the following zones.
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones#limitations
-A100_16G_ZONES = [
+A2_MEGAGPU_16G_ZONES = [
     'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f',
     'europe-west4-a', 'europe-west4-b', 'asia-southeast1-c'
 ]
@@ -442,7 +443,7 @@ def get_gpu_df(region_prefix: str) -> pd.DataFrame:
     # 16xA100 is only supported in certain zones.
     gpu_df = gpu_df[(gpu_df['AcceleratorName'] != 'A100') |
                     (gpu_df['AcceleratorCount'] != 16) |
-                    (gpu_df['AvailabilityZone'].isin(A100_16G_ZONES))]
+                    (gpu_df['AvailabilityZone'].isin(A2_MEGAGPU_16G_ZONES))]
 
     # Add columns for the service catalog.
     gpu_df['InstanceType'] = None
