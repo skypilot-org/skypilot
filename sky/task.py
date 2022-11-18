@@ -328,19 +328,23 @@ class Task:
 
         # Translate config of a list of accelerators to a set of resources.
         if resources_config.get('accelerators') is not None:
+            accelerators = resources_config.get('accelerators')
+            if isinstance(accelerators, str):
+                accelerators = {accelerators}
+
             tmp_resources_list = []
-            for acc in resources_config['accelerators']:
+            for acc in accelerators:
                 tmp_resource = resources_config.copy()
                 tmp_resource['accelerators'] = acc
                 tmp_resources_list.append(
                     sky.Resources.from_yaml_config(tmp_resource))
 
-            if isinstance(resources_config['accelerators'], dict):
+            if isinstance(accelerators, set):
                 final_resources = set(tmp_resources_list)
-            elif isinstance(resources_config['accelerators'], list):
+            elif isinstance(accelerators, list):
                 final_resources = tmp_resources_list
             else:
-                raise ValueError('Accelerators must be a list or a set.')
+                raise RuntimeError('Accelerators must be a list or a set.')
         else:
             final_resources = {sky.Resources.from_yaml_config(resources_config)}
         task.set_resources(final_resources)
