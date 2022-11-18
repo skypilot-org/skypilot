@@ -6,7 +6,7 @@ the information from GCP websites.
 import argparse
 import os
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 
 from lxml import html
 import pandas as pd
@@ -495,10 +495,11 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
     a100_df = catalog_df[catalog_df['AcceleratorName'].isin(
         ['A100', 'A100-80GB'])]
 
-    def _deduct_a100_price(row: pd.Series, spot: bool = False) -> float:
+    def _deduct_a100_price(
+            row: pd.Series) -> Tuple[Optional[float], Optional[float]]:
         instance_type = row['InstanceType']
         if pd.isna(instance_type) or not instance_type.startswith('a2'):
-            return row['SpotPrice'] if spot else row['Price']
+            return row['Price'], row['SpotPrice']
 
         zone = row['AvailabilityZone']
         a100_type = 'A100-80GB' if 'ultragpu' in instance_type else 'A100'
@@ -508,18 +509,14 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
                        (a100_df['AvailabilityZone'] == zone)]
         if a100.empty:
             # Invalid.
-            return None
-        if spot:
-            return row['SpotPrice'] - a100['SpotPrice'].iloc[0]
-        else:
-            return row['Price'] - a100['Price'].iloc[0]
+            return None, None
+        price = row['Price'] - a100['Price'].iloc[0]
+        spot_price = row['SpotPrice'] - a100['SpotPrice'].iloc[0]
+        return price, spot_price
 
-    # Deduct the A100 GPU price from the A2 "total" price.
-    catalog_df['Price'] = catalog_df.apply(_deduct_a100_price, axis=1)
-    catalog_df['SpotPrice'] = catalog_df.apply(_deduct_a100_price,
-                                               axis=1,
-                                               args=(True,))
-
+    catalog_df[['Price', 'SpotPrice']] = catalog_df.apply(_deduct_a100_price,
+                                                          axis=1,
+                                                          result_type='expand')
     # Remove invalid A2 instances.
     catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith('a2').
                             ne(True) | (catalog_df['Price'].notna())]
