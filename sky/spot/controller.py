@@ -177,6 +177,9 @@ class SpotController:
 
 @ray.remote(num_cpus=0)
 def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
+    """Runs the controller in a remote process for interruption."""
+    # The controller needs to be instantiated in the remote process, since
+    # the controller is not serializable.
     spot_controller = SpotController(job_id, task_yaml, retry_until_up)
     spot_controller.run()
 
