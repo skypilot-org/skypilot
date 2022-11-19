@@ -751,7 +751,7 @@ def write_cluster_config(
     credentials = sky_check.get_cloud_credential_file_mounts()
 
     ip_list = None
-    auth_config = None
+    auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     if isinstance(cloud, clouds.Local):
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
@@ -799,10 +799,7 @@ def write_cluster_config(
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
-                'ssh_user':
-                    (None if auth_config is None else auth_config['ssh_user']),
-                'ssh_private_key': (None if auth_config is None else
-                                    auth_config['ssh_private_key']),
+                **auth_config,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -919,7 +916,7 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run('ray status',
@@ -1012,14 +1009,18 @@ def wait_until_ray_cluster_ready(
     return True  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
+def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
-    return ssh_user, ssh_private_key, ssh_control_name
+    return {
+        'ssh_user': ssh_user,
+        'ssh_private_key': ssh_private_key,
+        'ssh_control_name': ssh_control_name
+    }
 
 
 def parallel_data_transfer_to_nodes(
@@ -1374,7 +1375,7 @@ def do_filemounts_and_setup_on_local_workers(
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, *ssh_credentials)
+        worker_ips, **ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
@@ -1846,7 +1847,10 @@ def get_clusters(
         ]
 
     def _is_local_cluster(record):
-        cluster_resources = record['handle'].launched_resources
+        handle = record['handle']
+        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+            return False
+        cluster_resources = handle.launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
 
     if cloud_filter == CloudFilter.LOCAL:
@@ -2111,3 +2115,23 @@ def validate_schema(obj, schema, err_msg_prefix=''):
     if err_msg:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(err_msg)
+
+
+def check_public_cloud_enabled():
+    """Checks if any of the public clouds is enabled."""
+
+    def _no_public_cloud():
+        enabled_clouds = global_user_state.get_enabled_clouds()
+        return (len(enabled_clouds) == 0 or
+                (len(enabled_clouds) == 1 and
+                 isinstance(enabled_clouds[0], clouds.Local)))
+
+    if not _no_public_cloud():
+        return
+
+    sky_check.check(quiet=True)
+    if _no_public_cloud():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Cloud access is not set up. Run: '
+                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')

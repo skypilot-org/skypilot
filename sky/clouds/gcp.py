@@ -273,7 +273,11 @@ class GCP(clouds.Cloud):
                         'skypilot:gpu-debian-10', clouds='gcp')
 
         if resources.image_id is not None:
-            image_id = resources.image_id
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert region_name in resources.image_id, resources.image_id
+                image_id = resources.image_id[region_name]
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id

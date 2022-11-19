@@ -216,11 +216,10 @@ def _interactive_node_cli_command(cli_func):
                                  help=('Automatically stop the cluster after '
                                        'this many minutes of idleness, i.e. '
                                        'no running or pending jobs in the '
-                                       'cluster\'s job queue. Idleness starts '
-                                       'counting after setup/file_mounts are '
-                                       'done; the clock gets reset whenever '
-                                       'there are running/pending jobs in the '
-                                       'job queue. If not set, the cluster '
+                                       'cluster\'s job queue. Idleness gets '
+                                       'reset whenever setting-up/running/'
+                                       'pending jobs are found in the job '
+                                       'queue. If not set, the cluster '
                                        'will not be auto-stopped.'))
     autodown = click.option('--down',
                             default=False,
@@ -683,6 +682,13 @@ def _launch_with_confirm(
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
+        try:
+            backend_utils.check_public_cloud_enabled()
+        except RuntimeError as e:
+            # Catch the exception where the public cloud is not enabled, and
+            # only print the error message without the error type.
+            click.secho(e, fg='yellow')
+            sys.exit(1)
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -763,10 +769,9 @@ def _create_and_ssh_into_node(
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
         idle_minutes_to_autostop: Automatically stop the cluster after
-                                  specified minutes of idleness. Idleness
-                                  starts counting after setup/file_mounts are
-                                  done; the clock gets reset whenever there
-                                  are running/pending jobs in the job queue.
+                                  specified minutes of idleness. Idleness gets
+                                  reset whenever setting-up/running/pending
+                                  jobs are found in the job queue.
         down: If true, autodown the cluster after all jobs finish. If
               idle_minutes_to_autostop is also set, the cluster will be torn
               down after the specified idle time.
@@ -1096,9 +1101,8 @@ def cli():
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
@@ -1582,6 +1586,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         core.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
+    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+        click.echo(str(e))
+        sys.exit(1)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1760,9 +1767,8 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
@@ -1784,6 +1790,14 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
+@click.option(
+    '--force',
+    '-f',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Force start the cluster even if it is already UP. Useful for '
+          'upgrading the SkyPilot runtime on the cluster.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
@@ -1792,7 +1806,8 @@ def start(
         yes: bool,
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool):
+        retry_until_up: bool,
+        force: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
@@ -1880,7 +1895,8 @@ def start(
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if cluster_status == global_user_state.ClusterStatus.UP:
+            if (not force and
+                    cluster_status == global_user_state.ClusterStatus.UP):
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -1893,7 +1909,8 @@ def start(
                 #    This is dangerous and unwanted behavior!
                 click.echo(f'Cluster {name} already has status UP.')
                 continue
-            assert cluster_status in (
+
+            assert force or cluster_status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append(name)
@@ -1915,7 +1932,8 @@ def start(
             core.start(name,
                        idle_minutes_to_autostop,
                        retry_until_up,
-                       down=down)
+                       down=down,
+                       force=force)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')

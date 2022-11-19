@@ -143,7 +143,7 @@ class Task:
         self.storage_mounts = {}
         self.storage_plans = {}
         self.setup = setup
-        self._envs = envs
+        self._envs = envs or dict()
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
@@ -354,7 +354,7 @@ class Task:
           ValueError: if various invalid inputs errors are detected.
         """
         if envs is None:
-            self._envs = None
+            self._envs = dict()
             return self
         if isinstance(envs, (list, tuple)):
             keys = set(env[0] for env in envs)
@@ -782,7 +782,9 @@ class Task:
         """
         config = dict()
 
-        def add_if_not_none(key, value):
+        def add_if_not_none(key, value, no_empty: bool = False):
+            if no_empty and not value:
+                return
             if value is not None:
                 config[key] = value
 
@@ -805,7 +807,7 @@ class Task:
         add_if_not_none('setup', self.setup)
         add_if_not_none('workdir', self.workdir)
         add_if_not_none('run', self.run)
-        add_if_not_none('envs', self.envs)
+        add_if_not_none('envs', self.envs, no_empty=True)
 
         add_if_not_none('file_mounts', dict())
 

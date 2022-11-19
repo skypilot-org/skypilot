@@ -96,6 +96,11 @@ Available fields:
       #   image_id: skypilot:k80-ubuntu-2004
       #   image_id: skypilot:gpu-ubuntu-1804
       #   image_id: skypilot:k80-ubuntu-1804
+      # It is also possible to specify a per-region image id (failover will only go through the regions sepcified as keys; 
+      # useful when you have the custom images in multiple regions):
+      #   image_id:
+      #     us-east-1: ami-0729d913a335efca7
+      #     us-west-2: ami-050814f384259894c
       image_id: ami-0868a20f5a3bf9702
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
