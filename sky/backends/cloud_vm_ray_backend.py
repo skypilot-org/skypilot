@@ -1335,7 +1335,7 @@ class RetryingVmProvisioner(object):
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
-        if cluster_handle.num_nodes == 1 and returncode == 0:
+        if cluster_handle.launched_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.
             # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
@@ -1371,7 +1371,7 @@ class RetryingVmProvisioner(object):
         # stop, then launch again.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             cluster_config_file,
-            cluster_handle.num_nodes,
+            cluster_handle.launched_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
             is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
