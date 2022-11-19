@@ -746,7 +746,7 @@ def write_cluster_config(
     credentials = sky_check.get_cloud_credential_file_mounts()
 
     ip_list = None
-    auth_config = None
+    auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     if isinstance(cloud, clouds.Local):
         ip_list = onprem_utils.get_local_ips(cluster_name)
         auth_config = onprem_utils.get_local_auth_config(cluster_name)
@@ -794,10 +794,7 @@ def write_cluster_config(
                 'head_ip': None if ip_list is None else ip_list[0],
                 'worker_ips': None if ip_list is None else ip_list[1:],
                 # Authentication (optional).
-                'ssh_user':
-                    (None if auth_config is None else auth_config['ssh_user']),
-                'ssh_private_key': (None if auth_config is None else
-                                    auth_config['ssh_private_key']),
+                **auth_config,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
