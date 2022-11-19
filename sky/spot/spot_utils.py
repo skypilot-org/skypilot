@@ -275,21 +275,18 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
-                    status_display.stop()
-                    logger.info(f'Logs finished for job {job_id} '
-                                f'(status: {job_status.value}).')
                     break
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
-                status_display.stop()
-                logger.info('INFO: (Log streaming) Job is cancelled. Waiting '
-                            'for the status update in '
+                logger.debug('INFO: Job is cancelled. Waiting for the status update in '
                             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                status_display.start()
             else:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            spot_status = spot_state.get_status(job_id)
+            if spot_status == spot_state.SpotStatus.CANCELLED:
+                break
             status_display.update(
                 _JOB_WAITING_STATUS_MESSAGE.format(status_str=''))
             status_display.start()
@@ -298,10 +295,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # controller, and check the spot queue again.
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
-        else:
-            # The spot_status is in terminal state.
-            logger.info(f'Logs finished for job {job_id} '
-                        f'(status: {spot_state.get_status(job_id).value}).')
+
+    # The spot_status is in terminal state.
+    logger.info(f'Logs finished for job {job_id} '
+                f'(status: {spot_state.get_status(job_id).value}).')
     return ''
 
 
