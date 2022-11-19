@@ -208,7 +208,8 @@ def _handle_signal(job_id):
     if signal is None:
         # None or empty string.
         return
-    assert signal == spot_utils.UserSignal.CANCEL, 'Only cancel signal is supported.'
+    assert signal == spot_utils.UserSignal.CANCEL, (
+        f'Only cancel signal is supported, but {signal} got.')
     raise exceptions.SpotUserCancelledError(f'User sent {signal.value} signal.')
 
 
