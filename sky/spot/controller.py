@@ -52,10 +52,10 @@ class SpotController:
             self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self._task))
         logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
-        self.cluster_name = spot_utils.generate_spot_cluster_name(
+        self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            self.cluster_name, self._backend, self._task, retry_until_up)
+            self._cluster_name, self._backend, self._task, retry_until_up)
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery."""
@@ -81,7 +81,7 @@ class SpotController:
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
             job_status = spot_utils.get_job_status(self._backend,
-                                                   self.cluster_name)
+                                                   self._cluster_name)
 
             if job_status is not None and not job_status.is_terminal():
                 need_recovery = False
@@ -91,7 +91,7 @@ class SpotController:
                     # of the nodes are preempted.
                     (cluster_status,
                      handle) = backend_utils.refresh_cluster_status_handle(
-                         self.cluster_name, force_refresh=True)
+                         self._cluster_name, force_refresh=True)
                     if cluster_status != global_user_state.ClusterStatus.UP:
                         # recover the cluster if it is not up.
                         logger.info(f'Cluster status {cluster_status.value}. '
@@ -104,7 +104,7 @@ class SpotController:
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 end_time = spot_utils.get_job_timestamp(self._backend,
-                                                        self.cluster_name,
+                                                        self._cluster_name,
                                                         get_end_time=True)
                 # The job is done.
                 spot_state.set_succeeded(self._job_id, end_time=end_time)
@@ -115,11 +115,11 @@ class SpotController:
                 # the cluster is preempted.
                 (cluster_status,
                  handle) = backend_utils.refresh_cluster_status_handle(
-                     self.cluster_name, force_refresh=True)
+                     self._cluster_name, force_refresh=True)
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
                     end_time = spot_utils.get_job_timestamp(self._backend,
-                                                            self.cluster_name,
+                                                            self._cluster_name,
                                                             get_end_time=True)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
@@ -148,6 +148,7 @@ class SpotController:
         try:
             self._run()
         except KeyboardInterrupt as e:
+            # ray.cancel will raise KeyboardInterrupt.
             logger.error(e)
             spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
@@ -224,6 +225,7 @@ def start(job_id, task_yaml, retry_until_up):
         logger.info(f'Cancelling spot job {job_id}...')
         try:
             if controller_task is not None:
+                # This will raise KeyboardInterrupt in the task.
                 ray.cancel(controller_task)
                 ray.get(controller_task)
         except ray.exceptions.RayTaskError:
