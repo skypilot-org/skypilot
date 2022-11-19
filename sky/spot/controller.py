@@ -200,7 +200,8 @@ def _handle_signal(job_id):
                 try:
                     signal = spot_utils.UserSignal(signal)
                 except ValueError:
-                    logger.warning(f'Unknown signal received: {signal}. Ignoring.')
+                    logger.warning(
+                        f'Unknown signal received: {signal}. Ignoring.')
                     signal = None
             # Remove the signal file, after reading the signal.
             signal_file.unlink()
@@ -208,9 +209,7 @@ def _handle_signal(job_id):
         # None or empty string.
         return
     assert signal == spot_utils.UserSignal.CANCEL, 'Only cancel signal is supported.'
-    raise exceptions.SpotUserCancelledError(
-            f'User sent {signal.value} signal.')
-
+    raise exceptions.SpotUserCancelledError(f'User sent {signal.value} signal.')
 
 
 def start(job_id, task_yaml, retry_until_up):
@@ -218,7 +217,8 @@ def start(job_id, task_yaml, retry_until_up):
     controller_task = None
     try:
         _handle_signal(job_id)
-        controller_task = _run_controller.remote(job_id, task_yaml, retry_until_up)
+        controller_task = _run_controller.remote(job_id, task_yaml,
+                                                 retry_until_up)
         # Signal can interrupt the underlying controller process.
         ready, _ = ray.wait([controller_task], timeout=0)
         while not ready:
