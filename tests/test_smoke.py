@@ -777,7 +777,7 @@ def test_spot():
 
 
 # ---------- Testing managed spot ----------
-def test_gcp_spot():
+def test_spot_gcp():
     """Test managed spot on GCP."""
     name = _get_cluster_name()
     test = Test(
