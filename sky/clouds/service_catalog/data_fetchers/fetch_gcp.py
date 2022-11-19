@@ -273,12 +273,14 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]) -> pd.DataFrame:
 
     vm_zones = get_vm_zones(GCP_VM_ZONES_URL)
     # Manually add A2 machines to the zones with A100 GPUs.
-    # This is necessary because GCP_VM_ZONES_URL is not up to date.
+    # This is necessary because GCP_VM_ZONES_URL may not be up to date.
     df = pd.DataFrame.from_dict({
         'AvailabilityZone': a100_zones,
         'MachineType': 'A2',
     })
     vm_zones = pd.concat([vm_zones, df], ignore_index=True)
+    # vm_zones alreay includes some zones with A100 GPUs.
+    # When we merge it with a100_zones, we need to remove the duplicates.
     vm_zones = vm_zones.drop_duplicates()
 
     # Remove regions not in the pricing data.
