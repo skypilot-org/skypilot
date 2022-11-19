@@ -1050,8 +1050,8 @@ class RetryingVmProvisioner(object):
                 'zone_str': zone_str,
             }
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
-                to_provision.cloud, num_nodes, cluster_config_file, handle,
-                log_abs_path, stream_logs, logging_info, to_provision.use_spot)
+                to_provision.cloud, cluster_config_file, handle, log_abs_path,
+                stream_logs, logging_info, to_provision.use_spot)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1174,8 +1174,7 @@ class RetryingVmProvisioner(object):
 
     @timeline.event
     def _gang_schedule_ray_up(
-            self, to_provision_cloud: clouds.Cloud, num_nodes: int,
-            cluster_config_file: str,
+            self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
             cluster_handle: 'backends.Backend.ResourceHandle',
             log_abs_path: str, stream_logs: bool, logging_info: dict,
             use_spot: bool
@@ -1331,7 +1330,7 @@ class RetryingVmProvisioner(object):
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
-        if num_nodes == 1 and returncode == 0:
+        if cluster_handle.num_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.
             # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
@@ -1364,7 +1363,7 @@ class RetryingVmProvisioner(object):
         # stop, then launch again.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             cluster_config_file,
-            num_nodes,
+            cluster_handle.num_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
             is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
