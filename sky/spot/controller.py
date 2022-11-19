@@ -215,6 +215,7 @@ def _handle_signal(job_id):
 
 def start(job_id, task_yaml, retry_until_up):
     """Start the controller."""
+    ray.init()
     controller_task = None
     try:
         _handle_signal(job_id)
@@ -241,7 +242,6 @@ def start(job_id, task_yaml, retry_until_up):
 
 
 if __name__ == '__main__':
-    ray.init()
     parser = argparse.ArgumentParser()
     parser.add_argument('--job-id',
                         required=True,
