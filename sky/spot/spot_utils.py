@@ -38,6 +38,9 @@ _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
+_JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
+                               '{status_str}.[/] It may take minutes.')
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
@@ -200,9 +203,9 @@ def cancel_job_by_name(job_name: str) -> str:
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
-    status_msg = ('[bold cyan]Waiting for controller, controller status: {}.[/]'
-                  'It may take a few minutes.')
-    status_display = rich.status.Status('[bold cyan]Waiting for logs...[/]')
+    status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
+                  '{status_str}[/]. It may take minutes.')
+    status_display = rich.status.Status(status_msg.format(status_str=''))
     with status_display:
         while (controller_status != job_lib.JobStatus.RUNNING and
                (controller_status is None or
@@ -210,34 +213,33 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             status_str = 'None'
             if controller_status is not None:
                 status_str = controller_status.value
-            status_display.update(status_msg.update(status_str))
+            status_display.update(
+                status_msg.format(status_str=f'(status: {status_str})'))
             time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
             controller_status = job_lib.get_status(job_id)
 
-        status_display.update(
-            '[bold cyan]Waiting for the spot job to be started[/]')
+        status_display.update(_JOB_WAITING_STATUS_MESSAGE.format(status_str=''))
         job_status = spot_state.get_status(job_id)
         while job_status is None:
             time.sleep(1)
             job_status = spot_state.get_status(job_id)
 
-    if job_status.is_terminal():
-        job_msg = ''
-        if job_status.is_failed():
-            job_msg = ('\nFor detailed error message, please check: '
-                       f'{colorama.Style.BRIGHT}sky logs '
-                       f'{SPOT_CONTROLLER_NAME} {job_id}'
-                       f'{colorama.Style.RESET_ALL}')
-        return (
-            f'Job {job_id} is already in terminal state {job_status.value}. '
-            f'Logs will not be shown.{job_msg}')
-    task_name = spot_state.get_task_name_by_job_id(job_id)
-    cluster_name = generate_spot_cluster_name(task_name, job_id)
-    backend = backends.CloudVmRayBackend()
-    spot_status = spot_state.get_status(job_id)
-    # spot_status can be None if the controller process just started and has
-    # not updated the spot status yet.
-    with status_display:
+        if job_status.is_terminal():
+            job_msg = ''
+            if job_status.is_failed():
+                job_msg = ('\nFor detailed error message, please check: '
+                           f'{colorama.Style.BRIGHT}sky logs '
+                           f'{SPOT_CONTROLLER_NAME} {job_id}'
+                           f'{colorama.Style.RESET_ALL}')
+            return (f'Job {job_id} is already in terminal state '
+                    f'{job_status.value}. Logs will not be shown.{job_msg}')
+        task_name = spot_state.get_task_name_by_job_id(job_id)
+        cluster_name = generate_spot_cluster_name(task_name, job_id)
+        backend = backends.CloudVmRayBackend()
+        spot_status = spot_state.get_status(job_id)
+
+        # spot_status can be None if the controller process just started and has
+        # not updated the spot status yet.
         while spot_status is None or not spot_status.is_terminal():
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
@@ -249,13 +251,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 status_help_str = ''
                 if (spot_status is not None and
                         spot_status != spot_state.SpotStatus.RUNNING):
-                    status_help_str = f', status: {spot_status.value}'
+                    status_help_str = f' (job status: {spot_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_help_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                status_display.update('[bold cyan]Waiting for the spot job'
-                                      f'{status_help_str}.[/] It may take '
-                                      'a few minutes.')
+                status_display.update(
+                    _JOB_WAITING_STATUS_MESSAGE.format(
+                        status_str=status_help_str))
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
@@ -273,19 +275,23 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
                 if job_status != job_lib.JobStatus.CANCELLED:
+                    status_display.stop()
                     logger.info(f'Logs finished for job {job_id} '
                                 f'(status: {job_status.value}).')
                     break
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
+                status_display.stop()
                 logger.info('INFO: (Log streaming) Job is cancelled. Waiting '
                             'for the status update in '
                             f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                status_display.start()
             else:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-            status_display.update('[bold cyan]Waiting for the spot job[/]')
+            status_display.update(
+                _JOB_WAITING_STATUS_MESSAGE.format(status_str=''))
             status_display.start()
             # If the tailing fails, it is likely that the cluster fails, so we
             # wait a while to make sure the spot state is updated by the
