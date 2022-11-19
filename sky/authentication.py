@@ -1,14 +1,13 @@
 """Module to enable a single SkyPilot key for all VMs in each cloud."""
 import copy
 import functools
-import hashlib
 import os
-import pathlib
 import re
 import subprocess
 import sys
+import textwrap
 import time
-import uuid
+from typing import Any, Dict, Tuple
 
 import colorama
 from cryptography.hazmat.primitives import serialization
@@ -17,7 +16,7 @@ from cryptography.hazmat.backends import default_backend
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import aws, gcp
+from sky.adaptors import gcp
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -30,10 +29,12 @@ logger = sky_logging.init_logger(__name__)
 # development.
 
 MAX_TRIALS = 64
+# TODO(zhwu): Support user specified key pair.
 PRIVATE_SSH_KEY_PATH = '~/.ssh/sky-key'
+PUBLIC_SSH_KEY_PATH = '~/.ssh/sky-key.pub'
 
 
-def generate_rsa_key_pair():
+def _generate_rsa_key_pair() -> Tuple[str, str]:
     key = rsa.generate_private_key(backend=default_backend(),
                                    public_exponent=65537,
                                    key_size=2048)
@@ -50,7 +51,8 @@ def generate_rsa_key_pair():
     return public_key, private_key
 
 
-def save_key_pair(private_key_path, public_key_path, private_key, public_key):
+def _save_key_pair(private_key_path: str, public_key_path: str,
+                   private_key: str, public_key: str) -> None:
     private_key_dir = os.path.dirname(private_key_path)
     os.makedirs(private_key_dir, exist_ok=True)
 
@@ -65,92 +67,42 @@ def save_key_pair(private_key_path, public_key_path, private_key, public_key):
         f.write(public_key)
 
 
-def get_public_key_path(private_key_path):
-    if private_key_path.endswith('.pem'):
-        private_key_path, _ = private_key_path.rsplit('.', 1)
-    return private_key_path + '.pub'
-
-
-def get_or_generate_keys(private_key_path: str, public_key_path: str):
-    """Returns private and public keys from the given paths.
-
-    If the private_key_path is not provided or does not exist, then a new
-    keypair is generated and written to the path.
-    """
-    if private_key_path is None or not os.path.exists(private_key_path):
-        public_key, private_key = generate_rsa_key_pair()
-        save_key_pair(private_key_path, public_key_path, private_key,
-                      public_key)
+def get_or_generate_keys() -> Tuple[str, str]:
+    """Returns the aboslute public and private key paths."""
+    private_key_path = os.path.expanduser(PRIVATE_SSH_KEY_PATH)
+    public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+    if not os.path.exists(private_key_path):
+        public_key, private_key = _generate_rsa_key_pair()
+        _save_key_pair(private_key_path, public_key_path, private_key,
+                       public_key)
     else:
         assert os.path.exists(public_key_path)
-        public_key = open(public_key_path, 'rb').read().decode('utf-8')
-        private_key = open(private_key_path, 'rb').read().decode('utf-8')
-    return private_key, public_key
+    return private_key_path, public_key_path
 
 
-# Snippets of code inspired from
-# https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/aws/config.py
-# Takes in config, a yaml dict and outputs a postprocessed dict
-def setup_aws_authentication(config):
-    from Crypto.PublicKey import RSA  # pylint: disable=import-outside-toplevel
-    config = copy.deepcopy(config)
-    private_key_path = config['auth'].get('ssh_private_key', None)
-    if private_key_path is None:
-        private_key_path = PRIVATE_SSH_KEY_PATH
-        config['auth']['ssh_private_key'] = private_key_path
-
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = get_public_key_path(private_key_path)
-
-    # Generating ssh key if it does not exist
-    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
-
-    ec2 = aws.client('ec2', region_name=config['provider']['region'])
-    key_pairs = ec2.describe_key_pairs()['KeyPairs']
-    key_name = None
-    all_key_names = set()
-
-    def _get_fingerprint(public_key_path):
-        key = RSA.importKey(open(public_key_path).read())
-
-        def insert_char_every_n_chars(string, char='\n', every=2):
-            return char.join(
-                string[i:i + every] for i in range(0, len(string), every))
-
-        md5digest = hashlib.md5(key.exportKey('DER', pkcs=8)).hexdigest()
-        fingerprint = insert_char_every_n_chars(md5digest, ':', 2)
-        return fingerprint
-
-    for key in key_pairs:
-        # Compute Fingerprint of public key
-        aws_fingerprint = key['KeyFingerprint']
-        local_fingerprint = _get_fingerprint(public_key_path)
-        if aws_fingerprint == local_fingerprint:
-            key_name = key['KeyName']
-        # Add key name to key name list
-        all_key_names.add(key['KeyName'])
-
-    if key_name is None:
-        for fail_counter in range(MAX_TRIALS):
-            key_name = 'sky-key-' + uuid.uuid4().hex[:6]
-            if key_name not in all_key_names:
-                ec2.import_key_pair(KeyName=key_name,
-                                    PublicKeyMaterial=public_key)
-                break
-        if fail_counter == MAX_TRIALS - 1:
-            raise RuntimeError(
-                'Failed to generate a unique key pair ID for AWS')
-
-    node_types = config['available_node_types']
-
-    for node_type in node_types.values():
-        node_type['node_config']['KeyName'] = key_name
+def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    # Use cloud init in UserData to set up the authorized_keys to get
+    # around the number of keys limit and permission issues with
+    # ec2.describe_key_pairs.
+    for node_type in config['available_node_types']:
+        config['available_node_types'][node_type]['node_config']['UserData'] = (
+            textwrap.dedent(f"""\
+            #cloud-config
+            users:
+            - name: {config['auth']['ssh_user']}
+              ssh-authorized-keys:
+                - {public_key}
+            """))
     return config
 
 
 # Reference:
 # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/gcp/config.py
-def _wait_for_compute_global_operation(project_name, operation_name, compute):
+def _wait_for_compute_global_operation(project_name: str, operation_name: str,
+                                       compute: Any) -> None:
     """Poll for global compute operation until finished."""
     logger.debug('wait_for_compute_global_operation: '
                  'Waiting for operation {} to finish...'.format(operation_name))
@@ -180,15 +132,8 @@ def _wait_for_compute_global_operation(project_name, operation_name, compute):
 # Retry for the GCP as sometimes there will be connection reset by peer error.
 @common_utils.retry
 @gcp.import_package
-def setup_gcp_authentication(config):
-    config = copy.deepcopy(config)
-    private_key_path = config['auth'].get('ssh_private_key', None)
-    if private_key_path is None:
-        private_key_path = PRIVATE_SSH_KEY_PATH
-        config['auth']['ssh_private_key'] = private_key_path
-
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = get_public_key_path(private_key_path)
+def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    private_key_path, public_key_path = get_or_generate_keys()
     config = copy.deepcopy(config)
 
     project_id = config['provider']['project_id']
@@ -261,9 +206,6 @@ def setup_gcp_authentication(config):
                         'account information.')
         config['auth']['ssh_user'] = account.replace('@', '_').replace('.', '_')
 
-        # Generating ssh key if it does not exist
-        get_or_generate_keys(private_key_path, public_key_path)
-
         # Add ssh key to GCP with oslogin
         subprocess.run(
             'gcloud compute os-login ssh-keys add '
@@ -292,13 +234,16 @@ def setup_gcp_authentication(config):
 
     # OS Login is not enabled for the project. Add the ssh key directly to the
     # metadata.
+    # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
+    # issue.
     project_keys = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')
     ssh_keys = project_keys.split('\n') if project_keys else []
 
-    # Generating ssh key if it does not exist
-    _, public_key = get_or_generate_keys(private_key_path, public_key_path)
+    # Get public key from file.
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
 
     # Check if ssh key in Google Project's metadata
     public_key_token = public_key.split(' ')[1]
@@ -338,34 +283,14 @@ def setup_gcp_authentication(config):
     return config
 
 
-def _unexpand_user(path):
-    """Inverse of `os.path.expanduser`."""
-    return ('~' /
-            pathlib.Path(path).relative_to(pathlib.Path.home())).as_posix()
-
-
-# Takes in config, a yaml dict and outputs a postprocessed dict
-def setup_azure_authentication(config):
-    # Doesn't need special library calls!
-    config = copy.deepcopy(config)
-    private_key_path = config['auth'].get('ssh_private_key', None)
-    if private_key_path is None:
-        private_key_path = PRIVATE_SSH_KEY_PATH
-        config['auth']['ssh_private_key'] = private_key_path
-
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = get_public_key_path(private_key_path)
-
-    # Generating ssh key if it does not exist
-    _, _ = get_or_generate_keys(private_key_path, public_key_path)
-
-    # Need to convert /Users/<username> back to ~ because Ray uses the same
+def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    get_or_generate_keys()
+    # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
-    public_key_path = _unexpand_user(public_key_path)
-    config['auth']['ssh_public_key'] = public_key_path
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
     file_mounts = config['file_mounts']
-    file_mounts[public_key_path] = public_key_path
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
 
     return config
