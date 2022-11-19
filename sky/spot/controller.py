@@ -144,6 +144,7 @@ class SpotController:
                                      recovered_time=recovered_time)
 
     def run(self):
+        """Run controller logic and handle exceptions."""
         try:
             self._run()
         except KeyboardInterrupt as e:
