@@ -875,7 +875,6 @@ def test_spot_cancellation():
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
             'sleep 300',
-            f's=$(sky spot logs --no-follow); printf "$s"; echo; echo; printf "$s" | grep "long setup"',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
