@@ -191,7 +191,7 @@ def cancel_job_by_name(job_name: str) -> str:
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
     cancel_jobs_by_id(job_ids)
-    return (f'Job {job_name!r} is scheduled to be cancelled.')
+    return f'Job {job_name!r} is scheduled to be cancelled.'
 
 
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
