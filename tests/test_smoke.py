@@ -860,6 +860,7 @@ def test_spot_cancellation():
     test = Test(
         'managed-spot-cancellation',
         [
+            # Test cancellation during spot cluster being launched.
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
@@ -872,24 +873,36 @@ def test_spot_cancellation():
              f'--filters Name=tag:ray-cluster-name,Values={name}* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text | grep terminated'),
-            # Test cancelling the spot job during running.
-            f'sky spot launch --cloud aws --region {region} -n {name}-2 "sleep 1000"  -y -d',
+            # Test cancelling the spot cluster during spot job being setup.
+            f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
             'sleep 300',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f's=$(sky spot logs --no-follow); printf "$s"; echo; echo; printf "$s" | grep "long setup"',
+            f'sky spot cancel -y -n {name}-2',
+            'sleep 5',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            'sleep 100',
+            (f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text | grep terminated'),
+            # Test cancellation during spot job is recovering.
+            f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
+            'sleep 300',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 50',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RECOVERING"',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-2',
             'sleep 10',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
             (f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text | grep terminated'),
         ])
