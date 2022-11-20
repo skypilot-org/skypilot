@@ -256,6 +256,9 @@ def get_vm_zones(url: str) -> pd.DataFrame:
     # Explode the 'MachineType' column.
     df['MachineType'] = df['MachineType'].apply(parse_machine_type_list)
     df = df.explode('MachineType', ignore_index=True)
+
+    # Check duplicates.
+    assert not df.duplicated().any()
     return df
 
 
@@ -284,9 +287,9 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]) -> pd.DataFrame:
     vm_zones = vm_zones.drop_duplicates()
 
     # Remove regions not in the pricing data.
+    regions = vm_df['Region'].unique()
     zone_to_region = lambda x: x[:-2]
     vm_zones['Region'] = vm_zones['AvailabilityZone'].apply(zone_to_region)
-    regions = vm_df['Region'].unique()
     vm_zones = vm_zones[vm_zones['Region'].isin(regions)]
 
     # Define the MachineType column.
@@ -298,11 +301,13 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]) -> pd.DataFrame:
 
     # Merge the dataframes.
     vm_df = pd.merge(vm_df, vm_zones, on=['Region', 'MachineType'])
+    # Check duplicates.
+    assert not vm_df[['InstanceType', 'AvailabilityZone']].duplicated().any()
 
     # Remove the MachineType column.
     vm_df.drop(columns=['MachineType'], inplace=True)
 
-    # Block non-US regions.
+    # Drop regions without the given prefix.
     vm_df = vm_df[vm_df['Region'].str.startswith(region_prefix)]
     return vm_df
 
@@ -452,7 +457,7 @@ def get_gpu_df(region_prefix: str) -> pd.DataFrame:
     gpu_df['vCPUs'] = None
     gpu_df['MemoryGiB'] = None
 
-    # Block non-US regions.
+    # Drop regions without the given prefix.
     gpu_df = gpu_df[gpu_df['Region'].str.startswith(region_prefix)]
     return gpu_df
 
