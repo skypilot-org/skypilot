@@ -2499,7 +2499,7 @@ class CloudVmRayBackend(backends.Backend):
                                                job_id,
                                                spot_job_id=spot_job_id,
                                                follow=follow)
-        if job_id is None:
+        if job_id is None and spot_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
