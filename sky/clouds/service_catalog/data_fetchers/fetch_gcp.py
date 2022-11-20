@@ -40,7 +40,7 @@ GPU_TYPES_TO_COUNTS = {
     'K80': [1, 2, 4, 8],
 }
 
-# VMs with 16 A100 GPUs only appear in the following zones.
+# A2 VMs that support 16 A100 GPUs only appear in the following zones.
 # Source: https://cloud.google.com/compute/docs/gpus/gpu-regions-zones#limitations
 A2_MEGAGPU_16G_ZONES = [
     'us-central1-a', 'us-central1-b', 'us-central1-c', 'us-central1-f',
@@ -303,7 +303,6 @@ def get_vm_df(region_prefix: str, a100_zones: List[str]) -> pd.DataFrame:
     vm_df.drop(columns=['MachineType'], inplace=True)
 
     # Block non-US regions.
-    # FIXME(woosuk): Allow all regions.
     vm_df = vm_df[vm_df['Region'].str.startswith(region_prefix)]
     return vm_df
 
@@ -454,7 +453,6 @@ def get_gpu_df(region_prefix: str) -> pd.DataFrame:
     gpu_df['MemoryGiB'] = None
 
     # Block non-US regions.
-    # FIXME(woosuk): Allow all regions.
     gpu_df = gpu_df[gpu_df['Region'].str.startswith(region_prefix)]
     return gpu_df
 
