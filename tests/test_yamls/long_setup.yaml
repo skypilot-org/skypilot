@@ -4,3 +4,6 @@ setup: |
     echo $i
     sleep 1
   done
+
+run: |
+  echo run

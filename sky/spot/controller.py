@@ -149,7 +149,7 @@ class SpotController:
         """Run controller logic and handle exceptions."""
         try:
             self._run()
-        except KeyboardInterrupt:
+        except exceptions.SpotUserCancelledError:
             # Kill the children processes launched by log_lib.run_with_log.
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
@@ -183,7 +183,7 @@ def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
     # Override the SIGTERM handler to gracefully terminate the controller.
     def handle_interupt(signum, frame):
         """Handle the interrupt signal."""
-        raise KeyboardInterrupt()
+        raise exceptions.SpotUserCancelledError()
 
     signal.signal(signal.SIGTERM, handle_interupt)
 
