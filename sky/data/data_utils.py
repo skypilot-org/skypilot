@@ -80,7 +80,7 @@ def is_cloud_store_url(url):
     return result.netloc
 
 
-def group_files_by_dir(
+def _group_files_by_dir(
         source_list: List[str]) -> Tuple[Dict[str, List[str]], List[str]]:
     """Groups a list of paths based on their directory
 
@@ -111,8 +111,8 @@ def group_files_by_dir(
 
 
 def parallel_upload(source_path_list: List[Path],
-                    filesync_command_generator: Callable,
-                    dirsync_command_generator: Callable,
+                    filesync_command_generator: Callable[[str, List[str]], str],
+                    dirsync_command_generator: Callable[[str, str], str],
                     bucket_name: str,
                     access_denied_message: str,
                     create_dirs: bool = False,
@@ -141,7 +141,7 @@ def parallel_upload(source_path_list: List[Path],
     """
     # Generate gsutil rsync command for files and dirs
     commands = []
-    grouped_files, dirs = group_files_by_dir(source_path_list)
+    grouped_files, dirs = _group_files_by_dir(source_path_list)
     # Generate file upload commands
     for dir_path, file_names in grouped_files.items():
         sync_command = filesync_command_generator(dir_path, file_names)

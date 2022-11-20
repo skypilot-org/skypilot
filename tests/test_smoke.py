@@ -1063,9 +1063,17 @@ class TestStorageWithCredentials:
     @staticmethod
     def cli_ls_cmd(store_type, bucket_name, suffix=''):
         if store_type == storage_lib.StoreType.S3:
-            return ['aws', 's3', 'ls', f's3://{bucket_name}{suffix}']
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return ['aws', 's3', 'ls', url]
         if store_type == storage_lib.StoreType.GCS:
-            return ['gsutil', 'ls', f'gs://{bucket_name}{suffix}']
+            if suffix:
+                url = f'gs://{bucket_name}/{suffix}'
+            else:
+                url = f'gs://{bucket_name}'
+            return ['gsutil', 'ls', url]
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
@@ -1125,7 +1133,7 @@ class TestStorageWithCredentials:
         # Check if tmp-file exists in the bucket/tmp-source using cli
         out = subprocess.check_output(
             self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
-                            '/tmp-source/'))
+                            'tmp-source/'))
         assert 'tmp-file' in out.decode('utf-8'), \
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
