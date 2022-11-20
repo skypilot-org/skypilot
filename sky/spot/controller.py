@@ -1,12 +1,14 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
+import multiprocessing
 import pathlib
+import os
+import signal
 import time
 import traceback
 
 import colorama
 import filelock
-import ray
 
 import sky
 from sky import exceptions
@@ -20,6 +22,7 @@ from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -147,9 +150,9 @@ class SpotController:
         """Run controller logic and handle exceptions."""
         try:
             self._run()
-        except KeyboardInterrupt as e:
-            # ray.cancel will raise KeyboardInterrupt.
-            logger.error(e)
+        except KeyboardInterrupt:
+            # Kill the children processes launched by log_lib.run_with_log.
+            subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
             logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
@@ -175,7 +178,6 @@ class SpotController:
             self._backend.teardown_ephemeral_storage(self._task)
 
 
-@ray.remote(num_cpus=0)
 def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
@@ -187,7 +189,7 @@ def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
 def _handle_signal(job_id):
     """Handle the signal if the user sent it."""
     signal_file = pathlib.Path(spot_utils.SIGNAL_FILE_PREFIX.format(job_id))
-    signal = None
+    user_signal = None
     if signal_file.exists():
         # Filelock is needed to prevent race condition with concurrent
         # signal writing.
@@ -196,49 +198,43 @@ def _handle_signal(job_id):
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open(mode='r') as f:
-                signal = f.read().strip()
+                user_signal = f.read().strip()
                 try:
-                    signal = spot_utils.UserSignal(signal)
+                    user_signal = spot_utils.UserSignal(user_signal)
                 except ValueError:
                     logger.warning(
-                        f'Unknown signal received: {signal}. Ignoring.')
-                    signal = None
+                        f'Unknown signal received: {user_signal}. Ignoring.')
+                    user_signal = None
             # Remove the signal file, after reading the signal.
             signal_file.unlink()
-    if signal is None:
+    if user_signal is None:
         # None or empty string.
         return
-    assert signal == spot_utils.UserSignal.CANCEL, (
-        f'Only cancel signal is supported, but {signal} got.')
-    raise exceptions.SpotUserCancelledError(f'User sent {signal.value} signal.')
+    assert user_signal == spot_utils.UserSignal.CANCEL, (
+        f'Only cancel signal is supported, but {user_signal} got.')
+    raise exceptions.SpotUserCancelledError(
+        f'User sent {user_signal.value} signal.')
 
 
 def start(job_id, task_yaml, retry_until_up):
     """Start the controller."""
-    ray.init()
-    controller_task = None
+    controller_process = None
     try:
         _handle_signal(job_id)
-        controller_task = _run_controller.remote(job_id, task_yaml,
-                                                 retry_until_up)
-        # Signal can interrupt the underlying controller process.
-        ready, _ = ray.wait([controller_task], timeout=0)
-        while not ready:
+        controller_process = multiprocessing.Process(target=_run_controller,
+                                                     args=(job_id, task_yaml,
+                                                           retry_until_up))
+        controller_process.start()
+        while controller_process.is_alive():
             _handle_signal(job_id)
-            ready, _ = ray.wait([controller_task], timeout=1)
+            time.sleep(1)
     except exceptions.SpotUserCancelledError:
         logger.info(f'Cancelling spot job {job_id}...')
-        try:
-            if controller_task is not None:
-                # This will raise KeyboardInterrupt in the task.
-                ray.cancel(controller_task)
-                ray.get(controller_task)
-        except ray.exceptions.RayTaskError:
-            # When the controller task is cancelled, it will raise
-            # ray.exceptions.RayTaskError, which can be ignored,
-            # since the SpotUserCancelledError will be raised and
-            # handled later.
-            pass
+        if controller_process is not None:
+            # This will raise KeyboardInterrupt in the task.
+            os.kill(controller_process.pid, signal.SIGINT)
+    if controller_process is not None:
+        controller_process.join()
 
 
 if __name__ == '__main__':
