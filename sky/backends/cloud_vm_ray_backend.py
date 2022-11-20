@@ -1902,18 +1902,11 @@ class CloudVmRayBackend(backends.Backend):
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
-            if config_dict['launched_nodes'] == 1 and config_dict[
-                    'head_ip'] is not None:
-                # Optimization for 1-node: we may have parsed the stdout of
-                # 'ray up' to get the head_ip already.
-                head_ip = config_dict['head_ip']
-                ip_list = [head_ip]
-            else:
-                # Caches the stable list of the IPs in the handle.
-                ip_list = backend_utils.get_stable_cluster_ips(
-                    handle,
-                    head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                    worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
+            # Caches the stable list of the IPs in the handle.
+            ip_list = backend_utils.get_stable_cluster_ips(
+                handle,
+                head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
