@@ -509,7 +509,27 @@ def post_process_a2_price(catalog_df: pd.DataFrame) -> pd.DataFrame:
                        (a100_df['AvailabilityZone'] == zone)]
         if a100.empty:
             # Invalid.
+            # The A2 VM is not acctually supported in this zone.
+            # The row is dropped out later.
+
+            # This happens because GCP_VM_PRICING_URL shows region-wise price,
+            # and GCP_VM_ZONES_URL only tells whether the zone has any A2 VM.
+            # Thus, for example, if zone X in a region only supports A100-40GB
+            # while another zone Y in the same region supports A100-80GB,
+            # it will appear in GCP_VM_PRICING_URL that the region supports
+            # both A100-40GB and A100-80GB. And in GCP_VM_ZONES_URL zone X
+            # will be said to support A2 VMs. In such a case, we do not know
+            # whether zone X supports both A100 GPUs or only one of them.
+            # We need to refer to GCP_GPU_ZONES_URL to know that zone X only
+            # supports A100-40GB. Thus, in get_vm_df(), we add both a2-highgpu
+            # (for A100-40GB) and a2-ultragpu (for A100-80GB) to zone X.
+            # Then in this post-processing step, we nullifies the A2 VMs
+            # that are not supported in zone X.
+
+            # This also filters out a2-megagpu-16g VMs in zones that do not
+            # support 16xA100.
             return None, None
+
         price = row['Price'] - a100['Price'].iloc[0]
         spot_price = row['SpotPrice'] - a100['SpotPrice'].iloc[0]
         return price, spot_price
