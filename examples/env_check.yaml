@@ -8,6 +8,9 @@ workdir: .
 setup: |
   echo "here"
   echo "export TEST_VAR=test" >> ~/.bashrc
+  [[ -v CUDA_VISIBLE_DEVICES ]] && exit 1 || exit 0
+  export CUDA_VISIBLE_DEVICES=1
+  [[ -v CUDA_VISIBLE_DEVICES ]] && exit 0 || exit 1
 
 run: |
   if [[ -z "${TEST_VAR}" ]]; then
@@ -24,7 +27,27 @@ run: |
     exit 1
   fi
 
-  echo NODE ID: $SKY_NODE_RANK
-  echo NODE IPS: "$SKY_NODE_IPS"
-  worker_addr=`echo "$SKY_NODE_IPS" | sed -n 2p`
+  if [[ -z "$SKYPILOT_NODE_RANK" ]]; then
+    echo "SKYPILOT_NODE_RANK is not set"
+    exit 1
+  else
+    echo "SKYPILOT_NODE_RANK is set to ${SKYPILOT_NODE_RANK}"
+  fi
+
+  if [[ -z "$SKYPILOT_NODE_IPS" ]]; then
+    echo "SKYPILOT_NODE_IPS is not set"
+    exit 1
+  else
+    echo "SKYPILOT_NODE_IPS is set to ${SKYPILOT_NODE_IPS}"
+    echo "${SKYPILOT_NODE_IPS}"
+    echo "${SKYPILOT_NODE_IPS}" | wc -l | grep 2 || exit 1
+  fi
+  worker_addr=`echo "$SKYPILOT_NODE_IPS" | sed -n 2p`
   echo Worker IP: $worker_addr
+
+  if [[ -z "$SKYPILOT_JOB_ID" ]]; then
+    echo "SKYPILOT_JOB_ID is not set"
+    exit 1
+  else
+    echo "SKYPILOT_JOB_ID is set to ${SKYPILOT_JOB_ID}"
+  fi

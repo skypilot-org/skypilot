@@ -62,9 +62,8 @@ When specifying a storage object, you can specify either of two modes:
     In effect, files are streamed from the backing source bucket as and when
     they are accessed by applications. This mode also allows applications to
     write to the mount path. All writes are replicated to remote bucket (and
-    any other VMs mounting the same bucket). Please note that this mode
-    uses a close-to-open consistency model, which means a file write is
-    committed to the backing store only after :code:`close()` is called on it.
+    any other VMs mounting the same bucket).
+
 
 - :code:`mode: COPY`
     This mode pre-fetches your files from remote storage and caches them on the
@@ -192,6 +191,17 @@ and storage mounting:
     For mounts backed by SkyPilot Storage, symbolic links are not copied to remote.
     For mounts not using SkyPilot Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
+
+.. note::
+    :code:`MOUNT` mode employs a close-to-open consistency model. This means calling
+    :code:`close()` on a file will upload the entire file to the backing object store.
+    Any subsequent reads, either using SkyPilot Storage or external utilities (such as
+    aws/gsutil cli) will see the latest data.
+
+.. note::
+    :code:`MOUNT` mode does not support the full POSIX interface and some file
+    operations may fail. Most notably, random writes and append operations are
+    not supported.
 
 .. note::
     Storage only supports uploading directories (i.e., :code:`source` cannot be a file).

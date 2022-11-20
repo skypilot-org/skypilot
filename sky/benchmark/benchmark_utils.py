@@ -315,7 +315,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
 
     # Update the benchmark status.
     if (cluster_status == global_user_state.ClusterStatus.INIT or
-            job_status in [job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING]):
+            job_status < job_lib.JobStatus.RUNNING):
         benchmark_status = benchmark_state.BenchmarkStatus.INIT
     elif job_status == job_lib.JobStatus.RUNNING:
         benchmark_status = benchmark_state.BenchmarkStatus.RUNNING

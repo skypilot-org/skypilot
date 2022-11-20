@@ -230,15 +230,24 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     cluster_name = generate_spot_cluster_name(task_name, job_id)
     backend = backends.CloudVmRayBackend()
     spot_status = spot_state.get_status(job_id)
-    while not spot_status.is_terminal():
-        if spot_status != spot_state.SpotStatus.RUNNING:
-            logger.info(f'INFO: The log is not ready yet, as the spot job '
-                        f'is {spot_status.value}. '
+    # spot_status can be None if the controller process just started and has
+    # not updated the spot status yet.
+    while spot_status is None or not spot_status.is_terminal():
+        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+        # Check the handle: The cluster can be preempted and removed from the
+        # table before the spot state is updated by the controller. In this
+        # case, we should skip the logging, and wait for the next round of
+        # status check.
+        if handle is None or spot_status != spot_state.SpotStatus.RUNNING:
+            status_help_str = ''
+            if (spot_status is not None and
+                    spot_status != spot_state.SpotStatus.RUNNING):
+                status_help_str = f', as the spot job is {spot_status.value}'
+            logger.info(f'INFO: The log is not ready yet{status_help_str}. '
                         f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
             continue
-        handle = global_user_state.get_handle_from_cluster_name(cluster_name)
         returncode = backend.tail_logs(handle,
                                        job_id=None,
                                        spot_job_id=job_id,
@@ -251,12 +260,19 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             job_statuses = backend.get_job_status(handle, stream_logs=False)
             job_status = list(job_statuses.values())[0]
             assert job_status is not None, 'No job found.'
-            logger.info(f'Logs finished for job {job_id} '
-                        f'(status: {job_status.value}).')
-            break
-        logger.info(
-            f'INFO: (Log streaming) Got return code {returncode}. Retrying '
-            f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            if job_status != job_lib.JobStatus.CANCELLED:
+                logger.info(f'Logs finished for job {job_id} '
+                            f'(status: {job_status.value}).')
+                break
+            # The job can be cancelled by the user or the controller (when the
+            # the cluster is partially preempted).
+            logger.info('INFO: (Log streaming) Job is cancelled. Waiting '
+                        'for the status update in '
+                        f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+        else:
+            logger.info(
+                f'INFO: (Log streaming) Got return code {returncode}. Retrying '
+                f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot queue again.
@@ -343,15 +359,13 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         job_duration = log_utils.readable_time_duration(0,
                                                         job['job_duration'],
                                                         absolute=True)
-        ago_suffix = ' ago' if show_all else ''
-        submitted = log_utils.readable_time_duration(job['submitted_at'],
-                                                     absolute=show_all)
+        submitted = log_utils.readable_time_duration(job['submitted_at'])
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            submitted + ago_suffix if submitted != '-' else submitted,
+            submitted if submitted != '-' else submitted,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
@@ -364,10 +378,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
             status_counts[job['status'].value] += 1
         if show_all:
             # STARTED
-            started = log_utils.readable_time_duration(job['start_at'],
-                                                       absolute=True)
-            if started != '-':
-                started += ago_suffix
+            started = log_utils.readable_time_duration(job['start_at'])
             values.append(started)
             values.extend([
                 job['cluster_resources'],

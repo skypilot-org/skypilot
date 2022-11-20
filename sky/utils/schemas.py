@@ -66,7 +66,12 @@ def get_resources_schema():
                 }
             },
             'image_id': {
-                'type': 'string',
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                }]
             }
         }
     }

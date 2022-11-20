@@ -3,12 +3,15 @@
 Google Cloud does not have an API for querying TPU/GPU offerings, so we crawl
 the information from GCP websites.
 """
+import argparse
+import os
 import re
 
 from lxml import html
 import pandas as pd
 import requests
 
+# pylint: disable=line-too-long
 GCP_URL = 'https://cloud.google.com'
 GCP_VM_PRICING_URL = 'https://cloud.google.com/compute/vm-instance-pricing'
 GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
@@ -19,9 +22,6 @@ NOT_AVAILABLE_STR = 'Not available in this region'
 
 ALL_REGION_PREFIX = ''
 US_REGION_PREFIX = 'us-'
-REGION_PREFIX = US_REGION_PREFIX
-# Uncomment the following line to VM pricings from all regions.
-# REGION_PREFIX = ALL_REGION_PREFIX
 
 # Refer to: https://github.com/skypilot-org/skypilot/issues/1006
 UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
@@ -41,6 +41,7 @@ GPU_TYPES_TO_COUNTS = {
 }
 
 # FIXME(woosuk): This URL can change.
+A2_PRICING_URL = '/compute/vm-instance-pricing_34568c2efd1858a89d6f5b0f1cdd171bbea1cdcba646e9771e6ef4028238086f.frame'  # pylint: disable=line-too-long
 A2_INSTANCE_TYPES = {
     'a2-highgpu-1g': {
         'vCPUs': 12,
@@ -264,9 +265,6 @@ def get_vm_price_table(url):
     else:
         # Others (e.g., per vCPU hour or per GB hour pricing rule table).
         df = df[['Item', 'Region', 'Price', 'SpotPrice']]
-        item = df['Item'].iloc[0]
-        if item == 'Predefined vCPUs':
-            df = get_a2_df(df)
     return df
 
 
@@ -302,12 +300,13 @@ def get_vm_zones(url):
     return df
 
 
-def get_a2_df(a2_pricing_df):
-    cpu_pricing = a2_pricing_df[a2_pricing_df['Item'] == 'Predefined vCPUs']
-    memory_pricing = a2_pricing_df[a2_pricing_df['Item'] == 'Predefined Memory']
+def get_a2_df():
+    a2_pricing = get_vm_price_table(GCP_URL + A2_PRICING_URL)
+    cpu_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined vCPUs']
+    memory_pricing = a2_pricing[a2_pricing['Item'] == 'Predefined Memory']
 
     table = []
-    for region in a2_pricing_df['Region'].unique():
+    for region in a2_pricing['Region'].unique():
         per_cpu_price = cpu_pricing[cpu_pricing['Region'] ==
                                     region]['Price'].values[0]
         per_cpu_spot_price = cpu_pricing[cpu_pricing['Region'] ==
@@ -321,7 +320,8 @@ def get_a2_df(a2_pricing_df):
             cpu = spec['vCPUs']
             memory = spec['MemoryGiB']
             price = per_cpu_price * cpu + per_memory_price * memory
-            spot_price = per_cpu_spot_price * cpu + per_memory_spot_price * memory
+            spot_price = (per_cpu_spot_price * cpu +
+                          per_memory_spot_price * memory)
             table.append(
                 [instance_type, cpu, memory, price, spot_price, region])
     a2_df = pd.DataFrame(table,
@@ -340,7 +340,7 @@ def get_a2_df(a2_pricing_df):
     return a2_df
 
 
-def get_vm_df():
+def get_vm_df(region_prefix: str):
     """Generates the GCP service catalog for host VMs."""
     vm_price_table_urls = get_iframe_sources(GCP_VM_PRICING_URL)
     # Skip the table for "Suspended VM instances".
@@ -351,7 +351,9 @@ def get_vm_df():
         df for df in vm_dfs if df is not None and 'InstanceType' in df.columns
     ]
 
-    vm_df = pd.concat(vm_dfs)
+    # Handle A2 instance types separately.
+    a2_df = get_a2_df()
+    vm_df = pd.concat(vm_dfs + [a2_df])
 
     vm_zones = get_vm_zones(GCP_VM_ZONES_URL)
     # Remove regions not in the pricing data.
@@ -375,7 +377,7 @@ def get_vm_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    vm_df = vm_df[vm_df['Region'].str.startswith(REGION_PREFIX)]
+    vm_df = vm_df[vm_df['Region'].str.startswith(region_prefix)]
     return vm_df
 
 
@@ -483,7 +485,7 @@ def get_gpu_zones(url):
     return df
 
 
-def get_gpu_df():
+def get_gpu_df(region_prefix: str):
     """Generates the GCP service catalog for GPUs."""
     gpu_price_table_url = get_iframe_sources(GCP_GPU_PRICING_URL)
     assert len(gpu_price_table_url) == 1
@@ -531,7 +533,7 @@ def get_gpu_df():
 
     # Block non-US regions.
     # FIXME(woosuk): Allow all regions.
-    gpu_df = gpu_df[gpu_df['Region'].str.startswith(REGION_PREFIX)]
+    gpu_df = gpu_df[gpu_df['Region'].str.startswith(region_prefix)]
     return gpu_df
 
 
@@ -564,25 +566,35 @@ def get_tpu_df():
     # Add columns for the service catalog.
     tpu_df['InstanceType'] = None
     tpu_df['GpuInfo'] = tpu_df['AcceleratorName']
-    gpu_df['vCPUs'] = None
-    gpu_df['MemoryGiB'] = None
+    tpu_df['vCPUs'] = None
+    tpu_df['MemoryGiB'] = None
     return tpu_df
 
 
 if __name__ == '__main__':
-    vm_df = get_vm_df()
-    gpu_df = get_gpu_df()
-    tpu_df = get_tpu_df()
-    catalog_df = pd.concat([vm_df, gpu_df, tpu_df])
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--all-regions',
+        action='store_true',
+        help='Fetch all global regions, not just the U.S. ones.')
+    args = parser.parse_args()
+    region_prefix_filter = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
+
+    processed_vm_df = get_vm_df(region_prefix_filter)
+    processed_gpu_df = get_gpu_df(region_prefix_filter)
+    processed_tpu_df = get_tpu_df()
+    catalog_df = pd.concat(
+        [processed_vm_df, processed_gpu_df, processed_tpu_df])
 
     # Filter out unsupported VMs from the catalog.
     for vm in UNSUPPORTED_VMS:
         # NOTE: The `InstanceType` column can be NaN.
-        catalog_df = catalog_df[
-            catalog_df['InstanceType'].str.startswith(vm) != True]
+        catalog_df = catalog_df[catalog_df['InstanceType'].str.startswith(
+            vm).ne(True)]
 
     # Reorder the columns.
     catalog_df = catalog_df[COLUMNS]
 
-    catalog_df.to_csv('gcp.csv', index=False)
-    print('GCP Service Catalog saved to gcp.csv')
+    os.makedirs('gcp', exist_ok=True)
+    catalog_df.to_csv('gcp/vms.csv', index=False)
+    print('GCP Service Catalog saved to gcp/vms.csv')

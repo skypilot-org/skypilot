@@ -78,6 +78,11 @@ class JobStatus(enum.Enum):
     # not started yet. skylet can transit the state from INIT to FAILED
     # directly, if the ray program fails to start.
     INIT = 'INIT'
+    # Running the user's setup script (only in effect if --detach-setup is
+    # set). Our update_job_status() can temporarily (for a short period) set
+    # the status to SETTING_UP, if the generated ray program has not set
+    # the status to PENDING or RUNNING yet.
+    SETTING_UP = 'SETTING_UP'
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
@@ -89,12 +94,19 @@ class JobStatus(enum.Enum):
     SUCCEEDED = 'SUCCEEDED'
     # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
+    # The job setup failed (only in effect if --detach-setup is set). It
+    # needs to be placed after the `FAILED` state, so that the status
+    # set by our generated ray program will not be overwritten by
+    # ray's job status (FAILED).
+    # This is for a better UX, so that the user can find out the reason
+    # of the failure quickly.
+    FAILED_SETUP = 'FAILED_SETUP'
     # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
 
     @classmethod
     def nonterminal_statuses(cls) -> List['JobStatus']:
-        return [cls.INIT, cls.PENDING, cls.RUNNING]
+        return [cls.INIT, cls.SETTING_UP, cls.PENDING, cls.RUNNING]
 
     def is_terminal(self):
         return self not in self.nonterminal_statuses()
@@ -107,15 +119,20 @@ _RAY_TO_JOB_STATUS_MAP = {
     # These are intentionally set to one status before, because:
     # 1. when the ray status indicates the job is PENDING the generated
     # python program should not be started yet, i.e. the job should be INIT.
-    # 2. when the ray status indicates the job is RUNNING the resources
-    # may not be allocated yet, i.e. the job should be PENDING.
-    # For case 2, update_job_status() would compare this mapped PENDING to
+    # 2. when the ray status indicates the job is RUNNING the job can be in
+    # setup or resources may not be allocated yet, i.e. the job should be
+    # SETTING_UP.
+    # For case 2, update_job_status() would compare this mapped SETTING_UP to
     # the status in our jobs DB and take the max. This is because the job's
     # generated ray program is the only place that can determine a job has
     # reserved resources and actually started running: it will set the
     # status in the DB to RUNNING.
+    # If there is no setup specified in the task, as soon as it is started
+    # (ray's status becomes RUNNING), i.e. it will be very rare that the job
+    # will be set to SETTING_UP by the update_job_status, as our generated
+    # ray program will set the status to PENDING immediately.
     'PENDING': JobStatus.INIT,
-    'RUNNING': JobStatus.PENDING,
+    'RUNNING': JobStatus.SETTING_UP,
     'SUCCEEDED': JobStatus.SUCCEEDED,
     'FAILED': JobStatus.FAILED,
     'STOPPED': JobStatus.CANCELLED,
@@ -172,9 +189,14 @@ def _set_status_no_lock(job_id: int, status: JobStatus) -> None:
         end_at = time.time()
         # status does not need to be set if the end_at is not null, since
         # the job must be in a terminal state already.
+        # Don't check the end_at for FAILED_SETUP, so that the generated
+        # ray program can overwrite the status.
+        check_end_at_str = ' AND end_at IS NULL'
+        if status != JobStatus.FAILED_SETUP:
+            check_end_at_str = ''
         _CURSOR.execute(
             'UPDATE jobs SET status=(?), end_at=(?) '
-            'WHERE job_id=(?) AND end_at IS NULL',
+            f'WHERE job_id=(?) {check_end_at_str}',
             (status.value, end_at, job_id))
     else:
         _CURSOR.execute(
@@ -213,7 +235,7 @@ def get_status_no_lock(job_id: int) -> JobStatus:
     for (status,) in rows:
         if status is None:
             return None
-        return JobStatus[status]
+        return JobStatus(status)
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
@@ -240,7 +262,7 @@ def load_statuses_payload(statuses_payload: str) -> Dict[int, JobStatus]:
     statuses = common_utils.decode_payload(statuses_payload)
     for job_id, status in statuses.items():
         if status is not None:
-            statuses[job_id] = JobStatus[status]
+            statuses[job_id] = JobStatus(status)
     return statuses
 
 
@@ -270,7 +292,7 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
             'job_name': row[JobInfoLoc.JOB_NAME.value],
             'username': row[JobInfoLoc.USERNAME.value],
             'submitted_at': row[JobInfoLoc.SUBMITTED_AT.value],
-            'status': JobStatus[row[JobInfoLoc.STATUS.value]],
+            'status': JobStatus(row[JobInfoLoc.STATUS.value]),
             'run_timestamp': row[JobInfoLoc.RUN_TIMESTAMP.value],
             'start_at': row[JobInfoLoc.START_AT.value],
             'end_at': row[JobInfoLoc.END_AT.value],
@@ -390,10 +412,11 @@ def update_job_status(job_owner: str,
                 # already been set to later state by the job. We skip the
                 # update.
                 # 2. _RAY_TO_JOB_STATUS_MAP would map `ray job status`'s
-                # `RUNNING` to our JobStatus.PENDING; if a job has already been
-                # set to JobStatus.RUNNING by the generated ray program,
-                # `original_status` (job status from our DB) would already have
-                # that value. So we take the max here to keep it at RUNNING.
+                # `RUNNING` to our JobStatus.SETTING_UP; if a job has already
+                # been set to JobStatus.PENDING or JobStatus.RUNNING by the
+                # generated ray program, `original_status` (job status from our
+                # DB) would already have that value. So we take the max here to
+                # keep it at later status.
                 status = max(status, original_status)
                 if status != original_status:  # Prevents redundant update.
                     _set_status_no_lock(job_id, status)
@@ -432,11 +455,14 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
 
 def is_cluster_idle() -> bool:
     """Returns if the cluster is idle (no in-flight jobs)."""
+    in_progress_status = [
+        status.value for status in JobStatus.nonterminal_statuses()
+    ]
     rows = _CURSOR.execute(
-        """\
+        f"""\
         SELECT COUNT(*) FROM jobs
-        WHERE status IN (?, ?, ?)
-        """, [status.value for status in JobStatus.nonterminal_statuses()])
+        WHERE status IN ({','.join(['?'] * len(in_progress_status))})
+        """, in_progress_status)
     for (count,) in rows:
         return count == 0
 
@@ -475,7 +501,7 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    status_list = [JobStatus.PENDING, JobStatus.RUNNING]
+    status_list = [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING]
     if all_jobs:
         status_list = None
 
@@ -508,7 +534,8 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     # Update the status of the jobs to avoid setting the status of stale
     # jobs to CANCELLED.
     if jobs is None:
-        job_records = _get_jobs(None, [JobStatus.PENDING, JobStatus.RUNNING])
+        job_records = _get_jobs(
+            None, [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING])
     else:
         job_records = _get_jobs_by_ids(jobs)
 
@@ -528,7 +555,9 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
             logger.warning(str(e))
             continue
 
-        if job['status'] in [JobStatus.PENDING, JobStatus.RUNNING]:
+        if job['status'] in [
+                JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
+        ]:
             set_status(job['job_id'], JobStatus.CANCELLED)
 
 

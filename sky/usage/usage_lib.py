@@ -77,7 +77,7 @@ class UsageMessageToReport(MessageToReport):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
         self.user: str = _get_user_hash()
-        self.run_id: str = common_utils.get_run_id()
+        self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
 
         # Entry

@@ -159,9 +159,6 @@ def fill_template(template_name: str,
                                                        output_prefix)
     output_path = os.path.abspath(output_path)
 
-    # Add yaml file path to the template variables.
-    variables['sky_ray_yaml_remote_path'] = SKY_RAY_YAML_REMOTE_PATH
-    variables['sky_ray_yaml_local_path'] = output_path
     # Write out yaml config.
     template = jinja2.Template(template)
     content = template.render(**variables)
@@ -786,6 +783,11 @@ def write_cluster_config(
                 # Sky remote utils.
                 'sky_remote_path': SKY_REMOTE_PATH,
                 'sky_local_path': str(local_wheel_path),
+                # Add yaml file path to the template variables.
+                'sky_ray_yaml_remote_path': SKY_RAY_YAML_REMOTE_PATH,
+                'sky_ray_yaml_local_path':
+                    tmp_yaml_path
+                    if not isinstance(cloud, clouds.Local) else yaml_path,
                 'sky_version': str(version.parse(sky.__version__)),
                 'sky_wheel_hash': wheel_hash,
                 # Local IP handling (optional).
@@ -912,7 +914,7 @@ def wait_until_ray_cluster_ready(
     ssh_credentials = ssh_credential_from_yaml(cluster_config_file)
     last_nodes_so_far = 0
     start = time.time()
-    runner = command_runner.SSHCommandRunner(head_ip, *ssh_credentials)
+    runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
     with console.status('[bold cyan]Waiting for workers...') as worker_status:
         while True:
             rc, output, stderr = runner.run('ray status',
@@ -1005,14 +1007,18 @@ def wait_until_ray_cluster_ready(
     return True  # success
 
 
-def ssh_credential_from_yaml(cluster_yaml: str) -> Tuple[str, str, str]:
+def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
     """Returns ssh_user, ssh_private_key and ssh_control name."""
     config = common_utils.read_yaml(cluster_yaml)
     auth_section = config['auth']
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
-    return ssh_user, ssh_private_key, ssh_control_name
+    return {
+        'ssh_user': ssh_user,
+        'ssh_private_key': ssh_private_key,
+        'ssh_control_name': ssh_control_name
+    }
 
 
 def parallel_data_transfer_to_nodes(
@@ -1145,7 +1151,7 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        return _get_tpu_vm_pod_ips(ray_config)
+        return _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
 
     # Try optimize for the common case where we have 1 node.
     if (expected_num_nodes == 1 and handle is not None and
@@ -1212,7 +1218,8 @@ def get_node_ips(cluster_yaml: str,
 
 
 @timeline.event
-def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
+def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
+                        get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all TPU VM Pod workers using gcloud."""
 
     cluster_name = ray_config['cluster_name']
@@ -1220,9 +1227,14 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any]) -> List[str]:
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
                  f'\\(labels.ray-cluster-name={cluster_name}\\) '
                  f'--zone={zone} --format=value\\(name\\)')
-    tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                 f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                 '(networkEndpoints.accessConfig.externalIp)"')
+    if not get_internal_ips:
+        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
+                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                     '(networkEndpoints.accessConfig.externalIp)"')
+    else:
+        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
+                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
+                     '(networkEndpoints.ipAddress)"')
 
     rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
                                                  '/dev/null',
@@ -1310,7 +1322,7 @@ def do_filemounts_and_setup_on_local_workers(
     setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
 
     worker_runners = command_runner.SSHCommandRunner.make_runner_list(
-        worker_ips, *ssh_credentials)
+        worker_ips, **ssh_credentials)
 
     # Uploads setup script to the worker node
     with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
@@ -1617,7 +1629,7 @@ def _update_cluster_status_no_lock(
             # case, since the get_node_ips() does not require ray cluster to be
             # running.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(ips[0], *ssh_credentials)
+            runner = command_runner.SSHCommandRunner(ips[0], **ssh_credentials)
             returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
@@ -1782,7 +1794,10 @@ def get_clusters(
         ]
 
     def _is_local_cluster(record):
-        cluster_resources = record['handle'].launched_resources
+        handle = record['handle']
+        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+            return False
+        cluster_resources = handle.launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
 
     if cloud_filter == CloudFilter.LOCAL:
@@ -2047,3 +2062,23 @@ def validate_schema(obj, schema, err_msg_prefix=''):
     if err_msg:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(err_msg)
+
+
+def check_public_cloud_enabled():
+    """Checks if any of the public clouds is enabled."""
+
+    def _no_public_cloud():
+        enabled_clouds = global_user_state.get_enabled_clouds()
+        return (len(enabled_clouds) == 0 or
+                (len(enabled_clouds) == 1 and
+                 isinstance(enabled_clouds[0], clouds.Local)))
+
+    if not _no_public_cloud():
+        return
+
+    sky_check.check(quiet=True)
+    if _no_public_cloud():
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Cloud access is not set up. Run: '
+                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
