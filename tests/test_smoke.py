@@ -864,7 +864,6 @@ def test_spot_cancellation():
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
-            # Test cancelling the spot job during launching.
             f'sky spot cancel -y -n {name}',
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',

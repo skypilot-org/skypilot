@@ -27,6 +27,7 @@ from sky.utils import subprocess_utils
 logger = sky_logging.init_logger(__name__)
 
 
+
 class SpotController:
     """Each spot controller manages the life cycle of one spot cluster (job)."""
 
@@ -180,6 +181,12 @@ class SpotController:
 
 def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
+    # Override the SIGTERM handler to gracefully terminate the controller.
+    def handle_interupt(signum, frame):
+        """Handle the interrupt signal."""
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGTERM, handle_interupt)
+
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
     spot_controller = SpotController(job_id, task_yaml, retry_until_up)
@@ -231,8 +238,11 @@ def start(job_id, task_yaml, retry_until_up):
     except exceptions.SpotUserCancelledError:
         logger.info(f'Cancelling spot job {job_id}...')
         if controller_process is not None:
+            logger.info(f'sending SIGTERM to controller process {controller_process.pid}')
             # This will raise KeyboardInterrupt in the task.
-            os.kill(controller_process.pid, signal.SIGINT)
+            # Using SIGTERM instead of SIGINT, as the SIGINT is weirdly ignored
+            # by the controller process when it is started inside a ray job.
+            controller_process.terminate()
     if controller_process is not None:
         controller_process.join()
 
