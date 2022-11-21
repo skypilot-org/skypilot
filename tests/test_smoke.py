@@ -76,6 +76,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             shell=True,
+            executable='/bin/bash',
         )
         try:
             proc.wait(timeout=test.timeout)
@@ -868,10 +869,11 @@ def test_spot_cancellation():
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',
             'sleep 100',
-            (f'aws ec2 describe-instances --region {region} '
+            (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}* '
              f'--query Reservations[].Instances[].State[].Name '
-             '--output text | grep terminated'),
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
             'sleep 300',
@@ -879,10 +881,11 @@ def test_spot_cancellation():
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
             'sleep 100',
-            (f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
              f'--query Reservations[].Instances[].State[].Name '
-             '--output text | grep terminated'),
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
             # Test cancellation during spot job is recovering.
             f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
@@ -899,10 +902,11 @@ def test_spot_cancellation():
             'sleep 10',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
-            (f'aws ec2 describe-instances --region {region} '
+            (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
              f'--query Reservations[].Instances[].State[].Name '
-             '--output text | grep terminated'),
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
         ])
     run_one_test(test)
 
