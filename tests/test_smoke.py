@@ -895,7 +895,7 @@ def test_spot_cancellation():
              '--output text)'),
             'sleep 50',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
-            f'sky spot cancel -y -n {name}-2',
+            f'sky spot cancel -y -n {name}-3',
             'sleep 10',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
