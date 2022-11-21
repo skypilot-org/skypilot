@@ -29,7 +29,7 @@ if system == 'Darwin':
     mac_major, mac_minor = mac_version.split('.')[:2]
     mac_major = int(mac_major)
     mac_minor = int(mac_minor)
-    if mac_major < 10 or (mac_major == 10 and mac_minor >= 15):
+    if mac_major < 10 or (mac_major == 10 and mac_minor < 15):
         warnings.warn(
             f'\'Detected MacOS version {mac_version}. MacOS version >=10.15 '
             'is required to install ray>=1.9\'')
@@ -47,17 +47,29 @@ def find_version(*filepath):
         raise RuntimeError('Unable to find version string.')
 
 
-def parse_footnote(readme: str) -> str:
-    """Parse the footnote from the README.md file."""
+def parse_readme(readme: str) -> str:
+    """Parse the README.md file to be pypi compatible."""
+    # Replace the footnotes.
     readme = readme.replace('<!-- Footnote -->', '#')
     footnote_re = re.compile(r'\[\^([0-9]+)\]')
-    return footnote_re.sub(r'<sup>[\1]</sup>', readme)
+    readme = footnote_re.sub(r'<sup>[\1]</sup>', readme)
+
+    # Remove the dark mode switcher
+    mode_re = re.compile(
+        r'<picture>[\n ]*<source media=.*>[\n ]*<img(.*)>[\n ]*</picture>',
+        re.MULTILINE)
+    readme = mode_re.sub(r'<img\1>', readme)
+    return readme
 
 
 install_requires = [
     'wheel',
-    'Click',
-    'colorama',
+    # NOTE: ray 2.0.1 requires click<=8.0.4,>=7.0; We disable the
+    # shell completion for click<8.0 for backward compatibility.
+    'click<=8.0.4,>=7.0',
+    # NOTE: required by awscli. To avoid ray automatically installing
+    # the latest version.
+    'colorama<0.4.5',
     'cryptography',
     'jinja2',
     'jsonschema',
@@ -68,14 +80,14 @@ install_requires = [
     'PrettyTable',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=1.13.0',
+    'ray[default]>=1.9.0,<=2.0.1',
     'rich',
     'tabulate',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
     # This is used by ray. The latest 1.44.0 will generate an error
     # `Fork support is only compatible with the epoll1 and poll
     # polling strategies`
-    'grpcio<=1.43.0',
+    'grpcio>=1.32.0,<=1.43.0',
     'packaging',
     # The latest 4.21.1 will break ray. Enforce < 4.0.0 until Ray releases the
     # fix.
@@ -96,6 +108,8 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
+    # azure-cli need to be pinned to 2.31.0 due to later versions
+    # do not have azure-identity (used in node_provider) installed
     'azure': ['azure-cli==2.31.0', 'azure-core'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
@@ -113,7 +127,7 @@ readme_filepath = 'README.md'
 # README.  Skip the description for that case.
 if os.path.exists(readme_filepath):
     long_description = io.open(readme_filepath, 'r', encoding='utf-8').read()
-    long_description = parse_footnote(long_description)
+    long_description = parse_readme(long_description)
 
 setuptools.setup(
     # NOTE: this affects the package.whl wheel name. When changing this (if

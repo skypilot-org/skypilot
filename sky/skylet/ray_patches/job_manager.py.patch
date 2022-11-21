@@ -1,9 +1,9 @@
 0a1,4
-> # Adapted from https://github.com/ray-project/ray/blob/ray-1.13.0/dashboard/modules/job/job_manager.py
+> # Adapted from https://github.com/ray-project/ray/blob/ray-2.0.1/dashboard/modules/job/job_manager.py
 > # Fixed the problem where the _monitor_job thread is leaked, due to `await job_supervisor.ping.remote()`
 > # does not raise an exception after the job_supervisor is exited, causing the dashboard to hang.
 > 
-334c338,349
+384c388,398
 <                 await job_supervisor.ping.remote()
 ---
 >                 # Simulate the await behavior, in case some unexpected exception happens
@@ -17,4 +17,3 @@
 >                         ray.get(ready)
 >                     else:
 >                         await asyncio.sleep(0)
-> 

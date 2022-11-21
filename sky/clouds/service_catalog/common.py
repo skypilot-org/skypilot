@@ -54,7 +54,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_lib.CLOUD_REGISTRY.from_str(filename.split('.csv')[0])
+    cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
     if not os.path.exists(catalog_path):
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
@@ -67,6 +67,7 @@ def read_catalog(filename: str) -> pd.DataFrame:
                 with ux_utils.print_exception_no_traceback():
                     raise e
         # Save the catalog to a local file.
+        os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
         with open(catalog_path, 'w') as f:
             f.write(r.text)
         logger.info(f'A new {cloud} catalog has been downloaded to '
@@ -103,8 +104,9 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
     return instance_type in df['InstanceType'].unique()
 
 
-def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
-                              zone: Optional[str]):
+def validate_region_zone_impl(
+        df: pd.DataFrame, region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
     def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
@@ -116,30 +118,32 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
 
+    validated_region, validated_zone = region, zone
+
+    filter_df = df
     if region is not None:
-        all_regions = df['Region'].unique()
-        if region not in all_regions:
+        filter_df = filter_df[filter_df['Region'] == region]
+        if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                error_msg += _get_candidate_str(region, all_regions)
+                error_msg += _get_candidate_str(region, df['Region'].unique())
                 raise ValueError(error_msg)
 
     if zone is not None:
-        all_zones = df['AvailabilityZone'].unique()
-        if zone not in all_zones:
+        maybe_region_df = filter_df
+        filter_df = filter_df[filter_df['AvailabilityZone'] == zone]
+        if len(filter_df) == 0:
+            region_str = f' for region {region!r}' if region else ''
+            df = maybe_region_df if region else df
             with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid zone {zone!r}')
-                error_msg += _get_candidate_str(zone, all_zones)
-                raise ValueError(error_msg)
-
-    if region is not None and zone is not None:
-        if zone not in df[df['Region'] == region]['AvailabilityZone'].unique():
-            with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid zone {zone!r} for region {region!r}')
+                error_msg = (f'Invalid zone {zone!r}{region_str}')
                 error_msg += _get_candidate_str(
-                    zone,
-                    df[df['Region'] == region]['AvailabilityZone'].unique())
+                    zone, maybe_region_df['AvailabilityZone'].unique())
                 raise ValueError(error_msg)
+        region_df = filter_df['Region'].unique()
+        assert len(region_df) == 1, 'Zone should be unique across regions.'
+        validated_region = region_df[0]
+    return validated_region, validated_zone
 
 
 def get_hourly_cost_impl(
@@ -271,7 +275,7 @@ def list_accelerators_impl(
     instance types offered by this cloud.
     """
     if gpus_only:
-        df = df[~pd.isna(df['GpuInfo'])]
+        df = df[~df['GpuInfo'].isna()]
     df = df[[
         'InstanceType',
         'AcceleratorName',
@@ -359,3 +363,36 @@ def accelerator_in_region_or_zone_impl(
         return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
         return _accelerator_in_zone(df, accelerator_name, acc_count, zone)
+
+
+# Images
+def get_image_id_from_tag_impl(df: pd.DataFrame, tag: str,
+                               region: Optional[str]) -> Optional[str]:
+    """Returns the image ID for the given tag and region.
+
+    If region is None, there must be only one image with the given tag.
+
+    Returns None if a region (or globally if region is None) does not have
+    an image that matches the tag.
+    """
+    df = df[df['Tag'] == tag]
+    if region is not None:
+        df = df[df['Region'] == region]
+    assert len(df) <= 1, ('Multiple images found for tag '
+                          f'{tag} in region {region}')
+    if len(df) == 0:
+        return None
+    image_id = df['ImageId'].iloc[0]
+    if pd.isna(image_id):
+        return None
+    return image_id
+
+
+def is_image_tag_valid_impl(df: pd.DataFrame, tag: str,
+                            region: Optional[str]) -> bool:
+    """Returns True if the image tag is valid."""
+    df = df[df['Tag'] == tag]
+    if region is not None:
+        df = df[df['Region'] == region]
+    df = df.dropna(subset=['ImageId'])
+    return len(df) > 0

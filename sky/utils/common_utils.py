@@ -11,8 +11,8 @@ import re
 import socket
 import sys
 import time
+from typing import Any, Dict, Optional
 import uuid
-from typing import Dict, List, Union
 import yaml
 
 from sky import sky_logging
@@ -24,23 +24,23 @@ _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
 
-_run_id = None
+_usage_run_id = None
 
 
-def get_run_id():
+def get_usage_run_id() -> str:
     """Returns a unique run id for each 'run'.
 
     A run is defined as the lifetime of a process that has imported `sky`
     and has called its CLI or programmatic APIs. For example, two successive
     `sky launch` are two runs.
     """
-    global _run_id
-    if _run_id is None:
-        _run_id = str(uuid.uuid4())
-    return _run_id
+    global _usage_run_id
+    if _usage_run_id is None:
+        _usage_run_id = str(uuid.uuid4())
+    return _usage_run_id
 
 
-def get_user_hash():
+def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id."""
     if os.path.exists(_USER_HASH_FILE):
         with open(_USER_HASH_FILE, 'r') as f:
@@ -52,6 +52,15 @@ def get_user_hash():
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
+
+
+def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
+                      job_id: str) -> str:
+    """Returns a unique job run id for each job run.
+
+    A job run is defined as the lifetime of a job that has been launched.
+    """
+    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
 
 
 class Backoff:
@@ -127,13 +136,13 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path):
+def read_yaml(path) -> Dict[str, Any]:
     with open(path, 'r') as f:
         config = yaml.safe_load(f)
     return config
 
 
-def dump_yaml(path, config):
+def dump_yaml(path, config) -> None:
     with open(path, 'w') as f:
         f.write(dump_yaml_str(config))
 
@@ -223,11 +232,17 @@ def retry(method, max_retries=3, initial_backoff=1):
     return method_with_retries
 
 
-def encode_payload(payload: Union[List, Dict]) -> str:
+def encode_payload(payload: Any) -> str:
     """Encode a payload to make it more robust for parsing.
 
+    The make the message transfer more robust to any additional
+    strings added to the message during transfering.
+
+    An example message that is polluted by the system warning:
+    "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # pylint: disable=line-too-long
+
     Args:
-        payload: A dict or list to be encoded.
+        payload: A str, dict or list to be encoded.
 
     Returns:
         A string that is encoded from the payload.
@@ -237,15 +252,18 @@ def encode_payload(payload: Union[List, Dict]) -> str:
     return payload_str
 
 
-def decode_payload(payload_str: str) -> Union[List, Dict]:
+def decode_payload(payload_str: str) -> Any:
     """Decode a payload string.
 
     Args:
         payload_str: A string that is encoded from a payload.
 
     Returns:
-        A dict or list that is decoded from the payload string.
+        A str, dict or list that is decoded from the payload string.
     """
-    payload_str = _PAYLOAD_PATTERN.match(payload_str).group(1)
+    matched = _PAYLOAD_PATTERN.findall(payload_str)
+    if not matched:
+        raise ValueError(f'Invalid payload string: \n{payload_str}')
+    payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload

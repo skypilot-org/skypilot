@@ -34,7 +34,7 @@ def get_mounting_command(
         # Check if path is already mounted
         if grep -q $MOUNT_PATH /proc/mounts ; then
             echo "Path already mounted - unmounting..."
-            fusermount -u "$MOUNT_PATH"
+            fusermount -uz "$MOUNT_PATH"
             echo "Successfully unmounted $MOUNT_PATH."
         fi
 

@@ -15,6 +15,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
+from sky.backends import backend_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 from sky.utils import log_utils
@@ -853,11 +854,8 @@ def _fill_in_launchable_resources(
     try_fix_with_sky_check: bool = True,
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
+    backend_utils.check_public_cloud_enabled()
     enabled_clouds = global_user_state.get_enabled_clouds()
-    if len(enabled_clouds) == 0 and try_fix_with_sky_check:
-        check.check(quiet=True)
-        return _fill_in_launchable_resources(task, blocked_launchable_resources,
-                                             False)
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(resources_lib.Resources)
     if blocked_launchable_resources is None:
@@ -872,8 +870,9 @@ def _fill_in_launchable_resources(
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'Task {task} requires {resources.cloud} which is not '
-                    'enabled. Run `sky check` to enable access to it, '
-                    'or change the cloud requirement.')
+                    f'enabled. To enable access, run {colorama.Style.BRIGHT}'
+                    f'sky check {colorama.Style.RESET_ALL}, or change the '
+                    'cloud requirement')
         elif resources.is_launchable():
             launchable[resources] = _generate_launchables_with_region_zones(
                 resources)

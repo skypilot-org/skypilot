@@ -3,6 +3,7 @@ import collections
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -165,6 +166,13 @@ class Cloud:
     def _get_default_region(cls) -> Region:
         raise NotImplementedError
 
+    @classmethod
+    def is_image_tag_valid(cls, image_tag: str, region: Optional[str]) -> bool:
+        """Validates that the image tag is valid for this cloud."""
+        return service_catalog.is_image_tag_valid(image_tag,
+                                                  region,
+                                                  clouds=cls._REPR.lower())
+
     def get_feasible_launchable_resources(self, resources):
         """Returns a list of feasible and launchable resources.
 
@@ -197,7 +205,9 @@ class Cloud:
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
         """Validates the region and zone."""
-        raise NotImplementedError
+        return service_catalog.validate_region_zone(region,
+                                                    zone,
+                                                    clouds=self._REPR.lower())
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
