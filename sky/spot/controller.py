@@ -240,7 +240,7 @@ def start(job_id, task_yaml, retry_until_up):
     except exceptions.SpotUserCancelledError:
         logger.info(f'Cancelling spot job {job_id}...')
         if controller_process is not None:
-            logger.info('sending SIGTERM to controller process '
+            logger.info('Sending SIGTERM to controller process '
                         f'{controller_process.pid}')
             # This will raise KeyboardInterrupt in the task.
             # Using SIGTERM instead of SIGINT, as the SIGINT is weirdly ignored
