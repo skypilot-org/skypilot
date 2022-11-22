@@ -212,7 +212,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             if controller_status is not None:
                 status_str = controller_status.value
             status_display.update(
-                status_msg.format(status_str=f'(status: {status_str})'))
+                status_msg.format(status_str=f' (status: {status_str})'))
             time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
             controller_status = job_lib.get_status(job_id)
 
@@ -246,16 +246,16 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # this case, we should skip the logging, and wait for the next
             # round of status check.
             if handle is None or spot_status != spot_state.SpotStatus.RUNNING:
-                status_help_str = ''
+                status_str = ''
                 if (spot_status is not None and
                         spot_status != spot_state.SpotStatus.RUNNING):
-                    status_help_str = f' (job status: {spot_status.value})'
+                    status_str = f' (job status: {spot_status.value})'
                 logger.debug(
-                    f'INFO: The log is not ready yet{status_help_str}. '
+                    f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 status_display.update(
                     _JOB_WAITING_STATUS_MESSAGE.format(
-                        status_str=status_help_str))
+                        status_str=status_str))
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
@@ -276,14 +276,16 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     break
                 # The job can be cancelled by the user or the controller (when
                 # the cluster is partially preempted).
-                logger.debug('INFO: Job is cancelled. Waiting for the status update in '
-                            f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+                logger.debug(
+                    'INFO: Job is cancelled. Waiting for the status update in '
+                    f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             else:
                 logger.debug(
                     f'INFO: (Log streaming) Got return code {returncode}. '
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            # Finish early if the spot status is already in terminal state.
             spot_status = spot_state.get_status(job_id)
-            if spot_status == spot_state.SpotStatus.CANCELLED:
+            if spot_status.is_terminal():
                 break
             status_display.update(
                 _JOB_WAITING_STATUS_MESSAGE.format(status_str=''))
