@@ -47,7 +47,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
         try:
             int(user_hash, 16)
-        except ValueError:
+        except (TypeError, ValueError):
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
