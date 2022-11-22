@@ -283,7 +283,8 @@ class Resources:
             gcp_region_zones = list(
                 self._cloud.region_zones_provision_loop(
                     instance_type=self._instance_type,
-                    accelerators=self.accelerators, use_spot=self._use_spot))
+                    accelerators=self.accelerators,
+                    use_spot=self._use_spot))
 
             # GCP provision loop yields 1 zone per request.
             # For consistency with other clouds, we group the zones in the
@@ -297,7 +298,9 @@ class Resources:
         else:
             region_zones = list(
                 self._cloud.region_zones_provision_loop(
-                    instance_type=self._instance_type, accelerators=self.accelerators, use_spot=self._use_spot))
+                    instance_type=self._instance_type,
+                    accelerators=self.accelerators,
+                    use_spot=self._use_spot))
         return region_zones
 
     def _try_validate_instance_type(self) -> None:
