@@ -65,7 +65,9 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
 
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    assert _is_valid_user_hash(user_hash), user_hash
+    if not _is_valid_user_hash(user_hash):
+        # A fallback in case the hash is invalid.
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
