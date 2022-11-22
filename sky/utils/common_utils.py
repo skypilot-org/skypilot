@@ -18,6 +18,7 @@ import yaml
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_LENGTH = 8
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
@@ -44,10 +45,12 @@ def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id."""
     if os.path.exists(_USER_HASH_FILE):
         with open(_USER_HASH_FILE, 'r') as f:
-            return f.read()
+            user_hash = f.read()
+            if user_hash and len(user_hash) == USER_HASH_LENGTH:
+                return user_hash
 
     hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
