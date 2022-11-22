@@ -249,7 +249,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 status_str = ''
                 if (spot_status is not None and
                         spot_status != spot_state.SpotStatus.RUNNING):
-                    status_str = f' (job status: {spot_status.value})'
+                    status_str = f' (status: {spot_status.value})'
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
@@ -292,12 +292,20 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # If the tailing fails, it is likely that the cluster fails, so we
             # wait a while to make sure the spot state is updated by the
             # controller, and check the spot queue again.
-            time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
+            # Wait a bit longer than the controller, so as to make sure the
+            # spot state is updated.
+            time.sleep(1.5 * JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
 
-    # The spot_status is in terminal state.
+    # The spot_status may not be in terminal status yet, since the controllerhas
+    # not updated the spot state yet. We wait for a while, until the spot state
+    # is updated.
+    spot_status = spot_state.get_status(job_id)
+    while not spot_status.is_terminal():
+        time.sleep(1)
+        spot_status = spot_state.get_status(job_id)
     logger.info(f'Logs finished for job {job_id} '
-                f'(status: {spot_state.get_status(job_id).value}).')
+                f'(status: {spot_status.value}).')
     return ''
 
 
