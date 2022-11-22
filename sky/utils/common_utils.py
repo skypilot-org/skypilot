@@ -41,16 +41,30 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash() -> str:
+def get_user_hash(default_value: Optional[str] = None) -> str:
     """Returns a unique user-machine specific hash as a user id."""
+    def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        try:
+            int(user_hash, 16)
+        except ValueError:
+            return False
+        return len(user_hash) == USER_HASH_LENGTH
+
+    user_hash = default_value
+    if _is_valid_user_hash(user_hash):
+        return user_hash
+
     if os.path.exists(_USER_HASH_FILE):
+        # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r') as f:
-            user_hash = f.read()
-            if len(user_hash) == USER_HASH_LENGTH:
-                return user_hash
+            # Remove invalid characters.
+            user_hash = f.read().strip()
+        if _is_valid_user_hash(user_hash):
+            return user_hash
 
     hash_str = user_and_hostname_hash()
     user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    assert _is_valid_user_hash(user_hash), user_hash
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
