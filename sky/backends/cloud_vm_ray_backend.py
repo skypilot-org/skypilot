@@ -1926,11 +1926,11 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
-            if 'tpu_name' in config_dict:
-                self._set_tpu_name(handle, config_dict['tpu_name'])
-
             ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           use_cached_ips=False)
+
+            if 'tpu_name' in config_dict:
+                self._set_tpu_name(handle, config_dict['tpu_name'])
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
