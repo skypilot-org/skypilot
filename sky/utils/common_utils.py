@@ -46,7 +46,7 @@ def get_user_hash() -> str:
     if os.path.exists(_USER_HASH_FILE):
         with open(_USER_HASH_FILE, 'r') as f:
             user_hash = f.read()
-            if user_hash and len(user_hash) == USER_HASH_LENGTH:
+            if len(user_hash) == USER_HASH_LENGTH:
                 return user_hash
 
     hash_str = user_and_hostname_hash()
