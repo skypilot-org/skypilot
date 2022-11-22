@@ -70,8 +70,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching IP address.
-_HEAD_IP_MAX_ATTEMPTS = 5
-_WORKER_IP_MAX_ATTEMPTS = 5
+_FETCH_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
@@ -1930,7 +1929,7 @@ class CloudVmRayBackend(backends.Backend):
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
-            ip_list = handle.external_ips(max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
                                           use_cached_ips=False)
 
             # Get actual zone info and save it into handle.
@@ -2097,7 +2096,7 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = handle.external_ips(max_attempts=_HEAD_IP_MAX_ATTEMPTS)
+            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             # Disable connection sharing for setup script to avoid old
@@ -2832,7 +2831,7 @@ class CloudVmRayBackend(backends.Backend):
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
-                                            _HEAD_IP_MAX_ATTEMPTS)
+                                            _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
