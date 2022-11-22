@@ -1667,22 +1667,19 @@ class CloudVmRayBackend(backends.Backend):
         def internal_ips(self):
             if self.stable_internal_external_ips is not None:
                 return [ips[0] for ips in self.stable_internal_external_ips]
-            else:
-                return None
+            return None
 
         @property
         def external_ips(self):
             if self.stable_internal_external_ips is not None:
                 return [ips[1] for ips in self.stable_internal_external_ips]
-            else:
-                return None
+            return None
 
         @property
         def head_ip(self):
             if self.external_ips is not None:
                 return self.external_ips[0]
-            else:
-                return None
+            return None
 
         def __setstate__(self, state):
             self._version = self._VERSION
@@ -1701,9 +1698,9 @@ class CloudVmRayBackend(backends.Backend):
             # Because the get_stable_cluster_ips uses the handle, we call
             # it on the existing instance after the state is updated
             if version < 3 and head_ip is not None:
-                self.stable_internal_external_ips = \
-                     backend_utils.get_stable_cluster_ips(self,
-                     use_cached_ips=False)
+                self.stable_internal_external_ips = (
+                    backend_utils.get_stable_cluster_ips(self,
+                                                         use_cached_ips=False))
 
             self._update_cluster_region()
 
