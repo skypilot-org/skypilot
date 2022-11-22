@@ -1145,7 +1145,7 @@ class RetryingVmProvisioner(object):
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        all_ips = backend_utils.get_stable_cluster_ips(cluster_handle)
+        all_ips = cluster_handle.external_ips()
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
         if len(all_ips) != num_tpu_devices:
@@ -1659,26 +1659,59 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
-        @property
-        def cluster_yaml(self):
-            return os.path.expanduser(self._cluster_yaml)
+        def _update_stable_cluster_ips(self,
+                                       max_attempts: int = 1) -> List[str]:
+            cluster_external_ips = backend_utils.get_node_ips(
+                self.cluster_yaml,
+                self.launched_nodes,
+                handle=self,
+                head_ip_max_attempts=max_attempts,
+                worker_ip_max_attempts=max_attempts,
+                get_internal_ips=False)
+            cluster_internal_ips = backend_utils.get_node_ips(
+                self.cluster_yaml,
+                self.launched_nodes,
+                handle=self,
+                head_ip_max_attempts=max_attempts,
+                worker_ip_max_attempts=max_attempts,
+                get_internal_ips=True)
 
-        @property
-        def internal_ips(self):
+            internal_external_ips = list(
+                zip(cluster_internal_ips, cluster_external_ips))
+
+            # Ensure head node is the first element, then sort based on the
+            # external IPs for stableness
+            stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+                internal_external_ips[1:], key=lambda x: x[1])
+            self.stable_internal_external_ips = stable_internal_external_ips
+
+        def internal_ips(self,
+                         max_attempts: int = 1,
+                         use_cached_ips: bool = True):
+            if not use_cached_ips:
+                self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
                 return [ips[0] for ips in self.stable_internal_external_ips]
             return None
 
-        @property
-        def external_ips(self):
+        def external_ips(self,
+                         max_attempts: int = 1,
+                         use_cached_ips: bool = True):
+            if not use_cached_ips:
+                self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
                 return [ips[1] for ips in self.stable_internal_external_ips]
             return None
 
         @property
+        def cluster_yaml(self):
+            return os.path.expanduser(self._cluster_yaml)
+
+        @property
         def head_ip(self):
-            if self.external_ips is not None:
-                return self.external_ips[0]
+            external_ips = self.external_ips()
+            if external_ips is not None:
+                return external_ips[0]
             return None
 
         def __setstate__(self, state):
@@ -1695,12 +1728,10 @@ class CloudVmRayBackend(backends.Backend):
 
             self.__dict__.update(state)
 
-            # Because the get_stable_cluster_ips uses the handle, we call
-            # it on the existing instance after the state is updated
+            # Because the _update_stable_cluster_ips function uses the handle,
+            # we call it on the current instance after the state is updated
             if version < 3 and head_ip is not None:
-                self.stable_internal_external_ips = (
-                    backend_utils.get_stable_cluster_ips(self,
-                                                         use_cached_ips=False))
+                self._update_stable_cluster_ips()
 
             self._update_cluster_region()
 
@@ -1899,11 +1930,8 @@ class CloudVmRayBackend(backends.Backend):
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
-            # Caches the stable list of the IPs in the handle.
-            ip_list = backend_utils.get_stable_cluster_ips(
-                handle,
-                head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
+            ip_list = handle.external_ips(max_attempts=_HEAD_IP_MAX_ATTEMPTS,
+                                          use_cached_ips=False)
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
@@ -1989,7 +2017,7 @@ class CloudVmRayBackend(backends.Backend):
         # e.g., in CLI.  So we should rerun rsync_up.
         fore = colorama.Fore
         style = colorama.Style
-        ip_list = backend_utils.get_stable_cluster_ips(handle)
+        ip_list = handle.external_ips()
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -2069,10 +2097,7 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = backend_utils.get_stable_cluster_ips(
-                handle,
-                head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
+            ip_list = handle.external_ips(max_attempts=_HEAD_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             # Disable connection sharing for setup script to avoid old
@@ -2468,7 +2493,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
                         f'{style.RESET_ALL}')
 
-        ip_list = backend_utils.get_stable_cluster_ips(handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2874,7 +2899,7 @@ class CloudVmRayBackend(backends.Backend):
 
     def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = backend_utils.get_stable_cluster_ips(handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
 
@@ -2907,7 +2932,7 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
-        ip_list = backend_utils.get_stable_cluster_ips(handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3051,7 +3076,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
-        ip_list = backend_utils.get_stable_cluster_ips(handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3097,8 +3122,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             1,
             accelerator_dict,
-            stable_cluster_internal_ips=backend_utils.get_stable_cluster_ips(
-                handle, get_internal_ips=True))
+            stable_cluster_internal_ips=handle.internal_ips())
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3161,8 +3185,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=backend_utils.get_stable_cluster_ips(
-                handle, get_internal_ips=True))
+            stable_cluster_internal_ips=handle.internal_ips())
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))

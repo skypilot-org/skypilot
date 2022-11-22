@@ -1138,59 +1138,6 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 
 
 @timeline.event
-def get_stable_cluster_ips(handle: backends.Backend.ResourceHandle,
-                           cluster_external_ips: Optional[List[str]] = None,
-                           cluster_internal_ips: Optional[List[str]] = None,
-                           get_internal_ips: bool = False,
-                           head_ip_max_attempts: int = 1,
-                           worker_ip_max_attempts: int = 1,
-                           use_cached_ips: bool = True) -> List[str]:
-    """Returns a stable list of (internal IP, external IP) tuples.
-
-    The lists of cluster IPs that are passed must correspond to each other.
-    """
-    if use_cached_ips:
-        if get_internal_ips and handle.internal_ips is not None:
-            return handle.internal_ips
-        elif handle.external_ips is not None:
-            return handle.external_ips
-
-    if cluster_external_ips is None:
-        cluster_external_ips = get_node_ips(
-            handle.cluster_yaml,
-            handle.launched_nodes,
-            handle=handle,
-            head_ip_max_attempts=head_ip_max_attempts,
-            worker_ip_max_attempts=worker_ip_max_attempts,
-            get_internal_ips=False)
-    if cluster_internal_ips is None:
-        cluster_internal_ips = get_node_ips(
-            handle.cluster_yaml,
-            handle.launched_nodes,
-            handle=handle,
-            head_ip_max_attempts=head_ip_max_attempts,
-            worker_ip_max_attempts=worker_ip_max_attempts,
-            get_internal_ips=True)
-
-    assert len(cluster_external_ips) == len(
-        cluster_internal_ips
-    ), 'length of external IPs and internal IPs must be the same'
-
-    internal_external_ips = list(zip(cluster_internal_ips,
-                                     cluster_external_ips))
-
-    # Ensure head node is the first element, then sort based on the external
-    # IPs for stableness
-    stable_internal_external_ips = [internal_external_ips[0]] + sorted(
-        internal_external_ips[1:], key=lambda x: x[1])
-    handle.stable_internal_external_ips = stable_internal_external_ips
-    if get_internal_ips:
-        return handle.internal_ips
-    elif handle.external_ips:
-        return handle.external_ips
-
-
-@timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
                  handle: Optional[backends.Backend.ResourceHandle] = None,
@@ -1207,11 +1154,6 @@ def get_node_ips(cluster_yaml: str,
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         return _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
-
-    # Try optimize for the common case where we have 1 node.
-    if (expected_num_nodes == 1 and handle is not None and
-            handle.head_ip is not None):
-        return [handle.head_ip]
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -1672,7 +1614,7 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        external_ips = get_stable_cluster_ips(handle, use_cached_ips=False)
+        external_ips = handle.external_ips(use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
         if len(external_ips) == 0:
             raise exceptions.FetchIPError(
@@ -1689,7 +1631,7 @@ def _update_cluster_status_no_lock(
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `get_stable_cluster_ips` function uses ray
+        # set the status to UP, as the `handle.external_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
