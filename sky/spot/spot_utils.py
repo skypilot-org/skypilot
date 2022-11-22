@@ -254,8 +254,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
                 status_display.update(
-                    _JOB_WAITING_STATUS_MESSAGE.format(
-                        status_str=status_str))
+                    _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str))
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
