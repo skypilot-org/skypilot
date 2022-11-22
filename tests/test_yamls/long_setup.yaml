@@ -1,0 +1,9 @@
+setup: |
+  echo long setup
+  for i in {1..10000}; do
+    echo $i
+    sleep 1
+  done
+
+run: |
+  echo run
