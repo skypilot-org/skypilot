@@ -644,9 +644,6 @@ class Optimizer:
                 accelerators, count = list(accelerators.items())[0]
                 accelerators = f'{accelerators}:{count}'
             spot = '[Spot]' if resources.use_spot else ''
-            region_or_zone = resources.region
-            if resources.zone is not None:
-                region_or_zone = resources.zone
             cloud = resources.cloud
             vcpus = cloud.get_vcpus_from_instance_type(resources.instance_type)
             if vcpus is None:
@@ -660,12 +657,11 @@ class Optimizer:
                 resources.instance_type + spot,
                 vcpus,
                 str(accelerators),
-                region_or_zone,
             ]
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS', 'REGION (ZONE)'
+            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS'
         ]
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
@@ -692,8 +688,23 @@ class Optimizer:
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'
                 f'({task.num_nodes} node{plural}):'
                 f'{colorama.Style.RESET_ALL}')
-            rows = []
+
+            # Only print 1 row per cloud.
+            best_per_cloud = {}
             for resources, cost in v.items():
+                cloud = str(resources.cloud)
+                if cloud in best_per_cloud:
+                    if cost < best_per_cloud[cloud][1]:
+                        best_per_cloud[cloud] = (resources, cost)
+                else:
+                    best_per_cloud[cloud] = (resources, cost)
+            # In a multi-node DAG, the chosen resources may not be the best
+            # resources for the task.
+            chosen = best_plan[task]
+            best_per_cloud[str(chosen.cloud)] = (chosen, v[chosen])
+
+            rows = []
+            for resources, cost in best_per_cloud.values():
                 if minimize_cost:
                     cost = f'{cost:.2f}'
                 else:
@@ -706,7 +717,9 @@ class Optimizer:
                                colorama.Style.RESET_ALL)
                 rows.append(row)
 
-            rows = sorted(rows, key=lambda x: x[-2])
+            # NOTE: we've converted the cost to a string above, so we should
+            # convert it back to float for sorting.
+            rows = sorted(rows, key=lambda x: float(x[-2]))
             # Highlight the chosen resources.
             for row in rows:
                 if row[-1] != '':
