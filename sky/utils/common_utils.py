@@ -42,7 +42,11 @@ def get_usage_run_id() -> str:
 
 
 def get_user_hash(default_value: Optional[str] = None) -> str:
-    """Returns a unique user-machine specific hash as a user id."""
+    """Returns a unique user-machine specific hash as a user id.
+    
+    We cache the user hash in a file to avoid potential user_name or
+    hostname changes causing a new user hash to be generated.
+    """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
         try:
