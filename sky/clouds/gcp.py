@@ -141,8 +141,14 @@ class GCP(clouds.Cloud):
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
-            regions = service_catalog.get_region_zones_for_accelerators(
+            acc_regions = service_catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
+            if instance_type == 'TPU-VM':
+                regions = acc_regions
+            else:
+                host_regions = service_catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, clouds='gcp')
+                regions = [r for r in host_regions if r in acc_regions]
 
         for region in regions:
             for zone in region.zones:
