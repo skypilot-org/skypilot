@@ -276,7 +276,7 @@ class Resources:
             region, zone)
 
     def get_valid_region_zones(self) -> List[Tuple[clouds.Region, clouds.Zone]]:
-        """Returns a list of (region, zones) that can provision this Resources."""
+        """Returns a list of (region, zone) that can provision this Resources"""
         assert self.is_launchable()
 
         if isinstance(self._cloud, clouds.GCP):

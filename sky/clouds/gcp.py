@@ -146,9 +146,10 @@ class GCP(clouds.Cloud):
             if instance_type == 'TPU-VM':
                 regions = acc_regions
             else:
-                host_regions = service_catalog.get_region_zones_for_instance_type(
+                # Host VM and accelerator must be in the same region and zone.
+                vm_regions = service_catalog.get_region_zones_for_instance_type(
                     instance_type, use_spot, clouds='gcp')
-                regions = [r for r in host_regions if r in acc_regions]
+                regions = [r for r in vm_regions if r in acc_regions]
 
         for region in regions:
             for zone in region.zones:
