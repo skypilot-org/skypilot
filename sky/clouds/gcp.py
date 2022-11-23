@@ -149,7 +149,19 @@ class GCP(clouds.Cloud):
                 # Host VM and accelerator must be in the same region and zone.
                 vm_regions = service_catalog.get_region_zones_for_instance_type(
                     instance_type, use_spot, clouds='gcp')
-                regions = [r for r in vm_regions if r in acc_regions]
+                regions = []
+                for r1 in acc_regions:
+                    for r2 in vm_regions:
+                        if r1.name != r2.name:
+                            continue
+                        zones = []
+                        for z1 in r1.zones:
+                            for z2 in r2.zones:
+                                if z1.name == z2.name:
+                                    zones.append(z1)
+                        if zones:
+                            regions.append(r1.set_zones(zones))
+                        break
 
         for region in regions:
             for zone in region.zones:
