@@ -342,17 +342,6 @@ class Resources:
                 f'inferred from the instance_type {self.instance_type!r}.')
             self._cloud = valid_clouds[0]
 
-        # FIXME
-        # Validate instance type against the region.
-        if self._region is not None:
-            region_zones = self.get_valid_region_zones()
-            regions = {region.name for region, _ in region_zones}
-            if self._region not in regions:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Invalid region {self._region!r} '
-                        f'for instance type {self._instance_type!r}.')
-
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
         acc_requested = self.accelerators
@@ -387,21 +376,6 @@ class Resources:
             # NOTE: should not clear 'self.accelerators' even for AWS/Azure,
             # because e.g., the instance may have 4 GPUs, while the task
             # specifies to use 1 GPU.
-
-        # Validate whether accelerator is available in specified region/zone.
-        if self.accelerators is not None:
-            acc, acc_count = list(self.accelerators.items())[0]
-            if self.region is not None or self.zone is not None:
-                if not self._cloud.accelerator_in_region_or_zone(
-                        acc, acc_count, self.region, self.zone):
-                    error_str = (f'Accelerator "{acc}" is not available in '
-                                 '"{}" region/zone.')
-                    if self.zone:
-                        error_str = error_str.format(self.zone)
-                    else:
-                        error_str = error_str.format(self.region)
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(error_str)
 
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
