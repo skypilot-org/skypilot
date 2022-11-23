@@ -31,11 +31,12 @@ _smoke_test_hash = hashlib.md5(
 # id.
 test_id = str(uuid.uuid4())[-2:]
 
-storage_setup_commands = ['touch ~/tmpfile',
-                          'mkdir -p ~/tmp-workdir',
-                          'touch ~/tmp-workdir/tmp\ file',
-                          'touch ~/tmp-workdir/foo',
-                          'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link']
+storage_setup_commands = [
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
+    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
+    'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
+]
+
 
 class Test(NamedTuple):
     name: str
@@ -330,10 +331,11 @@ def test_env_check():
 # ---------- file_mounts ----------
 def test_file_mounts():
     name = _get_cluster_name()
-    test_commands = [*storage_setup_commands,
-                     f'sky launch -y -c {name} examples/using_file_mounts.yaml',
-                     f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-                     ]
+    test_commands = [
+        *storage_setup_commands,
+        f'sky launch -y -c {name} examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
     test = Test(
         'using_file_mounts',
         test_commands,
@@ -341,6 +343,7 @@ def test_file_mounts():
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
+
 
 # ---------- storage ----------
 def test_storage_mounts():
@@ -353,15 +356,16 @@ def test_storage_mounts():
         f.write(yaml_str)
         f.flush()
         file_path = f.name
-        test_commands = [*storage_setup_commands,
-                         f'sky launch -y -c {name}-aws --cloud aws {file_path}',
-                         f'sky logs {name}-aws 1 --status', # Ensure job succeeded.
-                         f'aws s3 ls {storage_name}/hello.txt',
-                         f'sky storage delete {storage_name}', # Prepare for next cloud
-                         f'sky launch -y -c {name}-gcp --cloud gcp {file_path}',
-                         f'sky logs {name}-gcp 1 --status', # Ensure job succeeded.
-                         f'gsutil ls gs://{storage_name}/hello.txt',
-                         ]
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name}-aws --cloud aws {file_path}',
+            f'sky logs {name}-aws 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky storage delete {storage_name}',  # Prepare for next cloud
+            f'sky launch -y -c {name}-gcp --cloud gcp {file_path}',
+            f'sky logs {name}-gcp 1 --status',  # Ensure job succeeded.
+            f'gsutil ls gs://{storage_name}/hello.txt',
+        ]
         test = Test(
             'storage_mounts',
             test_commands,
@@ -369,6 +373,7 @@ def test_storage_mounts():
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
+
 
 # ---------- CLI logs ----------
 def test_logs():
