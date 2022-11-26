@@ -6,40 +6,17 @@ instance types and pricing information for AWS.
 import typing
 from typing import Dict, List, Optional, Tuple
 
-from sky import config
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
-    import pandas as pd
 
 _UPDATE_FREQUENCY_HOURS = 7
-_auto_update_frequency_hours = _UPDATE_FREQUENCY_HOURS
-if not config.sky_config.catalog.aws.auto_update:
-    _auto_update_frequency_hours = None
-
-
-# Filter the dataframe to only include the preferred regions.
-def area_filter_fn(df: 'pd.DataFrame') -> 'pd.DataFrame':
-    preferred_areas = config.sky_config.catalog.aws.preferred_area
-    if preferred_areas is None or preferred_areas == 'all':
-        return df
-
-    # TODO(zhwu): Move type check to config validation.
-    if isinstance(preferred_areas, str):
-        preferred_areas = [preferred_areas]
-    if not isinstance(preferred_areas, list):
-        raise ValueError('Preferred area must be a string or a list of strings')
-
-    area_filters = [f'{r.lower()}-' for r in preferred_areas]
-    return df[df['Region'].str.startswith(tuple(area_filters))]
-
 
 _df = common.read_catalog('aws/vms.csv',
-                          update_frequency_hours=_auto_update_frequency_hours,
-                          area_filter_fn=area_filter_fn)
-_image_df = common.read_catalog(
-    'aws/images.csv', update_frequency_hours=_auto_update_frequency_hours)
+                          update_frequency_hours=_UPDATE_FREQUENCY_HOURS)
+_image_df = common.read_catalog('aws/images.csv',
+                                update_frequency_hours=_UPDATE_FREQUENCY_HOURS)
 
 
 def instance_type_exists(instance_type: str) -> bool:

@@ -1,10 +1,11 @@
 """Common utilities for service catalog."""
+import hashlib
 import os
-import tempfile
 import time
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import difflib
+import filelock
 import requests
 import pandas as pd
 
@@ -48,11 +49,8 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def read_catalog(
-    filename: str,
-    update_frequency_hours: Optional[int] = None,
-    area_filter_fn: Optional[Callable[[pd.DataFrame], pd.DataFrame]] = None
-) -> pd.DataFrame:
+def read_catalog(filename: str,
+                 update_frequency_hours: Optional[int] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
@@ -62,40 +60,54 @@ def read_catalog(
     catalog_path = get_catalog_path(filename)
     cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
 
+    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
     def _need_update() -> bool:
         if not os.path.exists(catalog_path):
             return True
         if update_frequency_hours is None:
             return False
-        last_update = os.path.getmtime(catalog_path)
-        return (last_update + update_frequency_hours * 3600 <
-                time.time())
+        # Check the md5 of the file to see if it has changed.
+        with open(catalog_path, 'rb') as f:
+            file_md5 = hashlib.md5(f.read()).hexdigest()
+        md5_filepath = meta_path + '.md5'
+        if os.path.exists(md5_filepath):
+            with open(md5_filepath, 'r') as f:
+                last_md5 = f.read()
+            if file_md5 != last_md5:
+                # Do not update the file if the user modified it.
+                return False
 
-    if _need_update():
-        url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-        with backend_utils.safe_console_status(
-                f'Downloading {cloud} catalog...'):
-            try:
-                r = requests.get(url)
-                r.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                logger.error(f'Failed to download {cloud} catalog:')
-                with ux_utils.print_exception_no_traceback():
-                    raise e
-        # Save the catalog to a local file.
-        os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-        # Atomic write, to avoid conflicts with other processes.
-        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
-            f.write(r.text)
-            f.flush()
-        os.replace(f.name, catalog_path)
-        logger.info(f'{cloud} catalog has been updated at '
-                    f'{catalog_path}')
+        last_update = os.path.getmtime(catalog_path)
+        return last_update + update_frequency_hours * 3600 < time.time()
+
+    # Atomic check, to avoid conflicts with other processes.
+    # TODO(mraheja): remove pylint disabling when filelock version updated
+    # pylint: disable=abstract-class-instantiated
+    with filelock.FileLock(meta_path + '.lock'):
+        if _need_update():
+            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            with backend_utils.safe_console_status(
+                    f'Downloading {cloud} catalog...'):
+                try:
+                    r = requests.get(url)
+                    r.raise_for_status()
+                except requests.exceptions.RequestException as e:
+                    logger.error(f'Failed to download {cloud} catalog:')
+                    with ux_utils.print_exception_no_traceback():
+                        raise e
+            # Save the catalog to a local file.
+            os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+            with open(catalog_path, 'w') as f:
+                f.write(r.text)
+            with open(meta_path + '.md5', 'w') as f:
+                f.write(hashlib.md5(r.text.encode()).hexdigest())
+            logger.info(f'{cloud} catalog has been updated (every {update_frequency_hours}h): '
+                        f'{catalog_path}')
 
     try:
         df = pd.read_csv(catalog_path)
-        if area_filter_fn is not None:
-            df = area_filter_fn(df)
     except Exception as e:  # pylint: disable=broad-except
         # As users can manually modify the catalog, read_csv can fail.
         logger.error(f'Failed to read {catalog_path}. '
