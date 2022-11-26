@@ -103,8 +103,8 @@ def read_catalog(filename: str,
                 f.write(r.text)
             with open(meta_path + '.md5', 'w') as f:
                 f.write(hashlib.md5(r.text.encode()).hexdigest())
-            logger.info(f'{cloud} catalog has been updated (every {update_frequency_hours}h): '
-                        f'{catalog_path}')
+            logger.info(f'{cloud} catalog has been updated (every '
+                        f'{update_frequency_hours}h): {catalog_path}')
 
     try:
         df = pd.read_csv(catalog_path)

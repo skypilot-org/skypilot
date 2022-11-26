@@ -13,6 +13,7 @@ import ray
 
 from sky.adaptors import aws
 
+# Turn off the regions disabled for a new AWS account by default.
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -20,16 +21,19 @@ ALL_REGIONS = [
     'us-west-2',
     'ca-central-1',
     'eu-central-1',
+    # 'eu-central-2', # disabled
     'eu-west-1',
     'eu-west-2',
-    'eu-south-1',
+    # 'eu-south-1',
+    # 'eu-south-2', # disabled
     'eu-west-3',
     'eu-north-1',
-    'me-south-1',
+    # 'me-south-1',
     # 'me-central-1', # failed for no credential
-    'af-south-1',
-    'ap-east-1',
-    'ap-southeast-3',
+    # 'af-south-1',
+    # 'af-south-2', # disabled
+    # 'ap-east-1',
+    # 'ap-southeast-3',
     # 'ap-south-1', # failed for no credential
     'ap-northeast-3',
     'ap-northeast-2',
