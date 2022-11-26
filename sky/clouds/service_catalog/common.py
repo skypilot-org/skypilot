@@ -2,7 +2,7 @@
 import os
 import tempfile
 import time
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import difflib
 import requests
@@ -50,7 +50,8 @@ def get_catalog_path(filename: str) -> str:
 
 
 def read_catalog(filename: str,
-                 update_frequency_hours: Optional[int] = None) -> pd.DataFrame:
+                 update_frequency_hours: Optional[int] = None,
+                 area_filter_fn: Optional[Callable[[pd.DataFrame], pd.DataFrame]] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
@@ -91,6 +92,8 @@ def read_catalog(filename: str,
 
     try:
         df = pd.read_csv(catalog_path)
+        if area_filter_fn is not None:
+            df = area_filter_fn(df)
     except Exception as e:  # pylint: disable=broad-except
         # As users can manually modify the catalog, read_csv can fail.
         logger.error(f'Failed to read {catalog_path}. '

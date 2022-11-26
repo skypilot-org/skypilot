@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List, Union
 
 from sky.utils import common_utils
 
@@ -9,6 +9,7 @@ USER_CONFIG_PATH = os.path.abspath('sky_config.yaml')
 
 class BaseConfig:
     def load(self, config: Dict[str, Any], key_prefix: str = ''):
+        # TODO(zhwu): Add type check.
         for k, v in config.items():
             k = k.lower().replace('-', '_')
             if not hasattr(self, k):
@@ -31,16 +32,14 @@ class BaseConfig:
 class CatalogConfig(BaseConfig):
     class AWSConfig(BaseConfig):
         auto_update: bool = False
-        preferred_area: str = 'us'
+        preferred_area: Union[str, List[str]] = 'us'
 
     class GCPConfig(BaseConfig):
-        auto_update: bool = False
-        preferred_area: str = 'us'
+        pass
 
     class AzureConfig(BaseConfig):
-        auto_update: bool = False
-        preferred_area: str = 'us'
-    
+        pass
+
     aws: AWSConfig = AWSConfig()
     gcp: GCPConfig = GCPConfig()
     azure: AzureConfig = AzureConfig()
