@@ -1,3 +1,4 @@
+"""Load sky configs from file."""
 import os
 from typing import Any, Dict, List, Union
 
@@ -7,7 +8,10 @@ DEFAULT_CONFIG_PATH = os.path.expanduser(os.path.join('~/.sky', 'config.yaml'))
 # The config file under the current directory
 USER_CONFIG_PATH = os.path.abspath('sky_config.yaml')
 
+
 class BaseConfig:
+    """Abstract base class for config classes."""
+
     def load(self, config: Dict[str, Any], key_prefix: str = ''):
         # TODO(zhwu): Add type check.
         for k, v in config.items():
@@ -29,7 +33,10 @@ class BaseConfig:
                 config[k] = v
         return config
 
+
 class CatalogConfig(BaseConfig):
+    """Config for catalog."""
+
     class AWSConfig(BaseConfig):
         auto_update: bool = False
         preferred_area: Union[str, List[str]] = 'us'
@@ -47,20 +54,20 @@ class CatalogConfig(BaseConfig):
 
 class SkyConfig(BaseConfig):
     """Load the config file
-    
+
     The config file is loaded in the following order:
     1. The config file under the ~/.sky directory
     2. The config file under the current directory
 
     The config file loaded later will override the config file loaded earlier.
     """
+
     def __init__(self):
         self.catalog = CatalogConfig()
 
-        _config = self._load_config_file(DEFAULT_CONFIG_PATH)
-        _config.update(self._load_config_file(USER_CONFIG_PATH))
-        self.load(_config)
-
+        config = self._load_config_file(DEFAULT_CONFIG_PATH)
+        config.update(self._load_config_file(USER_CONFIG_PATH))
+        self.load(config)
 
     def _load_config_file(self, path: str) -> Dict[str, Any]:
         """Load the config file"""
@@ -68,5 +75,6 @@ class SkyConfig(BaseConfig):
             return {}
         with open(path, 'r') as f:
             return common_utils.read_yaml(f)
+
 
 sky_config = SkyConfig()

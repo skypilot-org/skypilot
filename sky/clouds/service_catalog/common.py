@@ -12,7 +12,6 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
-from sky.config import sky_config
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -49,9 +48,11 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def read_catalog(filename: str,
-                 update_frequency_hours: Optional[int] = None,
-                 area_filter_fn: Optional[Callable[[pd.DataFrame], pd.DataFrame]] = None) -> pd.DataFrame:
+def read_catalog(
+    filename: str,
+    update_frequency_hours: Optional[int] = None,
+    area_filter_fn: Optional[Callable[[pd.DataFrame], pd.DataFrame]] = None
+) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches

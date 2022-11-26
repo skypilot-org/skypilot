@@ -18,6 +18,7 @@ _auto_update_frequency_hours = _UPDATE_FREQUENCY_HOURS
 if not config.sky_config.catalog.aws.auto_update:
     _auto_update_frequency_hours = None
 
+
 # Filter the dataframe to only include the preferred regions.
 def area_filter_fn(df: 'pd.DataFrame') -> 'pd.DataFrame':
     preferred_areas = config.sky_config.catalog.aws.preferred_area
@@ -33,11 +34,12 @@ def area_filter_fn(df: 'pd.DataFrame') -> 'pd.DataFrame':
     area_filters = [f'{r.lower()}-' for r in preferred_areas]
     return df[df['Region'].str.startswith(tuple(area_filters))]
 
+
 _df = common.read_catalog('aws/vms.csv',
                           update_frequency_hours=_auto_update_frequency_hours,
                           area_filter_fn=area_filter_fn)
-_image_df = common.read_catalog('aws/images.csv',
-                                update_frequency_hours=_auto_update_frequency_hours)
+_image_df = common.read_catalog(
+    'aws/images.csv', update_frequency_hours=_auto_update_frequency_hours)
 
 
 def instance_type_exists(instance_type: str) -> bool:
