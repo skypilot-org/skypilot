@@ -19,9 +19,10 @@ class BaseConfig:
             if not hasattr(self, k):
                 raise ValueError(f'Invalid config key: {key_prefix}.{k}')
             if isinstance(v, dict):
-                self.__dict__[k].load(v, key_prefix=f'{key_prefix}.{k}')
+                attr = getattr(self, k)
+                attr.load(v, key_prefix=f'{key_prefix}.{k}')
             else:
-                self.__dict__[k] = v
+                self.__setattr__(k, v)
 
     def dump(self):
         config = {}
@@ -73,8 +74,7 @@ class SkyConfig(BaseConfig):
         """Load the config file"""
         if not os.path.exists(path):
             return {}
-        with open(path, 'r') as f:
-            return common_utils.read_yaml(f)
+        return common_utils.read_yaml(path)
 
 
 sky_config = SkyConfig()

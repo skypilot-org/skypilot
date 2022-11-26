@@ -67,7 +67,8 @@ def read_catalog(
             return True
         if update_frequency_hours is None:
             return False
-        return (os.path.getmtime(catalog_path) + update_frequency_hours * 3600 <
+        last_update = os.path.getmtime(catalog_path)
+        return (last_update + update_frequency_hours * 3600 <
                 time.time())
 
     if _need_update():
@@ -88,7 +89,7 @@ def read_catalog(
             f.write(r.text)
             f.flush()
         os.replace(f.name, catalog_path)
-        logger.info(f'A new {cloud} catalog has been downloaded to '
+        logger.info(f'{cloud} catalog has been updated at '
                     f'{catalog_path}')
 
     try:
