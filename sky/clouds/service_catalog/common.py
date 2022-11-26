@@ -1,5 +1,7 @@
 """Common utilities for service catalog."""
 import os
+import tempfile
+import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import difflib
@@ -10,6 +12,7 @@ from sky import sky_logging
 from sky.backends import backend_utils
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
+from sky.config import sky_config
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -46,7 +49,8 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def read_catalog(filename: str) -> pd.DataFrame:
+def read_catalog(filename: str,
+                 update_frequency_hours: Optional[int] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
@@ -55,7 +59,16 @@ def read_catalog(filename: str) -> pd.DataFrame:
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
     cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
-    if not os.path.exists(catalog_path):
+
+    def _need_update() -> bool:
+        if not os.path.exists(catalog_path):
+            return True
+        if update_frequency_hours is None:
+            return False
+        return (os.path.getmtime(catalog_path) + update_frequency_hours * 3600 <
+                time.time())
+
+    if _need_update():
         url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
         with backend_utils.safe_console_status(
                 f'Downloading {cloud} catalog...'):
@@ -68,8 +81,11 @@ def read_catalog(filename: str) -> pd.DataFrame:
                     raise e
         # Save the catalog to a local file.
         os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-        with open(catalog_path, 'w') as f:
+        # Atomic write, to avoid conflicts with other processes.
+        with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
             f.write(r.text)
+            f.flush()
+        os.replace(f.name, catalog_path)
         logger.info(f'A new {cloud} catalog has been downloaded to '
                     f'{catalog_path}')
 
