@@ -178,8 +178,7 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         cancelled_job_ids_str = ', '.join(map(str, cancelled_job_ids))
         identity_str = f'Jobs with IDs {cancelled_job_ids_str} are'
 
-    return (f'{identity_str} scheduled to be cancelled within '
-            f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+    return f'{identity_str} scheduled to be cancelled.'
 
 
 def cancel_job_by_name(job_name: str) -> str:
@@ -192,8 +191,7 @@ def cancel_job_by_name(job_name: str) -> str:
                 f'with name {job_name!r}.\n'
                 f'Job IDs: {job_ids}{colorama.Style.RESET_ALL}')
     cancel_jobs_by_id(job_ids)
-    return (f'Job {job_name!r} is scheduled to be cancelled within '
-            f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+    return f'Job {job_name!r} is scheduled to be cancelled.'
 
 
 def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
@@ -260,12 +258,19 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             job_statuses = backend.get_job_status(handle, stream_logs=False)
             job_status = list(job_statuses.values())[0]
             assert job_status is not None, 'No job found.'
-            logger.info(f'Logs finished for job {job_id} '
-                        f'(status: {job_status.value}).')
-            break
-        logger.info(
-            f'INFO: (Log streaming) Got return code {returncode}. Retrying '
-            f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+            if job_status != job_lib.JobStatus.CANCELLED:
+                logger.info(f'Logs finished for job {job_id} '
+                            f'(status: {job_status.value}).')
+                break
+            # The job can be cancelled by the user or the controller (when the
+            # the cluster is partially preempted).
+            logger.info('INFO: (Log streaming) Job is cancelled. Waiting '
+                        'for the status update in '
+                        f'{JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
+        else:
+            logger.info(
+                f'INFO: (Log streaming) Got return code {returncode}. Retrying '
+                f'in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
         # If the tailing fails, it is likely that the cluster fails, so we wait
         # a while to make sure the spot state is updated by the controller, and
         # check the spot queue again.
@@ -352,15 +357,13 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         job_duration = log_utils.readable_time_duration(0,
                                                         job['job_duration'],
                                                         absolute=True)
-        ago_suffix = ' ago' if show_all else ''
-        submitted = log_utils.readable_time_duration(job['submitted_at'],
-                                                     absolute=show_all)
+        submitted = log_utils.readable_time_duration(job['submitted_at'])
         values = [
             job['job_id'],
             job['job_name'],
             job['resources'],
             # SUBMITTED
-            submitted + ago_suffix if submitted != '-' else submitted,
+            submitted if submitted != '-' else submitted,
             # TOT. DURATION
             log_utils.readable_time_duration(job['submitted_at'],
                                              job['end_at'],
@@ -373,10 +376,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
             status_counts[job['status'].value] += 1
         if show_all:
             # STARTED
-            started = log_utils.readable_time_duration(job['start_at'],
-                                                       absolute=True)
-            if started != '-':
-                started += ago_suffix
+            started = log_utils.readable_time_duration(job['start_at'])
             values.append(started)
             values.extend([
                 job['cluster_resources'],

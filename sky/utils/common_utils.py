@@ -11,47 +11,80 @@ import re
 import socket
 import sys
 import time
+from typing import Any, Dict, Optional
 import uuid
-from typing import Any
 import yaml
 
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_LENGTH = 8
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
 
 logger = sky_logging.init_logger(__name__)
 
-_run_id = None
+_usage_run_id = None
 
 
-def get_run_id():
+def get_usage_run_id() -> str:
     """Returns a unique run id for each 'run'.
 
     A run is defined as the lifetime of a process that has imported `sky`
     and has called its CLI or programmatic APIs. For example, two successive
     `sky launch` are two runs.
     """
-    global _run_id
-    if _run_id is None:
-        _run_id = str(uuid.uuid4())
-    return _run_id
+    global _usage_run_id
+    if _usage_run_id is None:
+        _usage_run_id = str(uuid.uuid4())
+    return _usage_run_id
 
 
-def get_user_hash():
-    """Returns a unique user-machine specific hash as a user id."""
+def get_user_hash(default_value: Optional[str] = None) -> str:
+    """Returns a unique user-machine specific hash as a user id.
+
+    We cache the user hash in a file to avoid potential user_name or
+    hostname changes causing a new user hash to be generated.
+    """
+
+    def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        try:
+            int(user_hash, 16)
+        except (TypeError, ValueError):
+            return False
+        return len(user_hash) == USER_HASH_LENGTH
+
+    user_hash = default_value
+    if _is_valid_user_hash(user_hash):
+        return user_hash
+
     if os.path.exists(_USER_HASH_FILE):
+        # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r') as f:
-            return f.read()
+            # Remove invalid characters.
+            user_hash = f.read().strip()
+        if _is_valid_user_hash(user_hash):
+            return user_hash
 
     hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    if not _is_valid_user_hash(user_hash):
+        # A fallback in case the hash is invalid.
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
     return user_hash
+
+
+def get_global_job_id(job_timestamp: str, cluster_name: Optional[str],
+                      job_id: str) -> str:
+    """Returns a unique job run id for each job run.
+
+    A job run is defined as the lifetime of a job that has been launched.
+    """
+    return f'{job_timestamp}_{cluster_name}_id-{job_id}'
 
 
 class Backoff:
@@ -127,13 +160,13 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path):
+def read_yaml(path) -> Dict[str, Any]:
     with open(path, 'r') as f:
         config = yaml.safe_load(f)
     return config
 
 
-def dump_yaml(path, config):
+def dump_yaml(path, config) -> None:
     with open(path, 'w') as f:
         f.write(dump_yaml_str(config))
 

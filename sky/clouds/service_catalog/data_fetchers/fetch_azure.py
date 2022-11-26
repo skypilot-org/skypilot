@@ -2,9 +2,11 @@
 
 This script takes about 1 minute to finish.
 """
+import argparse
 import json
+import os
 import subprocess
-from typing import Optional
+from typing import Optional, Set, Tuple
 import urllib
 
 import numpy as np
@@ -24,18 +26,25 @@ US_REGIONS = [
     # 'WestUS3',   # WestUS3 pricing table is broken as of 2021/11.
 ]
 
-# To enable all the regions, uncomment the following line.
-# def get_regions() -> Tuple[str]:
-#     """Get all available regions."""
-#     proc = subprocess.run('az account list-locations  --query "[?not_null(metadata.latitude)] .{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json', shell=True, check=True, stdout=subprocess.PIPE)
-#     items = json.loads(proc.stdout.decode('utf-8'))
-#     regions = [item['RegionName'] for item in items if not item['RegionName'].endswith('stg')]
-#     return tuple(regions)
-# all_regions = get_regions()
 
-# REGIONS = all_regions
-REGIONS = US_REGIONS
-REGION_SET = set(REGIONS)
+# To enable all the regions, uncomment the following line.
+def get_regions() -> Tuple[str]:
+    """Get all available regions."""
+    proc = subprocess.run(
+        'az account list-locations  --query "[?not_null(metadata.latitude)] '
+        '.{RegionName:name , RegionDisplayName:regionalDisplayName}" -o json',
+        shell=True,
+        check=True,
+        stdout=subprocess.PIPE)
+    items = json.loads(proc.stdout.decode('utf-8'))
+    regions = [
+        item['RegionName']
+        for item in items
+        if not item['RegionName'].endswith('stg')
+    ]
+    return tuple(regions)
+
+
 # Azure secretly deprecated the M60 family which is still returned by its API.
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
@@ -48,12 +57,12 @@ USEFUL_COLUMNS = [
 
 def get_pricing_url(region: Optional[str] = None) -> str:
     filters = [
-        "serviceName eq 'Virtual Machines'",
-        "priceType eq 'Consumption'",
+        'serviceName eq \'Virtual Machines\'',
+        'priceType eq \'Consumption\'',
     ]
     if region is not None:
-        filters.append(f"armRegionName eq '{region}'")
-    filters_str = urllib.parse.quote(" and ".join(filters))
+        filters.append(f'armRegionName eq \'{region}\'')
+    filters_str = urllib.parse.quote(' and '.join(filters))
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
 
@@ -84,28 +93,28 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
 
 
 @ray.remote
-def get_all_regions_pricing_df() -> pd.DataFrame:
-    dfs = ray.get([get_pricing_df.remote(region) for region in REGIONS])
+def get_all_regions_pricing_df(regions: Set[str]) -> pd.DataFrame:
+    dfs = ray.get([get_pricing_df.remote(region) for region in regions])
     return pd.concat(dfs)
 
 
 @ray.remote
-def get_sku_df() -> pd.DataFrame:
-    print(f'Fetching SKU list')
+def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
+    print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
-        f'az vm list-skus --all',
+        'az vm list-skus --all',
         shell=True,
         check=True,
         stdout=subprocess.PIPE,
     )
-    print(f'Done fetching SKUs')
+    print('Done fetching SKUs')
     items = json.loads(proc.stdout.decode('ascii'))
     filtered_items = []
     for item in items:
         # zones = item['locationInfo'][0]['zones']
         region = item['locations'][0]
-        if region not in REGION_SET:
+        if region not in region_set:
             continue
         item['Region'] = region
         filtered_items.append(item)
@@ -141,12 +150,12 @@ def get_gpu_name(family: str) -> str:
     return gpu_data.get(family)
 
 
-def get_all_regions_instance_types_df():
+def get_all_regions_instance_types_df(region_set: Set[str]):
     df, df_sku = ray.get([
-        get_all_regions_pricing_df.remote(),
-        get_sku_df.remote(),
+        get_all_regions_pricing_df.remote(region_set),
+        get_sku_df.remote(region_set),
     ])
-    print(f'Processing dataframes')
+    print('Processing dataframes')
     df.drop_duplicates(inplace=True)
 
     df = df[df['unitPrice'] > 0]
@@ -232,7 +241,18 @@ def get_all_regions_instance_types_df():
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--all-regions',
+        action='store_true',
+        help='Fetch all global regions, not just the U.S. ones.')
+    args = parser.parse_args()
+
     ray.init()
-    df = get_all_regions_instance_types_df()
-    df.to_csv('azure.csv', index=False)
-    print('Azure Service Catalog saved to azure.csv')
+    region_filter = get_regions() if args.all_regions else US_REGIONS
+    region_filter = set(region_filter)
+
+    instance_df = get_all_regions_instance_types_df(region_filter)
+    os.makedirs('azure', exist_ok=True)
+    instance_df.to_csv('azure/vms.csv', index=False)
+    print('Azure Service Catalog saved to azure/vms.csv')

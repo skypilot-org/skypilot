@@ -1,7 +1,7 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
 import time
 import typing
-from typing import Callable, Optional
+from typing import Optional
 
 import sky
 from sky import exceptions
@@ -34,8 +34,7 @@ class StrategyExecutor:
     RETRY_INIT_GAP_SECONDS = 60
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool,
-                 signal_handler: Callable) -> None:
+                 task: 'task_lib.Task', retry_until_up: bool) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -43,15 +42,12 @@ class StrategyExecutor:
             backend: The backend to use. Only CloudVMRayBackend is supported.
             task: The task to execute.
             retry_until_up: Whether to retry until the cluster is up.
-            signal_handler: The signal handler that will raise an exception if a
-                SkyPilot signal is received.
         """
         self.dag = sky.Dag()
         self.dag.add(task)
         self.cluster_name = cluster_name
         self.backend = backend
         self.retry_until_up = retry_until_up
-        self.signal_handler = signal_handler
 
     def __init_subclass__(cls, name: str, default: bool = False):
         SPOT_STRATEGIES[name] = cls
@@ -63,8 +59,7 @@ class StrategyExecutor:
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
-             task: 'task_lib.Task', retry_until_up: bool,
-             signal_handler: Callable) -> 'StrategyExecutor':
+             task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
         resources = task.resources
         assert len(resources) == 1, 'Only one resource is supported.'
@@ -77,7 +72,7 @@ class StrategyExecutor:
         # will be handled by the strategy class.
         task.set_resources({resources.copy(spot_recovery=None)})
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
-                                              retry_until_up, signal_handler)
+                                              retry_until_up)
 
     def launch(self) -> Optional[float]:
         """Launch the spot cluster for the first time.
@@ -147,9 +142,6 @@ class StrategyExecutor:
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
-            # Check the signal every time to be more responsive to user
-            # signals, such as Cancel.
-            self.signal_handler()
             retry_launch = False
             exception = None
             try:
@@ -222,8 +214,7 @@ class StrategyExecutor:
                     continue
 
                 # Check the job status until it is not in initialized status
-                if status not in (None, job_lib.JobStatus.INIT,
-                                  job_lib.JobStatus.PENDING):
+                if status is not None and job_lib.JobStatus.PENDING < status:
                     try:
                         launch_time = spot_utils.get_job_timestamp(
                             self.backend, self.cluster_name, get_end_time=False)

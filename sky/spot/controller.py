@@ -1,6 +1,8 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
+import multiprocessing
 import pathlib
+import signal
 import time
 import traceback
 
@@ -13,10 +15,13 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.spot import recovery_strategy
 from sky.spot import spot_state
 from sky.spot import spot_utils
+from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -32,28 +37,27 @@ class SpotController:
 
         self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
-        self.backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
         # Add a unique identifier to the task environment variables, so that
         # the user can have the same id for multiple recoveries.
         #   Example value: sky-2022-10-04-22-46-52-467694_id-17
-        # TODO(zhwu): support SKYPILOT_RUN_ID for normal jobs as well, so
-        # the use can use env_var for normal jobs.
         task_envs = self._task.envs or {}
-        task_envs['SKYPILOT_RUN_ID'] = (f'{self.backend.run_timestamp}'
-                                        f'_id-{self._job_id}')
+        job_id_env_var = common_utils.get_global_job_id(
+            self._backend.run_timestamp, 'spot', self._job_id)
+        task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
         self._task.set_envs(task_envs)
 
         spot_state.set_submitted(
             self._job_id,
             self._task_name,
-            self.backend.run_timestamp,
+            self._backend.run_timestamp,
             resources_str=backend_utils.get_task_resources_str(self._task))
+        logger.info(f'Submitted spot job; SKYPILOT_JOB_ID: {job_id_env_var}')
         self._cluster_name = spot_utils.generate_spot_cluster_name(
             self._task_name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            self._cluster_name, self.backend, self._task, retry_until_up,
-            self._handle_signal)
+            self._cluster_name, self._backend, self._task, retry_until_up)
 
     def _run(self):
         """Busy loop monitoring spot cluster status and handling recovery."""
@@ -65,8 +69,6 @@ class SpotController:
         spot_state.set_started(self._job_id, start_time=start_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
-            # Handle the signal if it is sent by the user.
-            self._handle_signal()
 
             # Check the network connection to avoid false alarm for job failure.
             # Network glitch was observed even in the VM.
@@ -80,41 +82,53 @@ class SpotController:
 
             # NOTE: we do not check cluster status first because race condition
             # can occur, i.e. cluster can be down during the job status check.
-            job_status = spot_utils.get_job_status(self.backend,
+            job_status = spot_utils.get_job_status(self._backend,
                                                    self._cluster_name)
 
             if job_status is not None and not job_status.is_terminal():
-                # The job is healthy, continue to monitor the job status.
-                continue
+                need_recovery = False
+                if self._task.num_nodes > 1:
+                    # Check the cluster status for multi-node jobs, since the
+                    # job may not be set to FAILED immediately when only some
+                    # of the nodes are preempted.
+                    (cluster_status,
+                     handle) = backend_utils.refresh_cluster_status_handle(
+                         self._cluster_name, force_refresh=True)
+                    if cluster_status != global_user_state.ClusterStatus.UP:
+                        # recover the cluster if it is not up.
+                        logger.info(f'Cluster status {cluster_status.value}. '
+                                    'Recovering...')
+                        need_recovery = True
+                if not need_recovery:
+                    # The job and cluster are healthy, continue to monitor the
+                    # job status.
+                    continue
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = spot_utils.get_job_timestamp(self.backend,
+                end_time = spot_utils.get_job_timestamp(self._backend,
                                                         self._cluster_name,
                                                         get_end_time=True)
                 # The job is done.
                 spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
-            assert (job_status is None or
-                    job_status == job_lib.JobStatus.FAILED), (
-                        f'The job should not be {job_status.value}.')
             if job_status == job_lib.JobStatus.FAILED:
-                # Check the status of the spot cluster. It can be STOPPED or UP,
-                # where STOPPED means partially down.
+                # Check the status of the spot cluster. If it is not UP,
+                # the cluster is preempted.
                 (cluster_status,
                  handle) = backend_utils.refresh_cluster_status_handle(
                      self._cluster_name, force_refresh=True)
                 if cluster_status == global_user_state.ClusterStatus.UP:
                     # The user code has probably crashed.
-                    end_time = spot_utils.get_job_timestamp(self.backend,
+                    end_time = spot_utils.get_job_timestamp(self._backend,
                                                             self._cluster_name,
                                                             get_end_time=True)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
-                    self.backend.tail_logs(handle,
-                                           None,
-                                           spot_job_id=self._job_id)
+                    self._backend.tail_logs(handle,
+                                            None,
+                                            spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
                     spot_state.set_failed(
                         self._job_id,
@@ -131,12 +145,13 @@ class SpotController:
             spot_state.set_recovered(self._job_id,
                                      recovered_time=recovered_time)
 
-    def start(self):
-        """Start the controller."""
+    def run(self):
+        """Run controller logic and handle exceptions."""
         try:
             self._run()
-        except exceptions.SpotUserCancelledError as e:
-            logger.info(e)
+        except KeyboardInterrupt:
+            # Kill the children processes launched by log_lib.run_with_log.
+            subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
             logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
@@ -153,37 +168,86 @@ class SpotController:
             # The job can be non-terminal if the controller exited abnormally,
             # e.g. failed to launch cluster after reaching the MAX_RETRY.
             if not job_status.is_terminal():
+                logger.info(f'Previous spot job status: {job_status.value}')
                 spot_state.set_failed(
                     self._job_id,
                     failure_type=spot_state.SpotStatus.FAILED_CONTROLLER)
 
             # Clean up Storages with persistent=False.
-            self.backend.teardown_ephemeral_storage(self._task)
+            self._backend.teardown_ephemeral_storage(self._task)
 
-    def _handle_signal(self):
-        """Handle the signal if the user sent it."""
-        signal_file = pathlib.Path(
-            spot_utils.SIGNAL_FILE_PREFIX.format(self._job_id))
-        signal = None
-        if signal_file.exists():
-            # Filelock is needed to prevent race condition with concurrent
-            # signal writing.
-            # TODO(mraheja): remove pylint disabling when filelock version
-            # updated
-            # pylint: disable=abstract-class-instantiated
-            with filelock.FileLock(str(signal_file) + '.lock'):
-                with signal_file.open(mode='r') as f:
-                    signal = f.read().strip()
-                    signal = spot_utils.UserSignal(signal)
-                # Remove the signal file, after reading the signal.
-                signal_file.unlink()
-        if signal is None:
-            return
-        if signal == spot_utils.UserSignal.CANCEL:
-            raise exceptions.SpotUserCancelledError(
-                f'User sent {signal.value} signal.')
 
-        raise RuntimeError(f'Unknown SkyPilot signal received: {signal.value}.')
+def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
+    """Runs the controller in a remote process for interruption."""
+
+    # Override the SIGTERM handler to gracefully terminate the controller.
+    def handle_interupt(signum, frame):
+        """Handle the interrupt signal."""
+        # Need to raise KeyboardInterrupt to avoid the exception being caught by
+        # the strategy executor.
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGTERM, handle_interupt)
+
+    # The controller needs to be instantiated in the remote process, since
+    # the controller is not serializable.
+    spot_controller = SpotController(job_id, task_yaml, retry_until_up)
+    spot_controller.run()
+
+
+def _handle_signal(job_id):
+    """Handle the signal if the user sent it."""
+    signal_file = pathlib.Path(spot_utils.SIGNAL_FILE_PREFIX.format(job_id))
+    user_signal = None
+    if signal_file.exists():
+        # Filelock is needed to prevent race condition with concurrent
+        # signal writing.
+        # TODO(mraheja): remove pylint disabling when filelock version
+        # updated
+        # pylint: disable=abstract-class-instantiated
+        with filelock.FileLock(str(signal_file) + '.lock'):
+            with signal_file.open(mode='r') as f:
+                user_signal = f.read().strip()
+                try:
+                    user_signal = spot_utils.UserSignal(user_signal)
+                except ValueError:
+                    logger.warning(
+                        f'Unknown signal received: {user_signal}. Ignoring.')
+                    user_signal = None
+            # Remove the signal file, after reading the signal.
+            signal_file.unlink()
+    if user_signal is None:
+        # None or empty string.
+        return
+    assert user_signal == spot_utils.UserSignal.CANCEL, (
+        f'Only cancel signal is supported, but {user_signal} got.')
+    raise exceptions.SpotUserCancelledError(
+        f'User sent {user_signal.value} signal.')
+
+
+def start(job_id, task_yaml, retry_until_up):
+    """Start the controller."""
+    controller_process = None
+    try:
+        _handle_signal(job_id)
+        controller_process = multiprocessing.Process(target=_run_controller,
+                                                     args=(job_id, task_yaml,
+                                                           retry_until_up))
+        controller_process.start()
+        while controller_process.is_alive():
+            _handle_signal(job_id)
+            time.sleep(1)
+    except exceptions.SpotUserCancelledError:
+        logger.info(f'Cancelling spot job {job_id}...')
+        if controller_process is not None:
+            logger.info('Sending SIGTERM to controller process '
+                        f'{controller_process.pid}')
+            # This will raise KeyboardInterrupt in the task.
+            # Using SIGTERM instead of SIGINT, as the SIGINT is weirdly ignored
+            # by the controller process when it is started inside a ray job.
+            controller_process.terminate()
+    if controller_process is not None:
+        controller_process.join()
 
 
 if __name__ == '__main__':
@@ -200,6 +264,4 @@ if __name__ == '__main__':
                         help='The path to the user spot task yaml file. '
                         'The file name is the spot task name.')
     args = parser.parse_args()
-    controller = SpotController(args.job_id, args.task_yaml,
-                                args.retry_until_up)
-    controller.start()
+    start(args.job_id, args.task_yaml, args.retry_until_up)

@@ -10,3 +10,4 @@ UNINITIALIZED_ONPREM_CLUSTER_MESSAGE = (
     'command to initialize it locally: sky launch -c {cluster} \'\'')
 
 CONFIG_PATH = '~/.sky/config'
+JOB_ID_ENV_VAR = 'SKYPILOT_JOB_ID'

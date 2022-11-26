@@ -9,6 +9,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 
 if typing.TYPE_CHECKING:
@@ -94,63 +95,46 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
+        image_id = service_catalog.get_image_id_from_tag(
+            'skypilot:gpu-ubuntu-2004', region_name, clouds='aws')
         if acc is not None:
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
-                # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-                # Downgrade the AMI for K80 due as it is only compatible with
-                # NVIDIA driver lower than 470.
-                amis = {
-                    'us-east-1': 'ami-0868a20f5a3bf9702',
-                    'us-east-2': 'ami-09b8825010d4dc701',
-                    # This AMI is 20210623 as aws does not provide a newer one.
-                    'us-west-1': 'ami-0b3c34d643904a734',
-                    'us-west-2': 'ami-06b3479ab15aaeaf1',
-                }
-                assert region_name in amis, region_name
-                return amis[region_name]
-        # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+                image_id = service_catalog.get_image_id_from_tag(
+                    'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
+        if image_id is not None:
+            return image_id
+        # Raise ResourcesUnavailableError to make sure the failover in
+        # CloudVMRayBackend will be correctly triggered.
+        # TODO(zhwu): This is a information leakage to the cloud implementor,
+        # we need to find a better way to handle this.
+        raise exceptions.ResourcesUnavailableError(
+            'No image found in catalog for region '
+            f'{region_name}. Try setting a valid image_id.')
 
-        # Commented below are newer AMIs, but as other clouds do not support
-        # torch==1.13.0+cu117 we do not use these AMIs to avoid frequent updates:
-        # Deep Learning AMI GPU PyTorch 1.12.1 (Ubuntu 20.04) 20221025
-        #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (supports torch==1.13.0+cu117)
-        #     'us-east-1': 'ami-0eb1f91977a3fcc1b'
-        #     'us-east-2': 'ami-0274a6db2e19b7cc6'
-        #     'us-west-1': 'ami-0fb299af41d32cfd3'
-        #     'us-west-2': 'ami-04ba15f9bd464eb20'
-        #
-        # Current AMIs:
-        # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
-        #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (does not support torch==1.13.0+cu117)
-        amis = {
-            'us-east-1': 'ami-0729d913a335efca7',
-            'us-east-2': 'ami-070f4af81c19b41bf',
-            'us-west-1': 'ami-0365e546798d80d88',
-            'us-west-2': 'ami-050814f384259894c',
-            'af-south-1': 'ami-087e9c777068588cf',  # AF (Cape Town)
-            'ap-east-1': 'ami-0f67c8304962f6139',  # AP (Hong Kong)
-            'ap-southeast-3': 'ami-05b1df9070f4f50db',  # AP (Jakarta) (20221024, no old version)
-            'ap-south-1': 'ami-0d3c1d29d1dd98d1a',  # AP (Mumbai)
-            'ap-northeast-3': 'ami-03e883fd27d3203db',  # AP (Osaka)
-            'ap-northeast-2': 'ami-027aafa258be40256',  # AP (Seoul)
-            'ap-southeast-1': 'ami-0950163cc7b4bd94a',  # AP (Singapore)
-            'ap-southeast-2': 'ami-0736202a4ca189973',  # AP (Sydney)
-            'ap-northeast-1': 'ami-07b8b0c43a572bef3',  # AP (Tokyo)
-            'ca-central-1': 'ami-090ff046d4100a70f',  # Canada (Central)
-            'eu-central-1': 'ami-0ce648c1894dfd60f',  # EU (Frankfurt)
-            'eu-west-1': 'ami-0e55e4d019884a5f8',  # EU (Ireland)
-            'eu-west-2': 'ami-010455402d8e1cc58',  # EU (London)
-            'eu-south-1': 'ami-083d67d3190e95b0c',  # EU (Milan)
-            'eu-west-3': 'ami-00b068cc55c59b711',  # EU (Paris)
-            'eu-north-1': 'ami-016368d37ba996f72',  # EU (Stockholm)
-            'me-south-1': 'ami-05d2bc426c8cf24a8',  # Middle East (Bahrain)
-            'me-central-1': 'ami-0a7c9f2a2a95f25bf',  # Middle East (UAE) (20221024, no old version)
-            'sa-east-1': 'ami-081d7ffe67ce8673a',  # SA (Sao Paulo)
-        }
-        assert region_name in amis, region_name
-        return amis[region_name]
+    @classmethod
+    def _get_image_id(cls, region_name: str, instance_type: str,
+                      image_id: Optional[Dict[str, str]]) -> str:
+        if image_id is not None:
+            if None in image_id:
+                image_id = image_id[None]
+            else:
+                assert region_name in image_id, image_id
+                image_id = image_id[region_name]
+            if image_id.startswith('skypilot:'):
+                image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                                 region_name,
+                                                                 clouds='aws')
+                if image_id is None:
+                    # Raise ResourcesUnavailableError to make sure the failover
+                    # in CloudVMRayBackend will be correctly triggered.
+                    # TODO(zhwu): This is a information leakage to the cloud
+                    # implementor, we need to find a better way to handle this.
+                    raise exceptions.ResourcesUnavailableError(
+                        f'No image found for region {region_name}')
+            return image_id
+        return cls.get_default_ami(region_name, instance_type)
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -254,10 +238,7 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        if r.image_id is not None:
-            image_id = r.image_id
-        else:
-            image_id = self.get_default_ami(region_name, r.instance_type)
+        image_id = self._get_image_id(region_name, r.instance_type, r.image_id)
 
         return {
             'instance_type': r.instance_type,
@@ -363,9 +344,6 @@ class AWS(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
-
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='aws')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,

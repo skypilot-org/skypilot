@@ -208,15 +208,66 @@ def _interactive_node_cli_command(cli_func):
                               default=False,
                               required=False,
                               help='Skip confirmation prompt.')
+    idle_autostop = click.option('--idle-minutes-to-autostop',
+                                 '-i',
+                                 default=None,
+                                 type=int,
+                                 required=False,
+                                 help=('Automatically stop the cluster after '
+                                       'this many minutes of idleness, i.e. '
+                                       'no running or pending jobs in the '
+                                       'cluster\'s job queue. Idleness gets '
+                                       'reset whenever setting-up/running/'
+                                       'pending jobs are found in the job '
+                                       'queue. If not set, the cluster '
+                                       'will not be auto-stopped.'))
+    autodown = click.option('--down',
+                            default=False,
+                            is_flag=True,
+                            required=False,
+                            help=('Autodown the cluster: tear down the '
+                                  'cluster after all jobs finish '
+                                  '(successfully or abnormally). If '
+                                  '--idle-minutes-to-autostop is also set, '
+                                  'the cluster will be torn down after the '
+                                  'specified idle time. Note that if errors '
+                                  'occur during provisioning/data syncing/'
+                                  'setting up, the cluster will not be torn '
+                                  'down for debugging purposes.'))
+    retry_until_up = click.option('--retry-until-up',
+                                  '-r',
+                                  is_flag=True,
+                                  default=False,
+                                  required=False,
+                                  help=('Whether to retry provisioning '
+                                        'infinitely until the cluster is up '
+                                        'if we fail to launch the cluster on '
+                                        'any possible region/cloud due to '
+                                        'unavailability errors.'))
+    region_option = click.option('--region',
+                                 default=None,
+                                 type=str,
+                                 required=False,
+                                 help='The region to use.')
+    zone_option = click.option('--zone',
+                               default=None,
+                               type=str,
+                               required=False,
+                               help='The zone to use.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
         cluster_option,
         no_confirm,
         port_forward_option,
+        idle_autostop,
+        autodown,
+        retry_until_up,
 
         # Resource options
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
+        region_option,
+        zone_option,
         instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
@@ -614,6 +665,7 @@ def _launch_with_confirm(
     *,
     dryrun: bool,
     detach_run: bool,
+    detach_setup: bool = False,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     down: bool = False,  # pylint: disable=redefined-outer-name
@@ -630,6 +682,13 @@ def _launch_with_confirm(
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
+        try:
+            backend_utils.check_public_cloud_enabled()
+        except RuntimeError as e:
+            # Catch the exception where the public cloud is not enabled, and
+            # only print the error message without the error type.
+            click.secho(e, fg='yellow')
+            sys.exit(1)
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -656,6 +715,14 @@ def _launch_with_confirm(
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
+
+        # We do not sky.launch if interactive node is already up, so we need
+        # to update idle timeout and autodown here.
+        elif idle_minutes_to_autostop is not None:
+            core.autostop(cluster, idle_minutes_to_autostop, down)
+        elif down:
+            core.autostop(cluster, 1, down)
+
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
@@ -666,6 +733,7 @@ def _launch_with_confirm(
             dryrun=dryrun,
             stream_logs=True,
             cluster_name=cluster,
+            detach_setup=detach_setup,
             detach_run=detach_run,
             backend=backend,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -685,6 +753,9 @@ def _create_and_ssh_into_node(
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
     no_confirm: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -697,6 +768,16 @@ def _create_and_ssh_into_node(
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
+        idle_minutes_to_autostop: Automatically stop the cluster after
+                                  specified minutes of idleness. Idleness gets
+                                  reset whenever setting-up/running/pending
+                                  jobs are found in the job queue.
+        down: If true, autodown the cluster after all jobs finish. If
+              idle_minutes_to_autostop is also set, the cluster will be torn
+              down after the specified idle time.
+        retry_until_up: Whether to retry provisioning infinitely until the
+                        cluster is up if we fail to launch due to
+                        unavailability errors.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
@@ -735,6 +816,9 @@ def _create_and_ssh_into_node(
         dryrun=False,
         detach_run=True,
         no_confirm=no_confirm,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -980,12 +1064,24 @@ def cli():
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-setup',
+    '-s',
+    default=False,
+    is_flag=True,
+    help=
+    ('If True, run setup in non-interactive mode as part of the job itself. '
+     'You can safely ctrl-c to detach from logging, and it will not interrupt '
+     'the setup process. To see the logs again after detaching, use `sky logs`.'
+     ' To cancel setup, cancel the job via `sky cancel`. Useful for long-'
+     'running setup commands.'))
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
@@ -1005,9 +1101,8 @@ def cli():
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
@@ -1039,7 +1134,6 @@ def cli():
               required=False,
               help='Skip confirmation prompt.')
 @click.option('--no-setup',
-              '-n',
               is_flag=True,
               default=False,
               required=False,
@@ -1049,6 +1143,7 @@ def launch(
     entrypoint: str,
     cluster: Optional[str],
     dryrun: bool,
+    detach_setup: bool,
     detach_run: bool,
     backend_name: Optional[str],
     name: Optional[str],
@@ -1113,6 +1208,7 @@ def launch(
         backend,
         cluster,
         dryrun=dryrun,
+        detach_setup=detach_setup,
         detach_run=detach_run,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
@@ -1132,12 +1228,13 @@ def launch(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run workdir syncing first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -1489,6 +1586,9 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
         core.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
+    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+        click.echo(str(e))
+        sys.exit(1)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1667,9 +1767,8 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
           '. If not set, the cluster will not be autostopped.'))
@@ -1691,6 +1790,14 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
+@click.option(
+    '--force',
+    '-f',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Force start the cluster even if it is already UP. Useful for '
+          'upgrading the SkyPilot runtime on the cluster.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
@@ -1699,7 +1806,8 @@ def start(
         yes: bool,
         idle_minutes_to_autostop: Optional[int],
         down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool):
+        retry_until_up: bool,
+        force: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
@@ -1787,7 +1895,8 @@ def start(
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if cluster_status == global_user_state.ClusterStatus.UP:
+            if (not force and
+                    cluster_status == global_user_state.ClusterStatus.UP):
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -1800,7 +1909,8 @@ def start(
                 #    This is dangerous and unwanted behavior!
                 click.echo(f'Cluster {name} already has status UP.')
                 continue
-            assert cluster_status in (
+
+            assert force or cluster_status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append(name)
@@ -1822,7 +1932,8 @@ def start(
             core.start(name,
                        idle_minutes_to_autostop,
                        retry_until_up,
-                       down=down)
+                       down=down,
+                       force=force)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
@@ -2127,10 +2238,12 @@ def _down_or_stop_clusters(
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            gpus: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2167,7 +2280,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2178,6 +2292,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=gpus,
                               use_spot=use_spot,
@@ -2191,6 +2307,9 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2198,9 +2317,11 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2236,7 +2357,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2245,6 +2367,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2257,6 +2381,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2264,10 +2391,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
+            region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2303,7 +2432,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
-    user_requested_resources = not (instance_type is None and tpus is None and
+    user_requested_resources = not (region is None and zone is None and
+                                    instance_type is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
@@ -2317,6 +2447,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
@@ -2331,6 +2463,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2653,12 +2788,13 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @click.option(
     '--retry-until-up',
     '-r',
