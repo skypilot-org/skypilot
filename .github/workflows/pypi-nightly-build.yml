@@ -1,10 +1,7 @@
 name: pypi-publish-nightly
 on:
-  push:
-    branches:
-      - master
-  # schedule:
-  #   - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
+  schedule:
+    - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
 
 jobs:
   # nightly release check from https://stackoverflow.com/a/67527144
@@ -22,7 +19,7 @@ jobs:
         if: ${{ github.event_name == 'schedule' }}
         run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
 
-  nightly-build-test-pypi:
+  nightly-build-pypi:
     runs-on: ubuntu-latest
     needs: check-date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
@@ -43,8 +40,9 @@ jobs:
       - name: Set release version
         run: |
           RELEASE_VERSION=$(date +%Y%m%d)
-          sed -i 's/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g' sky/__init__.py
+          sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0-dev${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
       - name: Build a binary wheel and a source tarball
         run: >-
           python -m
@@ -58,3 +56,8 @@ jobs:
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository_url: https://test.pypi.org/legacy/
+            - name: Publish distribution to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
