@@ -41,7 +41,7 @@ jobs:
         run: |
           RELEASE_VERSION=$(date +%Y.%m.%d)
           sed -i 's/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g' sky/__init__.py
-          sed -i 's/__version__ = '.*'/__version__ = '1.0.0-dev${RELEASE_VERSION}'/g' sky/__init__.py
+          sed -i "s/__version__ = '.*'/__version__ = '1.0.0-dev${RELEASE_VERSION}'/g" sky/__init__.py
       - name: Build a binary wheel and a source tarball
         run: >-
           python -m
