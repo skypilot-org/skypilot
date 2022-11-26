@@ -6,17 +6,21 @@ instance types and pricing information for AWS.
 import typing
 from typing import Dict, List, Optional, Tuple
 
+from sky import config
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_UPDATE_PERIOD_HOURS = 7
+_UPDATE_FREQUENCY_HOURS = 7
+_auto_update_frequency_hours = _UPDATE_FREQUENCY_HOURS
+if not config.sky_config.catalog.aws.auto_update:
+    _auto_update_frequency_hours = None
 
 _df = common.read_catalog('aws/vms.csv',
-                          update_frequency_hours=_UPDATE_PERIOD_HOURS)
+                          update_frequency_hours=_auto_update_frequency_hours)
 _image_df = common.read_catalog('aws/images.csv',
-                                update_frequency_hours=_UPDATE_PERIOD_HOURS)
+                                update_frequency_hours=_auto_update_frequency_hours)
 
 
 def instance_type_exists(instance_type: str) -> bool:

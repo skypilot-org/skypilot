@@ -33,9 +33,18 @@ class CatalogConfig(BaseConfig):
         auto_update: bool = False
         preferred_area: str = 'us'
 
-    def __init__(self):
-        self.preferred_area = 'us'
-        self.aws = self.AWSConfig()
+    class GCPConfig(BaseConfig):
+        auto_update: bool = False
+        preferred_area: str = 'us'
+
+    class AzureConfig(BaseConfig):
+        auto_update: bool = False
+        preferred_area: str = 'us'
+    
+    aws: AWSConfig = AWSConfig()
+    gcp: GCPConfig = GCPConfig()
+    azure: AzureConfig = AzureConfig()
+
 
 class SkyConfig(BaseConfig):
     """Load the config file
