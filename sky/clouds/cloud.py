@@ -167,6 +167,7 @@ class Cloud:
     def default_areas(cls) -> Optional[List[str]]:
         return None
 
+    @classmethod
     def is_image_tag_valid(cls, image_tag: str, region: Optional[str]) -> bool:
         """Validates that the image tag is valid for this cloud."""
         return service_catalog.is_image_tag_valid(image_tag,

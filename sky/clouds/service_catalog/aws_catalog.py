@@ -9,8 +9,8 @@ from typing import Dict, List, Optional, Tuple
 from sky.clouds.service_catalog import common
 
 if typing.TYPE_CHECKING:
-    import pandas as pd
     from sky.clouds import cloud
+    import pandas as pd
 
 
 # Filter the dataframe to only include the preferred regions.
