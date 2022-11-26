@@ -1,5 +1,8 @@
 name: pypi-publish-nightly
-on: push
+on:
+  push:
+    branches:
+      - master
   # schedule:
   #   - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
 
@@ -39,7 +42,7 @@ jobs:
           --user
       - name: Set release version
         run: |
-          RELEASE_VERSION=$(date +%Y.%m.%d)
+          RELEASE_VERSION=$(date +%Y%m%d)
           sed -i 's/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g' sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '1.0.0-dev${RELEASE_VERSION}'/g" sky/__init__.py
       - name: Build a binary wheel and a source tarball
