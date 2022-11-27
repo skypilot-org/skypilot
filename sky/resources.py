@@ -275,32 +275,27 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def get_valid_region_zones(self) -> List[Tuple[clouds.Region, clouds.Zone]]:
+    def get_valid_region_zones(self) -> List[Tuple[clouds.Region, List[clouds.Zone]]]:
         """Returns a list of (region, zone) that can provision this Resources"""
         assert self.is_launchable()
 
-        if isinstance(self._cloud, clouds.GCP):
-            gcp_region_zones = list(
-                self._cloud.region_zones_provision_loop(
-                    instance_type=self._instance_type,
-                    accelerators=self.accelerators,
-                    use_spot=self._use_spot))
+        region_zones = list(
+            self._cloud.region_zones_provision_loop(
+                instance_type=self._instance_type,
+                accelerators=self.accelerators,
+                use_spot=self._use_spot))
 
+        if isinstance(self._cloud, clouds.GCP):
             # GCP provision loop yields 1 zone per request.
             # For consistency with other clouds, we group the zones in the
             # same region.
-            region_zones = []
+            gcp_region_zones = []
             regions = set()
-            for region, _ in gcp_region_zones:
+            for region, _ in region_zones:
                 if region.name not in regions:
                     regions.add(region.name)
-                    region_zones.append((region, region.zones))
-        else:
-            region_zones = list(
-                self._cloud.region_zones_provision_loop(
-                    instance_type=self._instance_type,
-                    accelerators=self.accelerators,
-                    use_spot=self._use_spot))
+                    gcp_region_zones.append((region, region.zones))
+            region_zones = gcp_region_zones
         return region_zones
 
     def _try_validate_instance_type(self) -> None:
