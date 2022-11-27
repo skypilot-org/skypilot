@@ -842,6 +842,7 @@ def _generate_launchables_with_region_zones(
     # requests since Azure spot prices are region-level.
     # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
     # in the same region and have the same price.
+    # FIXME(woosuk): Batching should be done at the higher level, not here.
     launchables = []
     for region, zones in resources.get_valid_region_zones():
         if (resources.region is not None and region.name != resources.region):
