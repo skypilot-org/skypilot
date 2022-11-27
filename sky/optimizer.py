@@ -824,11 +824,12 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
 
 
 def _make_launchables_for_valid_region_zones(
-        launchable_resources: resources_lib.Resources) -> List[resources_lib.Resources]:
+    launchable_resources: resources_lib.Resources
+) -> List[resources_lib.Resources]:
     assert launchable_resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
     # of a single zone. However, for on-demand instances, we batch the requests
-    # at the granularity of a single region in order to leverage the region-level
+    # to the zones in the same region in order to leverage the region-level
     # provisioning APIs of AWS and Azure. This way, we can reduce the number of
     # API calls, and thus the overall failover time. Note that this optimization
     # does not affect the user cost since the clouds charge the same prices for
@@ -845,13 +846,15 @@ def _make_launchables_for_valid_region_zones(
     # in the same region and have the same price.
     # FIXME(woosuk): Batching should be done at the higher level, not here.
     launchables = []
-    for region, zones in launchable_resources.get_valid_region_zones_for_launchable():
+    region_zones = launchable_resources.get_valid_region_zones_for_launchable()
+    for region, zones in region_zones:
         if launchable_resources.use_spot:
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in zones:
                 launchables.append(
-                    launchable_resources.copy(region=region.name, zone=zone.name))
+                    launchable_resources.copy(region=region.name,
+                                              zone=zone.name))
         else:
             # On-demand instances.
             # Batch the requests at the granularity of a single region.
