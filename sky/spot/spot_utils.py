@@ -39,7 +39,7 @@ _SPOT_STATUS_CACHE = '~/.sky/spot_status_cache.txt'
 _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
-                               '{status_str}.[/] It may take minutes.')
+                               '{status_str}.[/] It may take a few minutes.')
 
 
 class UserSignal(enum.Enum):
@@ -202,7 +202,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     """Stream logs by job id."""
     controller_status = job_lib.get_status(job_id)
     status_msg = ('[bold cyan]Waiting for controller process to be RUNNING '
-                  '{status_str}[/]. It may take minutes.')
+                  '{status_str}[/]. It may take a few minutes.')
     status_display = rich.status.Status(status_msg.format(status_str=''))
     with status_display:
         while (controller_status != job_lib.JobStatus.RUNNING and
@@ -294,7 +294,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             # controller, and check the spot queue again.
             # Wait a bit longer than the controller, so as to make sure the
             # spot state is updated.
-            time.sleep(1.5 * JOB_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(2.1 * JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
 
     # The spot_status may not be in terminal status yet, since the controllerhas
