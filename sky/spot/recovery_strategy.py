@@ -129,8 +129,9 @@ class StrategyExecutor:
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
             logger.info(
-                f'Ignoring the job cancellation failure (Exception: {e}); '
-                'the spot cluster is likely completely stopped.')
+                'Ignoring the job cancellation failure; '
+                'the spot cluster is likely completely stopped.'
+                f'\n  Detailed exception: {e}')
 
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch().
