@@ -3038,7 +3038,7 @@ def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
         core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError:
         # Hint messages already printed by the call above.
-        pass
+        sys.exit(1)
 
 
 # ==============================
