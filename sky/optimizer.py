@@ -845,7 +845,7 @@ def _generate_launchables_with_region_zones(
     # in the same region and have the same price.
     # FIXME(woosuk): Batching should be done at the higher level, not here.
     launchables = []
-    for region, zones in launchable_resources.get_valid_region_zones():
+    for region, zones in launchable_resources.get_valid_region_zones_for_launchable():
         if (launchable_resources.region is not None and region.name != launchable_resources.region):
             continue
         if launchable_resources.use_spot:
