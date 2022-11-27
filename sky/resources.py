@@ -352,8 +352,6 @@ class Resources:
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
             acc_requested = self.accelerators
-            if acc_requested is None:
-                return
             acc_from_instance_type = (
                 self.cloud.get_accelerators_from_instance_type(
                     self._instance_type))
