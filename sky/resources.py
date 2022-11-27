@@ -287,8 +287,8 @@ class Resources:
 
         if isinstance(self._cloud, clouds.GCP):
             # GCP provision loop yields 1 zone per request.
-            # For consistency with other clouds, we group the zones in the
-            # same region.
+            # For consistency with other clouds, we group the zones in the same
+            # region. This is required by Optimizer.
             gcp_region_zones = []
             regions = set()
             # This utilizes the knowledge that GCP.region_zones_provision_loop()
