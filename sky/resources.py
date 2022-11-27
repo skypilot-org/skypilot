@@ -279,16 +279,16 @@ class Resources:
         """Returns a list of (region, zone) that can provision this Resources"""
         assert self.is_launchable()
 
+        # Get resource-offering regions and zones.
         region_zones = list(
             self._cloud.region_zones_provision_loop(
                 instance_type=self._instance_type,
                 accelerators=self.accelerators,
                 use_spot=self._use_spot))
-
         if isinstance(self._cloud, clouds.GCP):
-            # GCP provision loop yields 1 zone per request.
-            # For consistency with other clouds, we group the zones in the same
-            # region. This is required by Optimizer.
+            # GCP provision loop yields 1 zone per request. For consistency with
+            # other clouds, we group the zones in the same region.
+            # This is required by Optimizer.
             gcp_region_zones = []
             regions = set()
             # This utilizes the knowledge that GCP.region_zones_provision_loop()
@@ -299,7 +299,22 @@ class Resources:
                     regions.add(region.name)
                     gcp_region_zones.append((region, region.zones))
             region_zones = gcp_region_zones
-        return region_zones
+
+        # If the region or zone is specified, filter out the other regions
+        # and zones.
+        filtered_region_zones = []
+        for region, zones in region_zones:
+            if self._region is not None and region.name != self._region:
+                continue
+            if self._zone is None:
+                filtered_region_zones.append((region, zones))
+            else:
+                filtered_zones = [
+                    zone for zone in zones if zone.name == self._zone
+                ]
+                if filtered_zones:
+                    filtered_region_zones.append((region, filtered_zones))
+        return filtered_region_zones
 
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
