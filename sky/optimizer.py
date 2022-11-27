@@ -823,7 +823,7 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
     return any(cloud.is_same_cloud(c) for c in lst)
 
 
-def _generate_launchables_with_region_zones(
+def _make_launchables_for_valid_region_zones(
         launchable_resources: resources_lib.Resources) -> List[resources_lib.Resources]:
     assert launchable_resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
@@ -907,7 +907,7 @@ def _fill_in_launchable_resources(
                     f'sky check {colorama.Style.RESET_ALL}, or change the '
                     'cloud requirement')
         elif resources.is_launchable():
-            launchable[resources] = _generate_launchables_with_region_zones(
+            launchable[resources] = _make_launchables_for_valid_region_zones(
                 resources)
             if isinstance(resources.cloud, clouds.GCP):
                 # Check if the host VM satisfies the max vCPU and memory limits.
@@ -935,7 +935,7 @@ def _fill_in_launchable_resources(
                     cheapest = feasible_resources[0]
                     # Generate region/zone-specified resources.
                     launchable[resources].extend(
-                        _generate_launchables_with_region_zones(cheapest))
+                        _make_launchables_for_valid_region_zones(cheapest))
                     cloud_candidates[cloud] = feasible_resources
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
