@@ -758,6 +758,8 @@ def test_use_spot():
 def test_spot():
     """Test the spot yaml."""
     name = _get_cluster_name()
+    cancel_command = (
+        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2')
     test = Test(
         'managed-spot',
         [
@@ -770,8 +772,15 @@ def test_spot():
             'sleep 200',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            # Test autostop. This assumes no regular spot jobs are running.
+            cancel_command,
+            'sleep 720',  # Sleep for a bit more than the default 10m.
+            'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
+            'sky start "sky-spot-controller-*" -y',
+            # Ensures it's up and the autostop setting is restored.
+            'sky status | grep sky-spot-controller- | grep UP | grep 10m',
         ],
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        cancel_command,
     )
     run_one_test(test)
 

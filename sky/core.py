@@ -89,6 +89,20 @@ def _start(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
 
+    if cluster_name == spot.SPOT_CONTROLLER_NAME:
+        if down:
+            raise ValueError('Using autodown (rather than autostop) is not '
+                             'supported for the spot controller. Pass '
+                             '`down=False` or omit it instead.')
+        if (idle_minutes_to_autostop is not None and idle_minutes_to_autostop !=
+                spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP):
+            raise ValueError(
+                'Passing a custom autostop setting is currently not '
+                'supported when starting the spot controller. To '
+                'fix: omit the `idle_minutes_to_autostop` argument to use the '
+                'default autostop settings.')
+        idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
     # would have a cluster name (the controller) filled in.
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -149,7 +163,10 @@ def start(
 
     Raises:
         ValueError: the specified cluster does not exist; or if ``down`` is set
-          to True but ``idle_minutes_to_autostop`` is None.
+          to True but ``idle_minutes_to_autostop`` is None; or if the specified
+          cluster is the managed spot controller, and either
+          ``idle_minutes_to_autostop`` is set to a non-default value or
+          ``down`` is True (omit them to use the default autostop settings).
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
@@ -709,7 +726,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     # TODO(zhwu): Automatically restart the spot controller
     controller_status, handle = _is_spot_controller_up(
         'Please restart the spot controller with '
-        f'`sky start {spot.SPOT_CONTROLLER_NAME} -i 5`.')
+        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:

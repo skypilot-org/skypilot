@@ -1956,7 +1956,7 @@ def check_cluster_name_not_reserved(
     return None.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for '
+        msg = (f'Cluster {cluster_name!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
