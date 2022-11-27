@@ -824,8 +824,8 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
 
 
 def _generate_launchables_with_region_zones(
-        resources: resources_lib.Resources) -> List[resources_lib.Resources]:
-    assert resources.is_launchable()
+        launchable_resources: resources_lib.Resources) -> List[resources_lib.Resources]:
+    assert launchable_resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
     # of a single zone. However, for on-demand instances, we batch the requests
     # at the granularity of a single region in order to leverage the region-level
@@ -845,21 +845,21 @@ def _generate_launchables_with_region_zones(
     # in the same region and have the same price.
     # FIXME(woosuk): Batching should be done at the higher level, not here.
     launchables = []
-    for region, zones in resources.get_valid_region_zones():
-        if (resources.region is not None and region.name != resources.region):
+    for region, zones in launchable_resources.get_valid_region_zones():
+        if (launchable_resources.region is not None and region.name != launchable_resources.region):
             continue
-        if resources.use_spot:
+        if launchable_resources.use_spot:
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in zones:
-                if (resources.zone is not None and zone.name != resources.zone):
+                if (launchable_resources.zone is not None and zone.name != launchable_resources.zone):
                     continue
                 launchables.append(
-                    resources.copy(region=region.name, zone=zone.name))
+                    launchable_resources.copy(region=region.name, zone=zone.name))
         else:
             # On-demand instances.
             # Batch the requests at the granularity of a single region.
-            launchables.append(resources.copy(region=region.name))
+            launchables.append(launchable_resources.copy(region=region.name))
     return launchables
 
 
