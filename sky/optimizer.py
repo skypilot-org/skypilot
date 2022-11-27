@@ -931,9 +931,9 @@ def _fill_in_launchable_resources(
                 (feasible_resources, fuzzy_candidate_list
                 ) = cloud.get_feasible_launchable_resources(resources)
                 if len(feasible_resources) > 0:
-                    # Assume feasible_resources is sorted by prices and
-                    # only append the cheapest option for each cloud
+                    # Assume feasible_resources is sorted by prices.
                     cheapest = feasible_resources[0]
+                    # Generate region/zone-specified resources.
                     launchable[resources].extend(
                         _generate_launchables_with_region_zones(cheapest))
                     cloud_candidates[cloud] = feasible_resources
