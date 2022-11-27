@@ -826,18 +826,38 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
 def _generate_launchables_with_region_zones(
         resources: resources_lib.Resources) -> List[resources_lib.Resources]:
     assert resources.is_launchable()
+    # In principle, all provisioning requests should be made at the granularity
+    # of a single zone. However, for on-demand instances, we batch the requests
+    # at the granularity of a single region by leveraging the region-level
+    # provisioning APIs in AWS and Azure. This way, we can reduce the number of
+    # API calls, and thus the overall failover time. Note that this optimization
+    # does not affect the user cost since the clouds charge the same prices for
+    # on-demand instances in the same region regardless of the zones. On the
+    # other hand, for spot instances, we do not batch the requests because the
+    # AWS spot prices may vary across zones.
+
+    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
+    # we do not batch the requests.
+    # NOTE(woosuk): If we support Azure spot instances, we should batch the
+    # requests since Azure spot prices are region-level.
+    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
+    # in the same region and have the same price.
     launchables = []
     for region, zones in resources.get_valid_region_zones():
         if (resources.region is not None and region.name != resources.region):
             continue
-        if not resources.use_spot:
-            launchables.append(resources.copy(region=region.name))
-        else:
+        if resources.use_spot:
+            # Spot instances.
+            # Do not batch the per-zone requests.
             for zone in zones:
                 if (resources.zone is not None and zone.name != resources.zone):
                     continue
                 launchables.append(
                     resources.copy(region=region.name, zone=zone.name))
+        else:
+            # On-demand instances.
+            # Batch the requests at the granularity of a single region.
+            launchables.append(resources.copy(region=region.name))
     return launchables
 
 

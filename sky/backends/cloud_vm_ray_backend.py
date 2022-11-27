@@ -1805,25 +1805,6 @@ class CloudVmRayBackend(backends.Backend):
             backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
-                # In principle, all provisioning requests should be made at the
-                # granularity of a single zone. However, for on-demand instances,
-                # we "batch" the requests at the granularity of a single region
-                # by leveraging the region-level provisioning APIs in AWS/Azure.
-                # This way, we can reduce the cloud response time, and thus the
-                # overall failover time. Note that this optimization does not
-                # affect the user cost since the clouds charge the same prices
-                # for on-demand VMs in the same region regardless of the zones.
-                # In contrast, for spot instances, we do not batch the requests
-                # because the "AWS" spot prices may vary across zones.
-
-                # NOTE(woosuk): GCP does not support region-level provisioning
-                # APIs. Thus, we do not batch the requests.
-                # NOTE(woosuk): If we support Azure spot instances, we should
-                # batch the per-zone requests to per-region requests since
-                # Azure spot prices are region-level.
-                # TODO(woosuk): Batch the per-zone AWS spot VM requests if
-                # they are in the same region and have the same price.
-
                 # For on-demand instances, RetryingVmProvisioner will retry
                 # within the given region first, then optionally retry on all
                 # other clouds and regions (if backend.register_info()
