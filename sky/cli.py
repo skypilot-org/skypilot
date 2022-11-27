@@ -1025,8 +1025,11 @@ def _add_command_alias_to_group(group, command, name, hidden):
     new_command = copy.deepcopy(command)
     new_command.hidden = hidden
     new_command.name = name
-    new_command.invoke = _with_deprecation_warning(new_command.invoke,
-                                                   command.name, name)
+
+    orig = f'sky {group.name} {command.name}'
+    alias = f'sky {group.name} {name}'
+    new_command.invoke = _with_deprecation_warning(new_command.invoke, orig,
+                                                   alias)
     group.add_command(new_command, name=name)
 
 
@@ -3078,7 +3081,11 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 @usage_lib.entrypoint
 def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
     """Tail the log of a managed spot job."""
-    core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
+    try:
+        core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
+    except exceptions.ClusterNotUpError:
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
 
 # ==============================
