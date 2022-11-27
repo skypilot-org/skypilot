@@ -170,7 +170,7 @@ def get_hourly_cost_impl(
             raise ValueError(f'Instance type {instance_type!r} not found '
                              f'in {region_or_zone}.')
 
-    # If the zone is specified, only one instance type should be returned.
+    # If the zone is specified, only one row should be found by the query.
     assert zone is None or len(df) == 1, df
     if use_spot:
         price_str = 'SpotPrice'
