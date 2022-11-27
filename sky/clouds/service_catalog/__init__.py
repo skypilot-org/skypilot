@@ -190,13 +190,13 @@ def get_accelerator_hourly_cost(
     """Returns the hourly price of the accelerator in the given region and zone.
 
     * If (region, zone) == (None, None), return the cheapest hourly price among
-    all regions and zones.
+        all regions and zones.
     * If (region, zone) == (str, None), return the cheapest hourly price among
-    all the zones in the given region.
+        all the zones in the given region.
     * If (region, zone) == (None, str), return the hourly price of the
-    accelerator in the zone.
+        accelerator in the zone.
     * If (region, zone) == (str, str), zone must be in the region, and the
-    function returns the hourly price of the accelerator in the zone.
+        function returns the hourly price of the accelerator in the zone.
     """
     return _map_clouds_catalog(clouds,
                                'get_accelerator_hourly_cost',
