@@ -828,16 +828,17 @@ def _generate_launchables_with_region_zones(
     assert resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
     # of a single zone. However, for on-demand instances, we batch the requests
-    # at the granularity of a single region by leveraging the region-level
-    # provisioning APIs in AWS and Azure. This way, we can reduce the number of
+    # at the granularity of a single region in order to leverage the region-level
+    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
     # API calls, and thus the overall failover time. Note that this optimization
     # does not affect the user cost since the clouds charge the same prices for
     # on-demand instances in the same region regardless of the zones. On the
     # other hand, for spot instances, we do not batch the requests because the
-    # AWS spot prices may vary across zones.
+    # "AWS" spot prices may vary across zones.
 
     # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
-    # we do not batch the requests.
+    # while we return per-region resources here, the provisioner will still
+    # issue the request for one zone at a time.
     # NOTE(woosuk): If we support Azure spot instances, we should batch the
     # requests since Azure spot prices are region-level.
     # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
