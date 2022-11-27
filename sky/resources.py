@@ -291,6 +291,9 @@ class Resources:
             # same region.
             gcp_region_zones = []
             regions = set()
+            # This utilizes the knowledge that GCP.region_zones_provision_loop()
+            # will set the zones field of each returned Region to be the
+            # resource-offering zones.
             for region, _ in region_zones:
                 if region.name not in regions:
                     regions.add(region.name)
