@@ -1812,6 +1812,9 @@ class CloudVmRayBackend(backends.Backend):
                 # For spot instances, each provisioning request is made for a
                 # single zone and the provisioner will retry on all other
                 # clouds, regions, and zones.
+                # See optimizer.py#_make_launchables_for_valid_region_zones()
+                # for detailed reasons.
+
                 # After this "round" of optimization across clouds, provisioning
                 # may still have not succeeded. This while loop will then kick
                 # in if retry_until_up is set, which will kick off new "rounds"
