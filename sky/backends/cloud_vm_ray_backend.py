@@ -2975,7 +2975,8 @@ class CloudVmRayBackend(backends.Backend):
                 sync = storage.make_sync_file_command(source=src,
                                                       destination=wrapped_dst)
                 # It is a file so make sure *its parent dir* exists.
-                mkdir_for_wrapped_dst = (f'mkdir -p {os.path.dirname(wrapped_dst)}')
+                mkdir_for_wrapped_dst = (
+                    f'mkdir -p {os.path.dirname(wrapped_dst)}')
 
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').
