@@ -110,9 +110,7 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
     ret = []
     for response in response_iterator:
         ret = ret + response['SpotPriceHistory']
-    df = pd.DataFrame(ret)[[
-        'InstanceType', 'AvailabilityZone', 'SpotPrice'
-    ]]
+    df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
     df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
     df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
     return df
@@ -280,12 +278,11 @@ def get_all_regions_images_df() -> pd.DataFrame:
     return results
 
 
-def fetch_zone_mappings():
+def fetch_availability_zone_mappings() -> pd.DataFrame:
     az_mappings = [get_availability_zones.remote(r) for r in ALL_REGIONS]
     az_mappings = ray.get(az_mappings)
     az_mappings = pd.concat(az_mappings)
-    az_mappings.to_csv('aws/az_mappings.csv', index=False)
-    print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
+    return az_mappings
 
 
 if __name__ == '__main__':
@@ -313,4 +310,6 @@ if __name__ == '__main__':
     print('AWS Images saved to aws/images.csv')
 
     if not args.no_az_mapping:
-        fetch_zone_mappings()
+        az_mappings = fetch_availability_zone_mappings()
+        az_mappings.to_csv('aws/az_mappings.csv', index=False)
+        print('AWS Availability Zone mapping saved to aws/az_mappings.csv')

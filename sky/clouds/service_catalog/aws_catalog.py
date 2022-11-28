@@ -7,11 +7,15 @@ import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
+from sky import sky_logging
 from sky.clouds.service_catalog import common
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
     import pandas as pd
+
+logger = sky_logging.init_logger(__name__)
 
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
@@ -31,10 +35,14 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         # pylint: disable=import-outside-toplevel
         import ray
         from sky.clouds.service_catalog.data_fetchers import fetch_aws
-        ray.init()
-        fetch_aws.fetch_az_mappings()
-    az_mappings = common.read_catalog('aws/az_mappings.csv')
-    df = df.join(az_mappings, on='AvailabilityZone', how='left')
+        logger.info('Fetching availability zones mapping from AWS...')
+        with ux_utils.suppress_output():
+            ray.init()
+            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        az_mappings.to_csv(common.get_catalog_path('aws/az_mappings.csv'))
+    else:
+        az_mappings = common.read_catalog('aws/az_mappings.csv', index=False)
+    df = df.merge(az_mappings, on=['AvailabilityZone'], how='left')
     df = df.drop(columns=['AvailabilityZone']).rename(
         columns={'AvailabilityZoneName': 'AvailabilityZone'})
     return df
