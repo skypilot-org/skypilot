@@ -114,7 +114,7 @@ run: |
   ls -l ~/data/train-00001-of-01024
 
   ls -l /s3-data-test
-  cat /s3-data-file | wc -l
+  cat /s3-data-file > /dev/null
 
   # ls -lH /data/fake_imagenet | head -n10
 
