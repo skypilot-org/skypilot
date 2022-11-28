@@ -106,23 +106,23 @@ class AutostopEvent(SkyletEvent):
         if (autostop_config.autostop_idle_minutes < 0 or
                 autostop_config.boot_time != psutil.boot_time()):
             autostop_lib.set_last_active_time_to_now()
-            logger.info('autostop_config not set. Skipped.')
+            logger.debug('autostop_config not set. Skipped.')
             return
 
         if job_lib.is_cluster_idle():
             idle_minutes = (time.time() -
                             autostop_lib.get_last_active_time()) // 60
-            logger.info(
+            logger.debug(
                 f'Idle minutes: {idle_minutes}, '
                 f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         else:
             autostop_lib.set_last_active_time_to_now()
             idle_minutes = -1
-            logger.info(
+            logger.debug(
                 'Not idle. Reset idle minutes.'
                 f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         if idle_minutes >= autostop_config.autostop_idle_minutes:
-            logger.info(
+            logger.debug(
                 f'{idle_minutes} idle minutes reached; threshold: '
                 f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
             self._stop_cluster(autostop_config)
