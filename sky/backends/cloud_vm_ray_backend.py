@@ -1584,8 +1584,8 @@ class CloudVmRayBackend(backends.Backend):
             return (f'ResourceHandle('
                     f'\n\tcluster_name={self.cluster_name},'
                     f'\n\thead_ip={self.head_ip},'
-                    f'\n\tinternal_ips={self.internal_ips},'
-                    f'\n\texternal_ips={self.external_ips},'
+                    '\n\tstable_internal_external_ips='
+                    f'{self.stable_internal_external_ips},'
                     '\n\tcluster_yaml='
                     f'{self.cluster_yaml}, '
                     f'\n\tlaunched_resources={self.launched_nodes}x '
@@ -1674,6 +1674,10 @@ class CloudVmRayBackend(backends.Backend):
                 head_ip_max_attempts=max_attempts,
                 worker_ip_max_attempts=max_attempts,
                 get_internal_ips=True)
+
+            assert len(cluster_external_ips) == len(cluster_internal_ips), (
+                f'Expected same number of internal IPs {cluster_internal_ips}'
+                ' and external IPs {cluster_external_ips}.')
 
             internal_external_ips = list(
                 zip(cluster_internal_ips, cluster_external_ips))

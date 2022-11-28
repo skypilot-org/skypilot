@@ -470,7 +470,7 @@ class SSHConfigHelper(object):
     def _add_multinode_config(
         cls,
         cluster_name: str,
-        public_worker_ips: List[str],
+        external_worker_ips: List[str],
         auth_config: Dict[str, str],
     ):
         username = auth_config['ssh_user']
@@ -481,15 +481,15 @@ class SSHConfigHelper(object):
 
         # Ensure stableness of the aliases worker-<i> by sorting based on
         # public IPs.
-        public_worker_ips = list(sorted(public_worker_ips))
+        external_worker_ips = list(sorted(external_worker_ips))
 
-        overwrites = [False] * len(public_worker_ips)
-        overwrite_begin_idxs = [None] * len(public_worker_ips)
-        codegens = [None] * len(public_worker_ips)
+        overwrites = [False] * len(external_worker_ips)
+        overwrite_begin_idxs = [None] * len(external_worker_ips)
+        codegens = [None] * len(external_worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
-        for idx in range(len(public_worker_ips)):
+        for idx in range(len(external_worker_ips)):
             worker_names.append(cluster_name + f'-worker{idx+1}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -533,10 +533,10 @@ class SSHConfigHelper(object):
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
                                f'host named {worker_names[idx]}.')
-                host_name = public_worker_ips[idx]
+                host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, public_worker_ips[idx],
+                    sky_autogen_comment, host_name, external_worker_ips[idx],
                     username, key_path)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
@@ -549,17 +549,17 @@ class SSHConfigHelper(object):
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, public_worker_ips[idx],
+                    sky_autogen_comment, host_name, external_worker_ips[idx],
                     username, key_path)
 
         # This checks if all codegens have been created.
-        for idx, ip in enumerate(public_worker_ips):
+        for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
                     key_path)
 
-        for idx in range(len(public_worker_ips)):
+        for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
@@ -1625,7 +1625,7 @@ def _update_cluster_status_no_lock(
             # running.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
             runner = command_runner.SSHCommandRunner(external_ips[0],
-                                                     *ssh_credentials)
+                                                     **ssh_credentials)
             returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
