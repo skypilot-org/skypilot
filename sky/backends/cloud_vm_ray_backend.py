@@ -1728,6 +1728,7 @@ class CloudVmRayBackend(backends.Backend):
                 state['_cluster_yaml'] = state.pop('cluster_yaml')
             if version < 3:
                 head_ip = state.pop('head_ip', None)
+                state['stable_internal_external_ips'] = None
 
             self.__dict__.update(state)
 
