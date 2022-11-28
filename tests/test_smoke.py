@@ -76,6 +76,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             shell=True,
+            executable='/bin/bash',
         )
         try:
             proc.wait(timeout=test.timeout)
@@ -767,8 +768,9 @@ def test_spot():
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
             f'sky spot cancel -y -n {name}-1',
-            'sleep 200',
+            'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
+            'sleep 200',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
@@ -777,7 +779,7 @@ def test_spot():
 
 
 # ---------- Testing managed spot ----------
-def test_gcp_spot():
+def test_spot_gcp():
     """Test managed spot on GCP."""
     name = _get_cluster_name()
     test = Test(
@@ -805,7 +807,7 @@ def test_spot_recovery():
         'managed-spot-recovery',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
-            'sleep 300',
+            'sleep 360',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
@@ -830,10 +832,10 @@ def test_spot_recovery_multi_node():
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
-        'managed-spot-recovery',
+        'managed-spot-recovery-multi',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
-            'sleep 360',
+            'sleep 400',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
@@ -851,6 +853,62 @@ def test_spot_recovery_multi_node():
         ],
         f'sky spot cancel -y -n {name}',
     )
+    run_one_test(test)
+
+
+def test_spot_cancellation():
+    name = _get_cluster_name()
+    region = 'us-east-2'
+    test = Test(
+        'managed-spot-cancellation',
+        [
+            # Test cancellation during spot cluster being launched.
+            f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
+            'sleep 60',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
+            f'sky spot cancel -y -n {name}',
+            'sleep 5',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',
+            'sleep 100',
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
+            # Test cancelling the spot cluster during spot job being setup.
+            f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
+            'sleep 300',
+            f'sky spot cancel -y -n {name}-2',
+            'sleep 5',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            'sleep 100',
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
+            # Test cancellation during spot job is recovering.
+            f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
+            'sleep 300',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
+            # Terminate the cluster manually.
+            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
+            'sleep 50',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'sky spot cancel -y -n {name}-3',
+            'sleep 10',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
+            'sleep 90',
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
+        ])
     run_one_test(test)
 
 
@@ -1036,6 +1094,15 @@ class TestStorageWithCredentials:
                                              source=tmp_source)
 
     @pytest.fixture
+    def tmp_local_list_storage_obj(self, tmp_bucket_name, tmp_source):
+        # Creates a temp storage object which uses a list of paths as source.
+        # Stores must be added in the test. After upload, the bucket should
+        # have two files - /tmp-file and /tmp-source/tmp-file
+        list_source = [tmp_source, tmp_source + '/tmp-file']
+        yield from self.yield_storage_object(name=tmp_bucket_name,
+                                             source=list_source)
+
+    @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
         # Creates a copy mount storage which reuses an existing storage object.
         tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
@@ -1186,11 +1253,19 @@ class TestStorageWithCredentials:
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @staticmethod
-    def cli_ls_cmd(store_type, bucket_name):
+    def cli_ls_cmd(store_type, bucket_name, suffix=''):
         if store_type == storage_lib.StoreType.S3:
-            return ['aws', 's3', 'ls', f's3://{bucket_name}']
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return ['aws', 's3', 'ls', url]
         if store_type == storage_lib.StoreType.GCS:
-            return ['gsutil', 'ls', f'gs://{bucket_name}']
+            if suffix:
+                url = f'gs://{bucket_name}/{suffix}'
+            else:
+                url = f'gs://{bucket_name}'
+            return ['gsutil', 'ls', url]
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
@@ -1232,6 +1307,28 @@ class TestStorageWithCredentials:
         # Check `sky storage ls` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
+
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    def test_list_source(self, tmp_local_list_storage_obj, store_type):
+        # Uses a list in the source field to specify a file and a directory to
+        # be uploaded to the storage object.
+        tmp_local_list_storage_obj.add_store(store_type)
+
+        # Check if tmp-file exists in the bucket root using cli
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
+        assert 'tmp-file' in out.decode('utf-8'), \
+            'File not found in bucket - output was : {}'.format(out.decode
+                                                                ('utf-8'))
+
+        # Check if tmp-file exists in the bucket/tmp-source using cli
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
+                            'tmp-source/'))
+        assert 'tmp-file' in out.decode('utf-8'), \
+            'File not found in bucket - output was : {}'.format(out.decode
+                                                                ('utf-8'))
 
 
 # ---------- Testing YAML Specs ----------

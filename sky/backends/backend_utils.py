@@ -23,7 +23,6 @@ import filelock
 import jinja2
 import jsonschema
 from packaging import version
-import psutil
 import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
@@ -1999,23 +1998,10 @@ def check_gcp_cli_include_tpu_vm() -> None:
                     ' TPU VM APIs, check "gcloud version" for details.')
 
 
-def kill_children_processes():
-    # We need to kill the children, so that the underlying subprocess
-    # will not print the logs to the terminal, after this program
-    # exits.
-    parent_process = psutil.Process()
-    for child in parent_process.children(recursive=True):
-        try:
-            child.terminate()
-        except psutil.NoSuchProcess:
-            # The child process may have already been terminated.
-            pass
-
-
 # Handle ctrl-c
 def interrupt_handler(signum, frame):
     del signum, frame
-    kill_children_processes()
+    subprocess_utils.kill_children_processes()
     # Avoid using logger here, as it will print the stack trace for broken
     # pipe, when the output is piped to another program.
     print(f'{colorama.Style.DIM}Tip: The job will keep '
@@ -2027,7 +2013,7 @@ def interrupt_handler(signum, frame):
 # Handle ctrl-z
 def stop_handler(signum, frame):
     del signum, frame
-    kill_children_processes()
+    subprocess_utils.kill_children_processes()
     # Avoid using logger here, as it will print the stack trace for broken
     # pipe, when the output is piped to another program.
     print(f'{colorama.Style.DIM}Tip: The job will keep '
