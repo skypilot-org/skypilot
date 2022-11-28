@@ -50,11 +50,14 @@ def get_catalog_path(filename: str) -> str:
 
 
 def read_catalog(filename: str,
-                 update_frequency_hours: Optional[int] = None) -> pd.DataFrame:
+                 pull_frequency_hours: Optional[int] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
     the schema version.
+    When `pull_frequency_hours` is not None, the catalog will be updated
+    if the local file is older than `pull_frequency_hours`, and no
+    modification is made after the last update (i.e. the hash does not change).
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
     catalog_path = get_catalog_path(filename)
@@ -63,29 +66,30 @@ def read_catalog(filename: str,
     meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
 
-    def _need_update() -> bool:
-        if not os.path.exists(catalog_path):
-            return True
-        if update_frequency_hours is None:
-            return False
-        # Check the md5 of the file to see if it has changed.
-        with open(catalog_path, 'rb') as f:
-            file_md5 = hashlib.md5(f.read()).hexdigest()
-        md5_filepath = meta_path + '.md5'
-        if os.path.exists(md5_filepath):
-            with open(md5_filepath, 'r') as f:
-                last_md5 = f.read()
-            if file_md5 != last_md5:
-                # Do not update the file if the user modified it.
-                return False
-
-        last_update = os.path.getmtime(catalog_path)
-        return last_update + update_frequency_hours * 3600 < time.time()
-
     # Atomic check, to avoid conflicts with other processes.
     # TODO(mraheja): remove pylint disabling when filelock version updated
     # pylint: disable=abstract-class-instantiated
     with filelock.FileLock(meta_path + '.lock'):
+
+        def _need_update() -> bool:
+            if not os.path.exists(catalog_path):
+                return True
+            if pull_frequency_hours is None:
+                return False
+            # Check the md5 of the file to see if it has changed.
+            with open(catalog_path, 'rb') as f:
+                file_md5 = hashlib.md5(f.read()).hexdigest()
+            md5_filepath = meta_path + '.md5'
+            if os.path.exists(md5_filepath):
+                with open(md5_filepath, 'r') as f:
+                    last_md5 = f.read()
+                if file_md5 != last_md5:
+                    # Do not update the file if the user modified it.
+                    return False
+
+            last_update = os.path.getmtime(catalog_path)
+            return last_update + pull_frequency_hours * 3600 < time.time()
+
         if _need_update():
             url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
             with backend_utils.safe_console_status(
@@ -103,8 +107,11 @@ def read_catalog(filename: str,
                 f.write(r.text)
             with open(meta_path + '.md5', 'w') as f:
                 f.write(hashlib.md5(r.text.encode()).hexdigest())
-            logger.info(f'{cloud} catalog has been updated (every '
-                        f'{update_frequency_hours}h): {catalog_path}')
+            update_frequency_str = ''
+            if pull_frequency_hours is not None:
+                update_frequency_str = f' (every {pull_frequency_hours} hours)'
+            logger.info(f'{cloud} catalog has been updated'
+                        f'{update_frequency_str}: {catalog_path}')
 
     try:
         df = pd.read_csv(catalog_path)

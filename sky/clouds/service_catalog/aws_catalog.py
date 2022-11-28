@@ -11,12 +11,14 @@ from sky.clouds.service_catalog import common
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
-_UPDATE_FREQUENCY_HOURS = 7
+# Keep it synced with the frequency in
+# skypilot-catalog/.github/workflows/update-aws-catalog.yml
+_PULL_FREQUENCY_HOURS = 7
 
 _df = common.read_catalog('aws/vms.csv',
-                          update_frequency_hours=_UPDATE_FREQUENCY_HOURS)
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 _image_df = common.read_catalog('aws/images.csv',
-                                update_frequency_hours=_UPDATE_FREQUENCY_HOURS)
+                                pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
 
 def instance_type_exists(instance_type: str) -> bool:
