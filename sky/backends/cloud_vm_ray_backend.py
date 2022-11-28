@@ -13,7 +13,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -890,7 +890,7 @@ class RetryingVmProvisioner(object):
         self,
         to_provision: resources_lib.Resources,
         num_nodes: int,
-        resources: resources_lib.Resources,
+        requested_resources: Set[resources_lib.Resources],
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
@@ -952,7 +952,7 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(
                 cluster_name,
                 cluster_handle=handle,
-                requested_resources=resources,
+                requested_resources=requested_resources,
                 ready=False,
             )
 
@@ -1398,7 +1398,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
-                    resources=task.resources,
+                    requested_resources=task.resources,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -2639,8 +2639,9 @@ class CloudVmRayBackend(backends.Backend):
                                          terminate=terminate)
 
         if cluster_cost:
-            logger.info(f'Estimated cost of cluster is... $ {cluster_cost:.2f}')
-
+            # to handle line length for formatter
+            message = 'Estimated cost of cluster'
+            logger.info(f'{message} {handle.cluster_name}: ${cluster_cost:.2f}')
         if terminate:
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:

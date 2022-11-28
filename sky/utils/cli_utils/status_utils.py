@@ -51,9 +51,9 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
                      trunc_length=70 if not show_all else 0),
         StatusColumn('REGION', _get_region, show_by_default=False),
         StatusColumn('ZONE', _get_zone, show_by_default=False),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('AUTOSTOP', _get_autostop),
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
         StatusColumn('COST (est.)', _get_total_cost),
         StatusColumn('COMMAND',
                      _get_command,
@@ -249,7 +249,7 @@ def _get_total_cost(cluster_status):
     if not cost:
         return '-'
 
-    cost_str = f'$ {cost:.3f}'
+    cost_str = f'${cost:.3f}'
     return cost_str
 
 

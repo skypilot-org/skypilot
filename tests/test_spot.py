@@ -55,7 +55,7 @@ class TestReservedClustersOperations:
         global_user_state.add_or_update_cluster(
             'test-cluster1',
             handle,
-            requested_resources=[handle.launched_resources],
+            requested_resources={handle.launched_resources},
             ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster2',
@@ -70,7 +70,7 @@ class TestReservedClustersOperations:
         global_user_state.add_or_update_cluster(
             'test-cluster2',
             handle,
-            requested_resources=[handle.launched_resources],
+            requested_resources={handle.launched_resources},
             ready=True)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster3',
@@ -84,7 +84,7 @@ class TestReservedClustersOperations:
         global_user_state.add_or_update_cluster(
             'test-cluster3',
             handle,
-            requested_resources=[handle.launched_resources],
+            requested_resources={handle.launched_resources},
             ready=False)
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name=spot.SPOT_CONTROLLER_NAME,
@@ -98,7 +98,7 @@ class TestReservedClustersOperations:
         global_user_state.add_or_update_cluster(
             spot.SPOT_CONTROLLER_NAME,
             handle,
-            requested_resources=[handle.launched_resources],
+            requested_resources={handle.launched_resources},
             ready=True)
 
     @pytest.mark.timeout(60)

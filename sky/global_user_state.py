@@ -42,16 +42,16 @@ def create_table(cursor, conn):
         autostop INTEGER DEFAULT -1)""")
 
     # Table for Cluster History
-    # usage_intervals: List[Tuple[int, int]]/
-    # Specifies start and end timestamps of cluster.
-    # When the last end time is None, the cluster is still UP.
-    # Example: [(start1, end1), (start2, end2), (start3, None)]
+    # usage_intervals: List[Tuple[int, int]]
+    #  Specifies start and end timestamps of cluster.
+    #  When the last end time is None, the cluster is still UP.
+    #  Example: [(start1, end1), (start2, end2), (start3, None)]
 
     # requested_resources: Set[resource_lib.Resource]
-    # Requested resources fetched from task that user specifies.
+    #  Requested resources fetched from task that user specifies.
 
     # launched_resources: Optional[resources_lib.Resources]
-    # Actual launched resources fetched from handle for cluster.
+    #  Actual launched resources fetched from handle for cluster.
 
     # num_nodes: Optional[int] number of nodes launched.
 
@@ -145,8 +145,11 @@ def add_or_update_cluster(
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
 
+    # TODO (sumanth): Cluster history table will have multiple entries
+    # when the cluster failover through multiple regions (one entry per region).
+    # It can be more inaccurate for the multi-node cluster
+    # as the failover can have the nodes partially UP.
     cluster_hash = _get_cluster_hash(cluster_name) or str(uuid.uuid4())
-
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     # first time a cluster is being launched
@@ -157,15 +160,6 @@ def add_or_update_cluster(
     # if this is the cluster init or we are starting after a stop
     if len(usage_intervals) == 0 or usage_intervals[-1][-1] is not None:
         usage_intervals.append((cluster_launched_at, None))
-
-    def get_launched_resources_from_handle(
-            handle: Optional['backends.Backend.ResourceHandle']):
-        launched_resources = handle.launched_resources
-        launched_nodes = handle.launched_nodes
-        return (launched_nodes, launched_resources)
-
-    num_nodes, launched_resources = get_launched_resources_from_handle(
-        cluster_handle)
 
     if requested_resources:
         assert len(requested_resources) == 1, requested_resources
@@ -244,11 +238,11 @@ def add_or_update_cluster(
             # name
             cluster_name,
             # number of nodes
-            num_nodes,
+            cluster_handle.launched_nodes,
             # requested resources
             pickle.dumps(requested_resources),
             # launched resources
-            pickle.dumps(launched_resources),
+            pickle.dumps(cluster_handle.launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
         ))
@@ -268,8 +262,8 @@ def remove_cluster(cluster_name: str, terminate: bool):
     cluster_hash = _get_cluster_hash(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
+    # usage_intervals is not None and not empty
     if usage_intervals:
-
         start_time = usage_intervals.pop()[0]
         end_time = int(time.time())
         usage_intervals.append((start_time, end_time))
@@ -432,7 +426,8 @@ def get_cluster_from_name(
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
-        'select * from clusters order by launched_at desc')
+        'SELECT * from clusters order by launched_at desc').fetchall()
+
     records = []
 
     for (name, launched_at, handle, last_use, status, autostop, metadata,

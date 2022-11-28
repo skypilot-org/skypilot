@@ -1288,6 +1288,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     after minutes of idling (no jobs running). If the time is followed by
     '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
     autostopped.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until the call
+    to status. This means if the cluster is UP, successive calls to status
+    will show increasing price.
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []
