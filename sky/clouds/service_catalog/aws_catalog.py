@@ -29,7 +29,7 @@ _image_df = common.read_catalog('aws/images.csv',
 
 def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
     """Apply the mapping from Availability ID to name."""
-    az_mapping_path = common.get_catalog_path('aws/az_mapping.csv')
+    az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
     if not os.path.exists(az_mapping_path):
         # Fetch az mapping from AWS.
         # pylint: disable=import-outside-toplevel
@@ -39,7 +39,7 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         with ux_utils.suppress_output():
             ray.init()
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
-        az_mappings.to_csv(common.get_catalog_path('aws/az_mappings.csv'),
+        az_mappings.to_csv(az_mapping_path,
                            index=False)
     else:
         az_mappings = common.read_catalog('aws/az_mappings.csv')
