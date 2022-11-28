@@ -277,10 +277,10 @@ class Resources:
 
     def get_valid_region_zones_for_launchable(
             self) -> List[Tuple[clouds.Region, List[clouds.Zone]]]:
-        """Returns a list of (region, zone) that can provision this Resources"""
+        """Returns a set of (region, zone) that can provision this Resources."""
         assert self.is_launchable()
 
-        # Get resource-offering regions and zones.
+        # Get the resource-offering regions and zones.
         region_zones = list(
             self._cloud.region_zones_provision_loop(
                 instance_type=self._instance_type,
