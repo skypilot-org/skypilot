@@ -12,7 +12,7 @@ _CURSOR = _CONN.cursor()
 
 _CURSOR.execute("""\
     CREATE TABLE IF NOT EXISTS config (
-        key TEXT PRIMARY KEY, 
+        key TEXT PRIMARY KEY,
         value TEXT)""")
 
 _CONN.commit()

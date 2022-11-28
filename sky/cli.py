@@ -1263,14 +1263,15 @@ def exec(
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
 
-    \b
     Actions performed by ``sky exec``:
 
-    \b
-    (1) workdir syncing, if:
-      - ENTRYPOINT is a YAML and ``workdir`` is specified inside; or
-      - ENTRYPOINT is a command and flag ``--workdir=<local_path>`` is set.
-    (2) executing the specified task's ``run`` commands / the bash command.
+    1. Workdir syncing, if:
+
+       - ENTRYPOINT is a YAML and ``workdir`` is specified inside; or
+
+       - ENTRYPOINT is a command and flag ``--workdir=<local_path>`` is set.
+
+    2. Executing the specified task's ``run`` commands / the bash command.
 
     ``sky exec`` is thus typically faster than ``sky launch``, provided a
     cluster already exists.
@@ -1280,17 +1281,17 @@ def exec(
     reflect those changes.  To ensure a cluster's setup is up to date, use ``sky
     launch`` instead.
 
-    \b
     Execution and scheduling behavior:
 
-    \b
-    - The task/command will undergo job queue scheduling, respecting any
+    * The task/command will undergo job queue scheduling, respecting any
       specified resource requirement. It can be executed on any node of the
       cluster with enough resources.
-    - The task/command is run under the workdir (if specified).
-    - The task/command is run non-interactively (without a pseudo-terminal or
-      pty), so interactive commands such as ``htop`` do not work.
-      Use ``ssh my_cluster`` instead.
+
+    * The task/command is run under the workdir (if specified).
+
+    * The task/command is run non-interactively (without a pseudo-terminal or
+      pty), so interactive commands such as ``htop`` do not work. Use ``ssh
+      my_cluster`` instead.
 
     Typical workflow:
 
@@ -1370,24 +1371,40 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
     Display all fields using ``sky status -a``.
 
-    \b
     Each cluster can have one of the following statuses:
 
-    \b
-    - INIT: The cluster may be live or down. It can happen in following cases:
-      (1) undergoing provisioning or runtime setup. (In other words, a
-      ``sky launch`` has started but has not completed.)
-      (2) Or, the cluster is in an abnormal state, e.g., some cluster nodes are
-      down, or the sky runtime has crashed.
-    - UP: Provisioning and runtime setup have succeeded and the cluster is
+    * ``INIT``: The cluster may be live or down. It can happen in the following
+      cases:
+
+      * Ongoing provisioning or runtime setup. (A ``sky launch`` has started
+        but has not completed.)
+
+      * Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+        down, or the SkyPilot runtime is unhealthy.
+
+    * ``UP``: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
-    - STOPPED: The cluster is stopped and the storage is persisted. Use
+
+    * ``STOPPED``: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
-    The autostop column indicates how long the cluster will be autostopped
-    after minutes of idling (no jobs running). If the time is followed by
-    '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
-    autostopped.
+    Autostop column:
+
+    * The autostop column indicates how long the cluster will be autostopped
+      after minutes of idling (no jobs running). If the time is followed by
+      '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
+      autostopped.
+
+    Getting up-to-date cluster statuses:
+
+    * In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations on cloud consoles) and no autostopping is used, the
+      table returned by this command will accurately reflect the cluster
+      statuses.
+
+    * If manual operations are otherwise used, or for autostop-enabled
+      clusters, use ``--refresh`` to query the cloud providers for the latest
+      cluster statuses.
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []
@@ -1699,25 +1716,34 @@ def autostop(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop or autodown for cluster(s).
 
-    CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
+    CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
-    If --down is passed, autodown (tear down the cluster; non-restartable) is
-    used, rather than autostop (restartable).
+    If ``--down`` is passed, autodown will be used (tear down the cluster;
+    non-restartable), rather than autostop (restartable).
 
     ``--idle-minutes`` is the number of minutes of idleness (no pending/running
     jobs) after which the cluster will be stopped automatically.
-    Scheduling autostop twice on the same cluster will overwrite the previous
-    autostop schedule.
 
     ``--cancel`` will cancel the autostopping. If the cluster was not scheduled
-    autostop, this will do nothing to autostop.
+    autostop, this will be a no-op.
 
     If ``--idle-minutes`` and ``--cancel`` are not specified, default to 5
     minutes.
 
-    When multiple configurations are specified for the same cluster, e.g. using
-    ``sky autostop`` or ``sky launch -i``, the last one takes precedence.
+    When multiple autostop settings are specified for the same cluster, e.g.,
+    using ``sky autostop`` or ``sky launch -i``, the last setting takes
+    precedence.
+
+    Idleness timer behavior:
+
+    * The timer starts when the first autostop setting is set (with a
+      nonnegative idle minutes).
+
+      * For example, say a cluster without any autostop set has been idle for 1
+        hour, then an autostop of 30 minutes is set. The cluster will not be
+        immediately autostopped. Instead, the idleness timer only starts
+        counting at that point.
 
     Examples:
 

@@ -51,6 +51,39 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
             'metadata': (dict) metadata of the cluster,
         }
 
+    Each cluster can have one of the following statuses:
+
+    * ``INIT``: The cluster may be live or down. It can happen in the following
+      cases:
+
+      * Ongoing provisioning or runtime setup. (A ``sky.launch()`` has started
+        but has not completed.)
+      * Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+        down, or the SkyPilot runtime is unhealthy.
+
+    * ``UP``: Provisioning and runtime setup have succeeded and the cluster is
+      live.  (The most recent ``sky.launch()`` has completed successfully.)
+
+    * ``STOPPED``: The cluster is stopped and the storage is persisted. Use
+      ``sky.start()`` to restart the cluster.
+
+    Autostop column:
+
+    * The autostop column indicates how long the cluster will be autostopped
+      after minutes of idling (no jobs running). If ``to_down`` is True, the
+      cluster will be autodowned, rather than autostopped.
+
+    Getting up-to-date cluster statuses:
+
+    * In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations on cloud consoles) and no autostopping is used, the
+      table returned by this function will accurately reflect the cluster
+      statuses.
+
+    * If manual operations are otherwise used, or for autostop-enabled
+      clusters, use ``refresh=True`` to query the cloud providers for the
+      latest cluster statuses.
+
     Args:
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
@@ -255,8 +288,18 @@ def autostop(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop/autodown for a cluster.
 
-    When multiple configurations are specified for the same cluster (e.g., this
-    function is called multiple times), the last one takes precedence.
+    When multiple autostop settings are specified for the same cluster (e.g.,
+    this function is called multiple times), the last one takes precedence.
+
+    Idleness timer behavior:
+
+    - The timer starts when the first autostop setting is set (with a
+      nonnegative idle minutes).
+
+      - For example, say a cluster without any autostop set has been idle for 1
+        hour, then an autostop of 30 minutes is set. The cluster will not be
+        immediately autostopped. Instead, the idleness timer only starts
+        counting at that point.
 
     Args:
         cluster_name: name of the cluster.
