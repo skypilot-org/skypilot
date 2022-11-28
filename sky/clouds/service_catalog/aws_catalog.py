@@ -39,8 +39,7 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         with ux_utils.suppress_output():
             ray.init()
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
-        az_mappings.to_csv(az_mapping_path,
-                           index=False)
+        az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = common.read_catalog('aws/az_mappings.csv')
     df = df.merge(az_mappings, on=['AvailabilityZone'], how='left')
