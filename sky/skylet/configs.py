@@ -1,4 +1,4 @@
-"""skylet configs"""
+"""Skylet configs."""
 import os
 import pathlib
 import sqlite3
