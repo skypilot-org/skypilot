@@ -24,7 +24,7 @@ _image_df = common.read_catalog('aws/images.csv',
 
 
 def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
-    """Returns a dataframe mapping availability zone to region."""
+    """Apply the mapping from Availability ID to name."""
     az_mapping_path = common.get_catalog_path('aws/az_mapping.csv')
     if not os.path.exists(az_mapping_path):
         # Fetch az mapping from AWS.
