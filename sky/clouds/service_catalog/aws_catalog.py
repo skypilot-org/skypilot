@@ -30,9 +30,9 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         # Fetch az mapping from AWS.
         # pylint: disable=import-outside-toplevel
         import ray
-        from sky.clouds.service_catalog.data_fetchers import aws_fetcher
+        from sky.clouds.service_catalog.data_fetchers import fetch_aws
         ray.init()
-        aws_fetcher.fetch_az_mappings()
+        fetch_aws.fetch_az_mappings()
     az_mappings = common.read_catalog('aws/az_mappings.csv')
     df = df.join(az_mappings, on='AvailabilityZone', how='left')
     df = df.drop(columns=['AvailabilityZone']).rename(
