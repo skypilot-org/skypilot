@@ -3,17 +3,53 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
+import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
+from sky import sky_logging
 from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import constants
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
+    import pandas as pd
 
-_df = common.read_catalog('aws/vms.csv')
-_image_df = common.read_catalog('aws/images.csv')
+logger = sky_logging.init_logger(__name__)
+
+# Keep it synced with the frequency in
+# skypilot-catalog/.github/workflows/update-aws-catalog.yml
+_PULL_FREQUENCY_HOURS = 7
+
+_df = common.read_catalog('aws/vms.csv',
+                          pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+_image_df = common.read_catalog('aws/images.csv',
+                                pull_frequency_hours=_PULL_FREQUENCY_HOURS)
+
+
+def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
+    """Apply the mapping from Availability ID to name."""
+    az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
+    if not os.path.exists(az_mapping_path):
+        # Fetch az mapping from AWS.
+        # pylint: disable=import-outside-toplevel
+        import ray
+        from sky.clouds.service_catalog.data_fetchers import fetch_aws
+        logger.info('Fetching availability zones mapping from AWS...')
+        with ux_utils.suppress_output():
+            ray.init()
+            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        az_mappings.to_csv(az_mapping_path, index=False)
+    else:
+        az_mappings = common.read_catalog('aws/az_mappings.csv')
+    df = df.merge(az_mappings, on=['AvailabilityZone'], how='left')
+    df = df.drop(columns=['AvailabilityZone']).rename(
+        columns={'AvailabilityZoneName': 'AvailabilityZone'})
+    return df
+
+
+_df = _apply_az_mapping(_df)
 
 
 def instance_type_exists(instance_type: str) -> bool:

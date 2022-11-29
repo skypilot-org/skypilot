@@ -13,6 +13,7 @@ import ray
 
 from sky.adaptors import aws
 
+# Turned off the regions disabled for a new AWS account by default.
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -20,17 +21,20 @@ ALL_REGIONS = [
     'us-west-2',
     'ca-central-1',
     'eu-central-1',
+    # 'eu-central-2',
     'eu-west-1',
     'eu-west-2',
-    'eu-south-1',
+    # 'eu-south-1',
+    # 'eu-south-2',
     'eu-west-3',
     'eu-north-1',
-    'me-south-1',
-    # 'me-central-1', # failed for no credential
-    'af-south-1',
-    'ap-east-1',
-    'ap-southeast-3',
-    # 'ap-south-1', # failed for no credential
+    # 'me-south-1',
+    # 'me-central-1',
+    # 'af-south-1',
+    # 'af-south-2',
+    # 'ap-east-1',
+    # 'ap-southeast-3',
+    # 'ap-south-1',
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
@@ -70,7 +74,10 @@ def get_availability_zones(region: str) -> pd.DataFrame:
     zones = []
     response = client.describe_availability_zones()
     for resp in response['AvailabilityZones']:
-        zones.append({'AvailabilityZone': resp['ZoneName']})
+        zones.append({
+            'AvailabilityZoneName': resp['ZoneName'],
+            'AvailabilityZone': resp['ZoneId'],
+        })
     return pd.DataFrame(zones)
 
 
@@ -104,7 +111,8 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
     for response in response_iterator:
         ret = ret + response['SpotPriceHistory']
     df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
-    df = df.set_index(['InstanceType', 'AvailabilityZone'])
+    df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
+    df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
     return df
 
 
@@ -167,7 +175,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,
-                      left_on=['InstanceType', 'AvailabilityZone'],
+                      left_on=['InstanceType', 'AvailabilityZoneName'],
                       right_index=True,
                       how='outer')
 
@@ -270,12 +278,23 @@ def get_all_regions_images_df() -> pd.DataFrame:
     return results
 
 
+def fetch_availability_zone_mappings() -> pd.DataFrame:
+    az_mappings = [get_availability_zones.remote(r) for r in ALL_REGIONS]
+    az_mappings = ray.get(az_mappings)
+    az_mappings = pd.concat(az_mappings)
+    return az_mappings
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--all-regions',
         action='store_true',
         help='Fetch all global regions, not just the U.S. ones.')
+    parser.add_argument(
+        '--no-az-mappings',
+        action='store_true',
+        help='Not fetching the mapping of availability zone ID to name.')
     args = parser.parse_args()
 
     region_filter = ALL_REGIONS if args.all_regions else US_REGIONS
@@ -289,3 +308,8 @@ if __name__ == '__main__':
     image_df = get_all_regions_images_df()
     image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
+
+    if not args.no_az_mappings:
+        az_mappings_df = fetch_availability_zone_mappings()
+        az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
+        print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
