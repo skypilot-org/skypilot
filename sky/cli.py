@@ -1692,7 +1692,7 @@ def stop(
     is_flag=True,
     required=False,
     help='Cancel any currently active auto{stop,down} setting for the '
-    'cluster. No-op if no setting was set.')
+    'cluster. No-op if there is no active setting.')
 @click.option(
     '--down',
     default=False,

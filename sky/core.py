@@ -313,7 +313,7 @@ def autostop(
         cluster_name: name of the cluster.
         idle_minutes: the number of minutes of idleness (no pending/running
           jobs) after which the cluster will be stopped automatically. Setting
-          to a negative number means cancel any autostop/autodown setting.
+          to a negative number cancels any autostop/autodown setting.
         down: if true, use autodown (tear down the cluster; non-restartable),
           rather than autostop (restartable).
 
