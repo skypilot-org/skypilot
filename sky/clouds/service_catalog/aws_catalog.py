@@ -30,9 +30,9 @@ _image_df = common.read_catalog('aws/images.csv',
 
 def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
-    
+
     Such mappings are account-specific and determined by AWS.
-    
+
     Returns:
         A dataframe with column 'AvailabilityZone' that's correctly replaced
         with the zone name (e.g. us-east-1a).

@@ -102,6 +102,12 @@ def _get_pricing_table(region: str) -> pd.DataFrame:
 
 @ray.remote
 def _get_spot_pricing_table(region: str) -> pd.DataFrame:
+    """Get spot pricing table for a region.
+
+    Example output:
+        InstanceType  AvailabilityZoneName  SpotPrice
+        p3.2xlarge    us-east-1a            1.0000
+    """
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_spot_price_history')
@@ -109,6 +115,14 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
                                            StartTime=datetime.datetime.utcnow())
     ret = []
     for response in response_iterator:
+        # response['SpotPriceHistory'] is a list of dicts, each dict is like:
+        # {
+        #  'AvailabilityZone': 'us-east-2c',  # This is the AZ name.
+        #  'InstanceType': 'm6i.xlarge',
+        #  'ProductDescription': 'Linux/UNIX',
+        #  'SpotPrice': '0.041900',
+        #  'Timestamp': datetime.datetime
+        # }
         ret = ret + response['SpotPriceHistory']
     df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
     df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
@@ -244,7 +258,7 @@ def _get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
 
 @ray.remote
 def _get_image_row(region: str, ubuntu_version: str,
-                  cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
+                   cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     date = None
@@ -279,6 +293,13 @@ def get_all_regions_images_df() -> pd.DataFrame:
 
 
 def fetch_availability_zone_mappings() -> pd.DataFrame:
+    """Fetch the availability zone mappings from ID to Name.
+
+    Example output:
+        AvailabilityZone  AvailabilityZoneName
+        use1-az1          us-east-1b
+        use1-az2          us-east-1a
+    """
     az_mappings = [_get_availability_zones.remote(r) for r in ALL_REGIONS]
     az_mappings = ray.get(az_mappings)
     az_mappings = pd.concat(az_mappings)
@@ -292,9 +313,14 @@ if __name__ == '__main__':
         action='store_true',
         help='Fetch all global regions, not just the U.S. ones.')
     parser.add_argument(
-        '--no-az-mappings',
+        '--az-mappings',
+        dest='az_mappings',
         action='store_true',
-        help='Not fetching the mapping of availability zone ID to name.')
+        help='Fetch the mapping from availability zone IDs to zone names.')
+    parser.add_argument('--no-az-mappings',
+                        dest='az_mappings',
+                        action='store_false')
+    parser.set_defaults(az_mappings=True)
     args = parser.parse_args()
 
     region_filter = ALL_REGIONS if args.all_regions else US_REGIONS
@@ -309,7 +335,7 @@ if __name__ == '__main__':
     image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
 
-    if not args.no_az_mappings:
+    if args.az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()
         az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
         print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
