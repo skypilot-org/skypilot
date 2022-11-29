@@ -1738,8 +1738,8 @@ class CloudVmRayBackend(backends.Backend):
                 try:
                     self._update_stable_cluster_ips()
                 except exceptions.FetchIPError:
-                    # This occurs when cluster from an older version has been autostopped,
-                    # so the head IP in the database is been updated.
+                    # This occurs when an old cluster from was autostopped,
+                    # so the head IP in the database is not updated.
                     pass
 
             self._update_cluster_region()
