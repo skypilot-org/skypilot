@@ -136,6 +136,10 @@ class StrategyExecutor:
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
             raise_on_failure: Whether to raise an exception if the launch fails.
+        
+        Returns: 
+            The job's start timestamp, or None if failed to start and
+            raise_on_failure is False.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
@@ -262,12 +266,14 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         launch_time = super()._launch(max_retry, raise_on_failure)
-        handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
-        assert handle is not None, 'Cluster should be launched.'
-        launched_resources = handle.launched_resources
-        self._launched_cloud_region = (launched_resources.cloud,
-                                       launched_resources.region)
+        if launch_time is not None:
+            # Only record the cloud/region if the launch is successful.
+            handle = global_user_state.get_handle_from_cluster_name(
+                self.cluster_name)
+            assert handle is not None, 'Cluster should be launched.'
+            launched_resources = handle.launched_resources
+            self._launched_cloud_region = (launched_resources.cloud,
+                                        launched_resources.region)
         return launch_time
 
     def terminate_cluster(self, max_retry: int = 3) -> None:
