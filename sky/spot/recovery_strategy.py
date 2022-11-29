@@ -278,7 +278,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
     def terminate_cluster(self, max_retry: int = 3) -> None:
         super().terminate_cluster(max_retry)
-        self.launched_resources = None
+        self._launched_cloud_region = None
 
     def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
