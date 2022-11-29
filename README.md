@@ -36,7 +36,7 @@ SkyPilot cuts your cloud costs:
 * [Managed Spot](https://skypilot.readthedocs.io/en/latest/examples/spot-jobs.html): **3x cost savings** using spot VMs, with auto-recovery from preemptions
 * [Autostop](https://skypilot.readthedocs.io/en/latest/reference/auto-stop.html): hands-free cleanup of idle clusters 
 * [Benchmark](https://skypilot.readthedocs.io/en/latest/reference/benchmark/index.html): find best VM types for your jobs
-* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds, *even resuming a spot job in the cheapest location each time it's preempted!*
+* Optimizer: **2x cost savings** by auto-picking best prices across zones/regions/clouds
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes. 
 
