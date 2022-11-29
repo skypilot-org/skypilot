@@ -52,3 +52,6 @@ run: |
 
   echo hi >> /tmp/workdir/new_file
   ls -al /tmp/workdir
+
+  cat ~/tmpfile
+  cat ~/a/b/c/tmpfile
