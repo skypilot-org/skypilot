@@ -38,13 +38,14 @@ class Azure(clouds.Cloud):
     _REPR = 'Azure'
     _regions: List[clouds.Region] = []
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self, instance_type, area, use_spot):
         return service_catalog.get_hourly_cost(instance_type,
+                                               area=area,
                                                region=None,
                                                use_spot=use_spot,
                                                clouds='azure')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators, area, use_spot):
         # Azure includes accelerators as part of the instance type.
         # Implementing this is also necessary for e.g., the instance may have 4
         # GPUs, while the task specifies to use 1 GPU.
@@ -139,7 +140,8 @@ class Azure(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
+        area: Optional[str] = None,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
 
@@ -148,7 +150,7 @@ class Azure(clouds.Cloud):
             regions = cls.regions()
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, clouds='azure')
+                instance_type, use_spot, area, clouds='azure')
         for region in regions:
             yield region, region.zones
 
@@ -300,10 +302,11 @@ class Azure(clouds.Cloud):
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
+                                      area: Optional[str] = None,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'azure')
+            accelerator, acc_count, area, region, zone, 'azure')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

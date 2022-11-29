@@ -25,6 +25,9 @@ def get_resources_schema():
             'zone': {
                 'type': 'string',
             },
+            'area': {
+                'type': 'string',
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',

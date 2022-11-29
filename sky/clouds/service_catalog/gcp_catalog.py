@@ -11,6 +11,7 @@ import pandas as pd
 
 from sky import exceptions
 from sky.clouds.service_catalog import common
+from sky.clouds.service_catalog import constants
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -124,6 +125,14 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
 }
 
 
+def _filter_catalog_by_area(area: Optional[str]):
+    df = _df
+    if area is None:
+        return df
+    df = df[df['Region'].str.startswith(f'{area}-')]
+    return df
+
+
 def _is_power_of_two(x: int) -> bool:
     """Returns true if x is a power of two."""
     # https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2
@@ -146,6 +155,7 @@ def instance_type_exists(instance_type: str) -> bool:
 
 def get_hourly_cost(
     instance_type: str,
+    area: Optional[str],
     region: Optional[str] = None,
     use_spot: bool = False,
 ) -> float:
@@ -153,7 +163,8 @@ def get_hourly_cost(
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    df = _filter_catalog_by_area(area)
+    return common.get_hourly_cost_impl(df, instance_type, region, use_spot)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
@@ -203,22 +214,28 @@ def get_instance_type_for_accelerator(
 
 
 def validate_region_zone(
-        region: Optional[str],
-        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl(_df, region, zone)
+        region: Optional[str], zone: Optional[str],
+        area: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    df = _filter_catalog_by_area(area)
+    return common.validate_region_zone_impl(df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
+                                  area: Optional[str],
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+    df = _filter_catalog_by_area(area)
+    return common.accelerator_in_region_or_zone_impl(df, acc_name, acc_count,
                                                      region, zone)
 
 
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List['cloud.Region']:
-    df = _df[_df['InstanceType'] == instance_type]
+def get_region_zones_for_instance_type(
+        instance_type: str, use_spot: bool,
+        area: Optional[str]) -> List['cloud.Region']:
+    area = area or constants.DEFAULT_AREA
+    df = _filter_catalog_by_area(area)
+    df = df[df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
@@ -237,18 +254,20 @@ def _get_accelerator(
 
 def get_accelerator_hourly_cost(accelerator: str,
                                 count: int,
+                                area: Optional[str],
                                 region: Optional[str] = None,
                                 use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
+    df = _filter_catalog_by_area(area)
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
     if region is None:
         for tpu_region in _TPU_REGIONS:
-            df = _get_accelerator(_df, accelerator, count, tpu_region)
+            df = _get_accelerator(df, accelerator, count, tpu_region)
             if len(set(df['Price'])) == 1:
                 region = tpu_region
                 break
-    df = _get_accelerator(_df, accelerator, count, region)
+    df = _get_accelerator(df, accelerator, count, region)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:
         return df['Price'].iloc[0]
@@ -309,10 +328,12 @@ def list_accelerators(
 def get_region_zones_for_accelerators(
     accelerator: str,
     count: int,
-    use_spot: bool = False,
+    use_spot: bool,
+    area: Optional[str],
 ) -> List['cloud.Region']:
     """Returns a list of regions for a given accelerators."""
-    df = _get_accelerator(_df, accelerator, count, region=None)
+    df = _filter_catalog_by_area(area)
+    df = _get_accelerator(df, accelerator, count, region=None)
     return common.get_region_zones(df, use_spot)
 
 

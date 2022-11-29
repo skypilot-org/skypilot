@@ -67,7 +67,7 @@ class Cloud:
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
@@ -104,11 +104,11 @@ class Cloud:
     #### Normal methods ####
 
     # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self, instance_type, area, use_spot):
         """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators, area, use_spot):
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
@@ -200,15 +200,20 @@ class Cloud:
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+    def validate_region_zone(self,
+                             region: Optional[str],
+                             zone: Optional[str],
+                             area: Optional[str] = None):
         """Validates the region and zone."""
         return service_catalog.validate_region_zone(region,
                                                     zone,
+                                                    area,
                                                     clouds=self._REPR.lower())
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
+                                      area: Optional[str] = None,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         """Returns whether the accelerator is valid in the region or zone."""

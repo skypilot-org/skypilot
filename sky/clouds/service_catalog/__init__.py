@@ -5,9 +5,11 @@ import typing
 from typing import Dict, List, Optional, Tuple, Union
 
 from sky.clouds.service_catalog.constants import (
-    HOSTED_CATALOG_DIR_URL,
+    AREA_FILTERS,
     CATALOG_SCHEMA_VERSION,
+    DEFAULT_AREA,
     LOCAL_CATALOG_DIR,
+    HOSTED_CATALOG_DIR_URL,
 )
 
 if typing.TYPE_CHECKING:
@@ -101,40 +103,44 @@ def instance_type_exists(instance_type: str,
 def validate_region_zone(
         region_name: Optional[str],
         zone_name: Optional[str],
+        area: Optional[str],
         clouds: CloudFilter = None) -> Tuple[Optional[str], Optional[str]]:
     """Returns the zone by name."""
     return _map_clouds_catalog(clouds, 'validate_region_zone', region_name,
-                               zone_name)
+                               zone_name, area)
 
 
 def accelerator_in_region_or_zone(
     acc_name: str,
     acc_count: int,
+    area: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> bool:
     """Returns True if the accelerator is in the region or zone."""
     return _map_clouds_catalog(clouds, 'accelerator_in_region_or_zone',
-                               acc_name, acc_count, region, zone)
+                               acc_name, acc_count, area, region, zone)
 
 
 def get_region_zones_for_instance_type(
         instance_type: str,
         use_spot: bool,
+        area: Optional[str],
         clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns a list of regions for a given instance type."""
     return _map_clouds_catalog(clouds, 'get_region_zones_for_instance_type',
-                               instance_type, use_spot)
+                               instance_type, use_spot, area)
 
 
 def get_hourly_cost(instance_type: str,
+                    area: Optional[str],
                     region: Optional[str],
                     use_spot: bool,
                     clouds: CloudFilter = None):
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
-                               use_spot)
+    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, area,
+                               region, use_spot)
 
 
 def get_vcpus_from_instance_type(instance_type: str,
@@ -168,6 +174,7 @@ def get_instance_type_for_accelerator(
 def get_accelerator_hourly_cost(
     acc_name: str,
     acc_count: int,
+    area: Optional[str],
     use_spot: bool,
     clouds: CloudFilter = None,
 ) -> float:
@@ -176,6 +183,7 @@ def get_accelerator_hourly_cost(
                                'get_accelerator_hourly_cost',
                                acc_name,
                                acc_count,
+                               area=area,
                                use_spot=use_spot)
 
 
@@ -183,10 +191,11 @@ def get_region_zones_for_accelerators(
         acc_name: str,
         acc_count: int,
         use_spot: bool,
+        area: Optional[str],
         clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns a list of regions for a given accelerators."""
     return _map_clouds_catalog(clouds, 'get_region_zones_for_accelerators',
-                               acc_name, acc_count, use_spot)
+                               acc_name, acc_count, use_spot, area)
 
 
 def check_host_accelerator_compatibility(instance_type: str,
@@ -265,7 +274,9 @@ __all__ = [
     'get_image_id_from_tag',
     'is_image_tag_valid',
     # Constants
-    'HOSTED_CATALOG_DIR_URL',
+    'AREA_FILTERS',
     'CATALOG_SCHEMA_VERSION',
+    'DEFAULT_AREA',
+    'HOSTED_CATALOG_DIR_URL',
     'LOCAL_CATALOG_DIR',
 ]

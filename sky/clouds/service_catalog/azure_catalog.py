@@ -7,9 +7,18 @@ from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
 from sky.clouds.service_catalog import common
+from sky.clouds.service_catalog import constants
 from sky.utils import ux_utils
 
 _df = common.read_catalog('azure/vms.csv')
+
+
+def _filter_catalog_by_area(area: Optional[str]):
+    df = _df
+    if area is None:
+        return df
+    df = df[df['Region'].str.match(r'^[a-z]+{}[1-9]?'.format(area))]
+    return df
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -17,29 +26,34 @@ def instance_type_exists(instance_type: str) -> bool:
 
 
 def validate_region_zone(
-        region: Optional[str],
-        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+        region: Optional[str], zone: Optional[str],
+        area: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    df = _filter_catalog_by_area(area)
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl(df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
+                                  area: Optional[str],
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
-    return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
+    df = _filter_catalog_by_area(area)
+    return common.accelerator_in_region_or_zone_impl(df, acc_name, acc_count,
                                                      region, zone)
 
 
 def get_hourly_cost(instance_type: str,
+                    area: Optional[str],
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    df = _filter_catalog_by_area(area)
+    return common.get_hourly_cost_impl(df, instance_type, region, use_spot)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
@@ -63,8 +77,11 @@ def get_instance_type_for_accelerator(
 
 
 def get_region_zones_for_instance_type(
-        instance_type: str, use_spot: bool) -> List[cloud_lib.Region]:
-    df = _df[_df['InstanceType'] == instance_type]
+        instance_type: str, use_spot: bool,
+        area: Optional[str]) -> List[cloud_lib.Region]:
+    area = area or constants.DEFAULT_AREA
+    df = _filter_catalog_by_area(area)
+    df = df[df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 

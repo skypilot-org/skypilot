@@ -77,7 +77,8 @@ class AWS(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
+        area: Optional[str] = None,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
@@ -88,7 +89,7 @@ class AWS(clouds.Cloud):
             regions = cls.regions()
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
+                instance_type, use_spot, area, 'aws')
         for region in regions:
             yield region, region.zones
 
@@ -148,13 +149,15 @@ class AWS(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
+    def instance_type_to_hourly_cost(self, instance_type: str,
+                                     area: Optional[str], use_spot: bool):
         return service_catalog.get_hourly_cost(instance_type,
+                                               area=area,
                                                region=None,
                                                use_spot=use_spot,
                                                clouds='aws')
 
-    def accelerators_to_hourly_cost(self, accelerators,
+    def accelerators_to_hourly_cost(self, accelerators, area,
                                     use_spot: bool) -> float:
         # AWS includes accelerators as part of the instance type.  Implementing
         # this is also necessary for e.g., the instance may have 4 GPUs, while
@@ -344,7 +347,8 @@ class AWS(clouds.Cloud):
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
+                                      area: Optional[str] = None,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'aws')
+            accelerator, acc_count, area, region, zone, 'aws')

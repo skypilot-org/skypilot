@@ -48,7 +48,7 @@ class Local(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del instance_type
         del use_spot
@@ -59,12 +59,13 @@ class Local(clouds.Cloud):
     #### Normal methods ####
 
     def instance_type_to_hourly_cost(self, instance_type: str,
+                                     area: Optional[str],
                                      use_spot: bool) -> float:
         # On-prem machines on Sky are assumed free
         # (minus electricity/utility bills).
         return 0.0
 
-    def accelerators_to_hourly_cost(self, accelerators,
+    def accelerators_to_hourly_cost(self, accelerators, area,
                                     use_spot: bool) -> float:
         # Hourly cost of accelerators is 0 for local cloud.
         return 0.0
@@ -123,6 +124,7 @@ class Local(clouds.Cloud):
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
+                                      area: Optional[str] = None,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         # In the public cloud case, an accelerator may not be in a region/zone.
@@ -150,10 +152,14 @@ class Local(clouds.Cloud):
         # local cloud.
         return instance_type == self.get_default_instance_type()
 
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
+    def validate_region_zone(self,
+                             region: Optional[str],
+                             zone: Optional[str],
+                             area: Optional[str] = None) -> None:
         # Returns true if the region name is same as Local cloud's
         # one and only region: 'Local'.
-        assert zone is None
+        assert zone is None, zone
+        assert area is None, area
         if region is None or region != Local.LOCAL_REGION.name:
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')

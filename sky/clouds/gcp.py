@@ -127,7 +127,8 @@ class GCP(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
+        area: Optional[str] = None,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
         if accelerators is None:
@@ -136,13 +137,13 @@ class GCP(clouds.Cloud):
                 regions = cls.regions()
             else:
                 regions = service_catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, clouds='gcp')
+                    instance_type, use_spot, area, clouds='gcp')
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
             regions = service_catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot, clouds='gcp')
+                acc, acc_count, use_spot, area, clouds='gcp')
 
         for region in regions:
             for zone in region.zones:
@@ -159,17 +160,19 @@ class GCP(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self, instance_type, area, use_spot):
         return service_catalog.get_hourly_cost(instance_type,
+                                               area=area,
                                                region=None,
                                                use_spot=use_spot,
                                                clouds='gcp')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
+    def accelerators_to_hourly_cost(self, accelerators, area, use_spot: bool):
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
         return service_catalog.get_accelerator_hourly_cost(acc,
                                                            acc_count,
+                                                           area,
                                                            use_spot,
                                                            clouds='gcp')
 
@@ -463,10 +466,11 @@ class GCP(clouds.Cloud):
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
                                       acc_count: int,
+                                      area: Optional[str] = None,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
-            accelerator, acc_count, region, zone, 'gcp')
+            accelerator, acc_count, area, region, zone, 'gcp')
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

@@ -921,6 +921,7 @@ class RetryingVmProvisioner(object):
                 instance_type=to_provision.instance_type,
                 accelerators=to_provision.accelerators,
                 use_spot=to_provision.use_spot,
+                area=to_provision.area,
         ):
             # Only retry requested region/zones or all if not specified.
             zone_names = [zone.name for zone in zones]

@@ -6,6 +6,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
 from sky.utils import accelerator_registry
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -44,7 +45,7 @@ class Resources:
     # 1. Increment the version. For backward compatibility.
     # 2. Change the __setstate__ method to handle the new fields.
     # 3. Modify the to_config method to handle the new fields.
-    _VERSION = 6
+    _VERSION = 8
 
     def __init__(
         self,
@@ -57,13 +58,16 @@ class Resources:
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
+        area: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = None
         self._zone: Optional[str] = None
+        self._area: Optional[str] = None
         self._set_region_zone(region, zone)
+        self._set_area(area)
 
         self._instance_type = instance_type
 
@@ -141,6 +145,10 @@ class Resources:
     @property
     def zone(self):
         return self._zone
+
+    @property
+    def area(self):
+        return self._area
 
     @property
     def instance_type(self):
@@ -274,6 +282,21 @@ class Resources:
         # region if zone is specified.
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
+
+    def _set_area(self, area: Optional[str]) -> None:
+        if area is None:
+            return
+        if self._region is not None or self._zone is not None:
+            logger.debug('Ignoring area because region/zone is specified.')
+            return
+
+        if area not in service_catalog.AREA_FILTERS:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid area: {area!r}. For now, we only support '
+                    f'{service_catalog.AREA_FILTERS}'
+                )
+        self._area = area
 
     def _try_validate_instance_type(self):
         if self.instance_type is None:
@@ -441,11 +464,11 @@ class Resources:
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
-            self._instance_type, self.use_spot)
+            self._instance_type, self.area, self.use_spot)
         # Accelerators (if any).
         if self.accelerators is not None:
             hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot)
+                self.accelerators, self.area, self.use_spot)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -461,30 +484,19 @@ class Resources:
             return False
         # self.cloud == other.cloud
 
-        if (self.region is None) != (other.region is None):
-            # self and other's region should be both None or both not None
+        if self.region != other.region:
             return False
 
-        if self.region is not None and self.region != other.region:
-            return False
-        # self.region <= other.region
-
-        if (self.zone is None) != (other.zone is None):
-            # self and other's zone should be both None or both not None
+        if self.zone != other.zone:
             return False
 
-        if self.zone is not None and self.zone != other.zone:
+        if self.area != other.area:
             return False
 
-        if (self.image_id is None) != (other.image_id is None):
-            # self and other's image id should be both None or both not None
+        if self.image_id != other.image_id:
             return False
 
-        if (self.image_id is not None and self.image_id != other.image_id):
-            return False
-
-        if (self._instance_type is not None and
-                self._instance_type != other.instance_type):
+        if self._instance_type != other.instance_type:
             return False
         # self._instance_type == other.instance_type
 
@@ -529,6 +541,17 @@ class Resources:
         if self.zone is not None and self.zone != other.zone:
             return False
         # self.zone <= other.zone
+
+        # Check self.area can have the resources of other.
+        if other.region is not None or other.zone is not None:
+            assert other.cloud is not None, 'other.cloud should not be None'
+            other.cloud.validate_region_zone(other.region, other.zone,
+                                             self.area)
+        elif 'all' not in [self.area, other.area]:
+            self_area = self.area or service_catalog.DEFAULT_AREA
+            other_area = other.area or service_catalog.DEFAULT_AREA
+            if self_area != other_area:
+                return False
 
         if self.image_id is not None:
             if other.image_id is None:
@@ -605,6 +628,7 @@ class Resources:
             disk_size=override.pop('disk_size', self.disk_size),
             region=override.pop('region', self.region),
             zone=override.pop('zone', self.zone),
+            area=override.pop('area', self.area),
             image_id=override.pop('image_id', self.image_id),
         )
         assert len(override) == 0
@@ -650,6 +674,8 @@ class Resources:
             resources_fields['region'] = config.pop('region')
         if config.get('zone') is not None:
             resources_fields['zone'] = config.pop('zone')
+        if config.get('area') is not None:
+            resources_fields['area'] = config.pop('area')
         if config.get('image_id') is not None:
             logger.warning('image_id in resources is experimental. It only '
                            'supports AWS/GCP.')
@@ -677,6 +703,7 @@ class Resources:
         config['disk_size'] = self.disk_size
         add_if_not_none('region', self.region)
         add_if_not_none('zone', self.zone)
+        add_if_not_none('area', self.area)
         add_if_not_none('image_id', self.image_id)
         return config
 
@@ -726,5 +753,8 @@ class Resources:
                     acc_count for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
+
+        if version < 8:
+            self._area = None
 
         self.__dict__.update(state)
