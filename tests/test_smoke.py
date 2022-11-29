@@ -908,7 +908,8 @@ def test_spot_cancellation():
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
              f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'),
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
+            ),
         ])
     run_one_test(test)
 
