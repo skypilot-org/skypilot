@@ -22,8 +22,8 @@ def _safe_cursor():
         conn.close()
 
 
-with _safe_cursor() as cursor:
-    cursor.execute("""\
+with _safe_cursor() as c:  # Call it 'c' to avoid pylint complaining.
+    c.execute("""\
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
             value TEXT)""")
