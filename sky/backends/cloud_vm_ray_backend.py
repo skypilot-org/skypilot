@@ -1735,7 +1735,12 @@ class CloudVmRayBackend(backends.Backend):
             # Because the _update_stable_cluster_ips function uses the handle,
             # we call it on the current instance after the state is updated
             if version < 3 and head_ip is not None:
-                self._update_stable_cluster_ips()
+                try:
+                    self._update_stable_cluster_ips()
+                except exceptions.FetchIPError:
+                    # This occurs when cluster from an older version has been autostopped,
+                    # so the head IP in the database is been updated.
+                    pass
 
             self._update_cluster_region()
 
