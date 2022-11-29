@@ -255,18 +255,19 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                  task: 'task_lib.Task', retry_until_up: bool) -> None:
         super().__init__(cluster_name, backend, task, retry_until_up)
         # Note down the cloud/region of the launched cluster, so that we can
-        # first retry in the same cloud/region. (we cannot use handle, as it
-        # can be None if the cluster is preempted)
-        self.launched_cloud_region = None
+        # first retry in the same cloud/region. (Inside recover() we may not
+        # rely on cluster handle, as it can be None if the cluster is
+        # preempted.)
+        self._launched_cloud_region = None
 
-    def launch(self) -> Optional[float]:
-        launch_time = super().launch()
+    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+        launch_time = super()._launch(max_retry, raise_on_failure)
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
         assert handle is not None, 'Cluster should be launched.'
         launched_resources = handle.launched_resources
-        self.launched_cloud_region = (launched_resources.cloud,
-                                      launched_resources.region)
+        self._launched_cloud_region = (launched_resources.cloud,
+                                       launched_resources.region)
         return launch_time
 
     def terminate_cluster(self, max_retry: int = 3) -> None:
@@ -293,8 +294,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             resources = list(task.resources)[0]
             original_resources = resources
 
-            assert self.launched_cloud_region is not None
-            launched_cloud, launched_region = self.launched_cloud_region
+            assert self._launched_cloud_region is not None
+            launched_cloud, launched_region = self._launched_cloud_region
             new_resources = resources.copy(cloud=launched_cloud,
                                            region=launched_region)
             task.set_resources({new_resources})
