@@ -1283,13 +1283,13 @@ def exec(
 
     Execution and scheduling behavior:
 
-    * The task/command will undergo job queue scheduling, respecting any
+    - The task/command will undergo job queue scheduling, respecting any
       specified resource requirement. It can be executed on any node of the
       cluster with enough resources.
 
-    * The task/command is run under the workdir (if specified).
+    - The task/command is run under the workdir (if specified).
 
-    * The task/command is run non-interactively (without a pseudo-terminal or
+    - The task/command is run non-interactively (without a pseudo-terminal or
       pty), so interactive commands such as ``htop`` do not work. Use ``ssh
       my_cluster`` instead.
 
@@ -1373,38 +1373,40 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
     Each cluster can have one of the following statuses:
 
-    * ``INIT``: The cluster may be live or down. It can happen in the following
+    - ``INIT``: The cluster may be live or down. It can happen in the following
       cases:
 
-      * Ongoing provisioning or runtime setup. (A ``sky launch`` has started
+      - Ongoing provisioning or runtime setup. (A ``sky launch`` has started
         but has not completed.)
 
-      * Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+      - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
         down, or the SkyPilot runtime is unhealthy.
 
-    * ``UP``: Provisioning and runtime setup have succeeded and the cluster is
+    - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
 
-    * ``STOPPED``: The cluster is stopped and the storage is persisted. Use
+    - ``STOPPED``: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
     Autostop column:
 
-    * The autostop column indicates how long the cluster will be autostopped
-      after minutes of idling (no jobs running). If the time is followed by
-      '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
-      autostopped.
+    - Indicates after how many minutes of idleness (no in-progress jobs) the
+      cluster will be autostopped. '-' means disabled.
+
+    - If the time is followed by '(down)', e.g., '1m (down)', the cluster will
+      be autodowned, rather than autostopped.
 
     Getting up-to-date cluster statuses:
 
-    * In normal cases where clusters are entirely managed by SkyPilot (i.e., no
-      manual operations on cloud consoles) and no autostopping is used, the
+    - In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations in cloud consoles) and no autostopping is used, the
       table returned by this command will accurately reflect the cluster
       statuses.
 
-    * If manual operations are otherwise used, or for autostop-enabled
-      clusters, use ``--refresh`` to query the cloud providers for the latest
-      cluster statuses.
+    - In cases where clusters are changed outside of SkyPilot (e.g., manual
+      operations in cloud consoles; unmanaged spot clusters getting preempted)
+      or for autostop-enabled clusters, use ``--refresh`` to query the latest
+      cluster statuses from the cloud providers.
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []
@@ -1689,8 +1691,8 @@ def stop(
     default=False,
     is_flag=True,
     required=False,
-    help='Cancel the currently active auto{stop,down} setting for the '
-    'cluster.')
+    help='Cancel any currently active auto{stop,down} setting for the '
+    'cluster. No-op if no setting was set.')
 @click.option(
     '--down',
     default=False,
@@ -1719,42 +1721,40 @@ def autostop(
     CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
-    If ``--down`` is passed, autodown will be used (tear down the cluster;
-    non-restartable), rather than autostop (restartable).
-
-    ``--idle-minutes`` is the number of minutes of idleness (no pending/running
-    jobs) after which the cluster will be stopped automatically.
-
-    ``--cancel`` will cancel the autostopping. If the cluster was not scheduled
-    autostop, this will be a no-op.
-
-    If ``--idle-minutes`` and ``--cancel`` are not specified, default to 5
-    minutes.
-
     When multiple autostop settings are specified for the same cluster, e.g.,
     using ``sky autostop`` or ``sky launch -i``, the last setting takes
     precedence.
 
-    Idleness timer behavior:
+    Idleness means there are no in-progress (pending/running) jobs in a
+    cluster's job queue (``sky queue``).
 
-    * The timer starts when the first autostop setting is set (with a
-      nonnegative idle minutes).
+    Idleness time of a cluster is reset to zero, when any of these happens:
 
-      * For example, say a cluster without any autostop set has been idle for 1
-        hour, then an autostop of 30 minutes is set. The cluster will not be
-        immediately autostopped. Instead, the idleness timer only starts
-        counting at that point.
+    - A first autostop setting is set. By "first", either there's never any
+      autostop setting set, or the last autostop setting is a cancel; or
 
-    Examples:
+    - The cluster has restarted; or
+
+    - A job is submitted (``sky launch`` or ``sky exec``).
+
+    Example: say a cluster without any autostop set has been idle for 1 hour,
+    then an autostop of 30 minutes is set. The cluster will not be immediately
+    autostopped. Instead, the idleness timer only starts counting at that
+    point.
+
+    Typical usage:
 
     .. code-block:: bash
 
-        # Set auto stopping for a specific cluster.
+        # Autostop this cluster after 60 minutes of idleness.
         sky autostop cluster_name -i 60
         \b
-        # Cancel auto stopping for a specific cluster.
+        # Cancel autostop for a specific cluster.
         sky autostop cluster_name --cancel
-
+        \b
+        # Since autostop was canceled in the last command, idleness will
+        # restart counting after this command.
+        sky autostop cluster_name -i 60
     """
     if cancel and idle_minutes is not None:
         raise click.UsageError(
