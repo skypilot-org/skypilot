@@ -903,11 +903,12 @@ def test_spot_cancellation():
             'sleep 10',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
+            # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
+            # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
              f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
-            ),
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'),
         ])
     run_one_test(test)
 
