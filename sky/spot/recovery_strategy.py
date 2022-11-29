@@ -273,7 +273,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             assert handle is not None, 'Cluster should be launched.'
             launched_resources = handle.launched_resources
             self._launched_cloud_region = (launched_resources.cloud,
-                                        launched_resources.region)
+                                           launched_resources.region)
         return launch_time
 
     def terminate_cluster(self, max_retry: int = 3) -> None:
