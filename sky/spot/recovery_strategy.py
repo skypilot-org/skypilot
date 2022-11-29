@@ -258,14 +258,16 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # first retry in the same cloud/region. (we cannot use handle, as it
         # can be None if the cluster is preempted)
         self.launched_cloud_region = None
-    
+
     def launch(self) -> Optional[float]:
         launch_time = super().launch()
         handle = global_user_state.get_cluster_from_name(self.cluster_name)
+        assert handle is not None, 'Cluster should be launched.'
         launched_resources = handle.launched_resources
-        self.launched_cloud_region = (launched_resources.cloud, launched_resources.region)
+        self.launched_cloud_region = (launched_resources.cloud,
+                                      launched_resources.region)
         return launch_time
-    
+
     def terminate_cluster(self, max_retry: int = 3) -> None:
         super().terminate_cluster(max_retry)
         self.launched_resources = None
