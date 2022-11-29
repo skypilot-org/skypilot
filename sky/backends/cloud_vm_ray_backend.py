@@ -182,6 +182,7 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
+            from sky.skylet import autostop_lib
             from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
@@ -201,8 +202,18 @@ class RayCodeGen:
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
-            f'setup_cmd = {setup_cmd!r}'
+            f'setup_cmd = {setup_cmd!r}',
         ]
+        # Currently, the codegen program is/can only be submitted to the head
+        # node, due to using job_lib for updating job statuses, and using
+        # autostop_lib here.
+        self._code.append(
+            # Use hasattr to handle backward compatibility.
+            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
+            textwrap.dedent("""\
+              if hasattr(autostop_lib, 'set_last_active_time_to_now'):
+                  autostop_lib.set_last_active_time_to_now()
+            """))
         if setup_cmd is not None:
             self._code += [
                 textwrap.dedent(f"""\
@@ -300,7 +311,7 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
-                
+
                 message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
@@ -2547,7 +2558,7 @@ class CloudVmRayBackend(backends.Backend):
                                                job_id,
                                                spot_job_id=spot_job_id,
                                                follow=follow)
-        if job_id is None:
+        if job_id is None and spot_job_id is None:
             logger.info(
                 'Job ID not provided. Streaming the logs of the latest job.')
 
@@ -3019,8 +3030,8 @@ class CloudVmRayBackend(backends.Backend):
                 sync = storage.make_sync_file_command(source=src,
                                                       destination=wrapped_dst)
                 # It is a file so make sure *its parent dir* exists.
-                mkdir_for_wrapped_dst = \
-                    f'mkdir -p {os.path.dirname(wrapped_dst)}'
+                mkdir_for_wrapped_dst = (
+                    f'mkdir -p {os.path.dirname(wrapped_dst)}')
 
             download_target_commands = [
                 # Ensure sync can write to wrapped_dst (e.g., '/data/').

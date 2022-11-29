@@ -155,6 +155,23 @@ and storage mounting:
         name: romil-output-bucket
         mode: MOUNT
 
+      # *** Uploading multiple files to the same Storage object ***
+      #
+      # The source field in a storage object can also be a list of local paths.
+      # This is useful when multiple files or directories need to be uploaded to the
+      # same bucket.
+      #
+      # Note: The basenames of each path in the source list are copied recursively
+      # to the root of the bucket. Thus, If the source list contains a directory,
+      # the entire directory is copied to the root of the bucket. For instance,
+      # in this example, the contents of ~/datasets are copied to
+      # s3://sky-multisource-storage/datasets/. ~/mydir/myfile.txt will appear
+      # at s3://sky-multisource-storage/myfile.txt.
+      /datasets-multisource-storage:
+        name: sky-multisource-storage2 # Make sure this name is unique or you own this bucket
+        source: [~/mydir/myfile.txt, ~/datasets]
+
+
     run: |
       pwd
       ls -la /
@@ -255,10 +272,11 @@ Storage YAML reference
 
       sky.Storage.source: str
         The source attribute specifies the local path that must be made available
-        in the storage object. It can either be a local path, in which case data
-        is uploaded to the cloud to an appropriate object store (s3 or gcs), or it
-        can be a remote path (s3://, gs://), in which case it is copied or mounted
-        directly (see mode flag below).
+        in the storage object. It can either be a local path or a list of local
+        paths or it can be a remote path (s3://, gs://).
+        If the source is local, data is uploaded to the cloud to an appropriate
+        object store (s3 or gcs). If the path is remote, the data is copied
+        or mounted directly (see mode flag below).
 
       sky.Storage.store: str; either of 's3' or 'gcs'
         If you wish to force sky.Storage to be backed by a specific cloud object
