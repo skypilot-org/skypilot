@@ -261,7 +261,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
     def launch(self) -> Optional[float]:
         launch_time = super().launch()
-        handle = global_user_state.get_cluster_from_name(self.cluster_name)
+        handle = global_user_state.get_handle_from_cluster_name(self.cluster_name)
         assert handle is not None, 'Cluster should be launched.'
         launched_resources = handle.launched_resources
         self.launched_cloud_region = (launched_resources.cloud,
