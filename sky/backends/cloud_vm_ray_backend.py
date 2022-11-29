@@ -210,6 +210,7 @@ class RayCodeGen:
         # autostop_lib here.
         self._code.append(
             # Use hasattr to handle backward compatibility.
+            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
             textwrap.dedent("""\
               if hasattr(autostop_lib, 'set_last_active_time_to_now'):
                   autostop_lib.set_last_active_time_to_now()

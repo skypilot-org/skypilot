@@ -110,7 +110,7 @@ class AutostopEvent(SkyletEvent):
         if job_lib.is_cluster_idle():
             idle_minutes = (time.time() -
                             autostop_lib.get_last_active_time()) // 60
-            logger.debug(
+            logger.info(
                 f'Idle minutes: {idle_minutes}, '
                 f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         else:

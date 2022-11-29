@@ -686,7 +686,7 @@ def test_autodown():
             'sleep 45',
             f'sky status --refresh | grep {name} | grep UP',
             # Ensure the cluster is terminated.
-            'sleep 240',
+            'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
