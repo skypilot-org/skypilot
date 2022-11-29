@@ -251,6 +251,25 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
+    def __init__(self, cluster_name: str, backend: 'backends.Backend',
+                 task: 'task_lib.Task', retry_until_up: bool) -> None:
+        super().__init__(cluster_name, backend, task, retry_until_up)
+        # Note down the cloud/region of the launched cluster, so that we can
+        # first retry in the same cloud/region. (we cannot use handle, as it
+        # can be None if the cluster is preempted)
+        self.launched_cloud_region = None
+    
+    def launch(self) -> Optional[float]:
+        launch_time = super().launch()
+        handle = global_user_state.get_cluster_from_name(self.cluster_name)
+        launched_resources = handle.launched_resources
+        self.launched_cloud_region = (launched_resources.cloud, launched_resources.region)
+        return launch_time
+    
+    def terminate_cluster(self, max_retry: int = 3) -> None:
+        super().terminate_cluster(max_retry)
+        self.launched_resources = None
+
     def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
@@ -264,8 +283,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # Retry the entire block until the cluster is up, so that the ratio of
         # the time spent in the current region and the time spent in the other
         # region is consistent during the retry.
-        handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
         while True:
             # Add region constraint to the task, to retry on the same region
             # first.
@@ -273,8 +290,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
             resources = list(task.resources)[0]
             original_resources = resources
 
-            launched_cloud = handle.launched_resources.cloud
-            launched_region = handle.launched_resources.region
+            assert self.launched_cloud_region is not None
+            launched_cloud, launched_region = self.launched_cloud_region
             new_resources = resources.copy(cloud=launched_cloud,
                                            region=launched_region)
             task.set_resources({new_resources})
