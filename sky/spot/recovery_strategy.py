@@ -295,22 +295,22 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # region is consistent during the retry.
         while True:
             # Add region constraint to the task, to retry on the same region
-            # first.
-            task = self.dag.tasks[0]
-            resources = list(task.resources)[0]
-            original_resources = resources
+            # first (if valid).
+            if self._launched_cloud_region is not None:
+                task = self.dag.tasks[0]
+                resources = list(task.resources)[0]
+                original_resources = resources
 
-            assert self._launched_cloud_region is not None
-            launched_cloud, launched_region = self._launched_cloud_region
-            new_resources = resources.copy(cloud=launched_cloud,
-                                           region=launched_region)
-            task.set_resources({new_resources})
-            # Not using self.launch to avoid the retry until up logic.
-            launched_time = self._launch(raise_on_failure=False)
-            # Restore the original dag, i.e. reset the region constraint.
-            task.set_resources({original_resources})
-            if launched_time is not None:
-                return launched_time
+                launched_cloud, launched_region = self._launched_cloud_region
+                new_resources = resources.copy(cloud=launched_cloud,
+                                               region=launched_region)
+                task.set_resources({new_resources})
+                # Not using self.launch to avoid the retry until up logic.
+                launched_time = self._launch(raise_on_failure=False)
+                # Restore the original dag, i.e. reset the region constraint.
+                task.set_resources({original_resources})
+                if launched_time is not None:
+                    return launched_time
 
             # Step 2
             logger.debug('Terminating unhealthy spot cluster.')
