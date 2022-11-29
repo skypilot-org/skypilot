@@ -13,7 +13,7 @@ import ray
 
 from sky.adaptors import aws
 
-# Turned off the regions disabled for a new AWS account by default.
+# Turn off the regions disabled for a new AWS account by default.
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -57,7 +57,7 @@ PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws
 
 
 @ray.remote
-def get_instance_types(region: str) -> pd.DataFrame:
+def _get_instance_types(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
@@ -69,7 +69,7 @@ def get_instance_types(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_availability_zones(region: str) -> pd.DataFrame:
+def _get_availability_zones(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     zones = []
     response = client.describe_availability_zones()
@@ -82,7 +82,7 @@ def get_availability_zones(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_pricing_table(region: str) -> pd.DataFrame:
+def _get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
@@ -101,7 +101,7 @@ def get_pricing_table(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_spot_pricing_table(region: str) -> pd.DataFrame:
+def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_spot_price_history')
@@ -117,13 +117,13 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
+def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     try:
         df, zone_df, pricing_df, spot_pricing_df = ray.get([
-            get_instance_types.remote(region),
-            get_availability_zones.remote(region),
-            get_pricing_table.remote(region),
-            get_spot_pricing_table.remote(region),
+            _get_instance_types.remote(region),
+            _get_availability_zones.remote(region),
+            _get_pricing_table.remote(region),
+            _get_spot_pricing_table.remote(region),
         ])
         print(f'{region} Processing dataframes')
 
@@ -193,7 +193,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
 
 def get_all_regions_instance_types_df(regions: List[str]) -> pd.DataFrame:
-    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in regions])
+    df_or_regions = ray.get([_get_instance_types_df.remote(r) for r in regions])
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -224,7 +224,7 @@ _GPU_TO_IMAGE_DATE = {
 _UBUNTU_VERSION = ['18.04', '20.04']
 
 
-def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
+def _get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
     try:
         image_id = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
@@ -243,13 +243,13 @@ def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
 
 
 @ray.remote
-def get_image_row(region: str, ubuntu_version: str,
+def _get_image_row(region: str, ubuntu_version: str,
                   cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     date = None
     for date in creation_date:
-        image_id = get_image_id(region, ubuntu_version, date)
+        image_id = _get_image_id(region, ubuntu_version, date)
         if image_id:
             break
     else:
@@ -269,7 +269,7 @@ def get_all_regions_images_df() -> pd.DataFrame:
         for ubuntu_version in _UBUNTU_VERSION:
             for region in ALL_REGIONS:
                 workers.append(
-                    get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
+                    _get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
 
     results = ray.get(workers)
     results = pd.DataFrame(
@@ -279,7 +279,7 @@ def get_all_regions_images_df() -> pd.DataFrame:
 
 
 def fetch_availability_zone_mappings() -> pd.DataFrame:
-    az_mappings = [get_availability_zones.remote(r) for r in ALL_REGIONS]
+    az_mappings = [_get_availability_zones.remote(r) for r in ALL_REGIONS]
     az_mappings = ray.get(az_mappings)
     az_mappings = pd.concat(az_mappings)
     return az_mappings

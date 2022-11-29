@@ -7,13 +7,14 @@ import os
 import typing
 from typing import Dict, List, Optional, Tuple
 
+import pandas as pd
+
 from sky import sky_logging
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
-    import pandas as pd
 
 logger = sky_logging.init_logger(__name__)
 
@@ -28,7 +29,14 @@ _image_df = common.read_catalog('aws/images.csv',
 
 
 def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
-    """Apply the mapping from Availability ID to name."""
+    """Maps zone IDs (use1-az1) to zone names (us-east-1x).
+    
+    Such mappings are account-specific and determined by AWS.
+    
+    Returns:
+        A dataframe with column 'AvailabilityZone' that's correctly replaced
+        with the zone name (e.g. us-east-1a).
+    """
     az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
     if not os.path.exists(az_mapping_path):
         # Fetch az mapping from AWS.
@@ -41,7 +49,7 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
-        az_mappings = common.read_catalog('aws/az_mappings.csv')
+        az_mappings = pd.read_csv(az_mapping_path)
     df = df.merge(az_mappings, on=['AvailabilityZone'], how='left')
     df = df.drop(columns=['AvailabilityZone']).rename(
         columns={'AvailabilityZoneName': 'AvailabilityZone'})
