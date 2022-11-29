@@ -79,15 +79,13 @@ class SpotJobUpdateEvent(SkyletEvent):
 class AutostopEvent(SkyletEvent):
     """Skylet event for autostop.
 
-    Semantics:
-    - Idleness timer gets reset whenever
-      - A first autostop setting is set. By "first", we mean either there's
-        never any autostop setting set, or the last autostop setting is a
-        cancel (idle minutes < 0).
-      - Or, whenever this event wakes up and job_lib.is_cluster_idle() returns
-        False.
-      - TODO(zongheng): what about if the cluster has restarted? The
-        autostop_config.boot_time != psutil.boot_time() check below.
+    Idleness timer gets set to 0 whenever:
+      - A first autostop setting is set. By "first", either there's never any
+        autostop setting set, or the last autostop setting is a cancel (idle
+        minutes < 0); or
+      - This event wakes up and job_lib.is_cluster_idle() returns False; or
+      - The cluster has restarted; or
+      - A job is submitted (handled in the backend; not here).
     """
     EVENT_INTERVAL_SECONDS = 60
 
