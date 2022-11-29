@@ -309,7 +309,7 @@ if __name__ == '__main__':
     image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
 
-    if not args.no_az_mapping:
+    if not args.no_az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()
         az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
         print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
