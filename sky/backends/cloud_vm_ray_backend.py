@@ -183,6 +183,7 @@ class RayCodeGen:
             import ray
             import ray.util as ray_util
 
+            from sky.skylet import autostop_lib
             from sky.skylet import constants
             from sky.skylet import job_lib
             from sky.utils import log_utils
@@ -202,8 +203,18 @@ class RayCodeGen:
             inspect.getsource(log_lib.add_ray_env_vars),
             inspect.getsource(log_lib.run_bash_command_with_log),
             'run_bash_command_with_log = ray.remote(run_bash_command_with_log)',
-            f'setup_cmd = {setup_cmd!r}'
+            f'setup_cmd = {setup_cmd!r}',
         ]
+        # Currently, the codegen program is/can only be submitted to the head
+        # node, due to using job_lib for updating job statuses, and using
+        # autostop_lib here.
+        self._code.append(
+            # Use hasattr to handle backward compatibility.
+            # TODO(zongheng): remove in ~1-2 minor releases (currently 0.2.x).
+            textwrap.dedent("""\
+              if hasattr(autostop_lib, 'set_last_active_time_to_now'):
+                  autostop_lib.set_last_active_time_to_now()
+            """))
         if setup_cmd is not None:
             self._code += [
                 textwrap.dedent(f"""\
@@ -301,7 +312,7 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
-                
+
                 message = '' if setup_cmd is not None else {_CTRL_C_TIP_MESSAGE!r} + '\\n'
                 message += f'INFO: Waiting for task resources on {{node_str}}. This will block if the cluster is full.'
                 print(message,
@@ -447,7 +458,7 @@ class RayCodeGen:
             sky_env_vars_dict['SKYPILOT_NODE_RANK'] = ip_rank_map[ip]
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
-            
+
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
