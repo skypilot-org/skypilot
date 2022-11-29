@@ -654,6 +654,17 @@ def test_autostop():
             f'sky status --refresh | grep {name} | grep UP',
             'sleep 90',
             f'sky status --refresh | grep {name} | grep STOPPED',
+
+            # Test restarting the idleness timer via exec:
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            'sky exec {name} echo hi',  # Should restart the timer.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            'sleep 90',
+            f'sky status --refresh | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,

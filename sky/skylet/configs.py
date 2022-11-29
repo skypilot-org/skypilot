@@ -1,4 +1,5 @@
 """Skylet configs."""
+import contextlib
 import os
 import pathlib
 import sqlite3
@@ -7,26 +8,37 @@ from typing import Optional
 _DB_PATH = os.path.expanduser('~/.sky/skylet_config.db')
 os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
-_CONN = sqlite3.connect(_DB_PATH)
-_CURSOR = _CONN.cursor()
 
-_CURSOR.execute("""\
-    CREATE TABLE IF NOT EXISTS config (
-        key TEXT PRIMARY KEY, 
-        value TEXT)""")
+@contextlib.contextmanager
+def _safe_cursor():
+    """A newly created, auto-commiting, auto-closing cursor."""
+    conn = sqlite3.connect(_DB_PATH)
+    cursor = conn.cursor()
+    try:
+        yield cursor
+    finally:
+        cursor.close()
+        conn.commit()
+        conn.close()
 
-_CONN.commit()
+
+with _safe_cursor() as cursor:
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value TEXT)""")
 
 
 def get_config(key: str) -> Optional[str]:
-    rows = _CURSOR.execute('SELECT value FROM config WHERE key = ?', (key,))
-    for (value,) in rows:
-        return value
+    with _safe_cursor() as cursor:
+        rows = cursor.execute('SELECT value FROM config WHERE key = ?', (key,))
+        for (value,) in rows:
+            return value
 
 
 def set_config(key: str, value: str) -> None:
-    _CURSOR.execute(
-        """\
-        INSERT OR REPLACE INTO config VALUES (?, ?)
-        """, (key, value))
-    _CONN.commit()
+    with _safe_cursor() as cursor:
+        cursor.execute(
+            """\
+            INSERT OR REPLACE INTO config VALUES (?, ?)
+            """, (key, value))
