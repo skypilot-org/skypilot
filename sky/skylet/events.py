@@ -120,7 +120,7 @@ class AutostopEvent(SkyletEvent):
                 'Not idle. Reset idle minutes.'
                 f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         if idle_minutes >= autostop_config.autostop_idle_minutes:
-            logger.debug(
+            logger.info(
                 f'{idle_minutes} idle minutes reached; threshold: '
                 f'{autostop_config.autostop_idle_minutes} minutes. Stopping.')
             self._stop_cluster(autostop_config)
