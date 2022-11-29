@@ -136,8 +136,8 @@ class StrategyExecutor:
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
             raise_on_failure: Whether to raise an exception if the launch fails.
-        
-        Returns: 
+
+        Returns:
             The job's start timestamp, or None if failed to start and
             raise_on_failure is False.
         """
