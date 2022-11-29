@@ -27,7 +27,7 @@
 
 SkyPilot is a framework for easily and cost effectively running ML workloads[^1] on any cloud. 
 
-SkyPilot abstracts away cloud infra burden:
+SkyPilot abstracts away the cloud infra burden:
 - Launch jobs & clusters on any cloud (AWS, Azure, GCP)
 - Find scarce resources across zones/regions/clouds
 - Queue jobs & use cloud object stores
@@ -86,7 +86,7 @@ Prepare the workdir by cloning:
 git clone https://github.com/pytorch/examples.git ~/torch_examples
 ```
 
-Launch with `sky launch`:
+Launch with `sky launch` (note: [access to GPU instances](https://skypilot.readthedocs.io/en/latest/reference/quota.html) is needed for this example):
 ```bash
 sky launch my_task.yaml
 ```
