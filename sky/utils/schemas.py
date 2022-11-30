@@ -88,7 +88,15 @@ def get_storage_schema():
                 'type': 'string',
             },
             'source': {
-                'type': 'string',
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'array',
+                    'minItems': 1,
+                    'items': {
+                        'type': 'string'
+                    }
+                }]
             },
             'store': {
                 'type': 'string',

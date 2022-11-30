@@ -1,12 +1,21 @@
-"""Sky autostop utility function."""
+"""Autostop utilities."""
 import pickle
 import psutil
 import shlex
+import time
 from typing import List, Optional
 
+from sky import sky_logging
 from sky.skylet import configs
 
-AUTOSTOP_CONFIG_KEY = 'autostop_config'
+logger = sky_logging.init_logger(__name__)
+
+_AUTOSTOP_CONFIG_KEY = 'autostop_config'
+
+# This key-value is stored inside the 'configs' sqlite3 database, because both
+# user-issued commands (this module) and the Skylet process running the
+# AutostopEvent need to access that state.
+_AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
 
 
 class AutostopConfig:
@@ -29,8 +38,8 @@ class AutostopConfig:
         self.__dict__.update(state)
 
 
-def get_autostop_config() -> Optional[AutostopConfig]:
-    config_str = configs.get_config(AUTOSTOP_CONFIG_KEY)
+def get_autostop_config() -> AutostopConfig:
+    config_str = configs.get_config(_AUTOSTOP_CONFIG_KEY)
     if config_str is None:
         return AutostopConfig(-1, -1, None)
     return pickle.loads(config_str)
@@ -39,7 +48,27 @@ def get_autostop_config() -> Optional[AutostopConfig]:
 def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
     boot_time = psutil.boot_time()
     autostop_config = AutostopConfig(idle_minutes, boot_time, backend, down)
-    configs.set_config(AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+    prev_autostop_config = get_autostop_config()
+    configs.set_config(_AUTOSTOP_CONFIG_KEY, pickle.dumps(autostop_config))
+    logger.debug(f'set_autostop(): idle_minutes {idle_minutes}, down {down}.')
+    if (prev_autostop_config.autostop_idle_minutes < 0 or
+            prev_autostop_config.boot_time != psutil.boot_time()):
+        # Either autostop never set, or has been canceled. Reset timer.
+        set_last_active_time_to_now()
+
+
+def get_last_active_time() -> float:
+    """Returns the last active time, or -1 if none has been set."""
+    result = configs.get_config(_AUTOSTOP_LAST_ACTIVE_TIME)
+    if result is not None:
+        return float(result)
+    return -1
+
+
+def set_last_active_time_to_now() -> None:
+    """Sets the last active time to time.time()."""
+    logger.debug('Setting last active time.')
+    configs.set_config(_AUTOSTOP_LAST_ACTIVE_TIME, str(time.time()))
 
 
 class AutostopCodeGen:

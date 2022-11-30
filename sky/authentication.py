@@ -3,6 +3,7 @@ import copy
 import functools
 import os
 import re
+import socket
 import subprocess
 import sys
 import textwrap
@@ -174,6 +175,10 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             sys.exit(1)
         else:
             raise
+    except socket.timeout:
+        logger.error('Socket timed out when trying to get the GCP project. '
+                     'Please check your network connection.')
+        raise
 
     project_oslogin = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])

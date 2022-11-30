@@ -18,6 +18,7 @@ import yaml
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
+USER_HASH_LENGTH = 8
 
 _PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
 _PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
@@ -40,14 +41,37 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash() -> str:
-    """Returns a unique user-machine specific hash as a user id."""
+def get_user_hash(default_value: Optional[str] = None) -> str:
+    """Returns a unique user-machine specific hash as a user id.
+
+    We cache the user hash in a file to avoid potential user_name or
+    hostname changes causing a new user hash to be generated.
+    """
+
+    def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        try:
+            int(user_hash, 16)
+        except (TypeError, ValueError):
+            return False
+        return len(user_hash) == USER_HASH_LENGTH
+
+    user_hash = default_value
+    if _is_valid_user_hash(user_hash):
+        return user_hash
+
     if os.path.exists(_USER_HASH_FILE):
+        # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r') as f:
-            return f.read()
+            # Remove invalid characters.
+            user_hash = f.read().strip()
+        if _is_valid_user_hash(user_hash):
+            return user_hash
 
     hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:8]
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    if not _is_valid_user_hash(user_hash):
+        # A fallback in case the hash is invalid.
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     with open(_USER_HASH_FILE, 'w') as f:
         f.write(user_hash)
@@ -222,9 +246,9 @@ def retry(method, max_retries=3, initial_backoff=1):
             try:
                 return method(*args, **kwargs)
             except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Caught {e}. Retrying.')
                 try_count += 1
                 if try_count < max_retries:
+                    logger.warning(f'Caught {e}. Retrying.')
                     time.sleep(backoff.current_backoff())
                 else:
                     raise
