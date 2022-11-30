@@ -1152,7 +1152,10 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        return _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        assert expected_num_nodes == 1, "TPU VM only supports single node for now."
+        if len(ips) != expected_num_nodes:
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
