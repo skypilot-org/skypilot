@@ -277,9 +277,9 @@ def remove_cluster(cluster_name: str, terminate: bool):
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
             return
-        # Must invalidate head_ip: otherwise 'sky cpunode' on a stopped cpunode
-        # will directly try to ssh, which leads to timeout.
-        handle.head_ip = None
+        # Must invalidate IP list: otherwise 'sky cpunode'
+        # on a stopped cpunode will directly try to ssh, which leads to timeout.
+        handle.stable_internal_external_ips = None
         _DB.cursor.execute(
             'UPDATE clusters SET handle=(?), status=(?) '
             'WHERE name=(?)', (
