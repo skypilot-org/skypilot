@@ -289,25 +289,27 @@ def autostop(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop/autodown for a cluster.
 
-    When multiple autostop settings are specified for the same cluster (e.g.,
-    this function is called multiple times), the last setting takes precedence.
-
-    Idleness means there are no in-progress (pending/running) jobs in a
-    cluster's job queue.
+    Autostop/autodown will automatically stop or teardown a cluster when it
+    becomes idle for a specified duration.  Idleness means there are no
+    in-progress (pending/running) jobs in a cluster's job queue.
 
     Idleness time of a cluster is reset to zero, whenever:
 
-    - A first autostop setting is set. By "first", either there's never any
-      autostop setting set, or the last autostop setting is a cancel; or
-
-    - The cluster has restarted; or
-
     - A job is submitted (``sky.launch()`` or ``sky.exec()``).
+
+    - The cluster has restarted.
+
+    - An autostop is set when there is no active setting. (Namely, either
+      there's never any autostop setting set, or the previous autostop setting
+      was canceled.) This is useful for restarting the autostop timer.
 
     Example: say a cluster without any autostop set has been idle for 1 hour,
     then an autostop of 30 minutes is set. The cluster will not be immediately
-    autostopped. Instead, the idleness timer only starts counting at that
-    point.
+    autostopped. Instead, the idleness timer only starts counting after the
+    autostop setting was set.
+
+    When multiple autostop settings are specified for the same cluster, the
+    last setting takes precedence.
 
     Args:
         cluster_name: name of the cluster.

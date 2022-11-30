@@ -1685,7 +1685,8 @@ def stop(
               type=int,
               default=None,
               required=False,
-              help='Set the idle minutes before autostopping the cluster.')
+              help=('Set the idle minutes before autostopping the cluster. '
+                    'See the doc above for detailed semantics.'))
 @click.option(
     '--cancel',
     default=False,
@@ -1718,29 +1719,30 @@ def autostop(
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule or cancel an autostop or autodown for cluster(s).
 
+    Autostop/autodown will automatically stop or teardown a cluster when it
+    becomes idle for a specified duration.  Idleness means there are no
+    in-progress (pending/running) jobs in a cluster's job queue.
+
     CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
-    When multiple autostop settings are specified for the same cluster, e.g.,
-    using ``sky autostop`` or ``sky launch -i``, the last setting takes
-    precedence.
-
-    Idleness means there are no in-progress (pending/running) jobs in a
-    cluster's job queue (``sky queue``).
-
     Idleness time of a cluster is reset to zero, when any of these happens:
-
-    - A first autostop setting is set. By "first", either there's never any
-      autostop setting set, or the last autostop setting is a cancel; or
-
-    - The cluster has restarted; or
 
     - A job is submitted (``sky launch`` or ``sky exec``).
 
+    - The cluster has restarted.
+
+    - An autostop is set when there is no active setting. (Namely, either
+      there's never any autostop setting set, or the previous autostop setting
+      was canceled.) This is useful for restarting the autostop timer.
+
     Example: say a cluster without any autostop set has been idle for 1 hour,
     then an autostop of 30 minutes is set. The cluster will not be immediately
-    autostopped. Instead, the idleness timer only starts counting at that
-    point.
+    autostopped. Instead, the idleness timer only starts counting after the
+    autostop setting was set.
+
+    When multiple autostop settings are specified for the same cluster, the
+    last setting takes precedence.
 
     Typical usage:
 
@@ -2093,10 +2095,15 @@ def _down_or_stop_clusters(
     name is explicitly and uniquely specified (not via glob) and purge is set
     to True.
     """
-    command = 'down' if down else 'stop'
+    if down:
+        command = 'down'
+    elif idle_minutes_to_autostop is not None:
+        command = 'autostop'
+    else:
+        command = 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
-            f'sky {command} requires either a cluster name (see `sky status`) '
+            f'`sky {command}` requires either a cluster name (see `sky status`) '
             'or --all.')
 
     operation = 'Terminating' if down else 'Stopping'
@@ -2160,7 +2167,7 @@ def _down_or_stop_clusters(
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             click.echo(
-                f'Both --all and cluster(s) specified for sky {command}. '
+                f'Both --all and cluster(s) specified for `sky {command}`. '
                 'Letting --all take effect.')
         # We should not remove reserved clusters when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a reserved
