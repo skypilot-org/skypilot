@@ -104,7 +104,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
             click.echo(
                 f'{colorama.Style.DIM}  Directly interacting with the '
                 f'controller is typically not needed.{colorama.Style.RESET_ALL}'
-                f'\n  Run: {colorama.Style.BRIGHT}sky spot{reset}')
+                f'\n  Use spot jobs CLI: {colorama.Style.BRIGHT}sky spot{reset}')
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
