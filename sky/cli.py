@@ -1939,7 +1939,7 @@ def start(
             raise click.UsageError(
                 'Autostop options are currently not allowed when starting the '
                 'spot controller. Use the default autostop settings by directly'
-                f' callling: {bold}sky start {reserved[0]}{reset_bold}')
+                f' calling: {bold}sky start {reserved[0]}{reset_bold}')
         idle_minutes_to_autostop = (
             spot_lib.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
