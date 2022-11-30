@@ -1292,7 +1292,10 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     The estimated cost column indicates the price for the cluster based on the
     type of resources being used and the duration of use up until the call
     to status. This means if the cluster is UP, successive calls to status
-    will show increasing price.
+    will show increasing price. The estimated cost is calculated based on
+    the local cache of the cluster status, and may not be accurate for
+    the cluster with autostop/use_spot set or terminated/stopped
+    on the cloud console.
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []

@@ -2639,9 +2639,8 @@ class CloudVmRayBackend(backends.Backend):
                                          terminate=terminate)
 
         if cluster_cost:
-            # to handle line length for formatter
-            message = 'Estimated cost of cluster'
-            logger.info(f'{message} {handle.cluster_name}: ${cluster_cost:.2f}')
+            logger.info(f'Estimated cost of cluster {handle.cluster_name}: '
+                        f'${cluster_cost:.2f}')
         if terminate:
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
