@@ -3,6 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for AWS.
 """
+import requests
 import typing
 from typing import Dict, List, Optional, Tuple
 
@@ -62,6 +63,12 @@ def get_instance_type_for_accelerator(
                                                          acc_count=acc_count)
 
 
+def set_region_latency(region) -> float:
+    response = requests.get(
+        f'https://dynamodb.{region.name}.amazonaws.com/ping')
+    region.latency = response.elapsed.total_seconds()
+
+
 def get_region_zones_for_instance_type(instance_type: str,
                                        use_spot: bool) -> List['cloud.Region']:
     df = _df[_df['InstanceType'] == instance_type]
@@ -71,6 +78,7 @@ def get_region_zones_for_instance_type(instance_type: str,
     us_region_list = []
     other_region_list = []
     for region in region_list:
+        set_region_latency(region)
         if region.name.startswith('us-'):
             us_region_list.append(region)
         else:

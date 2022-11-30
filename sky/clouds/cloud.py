@@ -14,6 +14,7 @@ class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
     name: str
     zones: List['Zone'] = []
+    latency: float = 1e10
 
     def set_zones(self, zones: List['Zone']):
         self.zones = zones

@@ -124,8 +124,10 @@ def get_region_zones_for_instance_type(
         use_spot: bool,
         clouds: CloudFilter = None) -> 'List[cloud.Region]':
     """Returns a list of regions for a given instance type."""
-    return _map_clouds_catalog(clouds, 'get_region_zones_for_instance_type',
-                               instance_type, use_spot)
+    regions = _map_clouds_catalog(clouds, 'get_region_zones_for_instance_type',
+                                  instance_type, use_spot)
+    regions = sorted(regions, key=lambda region: region.latency)
+    return regions
 
 
 def get_hourly_cost(instance_type: str,

@@ -3,6 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
+import requests
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
@@ -62,10 +63,19 @@ def get_instance_type_for_accelerator(
                                                          acc_count=acc_count)
 
 
+def set_region_latency(region) -> float:
+    response = requests.get(
+        f'https://av{region.name}.blob.core.windows.net/probe/ping.js')
+    region.latency = response.elapsed.total_seconds()
+
+
 def get_region_zones_for_instance_type(
         instance_type: str, use_spot: bool) -> List[cloud_lib.Region]:
     df = _df[_df['InstanceType'] == instance_type]
-    return common.get_region_zones(df, use_spot)
+    regions = common.get_region_zones(df, use_spot)
+    for region in regions:
+        set_region_latency(region)
+    return regions
 
 
 def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
