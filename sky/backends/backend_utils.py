@@ -1220,6 +1220,8 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
+    # Excluding preempted VMs is safe as they are already terminated and
+    # do not charge.
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
                  f'"(labels.ray-cluster-name={cluster_name} AND '
                  f'state!=PREEMPTED)" '
