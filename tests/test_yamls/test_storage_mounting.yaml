@@ -11,13 +11,13 @@ file_mounts:
 
   # Mounting private buckets in COPY mode
   /mount_private_copy:
-    name: {{bucket_name}}
+    name: {{storage_name}}
     source: ~/tmp-workdir
     mode: COPY
 
   # Mounting private buckets in MOUNT mode
   /mount_private_mount:
-    name: {{bucket_name}}
+    name: {{storage_name}}
     source: ~/tmp-workdir
     mode: MOUNT
 

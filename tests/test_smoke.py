@@ -373,9 +373,7 @@ def test_storage_mounts():
         test = Test(
             'storage_mounts',
             test_commands,
-            (f'sky down -y {name}-aws {name}-gcp; '
-             'sky storage delete {storage_name}; '
-             storage_teardown_command),
+            f'sky down -y {name}-aws {name}-gcp; sky storage delete {storage_name}; ' + storage_teardown_command,
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
