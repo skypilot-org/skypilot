@@ -94,8 +94,7 @@ def _start(
             raise ValueError('Using autodown (rather than autostop) is not '
                              'supported for the spot controller. Pass '
                              '`down=False` or omit it instead.')
-        if (idle_minutes_to_autostop is not None and idle_minutes_to_autostop !=
-                spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP):
+        if idle_minutes_to_autostop is not None:
             raise ValueError(
                 'Passing a custom autostop setting is currently not '
                 'supported when starting the spot controller. To '
@@ -165,8 +164,8 @@ def start(
         ValueError: the specified cluster does not exist; or if ``down`` is set
           to True but ``idle_minutes_to_autostop`` is None; or if the specified
           cluster is the managed spot controller, and either
-          ``idle_minutes_to_autostop`` is set to a non-default value or
-          ``down`` is True (omit them to use the default autostop settings).
+          ``idle_minutes_to_autostop`` is not None or ``down`` is True (omit
+          them to use the default autostop settings).
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
@@ -629,9 +628,7 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
               'Restarting controller for latest status...'
               f'{colorama.Style.RESET_ALL}')
 
-        handle = _start(spot.SPOT_CONTROLLER_NAME,
-                        idle_minutes_to_autostop=spot.
-                        SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+        handle = _start(spot.SPOT_CONTROLLER_NAME)
 
     if handle is None or handle.head_ip is None:
         raise exceptions.ClusterNotUpError('Spot controller is not up.')
