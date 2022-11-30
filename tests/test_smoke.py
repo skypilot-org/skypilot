@@ -10,6 +10,7 @@ import urllib.parse
 import uuid
 
 import colorama
+import jinja2
 import pytest
 
 import sky
@@ -36,6 +37,8 @@ storage_setup_commands = [
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
 ]
+
+storage_teardown_command = 'rm -rf ~/tmpfile ~/tmp-workdir'
 
 
 class Test(NamedTuple):
@@ -339,7 +342,7 @@ def test_file_mounts():
     test = Test(
         'using_file_mounts',
         test_commands,
-        f'sky down -y {name}',
+        f'sky down -y {name}; ' + storage_teardown_command,
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
@@ -348,12 +351,13 @@ def test_file_mounts():
 # ---------- storage ----------
 def test_storage_mounts():
     name = _get_cluster_name()
-    yaml_str = pathlib.Path(
-        'tests/test_yamls/test_storage_mounting.yaml').read_text()
     storage_name = f'sky-test-{int(time.time())}'
-    yaml_str = yaml_str.replace('random_bucket_name', storage_name)
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
-        f.write(yaml_str)
+        f.write(content)
         f.flush()
         file_path = f.name
         test_commands = [
@@ -369,7 +373,9 @@ def test_storage_mounts():
         test = Test(
             'storage_mounts',
             test_commands,
-            f'sky down -y {name}-aws {name}-gcp; sky storage delete {storage_name}',
+            (f'sky down -y {name}-aws {name}-gcp; '
+             'sky storage delete {storage_name}; '
+             storage_teardown_command),
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)

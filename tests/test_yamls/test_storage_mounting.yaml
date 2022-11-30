@@ -11,13 +11,13 @@ file_mounts:
 
   # Mounting private buckets in COPY mode
   /mount_private_copy:
-    name: random_bucket_name
+    name: {{bucket_name}}
     source: ~/tmp-workdir
     mode: COPY
 
   # Mounting private buckets in MOUNT mode
   /mount_private_mount:
-    name: random_bucket_name
+    name: {{bucket_name}}
     source: ~/tmp-workdir
     mode: MOUNT
 
@@ -37,9 +37,6 @@ run: |
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
   ! ls /mount_private_mount/circle-link
-  
-  # Write to private bucket in COPY mode should fail
-  ! touch /mount_private_copy/myfile
   
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
