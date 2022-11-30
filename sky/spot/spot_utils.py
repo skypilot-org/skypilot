@@ -295,10 +295,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             spot_status = spot_state.get_status(job_id)
             if spot_status.is_terminal():
                 break
-            logger.info(
-                f'{colorama.Fore.YELLOW}The job is preempted or cancelled. '
-                'Waiting for its status to be updated.'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'{colorama.Fore.YELLOW}The job is preempted.'
+                        f'{colorama.Style.RESET_ALL}')
             msg = _JOB_CANCELLED_MESSAGE
             status_display.update(msg)
             prev_msg = msg
