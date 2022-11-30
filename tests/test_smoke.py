@@ -38,8 +38,6 @@ storage_setup_commands = [
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
 ]
 
-storage_teardown_command = 'rm -rf ~/tmpfile ~/tmp-workdir'
-
 
 class Test(NamedTuple):
     name: str
@@ -342,7 +340,7 @@ def test_file_mounts():
     test = Test(
         'using_file_mounts',
         test_commands,
-        f'sky down -y {name}; ' + storage_teardown_command,
+        f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
@@ -373,8 +371,7 @@ def test_storage_mounts():
         test = Test(
             'storage_mounts',
             test_commands,
-            f'sky down -y {name}-aws {name}-gcp; sky storage delete {storage_name}; '
-            + storage_teardown_command,
+            f'sky down -y {name}-aws {name}-gcp; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -1424,3 +1421,4 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
+
