@@ -965,6 +965,7 @@ def test_spot_storage():
         test = Test(
             'managed-spot-storage',
             [
+                *storage_setup_commands,
                 f'sky spot launch -n {name} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
                 f'sky spot queue | grep {name} | grep SUCCEEDED',
