@@ -161,11 +161,12 @@ def start(
             Useful for upgrading SkyPilot runtime.
 
     Raises:
-        ValueError: the specified cluster does not exist; or if ``down`` is set
-          to True but ``idle_minutes_to_autostop`` is None; or if the specified
-          cluster is the managed spot controller, and either
-          ``idle_minutes_to_autostop`` is not None or ``down`` is True (omit
-          them to use the default autostop settings).
+        ValueError: argument values are invalid: (1) the specified cluster does
+          not exist; (2) if ``down`` is set to True but
+          ``idle_minutes_to_autostop`` is None; (3) if the specified cluster is
+          the managed spot controller, and either ``idle_minutes_to_autostop``
+          is not None or ``down`` is True (omit them to use the default
+          autostop settings).
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
