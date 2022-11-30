@@ -77,7 +77,16 @@ class SpotJobUpdateEvent(SkyletEvent):
 
 
 class AutostopEvent(SkyletEvent):
-    """Skylet event for autostop."""
+    """Skylet event for autostop.
+
+    Idleness timer gets set to 0 whenever:
+      - A first autostop setting is set. By "first", either there's never any
+        autostop setting set, or the last autostop setting is a cancel (idle
+        minutes < 0); or
+      - This event wakes up and job_lib.is_cluster_idle() returns False; or
+      - The cluster has restarted; or
+      - A job is submitted (handled in the backend; not here).
+    """
     EVENT_INTERVAL_SECONDS = 60
 
     _UPSCALING_PATTERN = re.compile(r'upscaling_speed: (\d+)')
@@ -85,8 +94,8 @@ class AutostopEvent(SkyletEvent):
 
     def __init__(self):
         super().__init__()
-        self.last_active_time = time.time()
-        self.ray_yaml_path = os.path.abspath(
+        autostop_lib.set_last_active_time_to_now()
+        self._ray_yaml_path = os.path.abspath(
             os.path.expanduser(backend_utils.SKY_RAY_YAML_REMOTE_PATH))
 
     def _run(self):
@@ -94,17 +103,18 @@ class AutostopEvent(SkyletEvent):
 
         if (autostop_config.autostop_idle_minutes < 0 or
                 autostop_config.boot_time != psutil.boot_time()):
-            self.last_active_time = time.time()
+            autostop_lib.set_last_active_time_to_now()
             logger.debug('autostop_config not set. Skipped.')
             return
 
         if job_lib.is_cluster_idle():
-            idle_minutes = (time.time() - self.last_active_time) // 60
+            idle_minutes = (time.time() -
+                            autostop_lib.get_last_active_time()) // 60
             logger.debug(
                 f'Idle minutes: {idle_minutes}, '
                 f'AutoStop config: {autostop_config.autostop_idle_minutes}')
         else:
-            self.last_active_time = time.time()
+            autostop_lib.set_last_active_time_to_now()
             idle_minutes = -1
             logger.debug(
                 'Not idle. Reset idle minutes.'
@@ -118,21 +128,21 @@ class AutostopEvent(SkyletEvent):
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
-            self._replace_yaml_for_stopping(self.ray_yaml_path,
+            self._replace_yaml_for_stopping(self._ray_yaml_path,
                                             autostop_config.down)
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
             subprocess.run([
                 'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
-                self.ray_yaml_path
+                self._ray_yaml_path
             ],
                            check=True)
             # Stop the workers first to avoid orphan workers.
             subprocess.run(
-                ['ray', 'down', '-y', '--workers-only', self.ray_yaml_path],
+                ['ray', 'down', '-y', '--workers-only', self._ray_yaml_path],
                 check=True)
-            subprocess.run(['ray', 'down', '-y', self.ray_yaml_path],
+            subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
                            check=True)
         else:
             raise NotImplementedError

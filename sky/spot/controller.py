@@ -96,7 +96,12 @@ class SpotController:
                          self._cluster_name, force_refresh=True)
                     if cluster_status != global_user_state.ClusterStatus.UP:
                         # recover the cluster if it is not up.
-                        logger.info(f'Cluster status {cluster_status.value}. '
+                        # The status could be None when the cluster is preempted
+                        # right after the job was found FAILED.
+                        cluster_status_str = ('is preempted'
+                                              if cluster_status is None else
+                                              f'status {cluster_status.value}')
+                        logger.info(f'Cluster {cluster_status_str}. '
                                     'Recovering...')
                         need_recovery = True
                 if not need_recovery:
