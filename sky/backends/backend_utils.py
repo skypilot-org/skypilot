@@ -1185,6 +1185,7 @@ def get_node_ips(cluster_yaml: str,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE)
                 out = proc.stdout.decode()
+                break
             except subprocess.CalledProcessError as e:
                 if retry_cnt == worker_ip_max_attempts - 1:
                     raise exceptions.FetchIPError(
