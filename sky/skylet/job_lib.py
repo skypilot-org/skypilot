@@ -10,6 +10,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
 import filelock
 
 from sky import sky_logging
@@ -114,6 +115,17 @@ class JobStatus(enum.Enum):
     def __lt__(self, other):
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
+
+_JOB_STATUS_TO_COLOR = {
+    JobStatus.INIT: colorama.Fore.BLUE,
+    JobStatus.SETTING_UP: colorama.Fore.BLUE,
+    JobStatus.PENDING: colorama.Fore.BLUE,
+    JobStatus.RUNNING: colorama.Fore.GREEN,
+    JobStatus.SUCCEEDED: colorama.Fore.GREEN,
+    JobStatus.FAILED: colorama.Fore.RED,
+    JobStatus.FAILED_SETUP: colorama.Fore.RED,
+    JobStatus.CANCELLED: colorama.Fore.YELLOW,
+}
 
 _RAY_TO_JOB_STATUS_MAP = {
     # These are intentionally set to one status before, because:
@@ -467,6 +479,11 @@ def is_cluster_idle() -> bool:
         return count == 0
 
 
+def _colored_status(status: JobStatus):
+    color = _JOB_STATUS_TO_COLOR[status]
+    return f'{color}{status.value}{colorama.Style.RESET_ALL}'
+
+
 def format_job_queue(jobs: List[Dict[str, Any]]):
     """Format the job queue for display.
 
@@ -488,7 +505,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
                                              job['end_at'],
                                              absolute=True),
             job['resources'],
-            job['status'].value,
+            _colored_status(job['status']),
             job['log_path'],
         ])
     return job_table
