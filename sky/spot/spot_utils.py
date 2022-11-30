@@ -40,6 +40,8 @@ _LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS = 5
 
 _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
                                '{status_str}.[/] It may take a few minutes.')
+_JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
+                          '[/] It may take a minute.')
 
 
 class UserSignal(enum.Enum):
@@ -205,18 +207,23 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                   '{status_str}[/]. It may take a few minutes.')
     status_display = rich.status.Status(status_msg.format(status_str=''))
     with status_display:
+        prev_msg = None
         while (controller_status != job_lib.JobStatus.RUNNING and
                (controller_status is None or
                 not controller_status.is_terminal())):
             status_str = 'None'
             if controller_status is not None:
                 status_str = controller_status.value
-            status_display.update(
-                status_msg.format(status_str=f' (status: {status_str})'))
+            msg = status_msg.format(status_str=f' (status: {status_str})')
+            if msg != prev_msg:
+                status_display.update(msg)
+                prev_msg = msg
             time.sleep(_LOG_STREAM_CHECK_CONTROLLER_GAP_SECONDS)
             controller_status = job_lib.get_status(job_id)
 
-        status_display.update(_JOB_WAITING_STATUS_MESSAGE.format(status_str=''))
+        msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='')
+        status_display.update(msg)
+        prev_msg = msg
         job_status = spot_state.get_status(job_id)
         while job_status is None:
             time.sleep(1)
@@ -253,8 +260,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 logger.debug(
                     f'INFO: The log is not ready yet{status_str}. '
                     f'Waiting for {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
-                status_display.update(
-                    _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str))
+                msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str=status_str)
+                if msg != prev_msg:
+                    status_display.update(msg)
+                    prev_msg = msg
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
@@ -286,15 +295,20 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             spot_status = spot_state.get_status(job_id)
             if spot_status.is_terminal():
                 break
-            status_display.update(
-                _JOB_WAITING_STATUS_MESSAGE.format(status_str=''))
+            logger.info(
+                f'{colorama.Fore.YELLOW}The job is preempted or cancelled. '
+                'Waiting for its status to be updated.'
+                f'{colorama.Style.RESET_ALL}')
+            msg = _JOB_CANCELLED_MESSAGE
+            status_display.update(msg)
+            prev_msg = msg
             status_display.start()
             # If the tailing fails, it is likely that the cluster fails, so we
             # wait a while to make sure the spot state is updated by the
             # controller, and check the spot queue again.
             # Wait a bit longer than the controller, so as to make sure the
             # spot state is updated.
-            time.sleep(2.1 * JOB_STATUS_CHECK_GAP_SECONDS)
+            time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             spot_status = spot_state.get_status(job_id)
 
     # The spot_status may not be in terminal status yet, since the controllerhas
