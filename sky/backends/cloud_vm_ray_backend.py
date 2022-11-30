@@ -2623,7 +2623,8 @@ class CloudVmRayBackend(backends.Backend):
 
                     query_cmd = (
                         f'gcloud compute tpus tpu-vm list --filter='
-                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                        f'"(labels.ray-cluster-name={cluster_name} AND '
+                        f'state!=PREEMPTED)" '
                         f'--zone={zone} --format=value\\(name\\)')
                     terminate_cmd = (
                         f'gcloud compute tpus tpu-vm delete --zone={zone}'

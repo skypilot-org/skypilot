@@ -1221,7 +1221,8 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
+                 f'"(labels.ray-cluster-name={cluster_name} AND '
+                 f'state!=PREEMPTED)" '
                  f'--zone={zone} --format=value\\(name\\)')
     if not get_internal_ips:
         tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
@@ -1242,10 +1243,14 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                            '**** STDOUT ****\n'
                            '{stdout}\n'
                            '**** STDERR ****\n'
-                           '{stderr}')
+                           '{stderr}\n'
+                           '**** CMD ****\n'
+                           '{tpuvm_cmd}')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                failure_massage.format(stdout=stdout, stderr=stderr))
+                failure_massage.format(stdout=stdout,
+                                       stderr=stderr,
+                                       tpuvm_cmd=tpuvm_cmd))
     all_ips = re.findall(IP_ADDR_REGEX, stdout)
     return all_ips
 
