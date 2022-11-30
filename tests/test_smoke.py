@@ -1421,4 +1421,3 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
-
