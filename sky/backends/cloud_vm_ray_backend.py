@@ -1678,6 +1678,13 @@ class CloudVmRayBackend(backends.Backend):
                 head_ip_max_attempts=max_attempts,
                 worker_ip_max_attempts=max_attempts,
                 get_internal_ips=False)
+
+            if self.external_ips() == cluster_external_ips:
+                # Optimization: If the cached external IPs are the same as the
+                # retrieved external IPs, then we can skip retrieving internal
+                # IPs since the cached IPs are updated.
+                return
+
             cluster_internal_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
                 self.launched_nodes,
