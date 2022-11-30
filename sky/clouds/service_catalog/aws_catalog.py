@@ -10,6 +10,10 @@ from sky.clouds.service_catalog import common
 
 _df = common.read_catalog('aws.csv')
 
+# https://aws.amazon.com/ebs/pricing/
+# gp3 standard, per gb per month
+DISK_PRICE = 0.08
+
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
@@ -25,6 +29,11 @@ def accelerator_in_region_or_zone(acc_name: str,
                                   zone: Optional[str] = None) -> bool:
     return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
                                                      region, zone)
+
+
+def get_hourly_disk_cost(disk_size: int) -> float:
+    """Returns the hourly cost for disk."""
+    return common.get_hourly_disk_cost_impl(DISK_PRICE, disk_size)
 
 
 def get_hourly_cost(instance_type: str,

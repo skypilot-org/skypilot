@@ -122,6 +122,10 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
     }
 }
 
+# https://cloud.google.com/compute/disks-image-pricing
+# provisioned standard, per gb per month
+DISK_PRICE = 0.04
+
 
 def _is_power_of_two(x: int) -> bool:
     """Returns true if x is a power of two."""
@@ -141,6 +145,11 @@ def instance_type_exists(instance_type: str) -> bool:
     if instance_type == 'TPU-VM':
         return True
     return common.instance_type_exists_impl(_df, instance_type)
+
+
+def get_hourly_disk_cost(disk_size: int) -> float:
+    """Returns the hourly cost for disk."""
+    return common.get_hourly_disk_cost_impl(DISK_PRICE, disk_size)
 
 
 def get_hourly_cost(

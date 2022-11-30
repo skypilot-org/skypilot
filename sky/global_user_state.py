@@ -575,7 +575,10 @@ def get_cost_for_cluster(cluster_name: str,) -> float:
 
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
-    return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
+    vm_cost = get_cost_for_usage_intervals(cluster_hash, usage_intervals)
+    disk_cost = get_cost_for_disk(cluster_hash, usage_intervals)
+
+    return vm_cost + disk_cost
 
 
 def get_cost_for_usage_intervals(
@@ -598,4 +601,20 @@ def get_cost_for_usage_intervals(
 
     cost = (resources.get_cost(total_duration) * num_nodes)
 
+    return cost
+
+
+def get_cost_for_disk(
+    cluster_hash: str,
+    usage_intervals: List[Tuple[int, int]],
+) -> float:
+
+    assert len(usage_intervals) > 0
+    launch_time = usage_intervals[0][0]
+    query_time = int(time.time())
+    total_duration = query_time - launch_time
+
+    _, resources = get_launched_resources_from_cluster_hash(cluster_hash)
+
+    cost = resources.get_disk_cost(total_duration)
     return cost

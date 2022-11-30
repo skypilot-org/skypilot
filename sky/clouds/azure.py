@@ -38,6 +38,10 @@ class Azure(clouds.Cloud):
     _REPR = 'Azure'
     _regions: List[clouds.Region] = []
 
+    def get_standard_hourly_disk_cost(self, disk_size):
+        """Returns the standard hourly disk cost given disk size."""
+        return service_catalog.get_hourly_disk_cost(disk_size, clouds='azure')
+
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         return service_catalog.get_hourly_cost(instance_type,
                                                region=None,

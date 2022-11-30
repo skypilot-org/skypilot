@@ -135,6 +135,10 @@ class AWS(clouds.Cloud):
 
     #### Normal methods ####
 
+    def get_standard_hourly_disk_cost(self, disk_size):
+        """Returns the standard hourly disk cost given disk size."""
+        return service_catalog.get_hourly_disk_cost(disk_size, clouds='aws')
+
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
         return service_catalog.get_hourly_cost(instance_type,
                                                region=None,

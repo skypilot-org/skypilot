@@ -408,6 +408,13 @@ class Resources:
                 self.accelerators, self.use_spot)
         return hourly_cost * hours
 
+    def get_disk_cost(self, seconds: float) -> float:
+        """Returns cost in USD for the runtime in seconds."""
+        hours = seconds / 3600
+        # Instance.
+        hourly_cost = self.cloud.get_standard_hourly_disk_cost(self.disk_size)
+        return hourly_cost * hours
+
     def is_same_resources(self, other: 'Resources') -> bool:
         """Returns whether two resources are the same.
 

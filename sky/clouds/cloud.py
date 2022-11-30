@@ -102,6 +102,10 @@ class Cloud:
 
     #### Normal methods ####
 
+    def get_standard_hourly_disk_cost(self, disk_size):
+        """Returns the standard hourly disk cost given disk size."""
+        raise NotImplementedError
+
     # TODO: incorporate region/zone into the API.
     def instance_type_to_hourly_cost(self, instance_type, use_spot):
         """Returns the hourly on-demand/spot price for an instance type."""

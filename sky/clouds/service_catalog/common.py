@@ -138,6 +138,16 @@ def validate_region_zone_impl(df: pd.DataFrame, region: Optional[str],
                 raise ValueError(error_msg)
 
 
+def get_hourly_disk_cost_impl(
+    disk_price: float,
+    disk_size: int,
+) -> float:
+    """Returns the hourly cost for given disk."""
+    average_days_in_month = 30.437
+    hours_in_month = 24 * average_days_in_month
+    return (disk_price * disk_size) / hours_in_month
+
+
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,

@@ -127,6 +127,11 @@ def get_region_zones_for_instance_type(
                                instance_type, use_spot)
 
 
+def get_hourly_disk_cost(disk_size: int, clouds: CloudFilter = None):
+    """Returns the cost, or the cheapest cost among all zones for spot."""
+    return _map_clouds_catalog(clouds, 'get_hourly_disk_cost', disk_size)
+
+
 def get_hourly_cost(instance_type: str,
                     region: Optional[str],
                     use_spot: bool,
