@@ -83,13 +83,18 @@ By default, SkyPilot only supports the US regions on different clouds for conven
 
 .. code-block:: bash
 
-  mkdir -p ~/.sky/catalogs/v4
-  cd ~/.sky/catalogs/v4
+  version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
+  mkdir -p ~/.sky/catalogs/${version}
+  cd ~/.sky/catalogs/${version}
   # Fetch all regions for AWS
-  python -m sky.clouds.service_catalog.data_fetchers.fetch_aws --all-regions
+  # Note: By default, SkyPilot already uses all global regions for AWS, and will periodically update the price
+  # manually running this command will disable the automatic update.
+  # python -m sky.clouds.service_catalog.data_fetchers.fetch_aws --all-regions
+
   # Fetch all regions for GCP
   pip install lxml
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
+  
   # Fetch all regions for Azure
   python -m sky.clouds.service_catalog.data_fetchers.fetch_azure --all-regions
 
