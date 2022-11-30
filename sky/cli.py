@@ -2103,8 +2103,8 @@ def _down_or_stop_clusters(
         command = 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
-            f'`sky {command}` requires either a cluster name (see `sky status`) '
-            'or --all.')
+            f'`sky {command}` requires either a cluster name (see `sky status`)'
+            ' or --all.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
