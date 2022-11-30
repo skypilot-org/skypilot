@@ -1687,7 +1687,7 @@ class CloudVmRayBackend(backends.Backend):
                 get_internal_ips=True)
 
             assert len(cluster_external_ips) == len(cluster_internal_ips), (
-                f'Expected same number of internal IPs {cluster_internal_ips}'
+                f'Cluster {self.cluster_name!r}: Expected same number of internal IPs {cluster_internal_ips}'
                 f' and external IPs {cluster_external_ips}.')
 
             internal_external_ips = list(
