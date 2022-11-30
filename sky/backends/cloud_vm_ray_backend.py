@@ -70,8 +70,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching IP address.
-_HEAD_IP_MAX_ATTEMPTS = 5
-_WORKER_IP_MAX_ATTEMPTS = 5
+_FETCH_IP_MAX_ATTEMPTS = 5
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
@@ -271,7 +270,7 @@ class RayCodeGen:
         self,
         num_nodes: int,
         accelerator_dict: Dict[str, int],
-        cluster_ips_sorted: Optional[List[str]] = None,
+        stable_cluster_internal_ips: List[str],
     ) -> None:
         """Create the gang scheduling placement group for a Task.
 
@@ -343,14 +342,10 @@ class RayCodeGen:
                 ])
                 print('INFO: Reserved IPs:', gang_scheduling_id_to_ip)
 
-                if {cluster_ips_sorted!r} is not None:
-                    cluster_ips_map = {{ip: i for i, ip in enumerate({cluster_ips_sorted!r})}}
-                    ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_map.get)
-                    ip_rank_map = {{ip: i for i, ip in enumerate(ip_rank_list)}}
-                    ip_list_str = '\\n'.join(ip_rank_list)
-                else:
-                    ip_rank_map = {{ip: i for i, ip in enumerate(gang_scheduling_id_to_ip)}}
-                    ip_list_str = '\\n'.join(gang_scheduling_id_to_ip)
+                cluster_ips_to_node_id = {{ip: i for i, ip in enumerate({stable_cluster_internal_ips!r})}}
+                job_ip_rank_list = sorted(gang_scheduling_id_to_ip, key=cluster_ips_to_node_id.get)
+                job_ip_rank_map = {{ip: i for i, ip in enumerate(job_ip_rank_list)}}
+                job_ip_list_str = '\\n'.join(job_ip_rank_list)
                 """),
         ]
 
@@ -377,24 +372,19 @@ class RayCodeGen:
                      task_name: Optional[str],
                      job_run_id: Optional[str],
                      ray_resources_dict: Optional[Dict[str, float]],
-                     log_path: str,
+                     log_dir: str,
                      env_vars: Dict[str, str] = None,
                      gang_scheduling_id: int = 0,
                      use_sudo: bool = False) -> None:
         """Generates code for a ray remote task that runs a bash command."""
         assert self._has_gang_scheduling, (
-            'Call add_gang_schedule_placement_group() before add_ray_task().')
+            'Call add_gang_scheduling_placement_group() before add_ray_task().')
         assert (not self._has_register_run_fn or
                 bash_script is None), ('bash_script should '
                                        'be None when run_fn is registered.')
         # Build remote_task.options(...)
-        #   name=...
         #   resources=...
         #   num_gpus=...
-        name_str = f'name=\'{task_name}\''
-        if task_name is None:
-            # Make the task name more meaningful in ray log.
-            name_str = 'name=\'task\''
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
@@ -422,9 +412,9 @@ class RayCodeGen:
         sky_env_vars_dict_str = [
             textwrap.dedent("""\
             sky_env_vars_dict = dict()
-            sky_env_vars_dict['SKYPILOT_NODE_IPS'] = ip_list_str
+            sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
             # Environment starting with `SKY_` is deprecated.
-            sky_env_vars_dict['SKY_NODE_IPS'] = ip_list_str
+            sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
             """)
         ]
 
@@ -439,7 +429,7 @@ class RayCodeGen:
         sky_env_vars_dict_str = '\n'.join(sky_env_vars_dict_str)
 
         logger.debug('Added Task with options: '
-                     f'{name_str}{cpu_str}{resources_str}{num_gpus_str}')
+                     f'{cpu_str}{resources_str}{num_gpus_str}')
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
@@ -447,7 +437,6 @@ class RayCodeGen:
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
-        log_path = os.path.expanduser({log_path!r})
 
         if script is not None:
             sky_env_vars_dict['SKYPILOT_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
@@ -455,16 +444,29 @@ class RayCodeGen:
             sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
-            sky_env_vars_dict['SKYPILOT_NODE_RANK'] = ip_rank_map[ip]
+            rank = job_ip_rank_map[ip]
+
+            if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
+                name_str = '{task_name},' if {task_name!r} is not None else 'task,'
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
+            else: # Single-node or multi-node task on multi-node cluster
+                idx_in_cluster = cluster_ips_to_node_id[ip]
+                if cluster_ips_to_node_id[ip] == 0:
+                    node_name = 'head'
+                else:
+                    node_name = f'worker{{idx_in_cluster}}'
+                name_str = f'{{node_name}}, rank={{rank}},'
+                log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{rank}}-{{node_name}}.log'))
+            sky_env_vars_dict['SKYPILOT_NODE_RANK'] = rank
             # Environment starting with `SKY_` is deprecated.
-            sky_env_vars_dict['SKY_NODE_RANK'] = ip_rank_map[ip]
+            sky_env_vars_dict['SKY_NODE_RANK'] = rank
 
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
-                    .options({name_str}{cpu_str}{resources_str}{num_gpus_str}) \\
+                    .options(name=name_str{cpu_str}{resources_str}{num_gpus_str}) \\
                     .remote(
                         script,
                         log_path,
@@ -1063,8 +1065,8 @@ class RetryingVmProvisioner(object):
                 'zone_str': zone_str,
             }
             status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
-                to_provision.cloud, num_nodes, cluster_config_file, handle,
-                log_abs_path, stream_logs, logging_info, to_provision.use_spot)
+                to_provision.cloud, cluster_config_file, handle, log_abs_path,
+                stream_logs, logging_info, to_provision.use_spot)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1146,17 +1148,14 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(message)
 
     def _tpu_pod_setup(self, cluster_yaml: str,
-                       cluster_handle: 'backends.Backend.ResourceHandle',
-                       num_nodes: int):
+                       cluster_handle: 'backends.Backend.ResourceHandle'):
         """Completes setup and start Ray cluster on TPU VM Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        all_ips = backend_utils.get_node_ips(cluster_yaml,
-                                             num_nodes,
-                                             handle=cluster_handle)
+        all_ips = cluster_handle.external_ips()
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
         if len(all_ips) != num_tpu_devices:
@@ -1190,8 +1189,7 @@ class RetryingVmProvisioner(object):
 
     @timeline.event
     def _gang_schedule_ray_up(
-            self, to_provision_cloud: clouds.Cloud, num_nodes: int,
-            cluster_config_file: str,
+            self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
             cluster_handle: 'backends.Backend.ResourceHandle',
             log_abs_path: str, stream_logs: bool, logging_info: dict,
             use_spot: bool
@@ -1344,10 +1342,10 @@ class RetryingVmProvisioner(object):
         if tpu_utils.is_tpu_vm_pod(resources):
             logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
                         f'{style.RESET_ALL}')
-            self._tpu_pod_setup(cluster_config_file, cluster_handle, num_nodes)
+            self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
         # Only 1 node or head node provisioning failure.
-        if num_nodes == 1 and returncode == 0:
+        if cluster_handle.launched_nodes == 1 and returncode == 0:
             # Optimization: Try parse head ip from 'ray up' stdout.
             # Last line looks like: 'ssh ... <user>@<public head_ip>\n'
             position = stdout.rfind('@')
@@ -1383,7 +1381,7 @@ class RetryingVmProvisioner(object):
         # stop, then launch again.
         cluster_ready = backend_utils.wait_until_ray_cluster_ready(
             cluster_config_file,
-            num_nodes,
+            cluster_handle.launched_nodes,
             log_path=log_abs_path,
             nodes_launching_progress_timeout=_NODES_LAUNCHING_PROGRESS_TIMEOUT,
             is_local_cloud=isinstance(to_provision_cloud, clouds.Local))
@@ -1561,27 +1559,32 @@ class CloudVmRayBackend(backends.Backend):
         - (required) Path to a cluster.yaml file.
         - (optional) A cached head node public IP.  Filled in after a
             successful provision().
+        - (optional) A cached stable list of (internal IP, external IP) tuples
+         for all nodes in a cluster. Filled in after successful task execution.
         - (optional) Launched num nodes
         - (optional) Launched resources
         - (optional) If TPU(s) are managed, a path to a deletion script.
         """
-        _VERSION = 2
+        _VERSION = 3
 
-        def __init__(self,
-                     *,
-                     cluster_name: str,
-                     cluster_yaml: str,
-                     head_ip: Optional[str] = None,
-                     launched_nodes: Optional[int] = None,
-                     launched_resources: Optional[
-                         resources_lib.Resources] = None,
-                     tpu_create_script: Optional[str] = None,
-                     tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(
+                self,
+                *,
+                cluster_name: str,
+                cluster_yaml: str,
+                stable_internal_external_ips: Optional[List[Tuple[str,
+                                                                  str]]] = None,
+                launched_nodes: Optional[int] = None,
+                launched_resources: Optional[resources_lib.Resources] = None,
+                tpu_create_script: Optional[str] = None,
+                tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
                                                       '~', 1)
-            self.head_ip = head_ip
+            # List of (internal_ip, external_ip) tuples for all the nodes
+            # in the cluster, sorted by the external ips.
+            self.stable_internal_external_ips = stable_internal_external_ips
             self.launched_nodes = launched_nodes
             self.launched_resources = launched_resources
             self.tpu_create_script = tpu_create_script
@@ -1592,6 +1595,8 @@ class CloudVmRayBackend(backends.Backend):
             return (f'ResourceHandle('
                     f'\n\tcluster_name={self.cluster_name},'
                     f'\n\thead_ip={self.head_ip},'
+                    '\n\tstable_internal_external_ips='
+                    f'{self.stable_internal_external_ips},'
                     '\n\tcluster_yaml='
                     f'{self.cluster_yaml}, '
                     f'\n\tlaunched_resources={self.launched_nodes}x '
@@ -1664,9 +1669,72 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
+        def _update_stable_cluster_ips(self,
+                                       max_attempts: int = 1) -> List[str]:
+            cluster_external_ips = backend_utils.get_node_ips(
+                self.cluster_yaml,
+                self.launched_nodes,
+                handle=self,
+                head_ip_max_attempts=max_attempts,
+                worker_ip_max_attempts=max_attempts,
+                get_internal_ips=False)
+
+            if self.external_ips() == cluster_external_ips:
+                # Optimization: If the cached external IPs are the same as the
+                # retrieved external IPs, then we can skip retrieving internal
+                # IPs since the cached IPs are up-to-date.
+                return
+
+            cluster_internal_ips = backend_utils.get_node_ips(
+                self.cluster_yaml,
+                self.launched_nodes,
+                handle=self,
+                head_ip_max_attempts=max_attempts,
+                worker_ip_max_attempts=max_attempts,
+                get_internal_ips=True)
+
+            assert len(cluster_external_ips) == len(cluster_internal_ips), (
+                f'Cluster {self.cluster_name!r}:'
+                f'Expected same number of internal IPs {cluster_internal_ips}'
+                f' and external IPs {cluster_external_ips}.')
+
+            internal_external_ips = list(
+                zip(cluster_internal_ips, cluster_external_ips))
+
+            # Ensure head node is the first element, then sort based on the
+            # external IPs for stableness
+            stable_internal_external_ips = [internal_external_ips[0]] + sorted(
+                internal_external_ips[1:], key=lambda x: x[1])
+            self.stable_internal_external_ips = stable_internal_external_ips
+
+        def internal_ips(self,
+                         max_attempts: int = 1,
+                         use_cached_ips: bool = True):
+            if not use_cached_ips:
+                self._update_stable_cluster_ips(max_attempts=max_attempts)
+            if self.stable_internal_external_ips is not None:
+                return [ips[0] for ips in self.stable_internal_external_ips]
+            return None
+
+        def external_ips(self,
+                         max_attempts: int = 1,
+                         use_cached_ips: bool = True):
+            if not use_cached_ips:
+                self._update_stable_cluster_ips(max_attempts=max_attempts)
+            if self.stable_internal_external_ips is not None:
+                return [ips[1] for ips in self.stable_internal_external_ips]
+            return None
+
         @property
         def cluster_yaml(self):
             return os.path.expanduser(self._cluster_yaml)
+
+        @property
+        def head_ip(self):
+            external_ips = self.external_ips()
+            if external_ips is not None:
+                return external_ips[0]
+            return None
 
         def __setstate__(self, state):
             self._version = self._VERSION
@@ -1677,8 +1745,22 @@ class CloudVmRayBackend(backends.Backend):
                 state.pop('cluster_region', None)
             if version < 2:
                 state['_cluster_yaml'] = state.pop('cluster_yaml')
+            if version < 3:
+                head_ip = state.pop('head_ip', None)
+                state['stable_internal_external_ips'] = None
 
             self.__dict__.update(state)
+
+            # Because the _update_stable_cluster_ips function uses the handle,
+            # we call it on the current instance after the state is updated
+            if version < 3 and head_ip is not None:
+                try:
+                    self._update_stable_cluster_ips()
+                except exceptions.FetchIPError:
+                    # This occurs when an old cluster from was autostopped,
+                    # so the head IP in the database is not updated.
+                    pass
+
             self._update_cluster_region()
 
     def __init__(self):
@@ -1864,37 +1946,20 @@ class CloudVmRayBackend(backends.Backend):
                 return
             cluster_config_file = config_dict['ray']
 
-            if 'tpu_name' in config_dict:
-                self._set_tpu_name(cluster_config_file,
-                                   config_dict['launched_nodes'],
-                                   config_dict['tpu_name'])
-
-            if config_dict['launched_nodes'] == 1 and config_dict[
-                    'head_ip'] is not None:
-                # Optimization for 1-node: we may have parsed the stdout of
-                # 'ray up' to get the head_ip already.
-                head_ip = config_dict['head_ip']
-                ip_list = [head_ip]
-            else:
-                # NOTE: querying node_ips is expensive, observed 1node GCP >=4s.
-                with timeline.Event('backend.provision.get_node_ips'):
-                    ip_list = backend_utils.get_node_ips(
-                        cluster_config_file,
-                        config_dict['launched_nodes'],
-                        head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                        worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
-                    head_ip = ip_list[0]
-
             handle = self.ResourceHandle(
                 cluster_name=cluster_name,
                 cluster_yaml=cluster_config_file,
-                # Cache head ip in the handle to speed up ssh operations.
-                head_ip=head_ip,
                 launched_nodes=config_dict['launched_nodes'],
                 launched_resources=config_dict['launched_resources'],
                 # TPU.
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
+
+            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
+                                          use_cached_ips=False)
+
+            if 'tpu_name' in config_dict:
+                self._set_tpu_name(handle, config_dict['tpu_name'])
 
             # Get actual zone info and save it into handle.
             # NOTE: querying zones is expensive, observed 1node GCP >=4s.
@@ -1980,9 +2045,7 @@ class CloudVmRayBackend(backends.Backend):
         # e.g., in CLI.  So we should rerun rsync_up.
         fore = colorama.Fore
         style = colorama.Style
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = handle.external_ips()
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -2062,12 +2125,7 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = backend_utils.get_node_ips(
-                handle.cluster_yaml,
-                handle.launched_nodes,
-                handle=handle,
-                head_ip_max_attempts=_HEAD_IP_MAX_ATTEMPTS,
-                worker_ip_max_attempts=_WORKER_IP_MAX_ATTEMPTS)
+            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             # Disable connection sharing for setup script to avoid old
@@ -2463,9 +2521,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
                         f'{style.RESET_ALL}')
 
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2806,9 +2862,8 @@ class CloudVmRayBackend(backends.Backend):
         **kwargs,
     ) -> Union[int, Tuple[int, str, str]]:
         """Runs 'cmd' on the cluster's head node."""
-        max_attempts = 1 if use_cached_head_ip else _HEAD_IP_MAX_ATTEMPTS
         head_ip = backend_utils.get_head_ip(handle, use_cached_head_ip,
-                                            max_attempts)
+                                            _FETCH_IP_MAX_ATTEMPTS)
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runner = command_runner.SSHCommandRunner(head_ip, **ssh_credentials)
@@ -2873,12 +2928,11 @@ class CloudVmRayBackend(backends.Backend):
                                                        to_provision,
                                                        task.num_nodes)
 
-    def _set_tpu_name(self, cluster_config_file: str, num_nodes: int,
-                      tpu_name: str) -> None:
+    def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
-        ip_list = backend_utils.get_node_ips(cluster_config_file, num_nodes)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
-            cluster_config_file)
+            handle.cluster_yaml)
 
         runners = command_runner.SSHCommandRunner.make_runner_list(
             ip_list, **ssh_credentials)
@@ -2909,9 +2963,7 @@ class CloudVmRayBackend(backends.Backend):
         style = colorama.Style
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3055,9 +3107,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing {len(storage_mounts)} '
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
-        ip_list = backend_utils.get_node_ips(handle.cluster_yaml,
-                                             handle.launched_nodes,
-                                             handle=handle)
+        ip_list = handle.external_ips()
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3089,7 +3139,6 @@ class CloudVmRayBackend(backends.Backend):
                                detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
-        log_path = os.path.join(log_dir, 'run.log')
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
 
@@ -3101,7 +3150,10 @@ class CloudVmRayBackend(backends.Backend):
                              envs=task.envs,
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
-        codegen.add_gang_scheduling_placement_group(1, accelerator_dict)
+        codegen.add_gang_scheduling_placement_group(
+            1,
+            accelerator_dict,
+            stable_cluster_internal_ips=handle.internal_ips())
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3124,7 +3176,7 @@ class CloudVmRayBackend(backends.Backend):
             task_name=task.name,
             job_run_id=job_run_id,
             ray_resources_dict=backend_utils.get_task_demands_dict(task),
-            log_path=log_path,
+            log_dir=log_dir,
             use_sudo=use_sudo)
 
         codegen.add_epilogue()
@@ -3153,15 +3205,6 @@ class CloudVmRayBackend(backends.Backend):
         else:
             num_actual_nodes = task.num_nodes
 
-        cluster_internal_ips = backend_utils.get_node_ips(handle.cluster_yaml,
-                                                          handle.launched_nodes,
-                                                          handle=handle,
-                                                          get_internal_ips=True)
-        # Ensure head node is the first element, then sort the remaining IPs
-        # for stableness
-        cluster_ips_sorted = [cluster_internal_ips[0]] + sorted(
-            cluster_internal_ips[1:])
-
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
         codegen.add_prologue(job_id,
@@ -3173,7 +3216,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            cluster_ips_sorted=cluster_ips_sorted)
+            stable_cluster_internal_ips=handle.internal_ips())
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3195,16 +3238,14 @@ class CloudVmRayBackend(backends.Backend):
 
             # Ray's per-node resources, to constrain scheduling each command to
             # the corresponding node, represented by private IPs.
-            name = f'node-{i}'
-            log_path = os.path.join(f'{log_dir}', f'{name}.log')
             use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
             codegen.add_ray_task(
                 bash_script=command_for_node,
                 env_vars=task.envs,
-                task_name=name,
+                task_name=task.name,
                 job_run_id=job_run_id,
                 ray_resources_dict=accelerator_dict,
-                log_path=log_path,
+                log_dir=log_dir,
                 gang_scheduling_id=i,
                 use_sudo=use_sudo,
             )
