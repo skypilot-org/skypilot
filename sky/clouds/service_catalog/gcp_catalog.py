@@ -17,6 +17,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
+# TODO(zhwu): Make the catalog include all the regions.
 _df = common.read_catalog('gcp/vms.csv')
 _image_df = common.read_catalog('gcp/images.csv')
 

@@ -254,6 +254,13 @@ def _interactive_node_cli_command(cli_func):
                                type=str,
                                required=False,
                                help='The zone to use.')
+    area_option = click.option(
+        '--area',
+        required=False,
+        type=str,
+        help=(
+            'The geographical area that limits the regions/zones to be tried. '
+            f'Must be one of {service_catalog.AREA_FILTERS}.'))
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
@@ -268,6 +275,7 @@ def _interactive_node_cli_command(cli_func):
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
         region_option,
         zone_option,
+        area_option,
         instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
@@ -329,6 +337,14 @@ _TASK_OPTIONS = [
         type=str,
         help=('The zone to use. If specified, overrides the '
               '"resources.zone" config. Passing "none" resets the config.')),
+    click.option(
+        '--area',
+        required=False,
+        type=str,
+        help=(
+            'The geographical area that limits the regions/zones to be tried. '
+            f'Must be one of {service_catalog.AREA_FILTERS}. '
+            'If specified, overrides the "resources.area" config.')),
     click.option(
         '--num-nodes',
         required=False,
@@ -556,6 +572,7 @@ def _add_click_options(options: List[click.Option]):
 def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            zone: Optional[str] = None,
+                           area: Optional[str] = None,
                            gpus: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
@@ -578,6 +595,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['zone'] = None
         else:
             override_params['zone'] = zone
+    if area is not None:
+        if area.lower() == 'none':
+            override_params['area'] = None
+        else:
+            override_params['area'] = area
     if gpus is not None:
         if gpus.lower() == 'none':
             override_params['accelerators'] = None
@@ -908,6 +930,7 @@ def _make_task_from_entrypoint_with_overrides(
     cloud: Optional[str] = None,
     region: Optional[str] = None,
     zone: Optional[str] = None,
+    area: Optional[str] = None,
     gpus: Optional[str] = None,
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
@@ -949,6 +972,7 @@ def _make_task_from_entrypoint_with_overrides(
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
                                              zone=zone,
+                                             area=area,
                                              gpus=gpus,
                                              instance_type=instance_type,
                                              use_spot=use_spot,
@@ -1154,6 +1178,7 @@ def launch(
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
+    area: Optional[str],
     gpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
@@ -1189,6 +1214,7 @@ def launch(
         cloud=cloud,
         region=region,
         zone=zone,
+        area=area,
         gpus=gpus,
         instance_type=instance_type,
         num_nodes=num_nodes,
@@ -1249,6 +1275,7 @@ def exec(
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
+    area: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
     instance_type: Optional[str],
@@ -1333,6 +1360,7 @@ def exec(
         cloud=cloud,
         region=region,
         zone=zone,
+        area=area,
         gpus=gpus,
         instance_type=instance_type,
         use_spot=use_spot,
@@ -2242,11 +2270,11 @@ def _down_or_stop_clusters(
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], gpus: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int],
-            idle_minutes_to_autostop: Optional[int], down: bool,
-            retry_until_up: bool):
+            area: Optional[str], instance_type: Optional[str],
+            gpus: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -2297,6 +2325,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=cloud_provider,
                               region=region,
                               zone=zone,
+                              area=area,
                               instance_type=instance_type,
                               accelerators=gpus,
                               use_spot=use_spot,
@@ -2321,10 +2350,11 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
-            down: bool, retry_until_up: bool):
+            area: Optional[str], instance_type: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2372,6 +2402,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=cloud_provider,
                               region=region,
                               zone=zone,
+                              area=area,
                               instance_type=instance_type,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2394,7 +2425,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            region: Optional[str], zone: Optional[str],
+            region: Optional[str], zone: Optional[str], area: Optional[str],
             instance_type: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
@@ -2452,6 +2483,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     resources = sky.Resources(cloud=sky.GCP(),
                               region=region,
                               zone=zone,
+                              area=area,
                               instance_type=instance_type,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
@@ -2823,6 +2855,7 @@ def spot_launch(
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
+    area: Optional[str],
     gpus: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
@@ -2861,6 +2894,7 @@ def spot_launch(
         cloud=cloud,
         region=region,
         zone=zone,
+        area=area,
         gpus=gpus,
         instance_type=instance_type,
         num_nodes=num_nodes,
@@ -3137,6 +3171,7 @@ def benchmark_launch(
     cloud: Optional[str],
     region: Optional[str],
     zone: Optional[str],
+    area: Optional[str],
     gpus: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -3186,6 +3221,9 @@ def benchmark_launch(
         if zone is not None:
             if any('zone' in candidate for candidate in candidates):
                 raise click.BadParameter(f'zone {message}')
+        if area is not None:
+            if any('area' in candidate for candidate in candidates):
+                raise click.BadParameter(f'area {message}')
         if gpus is not None:
             if any('accelerators' in candidate for candidate in candidates):
                 raise click.BadParameter(f'gpus (accelerators) {message}')

@@ -10,6 +10,7 @@ from sky.clouds.service_catalog import common
 from sky.clouds.service_catalog import constants
 from sky.utils import ux_utils
 
+# TODO(zhwu): Make the catalog include all the regions.
 _df = common.read_catalog('azure/vms.csv')
 
 
