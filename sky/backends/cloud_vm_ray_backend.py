@@ -1709,21 +1709,21 @@ class CloudVmRayBackend(backends.Backend):
 
         def internal_ips(self,
                          max_attempts: int = 1,
-                         use_cached_ips: bool = True):
+                         use_cached_ips: bool = True) -> List[str]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
                 return [ips[0] for ips in self.stable_internal_external_ips]
-            return None
+            return []
 
         def external_ips(self,
                          max_attempts: int = 1,
-                         use_cached_ips: bool = True):
+                         use_cached_ips: bool = True) -> List[str]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
                 return [ips[1] for ips in self.stable_internal_external_ips]
-            return None
+            return []
 
         @property
         def cluster_yaml(self):
