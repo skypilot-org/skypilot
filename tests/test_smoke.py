@@ -523,14 +523,12 @@ def test_tpu_vm():
 
 
 # ---------- TPU VM Pod. ----------
-# Mark slow because it's expensive to run.
-@pytest.mark.slow
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
         'tpu_pod',
         [
-            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32 --use-spot --zone europe-west4-a',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],

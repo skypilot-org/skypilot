@@ -48,6 +48,7 @@ from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
@@ -1152,10 +1153,11 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
         assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
-        if len(ips) != expected_num_nodes:
+        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -1626,7 +1628,7 @@ def _update_cluster_status_no_lock(
         # in ray's get IPs vs. ray runtime failing.
         external_ips = handle.external_ips(use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if len(external_ips) == 0:
+        if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
@@ -1694,8 +1696,10 @@ def _update_cluster_status_no_lock(
         # that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        global_user_state.set_cluster_status(
-            cluster_name, global_user_state.ClusterStatus.INIT)
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle,
+                                                ready=False,
+                                                is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
