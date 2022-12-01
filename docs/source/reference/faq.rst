@@ -79,18 +79,13 @@ To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky
 (Advanced) How to make SkyPilot use all global regions?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default, SkyPilot only supports the US regions on different clouds (except for AWS) for convenience. If you want to utilize all global regions, please run the following command:
+By default, SkyPilot supports most global regions on AWS and only supports the US regions on GCP and Azure. If you want to utilize all global regions, please run the following command:
 
 .. code-block:: bash
 
   version=$(python -c 'import sky; print(sky.clouds.service_catalog.constants.CATALOG_SCHEMA_VERSION)')
   mkdir -p ~/.sky/catalogs/${version}
   cd ~/.sky/catalogs/${version}
-  # Fetch all regions for AWS
-  # Note: SkyPilot already uses all global regions for AWS, and will periodically update the price
-  # manually running this command will disable the automatic update.
-  # python -m sky.clouds.service_catalog.data_fetchers.fetch_aws --all-regions
-
   # Fetch all regions for GCP
   pip install lxml
   python -m sky.clouds.service_catalog.data_fetchers.fetch_gcp --all-regions
