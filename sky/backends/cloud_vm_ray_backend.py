@@ -2046,7 +2046,7 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in the handle'
+        assert ip_list is not None, 'external_ips is not cached in handle'
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -2127,7 +2127,7 @@ class CloudVmRayBackend(backends.Backend):
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
             ip_list = handle.external_ips()
-            assert ip_list is not None, 'external_ips is not cached in the handle'
+            assert ip_list is not None, 'external_ips is not cached in handle'
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             # Disable connection sharing for setup script to avoid old
@@ -2524,7 +2524,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{style.RESET_ALL}')
 
         ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in the handle'
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2934,7 +2934,7 @@ class CloudVmRayBackend(backends.Backend):
     def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in the handle'
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
 
@@ -2968,7 +2968,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in the handle'
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3113,7 +3113,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
-        assert ip_list is not None, 'external_ips is not cached in the handle'
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3148,7 +3148,7 @@ class CloudVmRayBackend(backends.Backend):
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
-        assert internal_ips is not None, 'internal_ips is not cached in the handle'
+        assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3203,7 +3203,7 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = backend_utils.get_task_demands_dict(task)
         internal_ips = handle.internal_ips()
-        assert internal_ips is not None, 'internal_ips is not cached in the handle'
+        assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
