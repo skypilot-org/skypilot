@@ -1627,7 +1627,7 @@ def _update_cluster_status_no_lock(
         # in ray's get IPs vs. ray runtime failing.
         external_ips = handle.external_ips(use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if len(external_ips) == 0:
+        if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
