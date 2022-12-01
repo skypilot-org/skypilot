@@ -1,10 +1,12 @@
 """SDK functions for cluster/job management."""
+from multiprocessing import Pool
+
 import colorama
 import getpass
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import dag, StoreType
+from sky import dag
 from sky import task
 from sky import backends
 from sky import data
@@ -14,6 +16,7 @@ from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
+from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -767,11 +770,14 @@ def storage_create(name: Optional[str] = None,
     """
     storage = data.Storage(name, source)
 
-    stores = [] if stores is None else stores
-    stores = [store_type.upper() for store_type in stores]
+    store_types = []
 
-    # Add stores from tuple to storage object
-    if 'GCS' in stores:
-        storage.add_store(StoreType.GCS)
-    if 'AWS' in stores:
-        storage.add_store(StoreType.S3)
+    if stores is not None:
+        for store in [s.upper() for s in stores]:
+            if store == 'GCS':
+                store_types.add(storage_lib.StoreType.GCS)
+            elif store == 'S3':
+                store_types.add(storage_lib.StoreType.S3)
+
+    with Pool(2) as p:
+        p.map(storage.add_store, store_types)

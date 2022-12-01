@@ -971,7 +971,7 @@ class TestStorageWithCredentials:
     def test_sky_storage_cli(self, tmp_bucket_name, tmp_source):
         # Creates new bucket with local source
         out1 = subprocess.check_output(
-            ['sky', 'storage', 'create', tmp_bucket_name, tmp_source, 'AWS'])
+            ['sky', 'storage', 'create', tmp_bucket_name, tmp_source, 'S3'])
 
         # Run sky storage ls to check if storage object exists in output
         out2 = subprocess.check_output(['sky', 'storage', 'ls'])
