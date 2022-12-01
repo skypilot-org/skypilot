@@ -1709,7 +1709,7 @@ class CloudVmRayBackend(backends.Backend):
 
         def internal_ips(self,
                          max_attempts: int = 1,
-                         use_cached_ips: bool = True) -> List[str]:
+                         use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
@@ -1718,7 +1718,7 @@ class CloudVmRayBackend(backends.Backend):
 
         def external_ips(self,
                          max_attempts: int = 1,
-                         use_cached_ips: bool = True) -> List[str]:
+                         use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
@@ -3159,9 +3159,7 @@ class CloudVmRayBackend(backends.Backend):
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
-            1,
-            accelerator_dict,
-            stable_cluster_internal_ips=internal_ips)
+            1, accelerator_dict, stable_cluster_internal_ips=internal_ips)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
