@@ -1943,8 +1943,6 @@ def start(
                 'Autostop options are currently not allowed when starting the '
                 'spot controller. Use the default autostop settings by directly'
                 f' calling: {bold}sky start {reserved[0]}{reset_bold}')
-        idle_minutes_to_autostop = (
-            spot_lib.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
 
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'

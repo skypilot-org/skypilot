@@ -99,7 +99,7 @@ def _start(
                 'Passing a custom autostop setting is currently not '
                 'supported when starting the spot controller. To '
                 'fix: omit the `idle_minutes_to_autostop` argument to use the '
-                'default autostop settings.')
+                f'default autostop settings (got: {idle_minutes_to_autostop}).')
         idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
