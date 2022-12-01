@@ -1732,7 +1732,7 @@ class CloudVmRayBackend(backends.Backend):
         @property
         def head_ip(self):
             external_ips = self.external_ips()
-            if external_ips is not None:
+            if external_ips:
                 return external_ips[0]
             return None
 
