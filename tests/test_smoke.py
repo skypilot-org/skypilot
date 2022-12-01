@@ -877,10 +877,10 @@ def test_spot_recovery():
             'sleep 200',
             f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
-            # Increase timeout since sky spot queue -r can be blocked by other spot tests.
-            timeout=20 * 60,
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -970,9 +970,10 @@ def test_spot_cancellation():
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
-            # Increase timeout since sky spot queue -r can be blocked by other spot tests.
-            timeout=20 * 60,
-        ])
+        ],
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
+    )
     run_one_test(test)
 
 
