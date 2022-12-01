@@ -307,8 +307,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                                                region=launched_region)
                 task.set_resources({new_resources})
 
-                # Note: Preempted TPU VM needs to be cleaned up first.
-                # Otherwise, it will occupy the quota.
+                # Note: Preempted TPU VM cannot be reused and needs to be
+                # cleaned up. Otherwise, it will occupy the quota.
                 is_tpuvm = tpu_utils.is_tpu_vm(new_resources)
                 if is_tpuvm:
                     self.terminate_cluster()
