@@ -1177,7 +1177,7 @@ def launch(
     and they undergo job queue scheduling.
     """
     backend_utils.check_cluster_name_not_reserved(
-        cluster, operation_str='Launching task on it')
+        cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
@@ -1920,6 +1920,32 @@ def start(
     if not to_start:
         return
 
+    # Checks for reserved clusters (spot controller).
+    reserved, non_reserved = [], []
+    for name in to_start:
+        if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            reserved.append(name)
+        else:
+            non_reserved.append(name)
+    if reserved and non_reserved:
+        assert len(reserved) == 1, reserved
+        # Keep this behavior the same as _down_or_stop_clusters().
+        raise click.UsageError(
+            'Starting the spot controller with other cluster(s) '
+            'is currently not supported.\n'
+            'Please start the former independently.')
+    if reserved:
+        assert len(reserved) == 1, reserved
+        bold = backend_utils.BOLD
+        reset_bold = backend_utils.RESET_BOLD
+        if idle_minutes_to_autostop is not None:
+            raise click.UsageError(
+                'Autostop options are currently not allowed when starting the '
+                'spot controller. Use the default autostop settings by directly'
+                f' calling: {bold}sky start {reserved[0]}{reset_bold}')
+        idle_minutes_to_autostop = (
+            spot_lib.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
         cluster_list = ', '.join(to_start)
@@ -2110,13 +2136,13 @@ def _down_or_stop_clusters(
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} with multiple other cluster(s) '
-                    f'{names_str} is not supported.\n'
+                    f'{reserved_clusters_str} with other cluster(s) '
+                    f'{names_str} is currently not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
             if not down:
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} is not supported.')
+                    f'{reserved_clusters_str} is currently not supported.')
             else:
                 # TODO(zhwu): We can only have one reserved cluster (spot
                 # controller).

@@ -137,7 +137,7 @@ class TestReservedClustersOperations:
         assert result.exit_code == click.UsageError.exit_code
         assert (
             f'Stopping reserved cluster(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
-            'not supported' in result.output)
+            'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
         assert not result.exception
@@ -153,7 +153,7 @@ class TestReservedClustersOperations:
         result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert ('Scheduling autostop on reserved cluster(s) '
-                f'\'{spot.SPOT_CONTROLLER_NAME}\' is not supported'
+                f'\'{spot.SPOT_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
