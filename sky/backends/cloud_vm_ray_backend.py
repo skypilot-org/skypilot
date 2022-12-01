@@ -1343,6 +1343,9 @@ class RetryingVmProvisioner(object):
             logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
                         f'{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
+            logger.info(
+                f'{style.BRIGHT}Finished setting up TPU VM Pod workers...'
+                f'{style.RESET_ALL}')
 
         # Only 1 node or head node provisioning failure.
         if cluster_handle.launched_nodes == 1 and returncode == 0:
@@ -2680,12 +2683,9 @@ class CloudVmRayBackend(backends.Backend):
                     # check if gcloud includes TPU VM API
                     backend_utils.check_gcp_cli_include_tpu_vm()
 
-                    # Excluding preempted VMs is safe as they are already
-                    # terminated and do not charge.
                     query_cmd = (
                         f'gcloud compute tpus tpu-vm list --filter='
-                        f'"(labels.ray-cluster-name={cluster_name} AND '
-                        f'state!=PREEMPTED)" '
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zone={zone} --format=value\\(name\\)')
                     terminate_cmd = (
                         f'gcloud compute tpus tpu-vm delete --zone={zone}'
