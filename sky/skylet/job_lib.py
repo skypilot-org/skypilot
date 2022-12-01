@@ -274,7 +274,7 @@ def get_latest_job_id() -> Optional[int]:
 
 
 def get_job_time_payload(job_id: int, is_end: bool) -> Optional[int]:
-    field = 'end_at' if is_end else 'start_at'
+    field = 'end_at' if is_end else 'submitted_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:

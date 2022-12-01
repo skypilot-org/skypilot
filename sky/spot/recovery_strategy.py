@@ -150,8 +150,11 @@ class StrategyExecutor:
             exception = None
             try:
                 usage_lib.messages.usage.set_internal()
+                # Detach setup, so that the setup failure can be detected
+                # by the controller process (job_status -> FAILED_SETUP).
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
+                           detach_setup=True,
                            detach_run=True)
                 logger.info('Spot cluster launched.')
             except exceptions.InvalidClusterNameError as e:
@@ -218,7 +221,7 @@ class StrategyExecutor:
                     continue
 
                 # Check the job status until it is not in initialized status
-                if status is not None and job_lib.JobStatus.PENDING < status:
+                if status is not None and job_lib.JobStatus.INIT < status:
                     try:
                         launch_time = spot_utils.get_job_timestamp(
                             self.backend, self.cluster_name, get_end_time=False)

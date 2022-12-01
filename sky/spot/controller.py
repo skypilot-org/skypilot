@@ -117,7 +117,7 @@ class SpotController:
                 spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
-            if job_status == job_lib.JobStatus.FAILED:
+            if job_status in [job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP]:
                 # Check the status of the spot cluster. If it is not UP,
                 # the cluster is preempted.
                 (cluster_status,
