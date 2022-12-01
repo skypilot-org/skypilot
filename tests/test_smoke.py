@@ -808,6 +808,8 @@ def test_spot():
             f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -824,6 +826,8 @@ def test_spot_failed_setup():
             f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "FAILED"',
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -844,6 +848,8 @@ def test_spot_gcp():
             f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -871,6 +877,8 @@ def test_spot_recovery():
             'sleep 200',
             f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
+            # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+            timeout=20 * 60,
         ],
         f'sky spot cancel -y -n {name}',
     )
@@ -902,6 +910,8 @@ def test_spot_recovery_multi_node():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -960,6 +970,8 @@ def test_spot_cancellation():
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
+            # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+            timeout=20 * 60,
         ])
     run_one_test(test)
 
@@ -981,10 +993,12 @@ def test_spot_storage():
             [
                 f'sky spot launch -n {name} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
-                f'sky spot queue | grep {name} | grep SUCCEEDED',
+                f'sky spot queue -r | grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             f'sky spot cancel -y -n {name}',
+            # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+            timeout=20 * 60,
         )
         run_one_test(test)
 
@@ -1003,6 +1017,8 @@ def test_spot_tpu():
             f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1019,6 +1035,8 @@ def test_spot_inline_env():
             f's=$(sky spot queue -r) && printf "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
