@@ -1155,7 +1155,7 @@ class RetryingVmProvisioner(object):
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        all_ips = cluster_handle.external_ips()
+        all_ips = cluster_handle.external_ips(use_cached_ips=False)
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
         if len(all_ips) != num_tpu_devices:

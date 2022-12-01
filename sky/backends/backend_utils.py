@@ -48,6 +48,7 @@ from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
@@ -1154,8 +1155,9 @@ def get_node_ips(cluster_yaml: str,
     if use_tpu_vm:
         ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
         assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
-        if len(ips) != expected_num_nodes:
+        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
