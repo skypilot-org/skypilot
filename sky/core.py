@@ -238,6 +238,13 @@ def down(cluster_name: str, purge: bool = False) -> None:
     backend.teardown(handle, terminate=True, purge=purge)
 
 
+def get_cost_on_stop(cluster_name: str) -> str:
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    cluster_cost = global_user_state.get_cost_for_cluster(handle.cluster_name)
+
+    return f'Est. cost of cluster {handle.cluster_name}: ${cluster_cost:.2f}'
+
+
 @usage_lib.entrypoint
 def autostop(
         cluster_name: str,

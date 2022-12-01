@@ -2118,6 +2118,8 @@ def _down_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
+                message += f'\n {core.get_cost_on_stop(name)}'
+
         progress.stop()
         click.echo(message)
         if success_progress:

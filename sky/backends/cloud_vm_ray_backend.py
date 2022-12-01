@@ -2633,14 +2633,9 @@ class CloudVmRayBackend(backends.Backend):
                                                      handle.head_ip,
                                                      auth_config)
 
-        cluster_cost = global_user_state.get_cost_for_cluster(
-            handle.cluster_name)
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
 
-        if cluster_cost:
-            logger.info(f'Estimated cost of cluster {handle.cluster_name}: '
-                        f'${cluster_cost:.2f}')
         if terminate:
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
