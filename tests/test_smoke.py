@@ -793,30 +793,36 @@ def test_use_spot():
 def test_spot():
     """Test the spot yaml."""
     name = _get_cluster_name()
-    cancel_command = (
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2')
     test = Test(
         'managed-spot',
         [
             f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
             f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
             'sleep 5',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
             f'sky spot cancel -y -n {name}-1',
             'sleep 5',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
             'sleep 200',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
-            # Test autostop. This assumes no regular spot jobs are running.
-            cancel_command,
-            'sleep 720',  # Sleep for a bit more than the default 10m.
-            'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
-            'sky start "sky-spot-controller-*" -y',
-            # Ensures it's up and the autostop setting is restored.
-            'sky status | grep sky-spot-controller- | grep UP | grep 10m',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        cancel_command,
+        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+    )
+    run_one_test(test)
+
+def test_spot_failed_setup():
+    """Test managed spot job with failed setup."""
+    name = _get_cluster_name()
+    test = Test(
+        'spot-failed-setup',
+        [
+            f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup.yaml',
+            'sleep 200',
+            # Make sure the job failed quickly.
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "FAILED"',
+        ],
+        f'sky spot cancel -y -n {name}',
     )
     run_one_test(test)
 
@@ -832,9 +838,9 @@ def test_spot_gcp():
             'sleep 5',
             # Captures & prints the table for easier debugging. Two echo's to
             # separate the table from the grep output.
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
             'sleep 200',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
         ],
         f'sky spot cancel -y -n {name}',
     )
@@ -851,18 +857,18 @@ def test_spot_recovery():
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
             'sleep 360',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:ray-cluster-name,Values={name}* '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text)'),
             'sleep 50',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
@@ -879,19 +885,19 @@ def test_spot_recovery_multi_node():
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
             'sleep 400',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
-             'Name=tag:ray-node-type,Values=worker '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:ray-cluster-name,Values={name}* '
+            'Name=tag:ray-node-type,Values=worker '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text)'),
             'sleep 50',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 420',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
@@ -908,50 +914,50 @@ def test_spot_cancellation():
             # Test cancellation during spot cluster being launched.
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
             f'sky spot cancel -y -n {name}',
             'sleep 5',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            f'--filters Name=tag:ray-cluster-name,Values={name}* '
+            f'--query Reservations[].Instances[].State[].Name '
+            '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
             f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+            f'--query Reservations[].Instances[].State[].Name '
+            '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancellation during spot job is recovering.
             f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
-             f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
-             f'--query Reservations[].Instances[].InstanceId '
-             '--output text)'),
+            f'aws ec2 describe-instances --region {region} '
+            f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
+            f'--query Reservations[].Instances[].InstanceId '
+            '--output text)'),
             'sleep 50',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-3',
             'sleep 10',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
-             f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
+            f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
+            f'--query Reservations[].Instances[].State[].Name '
+            '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
         ])
     run_one_test(test)
@@ -991,15 +997,31 @@ def test_spot_tpu():
         [
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
             'sleep 600',  # TPU takes a while to launch
-            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}',
     )
     run_one_test(test)
 
+# ---------- Testing env for spot ----------
+def test_spot_inline_env():
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-spot-inline-env',
+        [
+            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            'sleep 20',
+            f's=$(sky spot queue -r) && printf "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky spot cancel -y -n {name}',
+    )
+    run_one_test(test)
 
+    
+   
 # ---------- Testing env ----------
 def test_inline_env():
     """Test env"""
@@ -1015,23 +1037,6 @@ def test_inline_env():
         f'sky down -y {name}',
     )
     run_one_test(test)
-
-
-# ---------- Testing env for spot ----------
-def test_inline_spot_env():
-    """Test env"""
-    name = _get_cluster_name()
-    test = Test(
-        'test-inline-spot-env',
-        [
-            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 20',
-            f's=$(sky spot queue) && printf "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
-        ],
-        f'sky spot cancel -y -n {name}',
-    )
-    run_one_test(test)
-
 
 # ---------- Testing custom image ----------
 def test_custom_image():
@@ -1430,3 +1435,19 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
+
+# Place the spot controller autostop test here to try best to run it last, after
+# all the spot tests are done.
+def test_spot_controller_autostop():
+    """Test controller autostop"""
+    test = Test(
+        'test-spot-controller-autostop',
+        [
+            'sleep 720',  # Sleep for a bit more than the default 10m.
+            'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
+            'sky start "sky-spot-controller-*" -y',
+            # Ensures it's up and the autostop setting is restored.
+            'sky status | grep sky-spot-controller- | grep UP | grep 10m',
+        ]
+    )
+    run_one_test(test)
