@@ -29,10 +29,11 @@ def pytest_collection_modifyitems(config, items):
         if 'slow' in item.keywords:
             item.add_marker(skip_slow)
 
+
 def pytest_sessionstart(session):
     from sky.clouds.service_catalog import common
     aws_az_mapping_path = common.get_catalog_path('aws/az_mappings.csv')
-            
+
     if not os.path.exists(aws_az_mapping_path):
         try:
             # Try to fetch the AZ mapping from AWS (if we have AWS access)
@@ -40,8 +41,8 @@ def pytest_sessionstart(session):
         except:
             # If we don't have AWS access, create a dummy file
             with tempfile.NamedTemporaryFile(delete=False) as f:
-                f.write(textwrap.dedent(
-                """\
+                f.write(
+                    textwrap.dedent("""\
                     AvailabilityZoneName,AvailabilityZone
                     us-east-1a,use1-az2
                     us-east-1b,use1-az4
