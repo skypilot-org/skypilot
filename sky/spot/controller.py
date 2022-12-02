@@ -93,8 +93,13 @@ class SpotController:
                 spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
-            # Get the up-to-date cluster status to determine
-            # whether preemption happens.
+            # For single-node jobs, non-terminated job_status means healthy.
+            if (job_status is not None and not job_status.is_terminal() and
+                    self._task.num_nodes == 1):
+                continue
+
+            # Oterwise, get the up-to-date cluster status to determine
+            # whether cluster is healthy.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
                  self._cluster_name, force_refresh=True)
@@ -125,7 +130,8 @@ class SpotController:
                         end_time=end_time)
                     break
                 else:
-                    raise RuntimeError(f'Unexpected job status: {job_status}')
+                    # unexpected job status, recover the cluster.
+                    logger.info(f'Unexpected job status: {job_status}')
 
             # Failed to connect to the cluster or the cluster is partially down.
             # cluster can be down, INIT or STOPPED, based on the interruption
