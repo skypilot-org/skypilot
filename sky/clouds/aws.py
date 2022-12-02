@@ -332,7 +332,7 @@ class AWS(clouds.Cloud):
                 help_str[2:])
 
         # Fetch the AWS availability zones mapping from ID to name.
-        from sky.clouds.service_catalog import aws_catalog
+        from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
