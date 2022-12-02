@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import contextlib
 import copy
 from datetime import datetime
 import difflib
@@ -48,6 +47,7 @@ from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
@@ -1152,10 +1152,11 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
         assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
-        if len(ips) != expected_num_nodes:
+        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -1427,15 +1428,6 @@ def _process_cli_query(
     ]
 
 
-@contextlib.contextmanager
-def suppress_output():
-    """Suppress stdout and stderr."""
-    with open(os.devnull, 'w') as devnull:
-        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
-                devnull):
-            yield
-
-
 def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     """Returns a set of Ray launch config hashes, one per node type."""
     # Use the cached Ray launch hashes if they exist.
@@ -1445,7 +1437,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_caches')
         return set(ray_launch_hashes)
-    with suppress_output():
+    with ux_utils.suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
@@ -1459,7 +1451,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
-        with suppress_output():
+        with ux_utils.suppress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
         launch_hashes.add(current_hash)
@@ -1626,7 +1618,7 @@ def _update_cluster_status_no_lock(
         # in ray's get IPs vs. ray runtime failing.
         external_ips = handle.external_ips(use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if len(external_ips) == 0:
+        if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
@@ -1694,8 +1686,10 @@ def _update_cluster_status_no_lock(
         # that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        global_user_state.set_cluster_status(
-            cluster_name, global_user_state.ClusterStatus.INIT)
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle,
+                                                ready=False,
+                                                is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
