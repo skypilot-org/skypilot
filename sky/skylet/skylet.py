@@ -10,7 +10,7 @@ logger.info('skylet started')
 
 EVENTS = [
     events.AutostopEvent(),
-    events.JobUpdateEvent(),
+    events.JobSchedulerEvent(),
     # The spot job update event should be after the job update event.
     # Otherwise, the abnormal spot job status update will be delayed
     # until the next job update event.

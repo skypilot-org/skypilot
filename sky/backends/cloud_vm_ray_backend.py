@@ -321,6 +321,8 @@ class RayCodeGen:
                 # it is waiting for other task to finish. We should hide the
                 # error message.
                 ray.get(pg.ready())
+                job_lib.scheduler.remove_job({self.job_id!r})
+                job_lib.scheduler.run_next_if_possible()
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
@@ -505,6 +507,7 @@ class RayCodeGen:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
+            job_lib.scheduler.run_next_if_possible()
             """)
         ]
 
@@ -2248,14 +2251,20 @@ class CloudVmRayBackend(backends.Backend):
                 handle, ray_command, ray_job_id)
         else:
             job_submit_cmd = (
-                f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
+                f'{cd} && ray job submit '
                 f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
-                '--no-wait '
+                '--no-wait -- '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
+        code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir}'
+                      '&& echo START > {remote_log_path} 2>&1')
+        code += '&&' + mkdir_code
+
+        # instead of directly running job_submit_cmd, queue it up instead
         returncode, stdout, stderr = self.run_on_head(handle,
-                                                      job_submit_cmd,
-                                                      stream_logs=False,
+                                                      code,
+                                                      stream_logs=True,
                                                       require_outputs=True)
         subprocess_utils.handle_returncode(returncode,
                                            job_submit_cmd,
@@ -2472,7 +2481,7 @@ class CloudVmRayBackend(backends.Backend):
         # All error messages should have been redirected to stdout.
         returncode, stdout, _ = self.run_on_head(handle,
                                                  code,
-                                                 stream_logs=False,
+                                                 stream_logs=True,
                                                  require_outputs=True)
         subprocess_utils.handle_returncode(
             returncode, code,
@@ -3144,6 +3153,22 @@ class CloudVmRayBackend(backends.Backend):
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
+
+        if task.spot_task is not None:
+            resources_str = backend_utils.get_task_resources_str(task.spot_task)
+            code = [
+                'from sky.spot import spot_state',
+                f'spot_state.set_pending('
+                f'{job_id}, {task.spot_task.name!r}, {resources_str!r})',
+            ]
+            code = ';'.join(code)
+            code = f'python -c "{code}"'
+
+            _, _, _ = self.run_on_head(handle,
+                                       code,
+                                       stream_logs=True,
+                                       require_outputs=True)
+
         codegen.add_prologue(job_id,
                              spot_task=task.spot_task,
                              setup_cmd=self._setup_cmd,
