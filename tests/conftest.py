@@ -40,7 +40,7 @@ def pytest_sessionstart(session):
             from sky.clouds.service_catalog import aws_catalog
         except:
             # If we don't have AWS access, create a dummy file
-            with tempfile.NamedTemporaryFile(delete=False) as f:
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
                 f.write(
                     textwrap.dedent("""\
                     AvailabilityZoneName,AvailabilityZone
@@ -97,4 +97,4 @@ def pytest_sessionstart(session):
                     ap-northeast-1c,apne1-az1
                     ap-northeast-1d,apne1-az2
                 """))
-            os.move(f.name, aws_az_mapping_path)
+            os.replace(f.name, aws_az_mapping_path)
