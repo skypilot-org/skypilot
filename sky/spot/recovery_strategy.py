@@ -305,7 +305,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                 new_resources = resources.copy(cloud=launched_cloud,
                                                region=launched_region)
                 task.set_resources({new_resources})
-
                 # Not using self.launch to avoid the retry until up logic.
                 launched_time = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
