@@ -1155,12 +1155,12 @@ class RetryingVmProvisioner(object):
         run setup or launch ray cluster on TPU VM Pod nodes.
         """
         ssh_credentials = backend_utils.ssh_credential_from_yaml(cluster_yaml)
-        all_ips = cluster_handle.external_ips()
+        all_ips = cluster_handle.external_ips(use_cached_ips=False)
         num_tpu_devices = tpu_utils.get_num_tpu_devices(
             cluster_handle.launched_resources)
-        if len(all_ips) != num_tpu_devices:
+        if all_ips is None or len(all_ips) != num_tpu_devices:
             raise RuntimeError(
-                f'Number of nodes IPs: {len(all_ips)} does not'
+                f'Nodes IPs: {all_ips} does not'
                 f'match number of TPU devices: {num_tpu_devices}.')
 
         # Get the private IP of head node for connecting Ray cluster.
@@ -1709,7 +1709,7 @@ class CloudVmRayBackend(backends.Backend):
 
         def internal_ips(self,
                          max_attempts: int = 1,
-                         use_cached_ips: bool = True):
+                         use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
@@ -1718,7 +1718,7 @@ class CloudVmRayBackend(backends.Backend):
 
         def external_ips(self,
                          max_attempts: int = 1,
-                         use_cached_ips: bool = True):
+                         use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
             if self.stable_internal_external_ips is not None:
@@ -2046,6 +2046,7 @@ class CloudVmRayBackend(backends.Backend):
         fore = colorama.Fore
         style = colorama.Style
         ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
         full_workdir = os.path.abspath(os.path.expanduser(workdir))
 
         # These asserts have been validated at Task construction time.
@@ -2125,7 +2126,8 @@ class CloudVmRayBackend(backends.Backend):
             setup_sh_path = f.name
             setup_file = os.path.basename(setup_sh_path)
             # Sync the setup script up and run it.
-            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS)
+            ip_list = handle.external_ips()
+            assert ip_list is not None, 'external_ips is not cached in handle'
             ssh_credentials = backend_utils.ssh_credential_from_yaml(
                 handle.cluster_yaml)
             # Disable connection sharing for setup script to avoid old
@@ -2522,6 +2524,7 @@ class CloudVmRayBackend(backends.Backend):
                         f'{style.RESET_ALL}')
 
         ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -2931,6 +2934,7 @@ class CloudVmRayBackend(backends.Backend):
     def _set_tpu_name(self, handle: ResourceHandle, tpu_name: str) -> None:
         """Sets TPU_NAME on all nodes."""
         ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
 
@@ -2964,6 +2968,7 @@ class CloudVmRayBackend(backends.Backend):
         logger.info(f'{fore.CYAN}Processing file mounts.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3108,6 +3113,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'storage mount{plural}.{style.RESET_ALL}')
         start = time.time()
         ip_list = handle.external_ips()
+        assert ip_list is not None, 'external_ips is not cached in handle'
         ssh_credentials = backend_utils.ssh_credential_from_yaml(
             handle.cluster_yaml)
         runners = command_runner.SSHCommandRunner.make_runner_list(
@@ -3141,6 +3147,8 @@ class CloudVmRayBackend(backends.Backend):
         log_dir = os.path.join(self.log_dir, 'tasks')
 
         accelerator_dict = backend_utils.get_task_demands_dict(task)
+        internal_ips = handle.internal_ips()
+        assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3151,9 +3159,7 @@ class CloudVmRayBackend(backends.Backend):
                              setup_log_path=os.path.join(log_dir, 'setup.log'),
                              is_local=is_local)
         codegen.add_gang_scheduling_placement_group(
-            1,
-            accelerator_dict,
-            stable_cluster_internal_ips=handle.internal_ips())
+            1, accelerator_dict, stable_cluster_internal_ips=internal_ips)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
@@ -3196,6 +3202,8 @@ class CloudVmRayBackend(backends.Backend):
         log_dir_base = self.log_dir
         log_dir = os.path.join(log_dir_base, 'tasks')
         accelerator_dict = backend_utils.get_task_demands_dict(task)
+        internal_ips = handle.internal_ips()
+        assert internal_ips is not None, 'internal_ips is not cached in handle'
 
         # If TPU VM Pods is used, #num_nodes should be #num_tpu_devices
         is_tpu_vm_pod = tpu_utils.is_tpu_vm_pod(handle.launched_resources)
@@ -3216,7 +3224,7 @@ class CloudVmRayBackend(backends.Backend):
         codegen.add_gang_scheduling_placement_group(
             num_actual_nodes,
             accelerator_dict,
-            stable_cluster_internal_ips=handle.internal_ips())
+            stable_cluster_internal_ips=internal_ips)
 
         if callable(task.run):
             run_fn_code = textwrap.dedent(inspect.getsource(task.run))
