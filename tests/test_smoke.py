@@ -866,7 +866,7 @@ def test_spot_recovery():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20*60,
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -896,7 +896,7 @@ def test_spot_recovery_multi_node():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20*60,
+        timeout=20 * 60,
     )
     run_one_test(test)
 
