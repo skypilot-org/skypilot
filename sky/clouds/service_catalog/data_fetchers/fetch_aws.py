@@ -13,6 +13,7 @@ import ray
 
 from sky.adaptors import aws
 
+# Turn off the regions disabled for a new AWS account by default.
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -20,17 +21,20 @@ ALL_REGIONS = [
     'us-west-2',
     'ca-central-1',
     'eu-central-1',
+    # 'eu-central-2',
     'eu-west-1',
     'eu-west-2',
-    'eu-south-1',
+    # 'eu-south-1',
+    # 'eu-south-2',
     'eu-west-3',
     'eu-north-1',
-    'me-south-1',
-    # 'me-central-1', # failed for no credential
-    'af-south-1',
-    'ap-east-1',
-    'ap-southeast-3',
-    # 'ap-south-1', # failed for no credential
+    # 'me-south-1',
+    # 'me-central-1',
+    # 'af-south-1',
+    # 'af-south-2',
+    # 'ap-east-1',
+    # 'ap-southeast-3',
+    'ap-south-1',
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
@@ -53,7 +57,7 @@ PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws
 
 
 @ray.remote
-def get_instance_types(region: str) -> pd.DataFrame:
+def _get_instance_types(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_instance_types')
     items = []
@@ -65,17 +69,20 @@ def get_instance_types(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_availability_zones(region: str) -> pd.DataFrame:
+def _get_availability_zones(region: str) -> pd.DataFrame:
     client = aws.client('ec2', region_name=region)
     zones = []
     response = client.describe_availability_zones()
     for resp in response['AvailabilityZones']:
-        zones.append({'AvailabilityZone': resp['ZoneName']})
+        zones.append({
+            'AvailabilityZoneName': resp['ZoneName'],
+            'AvailabilityZone': resp['ZoneId'],
+        })
     return pd.DataFrame(zones)
 
 
 @ray.remote
-def get_pricing_table(region: str) -> pd.DataFrame:
+def _get_pricing_table(region: str) -> pd.DataFrame:
     print(f'{region} downloading pricing table')
     url = PRICING_TABLE_URL_FMT.format(region=region)
     df = pd.read_csv(url, skiprows=5, low_memory=False)
@@ -94,7 +101,13 @@ def get_pricing_table(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def get_spot_pricing_table(region: str) -> pd.DataFrame:
+def _get_spot_pricing_table(region: str) -> pd.DataFrame:
+    """Get spot pricing table for a region.
+
+    Example output:
+        InstanceType  AvailabilityZoneName  SpotPrice
+        p3.2xlarge    us-east-1a            1.0000
+    """
     print(f'{region} downloading spot pricing table')
     client = aws.client('ec2', region_name=region)
     paginator = client.get_paginator('describe_spot_price_history')
@@ -102,20 +115,29 @@ def get_spot_pricing_table(region: str) -> pd.DataFrame:
                                            StartTime=datetime.datetime.utcnow())
     ret = []
     for response in response_iterator:
+        # response['SpotPriceHistory'] is a list of dicts, each dict is like:
+        # {
+        #  'AvailabilityZone': 'us-east-2c',  # This is the AZ name.
+        #  'InstanceType': 'm6i.xlarge',
+        #  'ProductDescription': 'Linux/UNIX',
+        #  'SpotPrice': '0.041900',
+        #  'Timestamp': datetime.datetime
+        # }
         ret = ret + response['SpotPriceHistory']
     df = pd.DataFrame(ret)[['InstanceType', 'AvailabilityZone', 'SpotPrice']]
-    df = df.set_index(['InstanceType', 'AvailabilityZone'])
+    df = df.rename(columns={'AvailabilityZone': 'AvailabilityZoneName'})
+    df = df.set_index(['InstanceType', 'AvailabilityZoneName'])
     return df
 
 
 @ray.remote
-def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
+def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     try:
         df, zone_df, pricing_df, spot_pricing_df = ray.get([
-            get_instance_types.remote(region),
-            get_availability_zones.remote(region),
-            get_pricing_table.remote(region),
-            get_spot_pricing_table.remote(region),
+            _get_instance_types.remote(region),
+            _get_availability_zones.remote(region),
+            _get_pricing_table.remote(region),
+            _get_spot_pricing_table.remote(region),
         ])
         print(f'{region} Processing dataframes')
 
@@ -167,7 +189,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
         # Add spot price column, by joining the spot pricing table.
         df = df.merge(spot_pricing_df,
-                      left_on=['InstanceType', 'AvailabilityZone'],
+                      left_on=['InstanceType', 'AvailabilityZoneName'],
                       right_index=True,
                       how='outer')
 
@@ -185,7 +207,7 @@ def get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
 
 
 def get_all_regions_instance_types_df(regions: List[str]) -> pd.DataFrame:
-    df_or_regions = ray.get([get_instance_types_df.remote(r) for r in regions])
+    df_or_regions = ray.get([_get_instance_types_df.remote(r) for r in regions])
     new_dfs = []
     for df_or_region in df_or_regions:
         if isinstance(df_or_region, str):
@@ -216,7 +238,7 @@ _GPU_TO_IMAGE_DATE = {
 _UBUNTU_VERSION = ['18.04', '20.04']
 
 
-def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
+def _get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
     try:
         image_id = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
@@ -235,13 +257,13 @@ def get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
 
 
 @ray.remote
-def get_image_row(region: str, ubuntu_version: str,
-                  cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
+def _get_image_row(region: str, ubuntu_version: str,
+                   cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     date = None
     for date in creation_date:
-        image_id = get_image_id(region, ubuntu_version, date)
+        image_id = _get_image_id(region, ubuntu_version, date)
         if image_id:
             break
     else:
@@ -261,7 +283,7 @@ def get_all_regions_images_df() -> pd.DataFrame:
         for ubuntu_version in _UBUNTU_VERSION:
             for region in ALL_REGIONS:
                 workers.append(
-                    get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
+                    _get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
 
     results = ray.get(workers)
     results = pd.DataFrame(
@@ -270,12 +292,35 @@ def get_all_regions_images_df() -> pd.DataFrame:
     return results
 
 
+def fetch_availability_zone_mappings() -> pd.DataFrame:
+    """Fetch the availability zone mappings from ID to Name.
+
+    Example output:
+        AvailabilityZone  AvailabilityZoneName
+        use1-az1          us-east-1b
+        use1-az2          us-east-1a
+    """
+    az_mappings = [_get_availability_zones.remote(r) for r in ALL_REGIONS]
+    az_mappings = ray.get(az_mappings)
+    az_mappings = pd.concat(az_mappings)
+    return az_mappings
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--all-regions',
         action='store_true',
         help='Fetch all global regions, not just the U.S. ones.')
+    parser.add_argument(
+        '--az-mappings',
+        dest='az_mappings',
+        action='store_true',
+        help='Fetch the mapping from availability zone IDs to zone names.')
+    parser.add_argument('--no-az-mappings',
+                        dest='az_mappings',
+                        action='store_false')
+    parser.set_defaults(az_mappings=True)
     args = parser.parse_args()
 
     region_filter = ALL_REGIONS if args.all_regions else US_REGIONS
@@ -289,3 +334,8 @@ if __name__ == '__main__':
     image_df = get_all_regions_images_df()
     image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
+
+    if args.az_mappings:
+        az_mappings_df = fetch_availability_zone_mappings()
+        az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
+        print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
