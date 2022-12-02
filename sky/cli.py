@@ -1263,14 +1263,15 @@ def exec(
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
 
-    \b
     Actions performed by ``sky exec``:
 
-    \b
-    (1) workdir syncing, if:
-      - ENTRYPOINT is a YAML and ``workdir`` is specified inside; or
-      - ENTRYPOINT is a command and flag ``--workdir=<local_path>`` is set.
-    (2) executing the specified task's ``run`` commands / the bash command.
+    1. Workdir syncing, if:
+
+       - ENTRYPOINT is a YAML with the ``workdir`` field specified; or
+
+       - Flag ``--workdir=<local_dir>`` is set.
+
+    2. Executing the specified task's ``run`` commands / the bash command.
 
     ``sky exec`` is thus typically faster than ``sky launch``, provided a
     cluster already exists.
@@ -1280,17 +1281,17 @@ def exec(
     reflect those changes.  To ensure a cluster's setup is up to date, use ``sky
     launch`` instead.
 
-    \b
     Execution and scheduling behavior:
 
-    \b
     - The task/command will undergo job queue scheduling, respecting any
       specified resource requirement. It can be executed on any node of the
       cluster with enough resources.
+
     - The task/command is run under the workdir (if specified).
+
     - The task/command is run non-interactively (without a pseudo-terminal or
-      pty), so interactive commands such as ``htop`` do not work.
-      Use ``ssh my_cluster`` instead.
+      pty), so interactive commands such as ``htop`` do not work. Use ``ssh
+      my_cluster`` instead.
 
     Typical workflow:
 
@@ -1370,24 +1371,43 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
     Display all fields using ``sky status -a``.
 
-    \b
     Each cluster can have one of the following statuses:
 
-    \b
-    - INIT: The cluster may be live or down. It can happen in following cases:
-      (1) undergoing provisioning or runtime setup. (In other words, a
-      ``sky launch`` has started but has not completed.)
-      (2) Or, the cluster is in an abnormal state, e.g., some cluster nodes are
-      down, or the sky runtime has crashed.
-    - UP: Provisioning and runtime setup have succeeded and the cluster is
+    - ``INIT``: The cluster may be live or down. It can happen in the following
+      cases:
+
+      - Ongoing provisioning or runtime setup. (A ``sky launch`` has started
+        but has not completed.)
+
+      - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
+        try ``sky launch`` again on it.)
+
+    - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
-    - STOPPED: The cluster is stopped and the storage is persisted. Use
+
+    - ``STOPPED``: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
-    The autostop column indicates how long the cluster will be autostopped
-    after minutes of idling (no jobs running). If the time is followed by
-    '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
-    autostopped.
+    Autostop column:
+
+    - Indicates after how many minutes of idleness (no in-progress jobs) the
+      cluster will be autostopped. '-' means disabled.
+
+    - If the time is followed by '(down)', e.g., '1m (down)', the cluster will
+      be autodowned, rather than autostopped.
+
+    Getting up-to-date cluster statuses:
+
+    - In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations in cloud consoles) and no autostopping is used, the
+      table returned by this command will accurately reflect the cluster
+      statuses.
+
+    - In cases where clusters are changed outside of SkyPilot (e.g., manual
+      operations in cloud consoles; unmanaged spot clusters getting preempted)
+      or for autostop-enabled clusters, use ``--refresh`` to query the latest
+      cluster statuses from the cloud providers.
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []
@@ -1666,14 +1686,15 @@ def stop(
               type=int,
               default=None,
               required=False,
-              help='Set the idle minutes before autostopping the cluster.')
+              help=('Set the idle minutes before autostopping the cluster. '
+                    'See the doc above for detailed semantics.'))
 @click.option(
     '--cancel',
     default=False,
     is_flag=True,
     required=False,
-    help='Cancel the currently active auto{stop,down} setting for the '
-    'cluster.')
+    help='Cancel any currently active auto{stop,down} setting for the '
+    'cluster. No-op if there is no active setting.')
 @click.option(
     '--down',
     default=False,
@@ -1697,38 +1718,46 @@ def autostop(
     yes: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Schedule or cancel an autostop or autodown for cluster(s).
+    """Schedule an autostop or autodown for cluster(s).
 
-    CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
+    Autostop/autodown will automatically stop or teardown a cluster when it
+    becomes idle for a specified duration.  Idleness means there are no
+    in-progress (pending/running) jobs in a cluster's job queue.
+
+    CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
-    If --down is passed, autodown (tear down the cluster; non-restartable) is
-    used, rather than autostop (restartable).
+    Idleness time of a cluster is reset to zero, when any of these happens:
 
-    ``--idle-minutes`` is the number of minutes of idleness (no pending/running
-    jobs) after which the cluster will be stopped automatically.
-    Scheduling autostop twice on the same cluster will overwrite the previous
-    autostop schedule.
+    - A job is submitted (``sky launch`` or ``sky exec``).
 
-    ``--cancel`` will cancel the autostopping. If the cluster was not scheduled
-    autostop, this will do nothing to autostop.
+    - The cluster has restarted.
 
-    If ``--idle-minutes`` and ``--cancel`` are not specified, default to 5
-    minutes.
+    - An autostop is set when there is no active setting. (Namely, either
+      there's never any autostop setting set, or the previous autostop setting
+      was canceled.) This is useful for restarting the autostop timer.
 
-    When multiple configurations are specified for the same cluster, e.g. using
-    ``sky autostop`` or ``sky launch -i``, the last one takes precedence.
+    Example: say a cluster without any autostop set has been idle for 1 hour,
+    then an autostop of 30 minutes is set. The cluster will not be immediately
+    autostopped. Instead, the idleness timer only starts counting after the
+    autostop setting was set.
 
-    Examples:
+    When multiple autostop settings are specified for the same cluster, the
+    last setting takes precedence.
+
+    Typical usage:
 
     .. code-block:: bash
 
-        # Set auto stopping for a specific cluster.
+        # Autostop this cluster after 60 minutes of idleness.
         sky autostop cluster_name -i 60
         \b
-        # Cancel auto stopping for a specific cluster.
+        # Cancel autostop for a specific cluster.
         sky autostop cluster_name --cancel
-
+        \b
+        # Since autostop was canceled in the last command, idleness will
+        # restart counting after this command.
+        sky autostop cluster_name -i 60
     """
     if cancel and idle_minutes is not None:
         raise click.UsageError(
@@ -2091,11 +2120,16 @@ def _down_or_stop_clusters(
     name is explicitly and uniquely specified (not via glob) and purge is set
     to True.
     """
-    command = 'down' if down else 'stop'
+    if down:
+        command = 'down'
+    elif idle_minutes_to_autostop is not None:
+        command = 'autostop'
+    else:
+        command = 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
-            f'sky {command} requires either a cluster name (see `sky status`) '
-            'or --all.')
+            f'`sky {command}` requires either a cluster name (see `sky status`)'
+            ' or --all.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -2158,7 +2192,7 @@ def _down_or_stop_clusters(
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             click.echo(
-                f'Both --all and cluster(s) specified for sky {command}. '
+                f'Both --all and cluster(s) specified for `sky {command}`. '
                 'Letting --all take effect.')
         # We should not remove reserved clusters when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a reserved
