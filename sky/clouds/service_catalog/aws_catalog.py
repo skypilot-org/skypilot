@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 from sky import sky_logging
+from sky.backends import backend_utils
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
@@ -43,8 +44,9 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         # pylint: disable=import-outside-toplevel
         import ray
         from sky.clouds.service_catalog.data_fetchers import fetch_aws
-        logger.info('Fetching availability zones mapping from AWS...')
-        with ux_utils.suppress_output():
+        with backend_utils.safe_console_status(
+                'Fetching availability zones mapping for AWS.'
+        ), ux_utils.suppress_output():
             ray.init()
             az_mappings = fetch_aws.fetch_availability_zone_mappings()
         az_mappings.to_csv(az_mapping_path, index=False)

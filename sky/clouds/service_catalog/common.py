@@ -95,8 +95,11 @@ def read_catalog(filename: str,
 
         if _need_update():
             url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            update_frequency_str = ''
+            if pull_frequency_hours is not None:
+                update_frequency_str = f' (every {pull_frequency_hours} hours)'
             with backend_utils.safe_console_status(
-                    f'Downloading {cloud} catalog...'):
+                    f'Updating {cloud} catalog{update_frequency_str}'):
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
@@ -110,11 +113,6 @@ def read_catalog(filename: str,
                 f.write(r.text)
             with open(meta_path + '.md5', 'w') as f:
                 f.write(hashlib.md5(r.text.encode()).hexdigest())
-            update_frequency_str = ''
-            if pull_frequency_hours is not None:
-                update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            logger.info(f'{cloud} catalog has been updated'
-                        f'{update_frequency_str}: {catalog_path}')
 
     try:
         df = pd.read_csv(catalog_path)
