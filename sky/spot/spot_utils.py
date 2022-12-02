@@ -42,6 +42,7 @@ _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
                                '{status_str}.[/] It may take a few minutes.')
 _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
                           '[/] It may take a minute.')
+_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 10
 
 
 class UserSignal(enum.Enum):
@@ -313,8 +314,11 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
     spot_status = spot_state.get_status(job_id)
-    while not spot_status.is_terminal() and follow:
+    wait_seconds = 0
+    while (not spot_status.is_terminal() and follow and
+           wait_seconds < _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS):
         time.sleep(1)
+        wait_seconds += 1
         spot_status = spot_state.get_status(job_id)
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_status.value}).')
