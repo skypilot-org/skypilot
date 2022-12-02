@@ -93,24 +93,29 @@ class SpotController:
                 spot_state.set_succeeded(self._job_id, end_time=end_time)
                 break
 
-            # For single-node jobs, non-terminated job_status means healthy.
+            # For single-node jobs, nonterminated job_status indicates a
+            # healthy cluster. We can safely continue monitoring.
+            # For multi-node jobs, since the job may not be set to FAILED
+            # immediately (depending on user program) when only some of the
+            # nodes are preempted, need to check the actual cluster status.
             if (job_status is not None and not job_status.is_terminal() and
                     self._task.num_nodes == 1):
                 continue
 
-            # Oterwise, get the up-to-date cluster status to determine
-            # whether cluster is healthy.
+            # Pull the actual cluster status from the cloud provider to
+            # determine whether the cluster is preempted.
             (cluster_status,
              handle) = backend_utils.refresh_cluster_status_handle(
                  self._cluster_name, force_refresh=True)
 
-            if cluster_status == global_user_state.ClusterStatus.UP:
-                if job_status is None:
-                    # Rare case, likely to be network issue.
-                    # to be conservative, we still recover the cluster.
-                    pass
-                elif not job_status.is_terminal():
-                    # The job is still running.
+            is_preempted = False
+            if cluster_status != global_user_state.ClusterStatus.UP:
+                # When the status is not UP, the cluster is likely preempted,
+                # and spot recovery is needed (will be done later in the code).
+                is_preempted = True
+            else:
+                if job_status is not None and not job_status.is_terminal():
+                    # The multi-node job is still running, continue monitoring.
                     continue
                 elif job_status == job_lib.JobStatus.FAILED:
                     # The user code has probably crashed, fail immediately.
@@ -130,16 +135,19 @@ class SpotController:
                         end_time=end_time)
                     break
                 else:
-                    # unexpected job status, recover the cluster.
-                    logger.info(f'Unexpected job status: {job_status}')
+                    # Unexpected job status received, try to recover
+                    # the cluster to be safe.
+                    logger.info(f'Got unexpected job status: {job_status}. '
+                                'Recovering...')
 
             # Failed to connect to the cluster or the cluster is partially down.
             # cluster can be down, INIT or STOPPED, based on the interruption
             # behavior of the cloud.
-            cluster_status_str = ('' if cluster_status is None else
-                                  f' (status: {cluster_status.value})')
-            logger.info(
-                f'Cluster is preempted{cluster_status_str}. Recovering...')
+            if is_preempted:
+                cluster_status_str = ('' if cluster_status is None else
+                                      f' (status: {cluster_status.value})')
+                logger.info(
+                    f'Cluster is preempted{cluster_status_str}. Recovering...')
             spot_state.set_recovering(self._job_id)
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
