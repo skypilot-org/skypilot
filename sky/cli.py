@@ -1267,9 +1267,9 @@ def exec(
 
     1. Workdir syncing, if:
 
-       - ENTRYPOINT is a YAML and ``workdir`` is specified inside; or
+       - ENTRYPOINT is a YAML with the ``workdir`` field specified; or
 
-       - ENTRYPOINT is a command and flag ``--workdir=<local_path>`` is set.
+       - Flag ``--workdir=<local_dir>`` is set.
 
     2. Executing the specified task's ``run`` commands / the bash command.
 
@@ -1380,7 +1380,8 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
         but has not completed.)
 
       - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
-        down, or the SkyPilot runtime is unhealthy.
+        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
+        try ``sky launch`` again on it.)
 
     - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
@@ -1717,7 +1718,7 @@ def autostop(
     yes: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Schedule or cancel an autostop or autodown for cluster(s).
+    """Schedule an autostop or autodown for cluster(s).
 
     Autostop/autodown will automatically stop or teardown a cluster when it
     becomes idle for a specified duration.  Idleness means there are no

@@ -59,7 +59,8 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
       - Ongoing provisioning or runtime setup. (A ``sky.launch()`` has started
         but has not completed.)
       - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
-        down, or the SkyPilot runtime is unhealthy.
+        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
+        try ``sky launch`` again on it.)
 
     - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky.launch()`` has completed successfully.)
@@ -287,7 +288,7 @@ def autostop(
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Schedule or cancel an autostop/autodown for a cluster.
+    """Schedule an autostop/autodown for a cluster.
 
     Autostop/autodown will automatically stop or teardown a cluster when it
     becomes idle for a specified duration.  Idleness means there are no
