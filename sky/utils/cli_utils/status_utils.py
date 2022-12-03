@@ -92,7 +92,6 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         cluster_table.add_row(row)
         pending_autostop += _is_pending_autostop(record)
 
-    reset = backend_utils.RESET_BOLD
     if cluster_records:
         if reserved_group_name is not None:
             autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
@@ -109,7 +108,6 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-
     else:
         click.echo('No existing clusters.')
     return pending_autostop
