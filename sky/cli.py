@@ -2828,7 +2828,7 @@ def _is_spot_controller_up(
 
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Managed spot instances related commands."""
+    """Commands for managed spot jobs."""
     pass
 
 
