@@ -92,6 +92,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         cluster_table.add_row(row)
         pending_autostop += _is_pending_autostop(record)
 
+    reset = backend_utils.RESET_BOLD
     if cluster_records:
         if reserved_group_name is not None:
             autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
@@ -101,15 +102,14 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')
             reset = backend_utils.RESET_BOLD
-            click.echo(
-                f'{colorama.Style.DIM}  Directly interacting with the '
-                f'controller is typically not needed.{colorama.Style.RESET_ALL}'
-                '\n  Use spot jobs CLI: '
-                f'{colorama.Style.BRIGHT}sky spot --help{reset}')
+            click.echo('Use spot jobs CLI: '
+                       f'{colorama.Style.BRIGHT}sky spot --help{reset}')
+
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
+
     else:
         click.echo('No existing clusters.')
     return pending_autostop
