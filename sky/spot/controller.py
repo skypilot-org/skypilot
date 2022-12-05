@@ -108,11 +108,14 @@ class SpotController:
              handle) = backend_utils.refresh_cluster_status_handle(
                  self._cluster_name, force_refresh=True)
 
-            is_preempted = False
             if cluster_status != global_user_state.ClusterStatus.UP:
-                # When the status is not UP, the cluster is likely preempted,
-                # and spot recovery is needed (will be done later in the code).
-                is_preempted = True
+                # The cluster is (partially) preempted. It can be down, INIT
+                # or STOPPED, based on the interruption behavior of the cloud.
+                # Spot recovery is needed (will be done later in the code).
+                cluster_status_str = ('' if cluster_status is None else
+                                      f' (status: {cluster_status.value})')
+                logger.info(
+                    f'Cluster is preempted{cluster_status_str}. Recovering...')
             else:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
@@ -134,20 +137,16 @@ class SpotController:
                         failure_type=spot_state.SpotStatus.FAILED,
                         end_time=end_time)
                     break
-                else:
-                    # Unexpected job status received, try to recover
-                    # the cluster to be safe.
-                    logger.info(f'Got unexpected job status: {job_status}. '
-                                'Recovering...')
+                # Although the cluster is healthy, we fail to access the
+                # job status. Try to recover the job (will not restart the
+                # cluster, if the cluster is healthy).
+                assert job_status is None, job_status
+                logger.info('Failed to fetch the job status while the '
+                            'cluster is healthy. Try to recover the job '
+                            '(the cluster will not be restarted).')
 
-            # Failed to connect to the cluster or the cluster is partially down.
-            # cluster can be down, INIT or STOPPED, based on the interruption
-            # behavior of the cloud.
-            if is_preempted:
-                cluster_status_str = ('' if cluster_status is None else
-                                      f' (status: {cluster_status.value})')
-                logger.info(
-                    f'Cluster is preempted{cluster_status_str}. Recovering...')
+            # Try to recover the spot jobs, when the cluster is preempted
+            # or the job status is failed to be fetched.
             spot_state.set_recovering(self._job_id)
             recovered_time = self._strategy_executor.recover()
             spot_state.set_recovered(self._job_id,
