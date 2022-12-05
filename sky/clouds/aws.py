@@ -16,10 +16,13 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.aws that grant AWS access.
-_CREDENTIAL_FILES = [
-    'credentials',
-]
+# No need to upload the credentials file to the cloud, since we have
+# enabled the ray-autoscaler-v1 role for all the nodes, i.e. they can
+# access ec2, s3, etc.
+# TODO(zhwu): Should still upload the credentials file to the VM, when
+# the VM is not running on AWS (access s3 or spot controller managing
+# instances).
+_CREDENTIAL_FILES = []
 
 
 def _run_output(cmd):
@@ -302,8 +305,8 @@ class AWS(clouds.Cloud):
         # This file is required because it will be synced to remote VMs for
         # `aws` to access private storage buckets.
         # `aws configure list` does not guarantee this file exists.
-        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
-            return (False, '~/.aws/credentials does not exist.' + help_str)
+        # if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
+        #     return (False, '~/.aws/credentials does not exist.' + help_str)
 
         # Checks if the AWS CLI is installed properly
         try:

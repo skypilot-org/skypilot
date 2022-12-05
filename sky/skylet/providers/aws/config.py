@@ -27,10 +27,11 @@ from ray.autoscaler.tags import NODE_TYPE_LEGACY_HEAD, NODE_TYPE_LEGACY_WORKER
 
 logger = logging.getLogger(__name__)
 
-RAY = "ray-autoscaler"
-DEFAULT_RAY_INSTANCE_PROFILE = RAY + "-v1"
-DEFAULT_RAY_IAM_ROLE = RAY + "-v1"
-SECURITY_GROUP_TEMPLATE = RAY + "-{}"
+# TODO(skypilot, zhwu): backward compatibility for old config
+SKYPILOT = "skypilot-service"
+DEFAULT_RAY_INSTANCE_PROFILE = SKYPILOT + "-v1"
+DEFAULT_RAY_IAM_ROLE = SKYPILOT + "-v1"
+SECURITY_GROUP_TEMPLATE = SKYPILOT + "-{}"
 
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
@@ -63,14 +64,14 @@ def key_pair(i, region, key_name):
     Returns the ith default (aws_key_pair_name, key_pair_path).
     """
     if i == 0:
-        key_pair_name = "{}_{}".format(RAY, region) if key_name is None else key_name
+        key_pair_name = "{}_{}".format(SKYPILOT, region) if key_name is None else key_name
         return (
             key_pair_name,
             os.path.expanduser("~/.ssh/{}.pem".format(key_pair_name)),
         )
 
     key_pair_name = (
-        "{}_{}_{}".format(RAY, i, region)
+        "{}_{}_{}".format(SKYPILOT, i, region)
         if key_name is None
         else key_name + "_key-{}".format(i)
     )
@@ -262,6 +263,10 @@ def _configure_iam_role(config):
     head_node_config = config["available_node_types"][head_node_type]["node_config"]
     if "IamInstanceProfile" in head_node_config:
         _set_config_info(head_instance_profile_src="config")
+        # SkyPilot: let the workers use the same role as the head node, so that they
+        # can access the same S3 buckets.
+        for node_type in config["available_node_types"].values():
+            node_type["node_config"]["IamInstanceProfile"] = {"Arn": profile.arn}
         return config
     _set_config_info(head_instance_profile_src="default")
 
@@ -312,10 +317,10 @@ def _configure_iam_role(config):
                     "arn:aws:iam::aws:policy/AmazonS3FullAccess",
                 ],
             )
-
             iam.create_role(
                 RoleName=role_name, AssumeRolePolicyDocument=json.dumps(policy_doc)
             )
+            
             role = _get_role(role_name, config)
             cli_logger.doassert(
                 role is not None, "Failed to create role."
@@ -325,12 +330,32 @@ def _configure_iam_role(config):
 
             for policy_arn in attach_policy_arns:
                 role.attach_policy(PolicyArn=policy_arn)
+            get_pass_role_policy_doc = {
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "iam:GetRole",
+                            "iam:PassRole",
+                        ],
+                        "Resource": role.arn,
+                    }
+                ]
+            }
+            role.Policy('GetPassRolePolicy').put(
+                PolicyDocument=json.dumps(get_pass_role_policy_doc)
+            )
 
         profile.add_role(RoleName=role.name)
         time.sleep(15)  # wait for propagation
     # Add IAM role to "head_node" field so that it is applied only to
     # the head node -- not to workers with the same node type as the head.
-    config["head_node"]["IamInstanceProfile"] = {"Arn": profile.arn}
+    # config["head_node"]["IamInstanceProfile"] = {"Arn": profile.arn}
+
+    # SkyPilot: make all the node types use the same role, so that all the nodes
+    # can access the same S3 buckets.
+    for node_type in config["available_node_types"].values():
+        node_type["node_config"]["IamInstanceProfile"] = {"Arn": profile.arn}
 
     return config
 
