@@ -3,6 +3,7 @@
 # pylint: disable=import-outside-toplevel
 
 import json
+import os
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -301,11 +302,6 @@ class AWS(clouds.Cloud):
             '\n    For more info: '
             'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
         )
-        # This file is required because it will be synced to remote VMs for
-        # `aws` to access private storage buckets.
-        # `aws configure list` does not guarantee this file exists.
-        # if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
-        #     return (False, '~/.aws/credentials does not exist.' + help_str)
 
         # Checks if the AWS CLI is installed properly
         try:
@@ -333,9 +329,19 @@ class AWS(clouds.Cloud):
                 ' To reconfigure the credentials, ' + help_str[1].lower() +
                 help_str[2:])
 
+        hints = None
+        # This file is required for multiple clouds because it will be synced to remote VMs
+        # for `aws` to access private storage buckets.
+        # `aws configure list` does not guarantee this file exists.
+        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
+            hints = (
+                'AWS static credentials are not set. SSO configuration might be used. '
+                'It will work if you use AWS only, but will cause problems for multiple '
+                'clouds. To set up static credentials, try: aws configure')
+
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
-        return True, None
+        return True, hints
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {

@@ -334,6 +334,10 @@ def _configure_iam_role(config):
 
             for policy_arn in attach_policy_arns:
                 role.attach_policy(PolicyArn=policy_arn)
+            
+            # SkyPilot: "PassRole" is required by the head node to pass the role to
+            # the workers, so we can access S3 buckets on the workers. "Resource"
+            # is to limit the role to only able to pass itself to the workers.
             get_pass_role_policy_doc = {
                 "Statement": [
                     {
