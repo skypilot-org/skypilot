@@ -16,13 +16,15 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-# No need to upload the credentials file to the cloud, since we have
-# enabled the ray-autoscaler-v1 role for all the nodes, i.e. they can
+# No need to upload the credentials file to AWS node, since we have
+# enabled the sky-service-v1 IAM role for all the nodes, i.e. they can
 # access ec2, s3, etc.
-# TODO(zhwu): Should still upload the credentials file to the VM, when
-# the VM is not running on AWS (access s3 or spot controller managing
+# We Should still upload the credentials file to the VM, when the VM
+# is not running on AWS (access s3 or spot controller managing
 # instances).
-_CREDENTIAL_FILES = []
+_CREDENTIAL_FILES = [
+    'credentials',
+]
 
 
 def _run_output(cmd):
@@ -347,6 +349,7 @@ class AWS(clouds.Cloud):
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
             for filename in _CREDENTIAL_FILES
+            if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
     def instance_type_exists(self, instance_type):
