@@ -63,15 +63,19 @@ def key_pair(i, region, key_name):
     If key_name is not None, key_pair will be named after key_name.
     Returns the ith default (aws_key_pair_name, key_pair_path).
     """
+    # SkyPilot: we don't use this, as we explicitly set the key already.
+    # For backwards compatibility, we'll just return the key pair with
+    # the previous name.
+    LEGACY_KEY_NAME = "ray-autoscaler"
     if i == 0:
-        key_pair_name = "{}_{}".format(SKYPILOT, region) if key_name is None else key_name
+        key_pair_name = "{}_{}".format(LEGACY_KEY_NAME, region) if key_name is None else key_name
         return (
             key_pair_name,
             os.path.expanduser("~/.ssh/{}.pem".format(key_pair_name)),
         )
 
     key_pair_name = (
-        "{}_{}_{}".format(SKYPILOT, i, region)
+        "{}_{}_{}".format(LEGACY_KEY_NAME, i, region)
         if key_name is None
         else key_name + "_key-{}".format(i)
     )
