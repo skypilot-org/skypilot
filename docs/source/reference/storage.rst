@@ -4,7 +4,8 @@ SkyPilot Storage
 =================
 
 A SkyPilot Storage object represents an abstract data store containing large data
-files required by the task. Compared to file_mounts, storage is faster and
+files required by the task. Think of it as a bucket of files that can be attached
+to your task. Compared to file_mounts, storage is faster and
 can persist across runs, requiring fewer uploads from your local machine.
 Behind the scenes, storage automatically uploads all data in the source
 to a backing object store in a particular cloud (S3/GCS/Azure Blob).
@@ -61,9 +62,8 @@ When specifying a storage object, you can specify either of two modes:
     In effect, files are streamed from the backing source bucket as and when
     they are accessed by applications. This mode also allows applications to
     write to the mount path. All writes are replicated to remote bucket (and
-    any other VMs mounting the same bucket). Please note that this mode
-    uses a close-to-open consistency model, which means a file write is
-    committed to the backing store only after :code:`close()` is called on it.
+    any other VMs mounting the same bucket).
+
 
 - :code:`mode: COPY`
     This mode pre-fetches your files from remote storage and caches them on the
@@ -155,6 +155,23 @@ and storage mounting:
         name: romil-output-bucket
         mode: MOUNT
 
+      # *** Uploading multiple files to the same Storage object ***
+      #
+      # The source field in a storage object can also be a list of local paths.
+      # This is useful when multiple files or directories need to be uploaded to the
+      # same bucket.
+      #
+      # Note: The basenames of each path in the source list are copied recursively
+      # to the root of the bucket. Thus, If the source list contains a directory,
+      # the entire directory is copied to the root of the bucket. For instance,
+      # in this example, the contents of ~/datasets are copied to
+      # s3://sky-multisource-storage/datasets/. ~/mydir/myfile.txt will appear
+      # at s3://sky-multisource-storage/myfile.txt.
+      /datasets-multisource-storage:
+        name: sky-multisource-storage2 # Make sure this name is unique or you own this bucket
+        source: [~/mydir/myfile.txt, ~/datasets]
+
+
     run: |
       pwd
       ls -la /
@@ -174,6 +191,22 @@ and storage mounting:
     For mounts backed by SkyPilot Storage, symbolic links are not copied to remote.
     For mounts not using SkyPilot Storage (e.g., those using rsync) the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
+
+.. note::
+    :code:`MOUNT` mode employs a close-to-open consistency model. This means calling
+    :code:`close()` on a file will upload the entire file to the backing object store.
+    Any subsequent reads, either using SkyPilot Storage or external utilities (such as
+    aws/gsutil cli) will see the latest data.
+
+.. note::
+    :code:`MOUNT` mode does not support the full POSIX interface and some file
+    operations may fail. Most notably, random writes and append operations are
+    not supported.
+
+.. note::
+    Storage only supports uploading directories (i.e., :code:`source` cannot be a file).
+    To upload a single file to a bucket, please put in a directory and specify the directory as the source.
+    To directly copy a file to a VM, please use regular :ref:`file mounts <file-mounts-example>`.
 
 Creating a shared file system
 -----------------------------
@@ -239,10 +272,11 @@ Storage YAML reference
 
       sky.Storage.source: str
         The source attribute specifies the local path that must be made available
-        in the storage object. It can either be a local path, in which case data
-        is uploaded to the cloud to an appropriate object store (s3 or gcs), or it
-        can be a remote path (s3://, gs://), in which case it is copied or mounted
-        directly (see mode flag below).
+        in the storage object. It can either be a local path or a list of local
+        paths or it can be a remote path (s3://, gs://).
+        If the source is local, data is uploaded to the cloud to an appropriate
+        object store (s3 or gcs). If the path is remote, the data is copied
+        or mounted directly (see mode flag below).
 
       sky.Storage.store: str; either of 's3' or 'gcs'
         If you wish to force sky.Storage to be backed by a specific cloud object

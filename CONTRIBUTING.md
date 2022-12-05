@@ -24,7 +24,7 @@ pip install -r requirements-dev.txt
 ```
 
 ### Testing
-To run smoke tests:
+To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 ```
 bash tests/run_smoke_tests.sh
 

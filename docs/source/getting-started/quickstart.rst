@@ -26,8 +26,6 @@ Copy the following YAML into a ``hello_sky.yaml`` file:
 
 .. code-block:: yaml
 
-  # hello_sky.yaml
-
   resources:
     # Optional; if left out, automatically pick the cheapest cloud.
     cloud: aws
@@ -111,10 +109,8 @@ For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``s
 
 View all clusters
 =================
-..
-   **To view existing clusters**, use :code:`sky status`:
 
-Use :code:`sky status` to view existing clusters:
+Use :code:`sky status` to see all clusters (across regions and clouds) in a single table:
 
 .. code-block:: console
 
@@ -128,16 +124,34 @@ This may show multiple clusters, if you have created several:
   gcp        1 day ago    1x GCP(n1-highmem-8)  sky cpunode -c gcp --cloud gcp     STOPPED
   mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
 
-To log into the a cluster, SkyPilot provides convenient SSH access via :code:`ssh <cluster_name>`:
+
+SSH into clusters
+=================
+Simply run :code:`ssh <cluster_name>` to log into a cluster:
 
 .. code-block:: console
 
   $ ssh mycluster
 
+:ref:`Multi-node clusters <dist-jobs>` work too:
+
+.. code-block:: console
+
+  # Assuming 3 nodes.
+
+  # Head node.
+  $ ssh mycluster
+
+  # Worker nodes.
+  $ ssh mycluster-worker1
+  $ ssh mycluster-worker2
+
+The above are achieved by adding appropriate entries to ``~/.ssh/config``.
+
 Transfer files
 ===============
 
-After a task's execution,  use :code:`rsync` (or :code:`scp`) to download files (e.g., checkpoints):
+After a task's execution,  use :code:`rsync` or :code:`scp` to download files (e.g., checkpoints):
 
 .. code-block:: console
 
@@ -157,9 +171,10 @@ Next steps
 
 Congratulations!  In this quickstart, you have launched a cluster, run a task, and interacted with SkyPilot's CLI.
 
-To learn more:
+Next steps:
 
-- Adapt :ref:`Tutorial: DNN Training` to run your own project on SkyPilot
-- Try :ref:`Interactive Nodes` -- VMs that can be launched in one command without a YAML file
-- See a fully complete :ref:`YAML example <yaml-spec>` and more examples in the `repository <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
-- Explore the rest of the documentation
+- Adapt :ref:`Tutorial: DNN Training` to start running your own project on SkyPilot!
+- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
+- To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
+- Try :ref:`Interactive Nodes` -- launch VMs in one command without a YAML file
+- Explore SkyPilot's unique features in the rest of the documentation

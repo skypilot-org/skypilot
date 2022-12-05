@@ -31,9 +31,8 @@ _CREDENTIAL_FILES = [
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
+    'active_config',
 ]
-
-_IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
 
 _GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
 # Need to be run with /bin/bash
@@ -213,7 +212,13 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
+        # gcloud compute images list \
+        # --project deeplearning-platform-release \
+        # --no-standard-images
+        # We use the debian image, as the ubuntu image has some connectivity
+        # issue when first booted.
+        image_id = service_catalog.get_image_id_from_tag(
+            'skypilot:cpu-debian-10', clouds='gcp')
 
         r = resources
         # Find GPU spec, if any.
@@ -246,18 +251,35 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
+                if acc == 'A100-80GB':
+                    # A100-80GB has a different name pattern.
+                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                else:
+                    resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
+                        acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 if acc == 'K80':
+                    # Though the image is called cu113, it actually has later
+                    # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
+                    image_id = service_catalog.get_image_id_from_tag(
+                        'skypilot:k80-debian-10', clouds='gcp')
                 else:
+                    # Though the image is called cu113, it actually has later
+                    # versions of CUDA as noted below.
                     # CUDA driver version 510.47.03, CUDA Library 11.6
-                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220806'
+                    # Does not support torch==1.13.0 with cu117
+                    image_id = service_catalog.get_image_id_from_tag(
+                        'skypilot:gpu-debian-10', clouds='gcp')
 
         if resources.image_id is not None:
-            image_id = resources.image_id
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert region_name in resources.image_id, resources.image_id
+                image_id = resources.image_id[region_name]
 
+        assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
         return resources_vars
@@ -437,9 +459,6 @@ class GCP(clouds.Cloud):
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
-
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='gcp')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,

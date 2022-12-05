@@ -32,6 +32,7 @@ _CURSOR.execute("""\
     last_recovered_at FLOAT DEFAULT -1,
     recovery_count INTEGER DEFAULT 0,
     job_duration FLOAT DEFAULT 0)""")
+
 # job_duration is the time a job actually runs before last_recover,
 # excluding the provision and recovery time.
 # If the job is not finished:

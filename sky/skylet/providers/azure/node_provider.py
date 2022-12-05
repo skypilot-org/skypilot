@@ -4,23 +4,23 @@ from pathlib import Path
 from threading import RLock
 from uuid import uuid4
 
-from azure.identity import DefaultAzureCredential
+from azure.identity import AzureCliCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
-from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_NODE_NAME,
-    TAG_RAY_NODE_KIND,
-    TAG_RAY_LAUNCH_CONFIG,
-    TAG_RAY_USER_NODE_TYPE,
-)
 from sky.skylet.providers.azure.config import (
     bootstrap_azure,
     get_azure_sdk_function,
+)
+from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler.tags import (
+    TAG_RAY_CLUSTER_NAME,
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_KIND,
+    TAG_RAY_NODE_NAME,
+    TAG_RAY_USER_NODE_TYPE,
 )
 
 VM_NAME_MAX_LEN = 64
@@ -65,12 +65,8 @@ class AzureNodeProvider(NodeProvider):
         _configure_resource_group({"provider": provider_config})
         subscription_id = provider_config["subscription_id"]
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
-        # AWS provides managed identity for Azure, but it is not setup properly by
-        # default. This interferes with azure-cli credentials and causes failures,
-        # when using sky to launch Azure on AWS ec2 instances. We disable it to give
-        # way to azure-cli credentials.
-        credential = DefaultAzureCredential(exclude_shared_token_cache_credential=True,
-                                            exclude_managed_identity_credential=True)
+        # Sky only supports Azure CLI credential for now.
+        credential = AzureCliCredential()
         self.compute_client = ComputeManagementClient(credential, subscription_id)
         self.network_client = NetworkManagementClient(credential, subscription_id)
         self.resource_client = ResourceManagementClient(credential, subscription_id)

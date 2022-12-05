@@ -35,9 +35,7 @@ def _get_current_timestamp_ns() -> int:
 def _get_user_hash():
     """Returns a unique user-machine specific hash as a user id for logging."""
     user_id = os.getenv(constants.USAGE_USER_ENV)
-    if user_id and len(user_id) == 8:
-        return user_id
-    return common_utils.get_user_hash()
+    return common_utils.get_user_hash(default_value=user_id)
 
 
 class MessageType(enum.Enum):
@@ -77,7 +75,7 @@ class UsageMessageToReport(MessageToReport):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
         self.user: str = _get_user_hash()
-        self.run_id: str = common_utils.get_run_id()
+        self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
 
         # Entry
@@ -430,3 +428,24 @@ def entrypoint(name_or_fn: str, fallback: bool = False):
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)
+
+
+# Convenience methods below.
+
+
+def record_cluster_name_for_current_operation(
+        cluster_name: Union[List[str], str]) -> None:
+    """Records cluster name(s) for the current operation.
+
+    Usage:
+
+       def op():  # CLI or programmatic API
+
+           ...validate errors...
+
+           usage_lib.record_cluster_name_for_current_operation(
+              <actual clusters being operated on>)
+
+           do_actual_op()
+    """
+    messages.usage.update_cluster_name(cluster_name)

@@ -3,8 +3,10 @@ import enum
 import os
 import subprocess
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union, List
 import urllib.parse
+
+import colorama
 
 from sky import clouds
 from sky.adaptors import aws
@@ -32,17 +34,41 @@ STORE_ENABLED_CLOUDS = [clouds.AWS(), clouds.GCP()]
 # Max number of objects a GCS bucket can be directly deleted with
 _GCS_RM_MAX_OBJS = 256
 
+# Maximum number of concurrent rsync upload processes
+_MAX_CONCURRENT_UPLOADS = 32
+
 _BUCKET_FAIL_TO_CONNECT_MESSAGE = (
     'Failed to connect to an existing bucket {name!r}.\n'
-    'Please check if:\n  1) the bucket name is taken and/or '
-    '\n  2) the bucket permissions are not setup correctly. '
-    'Consider using {command} to debug.')
+    'Please check if:\n  1. the bucket name is taken and/or '
+    '\n  2. the bucket permissions are not setup correctly.')
 
 
 class StoreType(enum.Enum):
+    """Enum for the different types of stores."""
     S3 = 'S3'
     GCS = 'GCS'
     AZURE = 'AZURE'
+
+    @classmethod
+    def from_cloud(cls, cloud: clouds.Cloud) -> 'StoreType':
+        if isinstance(cloud, clouds.AWS):
+            return StoreType.S3
+        elif isinstance(cloud, clouds.GCP):
+            return StoreType.GCS
+        elif isinstance(cloud, clouds.Azure):
+            return StoreType.AZURE
+
+        raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
+
+    @classmethod
+    def from_store(cls, store: 'AbstractStore') -> 'StoreType':
+        if isinstance(store, S3Store):
+            return StoreType.S3
+        elif isinstance(store, GcsStore):
+            return StoreType.GCS
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Unknown store type: {store}')
 
 
 class StorageMode(enum.Enum):
@@ -76,16 +102,6 @@ def get_store_prefix(storetype: StoreType) -> str:
             raise ValueError(f'Unknown store type: {storetype}')
 
 
-def _get_storetype_from_store(store: 'Storage') -> StoreType:
-    if isinstance(store, S3Store):
-        return StoreType.S3
-    elif isinstance(store, GcsStore):
-        return StoreType.GCS
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Unknown store type: {store}')
-
-
 class AbstractStore:
     """AbstractStore abstracts away the different storage types exposed by
     different clouds.
@@ -97,6 +113,7 @@ class AbstractStore:
     _STAT_CACHE_TTL = '5s'
     _STAT_CACHE_CAPACITY = 4096
     _TYPE_CACHE_TTL = '5s'
+    _RENAME_DIR_LIMIT = 10000
 
     class StoreMetadata:
         """A pickle-able representation of Store
@@ -204,10 +221,6 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def sync_local_dir(self) -> None:
-        """Syncs a local directory to a Store bucket."""
-        raise NotImplementedError
-
     def download_remote_dir(self, local_path: str) -> None:
         """Downloads directory from remote bucket to the specified
         local_path
@@ -312,17 +325,17 @@ class Storage(object):
                     f'\n\tstores={self.sky_stores})')
 
         def add_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             self.sky_stores[storetype] = store.get_metadata()
 
         def remove_store(self, store: AbstractStore) -> None:
-            storetype = _get_storetype_from_store(store)
+            storetype = StoreType.from_store(store)
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
     def __init__(self,
                  name: Optional[str] = None,
-                 source: Optional[Path] = None,
+                 source: Union[Path, List[Path], None] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
@@ -352,9 +365,9 @@ class Storage(object):
         Args:
           name: str; Name of the storage object. Typically used as the
             bucket name in backing object stores.
-          source: str; File path where the data is initially stored. Can be a
-            local path or a cloud URI (s3://, gs://, etc.). Local paths do not
-            need to be absolute.
+          source: str, List[str]; File path where the data is initially stored.
+            Can be a single local path, a list of local paths, or a cloud URI
+            (s3://, gs://, etc.). Local paths do not need to be absolute.
           stores: Optional; Specify pre-initialized stores (S3Store, GcsStore).
           persistent: bool; Whether to persist across sky launches.
           mode: StorageMode; Specify how the storage object is manifested on
@@ -387,8 +400,8 @@ class Storage(object):
         self.handle = global_user_state.get_handle_from_storage_name(self.name)
         if self.handle:
             # Reconstruct the Storage object from the global_user_state
-            logger.info('Detected existing storage object, '
-                        f'loading Storage: {self.name}')
+            logger.debug('Detected existing storage object, '
+                         f'loading Storage: {self.name}')
             for s_type, s_metadata in self.handle.sky_stores.items():
                 # When initializing from global_user_state, we override the
                 # source from the YAML
@@ -408,8 +421,9 @@ class Storage(object):
             # syncing to file_mount stage..
             if self.sync_on_reconstruction:
                 msg = ''
-                if self.source and \
-                        not data_utils.is_cloud_store_url(self.source):
+                if (self.source and
+                    (isinstance(self.source, list) or
+                     not data_utils.is_cloud_store_url(self.source))):
                     msg = ' and uploading from source'
                 logger.info(f'Verifying bucket{msg} for storage {self.name}')
                 self.sync_all_stores()
@@ -428,10 +442,11 @@ class Storage(object):
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
                 # If the bucket does not exist, this will error out
-                if self.source.startswith('s3://'):
-                    self.add_store(StoreType.S3)
-                elif self.source.startswith('gs://'):
-                    self.add_store(StoreType.GCS)
+                if isinstance(self.source, str):
+                    if self.source.startswith('s3://'):
+                        self.add_store(StoreType.S3)
+                    elif self.source.startswith('gs://'):
+                        self.add_store(StoreType.GCS)
 
     @staticmethod
     def _validate_source(source: str, mode: StorageMode,
@@ -449,46 +464,85 @@ class Storage(object):
           source: str; The source path.
           is_local_path: bool; Whether the source is a local path. False if URI.
         """
-        # Check if source is a valid local/remote URL
-        split_path = urllib.parse.urlsplit(source)
-        if split_path.scheme == '':
-            if source.endswith('/'):
+
+        def _check_basename_conflicts(source_list: List[str]) -> None:
+            """Checks if two paths in source_list have the same basename."""
+            basenames = [os.path.basename(s) for s in source_list]
+            conflicts = {x for x in basenames if basenames.count(x) > 1}
+            if conflicts:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        'Cannot have multiple files or directories with the '
+                        'same name in source. Conflicts found for: '
+                        f'{", ".join(conflicts)}')
+
+        def _validate_local_source(local_source):
+            if local_source.endswith('/'):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         'Storage source paths cannot end with a slash '
                         '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found source={source}')
+                        f'Found source={local_source}')
             # Local path, check if it exists
-            source = os.path.abspath(os.path.expanduser(source))
+            full_src = os.path.abspath(os.path.expanduser(local_source))
             # Only check if local source exists if it is synced to the bucket
-            if not os.path.exists(source) and sync_on_reconstruction:
+            if not os.path.exists(full_src) and sync_on_reconstruction:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageSourceError(
                         'Local source path does not'
-                        f' exist: {source}')
+                        f' exist: {local_source}')
             # Raise warning if user's path is a symlink
-            elif os.path.islink(source):
+            elif os.path.islink(full_src):
                 logger.warning(f'Source path {source} is a symlink. '
                                'Referenced contents are uploaded, matching '
                                'the default behavior for S3 and GCS syncing.')
+
+        # Check if source is a list of paths
+        if isinstance(source, list):
+            # Check for conflicts in basenames
+            _check_basename_conflicts(source)
+            # Validate each path
+            for local_source in source:
+                _validate_local_source(local_source)
             is_local_source = True
-        elif split_path.scheme in ['s3', 'gs']:
-            is_local_source = False
-            # Storage mounting does not support mounting specific files from
-            # cloud store - ensure path points to only a directory
-            if mode == StorageMode.MOUNT:
-                if split_path.path.strip('/') != '':
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.StorageModeError(
-                            'MOUNT mode does not support'
-                            ' mounting specific files from cloud'
-                            ' storage. Please use COPY mode or'
-                            ' specify only the bucket name as'
-                            ' the source.')
         else:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageSourceError(
-                    f'Supported paths: local, s3://, gs://. Got: {source}')
+            # Check if str source is a valid local/remote URL
+            split_path = urllib.parse.urlsplit(source)
+            if split_path.scheme == '':
+                _validate_local_source(source)
+                # Check if source is a file - throw error if it is
+                full_src = os.path.abspath(os.path.expanduser(source))
+                if os.path.isfile(full_src):
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.StorageSourceError(
+                            'Storage source path cannot be a file - only'
+                            ' directories are supported as a source. '
+                            'To upload a single file, specify it in a list '
+                            f'by writing source: [{source}]. Note '
+                            'that the file will be uploaded to the root of the '
+                            'bucket and will appear at <destination_path>/'
+                            f'{os.path.basename(source)}. Alternatively, you '
+                            'can directly upload the file to the VM without '
+                            'using a bucket by writing <destination_path>: '
+                            f'{source} in the file_mounts section of your YAML')
+                is_local_source = True
+            elif split_path.scheme in ['s3', 'gs']:
+                is_local_source = False
+                # Storage mounting does not support mounting specific files from
+                # cloud store - ensure path points to only a directory
+                if mode == StorageMode.MOUNT:
+                    if split_path.path.strip('/') != '':
+                        with ux_utils.print_exception_no_traceback():
+                            raise exceptions.StorageModeError(
+                                'MOUNT mode does not support'
+                                ' mounting specific files from cloud'
+                                ' storage. Please use COPY mode or'
+                                ' specify only the bucket name as'
+                                ' the source.')
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageSourceError(
+                        f'Supported paths: local, s3://, gs://. Got: {source}')
         return source, is_local_source
 
     def _validate_storage_spec(self) -> None:
@@ -582,18 +636,18 @@ class Storage(object):
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
-            logger.error(f'Sky could not create {store_type} store '
+            logger.error(f'Could not create {store_type} store '
                          f'with name {self.name}.')
             global_user_state.set_storage_status(self.name,
                                                  StorageStatus.INIT_FAILED)
             raise
         except exceptions.StorageBucketGetError:
             # Bucket get failed, so this is not sky managed. Do not update state
-            logger.error(f'Sky could not get {store_type} store '
+            logger.error(f'Could not get {store_type} store '
                          f'with name {self.name}.')
             raise
         except exceptions.StorageInitError:
-            logger.error(f'Sky could not initialize {store_type} store with '
+            logger.error(f'Could not initialize {store_type} store with '
                          f'name {self.name}. General initialization error.')
             raise
 
@@ -607,7 +661,7 @@ class Storage(object):
 
     def _add_store(self, store: AbstractStore, is_reconstructed: bool = False):
         # Adds a store object to the storage
-        store_type = _get_storetype_from_store(store)
+        store_type = StoreType.from_store(store)
         self.stores[store_type] = store
         # If store initialized and is sky managed, add to state
         if store.is_sky_managed:
@@ -669,7 +723,7 @@ class Storage(object):
         try:
             store.upload()
         except exceptions.StorageUploadError:
-            logger.error(f'Sky could not upload {self.source} to store '
+            logger.error(f'Could not upload {self.source} to store '
                          f'name {store.name}.')
             if store.is_sky_managed:
                 global_user_state.set_storage_status(
@@ -721,8 +775,8 @@ class Storage(object):
                 config[key] = value
 
         name = self.name
-        if self.source is not None and data_utils.is_cloud_store_url(
-                self.source):
+        if (self.source is not None and isinstance(self.source, str) and
+                data_utils.is_cloud_store_url(self.source)):
             # Remove name if source is a cloud store URL
             name = None
         add_if_not_none('name', name)
@@ -744,6 +798,8 @@ class S3Store(AbstractStore):
     for S3 buckets.
     """
 
+    ACCESS_DENIED_MESSAGE = 'Access Denied'
+
     def __init__(self,
                  name: str,
                  source: str,
@@ -754,15 +810,15 @@ class S3Store(AbstractStore):
         super().__init__(name, source, region, is_sky_managed)
 
     def _validate(self):
-        if self.source is not None:
+        if self.source is not None and isinstance(self.source, str):
             if self.source.startswith('s3://'):
                 assert self.name == data_utils.split_s3_path(self.source)[0], (
-                    'S3 Bucket is specified as path, the name should be the '
-                    'same as S3 bucket.')
+                    'S3 Bucket is specified as path, the name should be the'
+                    ' same as S3 bucket.')
             elif self.source.startswith('gs://'):
                 assert self.name == data_utils.split_gcs_path(self.source)[0], (
-                    'GCS Bucket is specified as path, the name should be the '
-                    'same as GCS bucket.')
+                    'GCS Bucket is specified as path, the name should be '
+                    'the same as GCS bucket.')
                 assert data_utils.verify_gcs_bucket(self.name), (
                     f'Source specified as {self.source}, a GCS bucket. ',
                     'GCS Bucket should exist.')
@@ -797,13 +853,15 @@ class S3Store(AbstractStore):
             StorageUploadError: if upload fails.
         """
         try:
-            if self.source is not None:
+            if isinstance(self.source, list):
+                self.batch_aws_rsync(self.source, create_dirs=True)
+            elif self.source is not None:
                 if self.source.startswith('s3://'):
                     pass
                 elif self.source.startswith('gs://'):
                     self._transfer_to_s3()
                 else:
-                    self.sync_local_dir()
+                    self.batch_aws_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -812,52 +870,64 @@ class S3Store(AbstractStore):
 
     def delete(self) -> None:
         self._delete_s3_bucket(self.name)
-        logger.info(f'Deleted S3 bucket {self.name}.')
+        logger.info(f'{colorama.Fore.GREEN}Deleted S3 bucket {self.name}.'
+                    f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
         return aws.resource('s3').Bucket(self.name)
 
-    def sync_local_dir(self) -> None:
-        """Syncs a local directory to a S3 bucket.
+    def batch_aws_rsync(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes aws s3 sync to batch upload a list of local paths to S3
 
         AWS Sync by default uses 10 threads to upload files to the bucket.  To
         increase parallelism, modify max_concurrent_requests in your aws config
         file (Default path: ~/.aws/config).
+
+        Since aws s3 sync does not support batch operations, we construct
+        multiple commands to be run in parallel.
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
         """
-        source = os.path.abspath(os.path.expanduser(self.source))
-        sync_command = ('aws s3 sync --no-follow-symlinks '
-                        f'{source} s3://{self.name}/')
+
+        def get_file_sync_command(base_dir_path, file_names):
+            includes = ' '.join(
+                [f'--include "{file_name}"' for file_name in file_names])
+            sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
+                            f'{includes} {base_dir_path} '
+                            f's3://{self.name}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            sync_command = ('aws s3 sync --no-follow-symlinks '
+                            f'{src_dir_path} '
+                            f's3://{self.name}/{dest_dir_name}')
+            return sync_command
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to s3://{self.name}/'):
-            # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
-            # to a log file.
-            with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE,
-                                  stdout=subprocess.DEVNULL) as process:
-                stderr = []
-                while True:
-                    line = process.stderr.readline()
-                    if not line:
-                        break
-                    str_line = line.decode('utf-8')
-                    stderr.append(str_line)
-                    if 'Access Denied' in str_line:
-                        process.kill()
-                        with ux_utils.print_exception_no_traceback():
-                            raise PermissionError(
-                                'Sky Storage failed to upload files to '
-                                'the S3 bucket. The bucket does not have '
-                                'write permissions. It is possible that '
-                                'the bucket is public.')
-                returncode = process.wait()
-                if returncode != 0:
-                    stderr = '\n'.join(stderr)
-                    with ux_utils.print_exception_no_traceback():
-                        logger.error(stderr)
-                        raise exceptions.StorageUploadError(
-                            f'Upload to S3 failed for store {self.name} and '
-                            f'source {self.source}. Please check the logs.')
+                f'[green]{source_message}[/] to [green]s3://{self.name}/[/]'):
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                self.name,
+                self.ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_s3(self) -> None:
         if self.source.startswith('gs://'):
@@ -893,10 +963,10 @@ class S3Store(AbstractStore):
                 command = f'aws s3 ls {self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name, command=command)) from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
-        if self.source is not None and self.source.startswith('s3://'):
+        if isinstance(self.source, str) and self.source.startswith('s3://'):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketGetError(
                     'Attempted to connect to a non-existent bucket: '
@@ -980,7 +1050,7 @@ class S3Store(AbstractStore):
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
         try:
             with backend_utils.safe_console_status(
-                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
+                    f'[bold cyan]Deleting S3 bucket {bucket_name}[/]'):
                 subprocess.check_output(remove_command.split(' '))
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
@@ -998,6 +1068,8 @@ class GcsStore(AbstractStore):
     for GCS buckets.
     """
 
+    ACCESS_DENIED_MESSAGE = 'AccessDeniedException'
+
     def __init__(self,
                  name: str,
                  source: str,
@@ -1009,17 +1081,22 @@ class GcsStore(AbstractStore):
 
     def _validate(self):
         if self.source is not None:
-            if self.source.startswith('s3://'):
-                assert self.name == data_utils.split_s3_path(self.source)[0], (
-                    'S3 Bucket is specified as path, the name should be the '
-                    'same as S3 bucket.')
-                assert data_utils.verify_s3_bucket(self.name), (
-                    f'Source specified as {self.source}, an S3 bucket. ',
-                    'S3 Bucket should exist.')
-            elif self.source.startswith('gs://'):
-                assert self.name == data_utils.split_gcs_path(self.source)[0], (
-                    'GCS Bucket is specified as path, the name should be the '
-                    'same as GCS bucket.')
+            if isinstance(self.source, str):
+                if self.source.startswith('s3://'):
+                    assert self.name == data_utils.split_s3_path(
+                        self.source
+                    )[0], (
+                        'S3 Bucket is specified as path, the name should be the'
+                        ' same as S3 bucket.')
+                    assert data_utils.verify_s3_bucket(self.name), (
+                        f'Source specified as {self.source}, an S3 bucket. ',
+                        'S3 Bucket should exist.')
+                elif self.source.startswith('gs://'):
+                    assert self.name == data_utils.split_gcs_path(
+                        self.source
+                    )[0], (
+                        'GCS Bucket is specified as path, the name should be '
+                        'the same as GCS bucket.')
 
     def initialize(self):
         """Initializes the GCS store object on the cloud.
@@ -1051,13 +1128,17 @@ class GcsStore(AbstractStore):
             StorageUploadError: if upload fails.
         """
         try:
-            if self.source is not None:
+            if isinstance(self.source, list):
+                self.batch_gsutil_rsync(self.source, create_dirs=True)
+            elif self.source is not None:
                 if self.source.startswith('gs://'):
                     pass
                 elif self.source.startswith('s3://'):
                     self._transfer_to_gcs()
                 else:
-                    self.sync_local_dir()
+                    # If a single directory is specified in source, upload
+                    # contents to root of bucket by suffixing /*.
+                    self.batch_gsutil_rsync([self.source])
         except exceptions.StorageUploadError:
             raise
         except Exception as e:
@@ -1066,46 +1147,99 @@ class GcsStore(AbstractStore):
 
     def delete(self) -> None:
         self._delete_gcs_bucket(self.name)
-        logger.info(f'Deleted GCS bucket {self.name}.')
+        logger.info(f'{colorama.Fore.GREEN}Deleted GCS bucket {self.name}.'
+                    f'{colorama.Style.RESET_ALL}')
 
     def get_handle(self) -> StorageHandle:
         return self.client.get_bucket(self.name)
 
-    def sync_local_dir(self) -> None:
-        """Syncs a local directory to a GCS bucket."""
-        source = os.path.abspath(os.path.expanduser(self.source))
-        # TODO(zhwu): Speed up the upload process by providing a list of files
-        # so that we can utilize the parallelism.
-        sync_command = f'gsutil -m rsync -d -r {source} gs://{self.name}/'
+    def batch_gsutil_cp(self,
+                        source_path_list: List[Path],
+                        create_dirs: bool = False) -> None:
+        """Invokes gsutil cp -n to batch upload a list of local paths
+
+        -n flag to gsutil cp checks the existence of an object before uploading,
+        making it similar to gsutil rsync. Since it allows specification of a
+        list of files, it is faster than calling gsutil rsync on each file.
+        However, unlike rsync, files are compared based on just their filename,
+        and any updates to a file would not be copied to the bucket.
+        """
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list
+
+        # If the source_path list contains a directory, then gsutil cp -n
+        # copies the dir as is to the root of the bucket. To copy the
+        # contents of directory to the root, add /* to the directory path
+        # e.g., /mydir/*
+        source_path_list = [
+            str(path) + '/*' if
+            (os.path.isdir(path) and not create_dirs) else str(path)
+            for path in source_path_list
+        ]
+        copy_list = '\n'.join(
+            os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
+        sync_command = (f'echo "{copy_list}" | '
+                        f'gsutil -m cp -e -n -r -I gs://{self.name}')
+
         with backend_utils.safe_console_status(
                 f'[bold cyan]Syncing '
-                f'[green]{self.source} to gs://{self.name}/'):
-            with subprocess.Popen(sync_command.split(' '),
-                                  stderr=subprocess.PIPE,
-                                  stdout=subprocess.DEVNULL) as process:
-                stderr = []
-                while True:
-                    line = process.stderr.readline()
-                    if not line:
-                        break
-                    str_line = line.decode('utf-8')
-                    stderr.append(str_line)
-                    if 'AccessDeniedException' in str_line:
-                        process.kill()
-                        with ux_utils.print_exception_no_traceback():
-                            raise PermissionError(
-                                'Sky Storage failed to upload files to '
-                                'GCS. The bucket does not have '
-                                'write permissions. It is possible that '
-                                'the bucket is public.')
-                returncode = process.wait()
-                if returncode != 0:
-                    with ux_utils.print_exception_no_traceback():
-                        stderr = '\n'.join(stderr)
-                        logger.error(stderr)
-                        raise exceptions.StorageUploadError(
-                            f'Upload to GCS failed for store {self.name} and '
-                            f'source {self.source}. Please check logs.')
+                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+            data_utils.run_upload_cli(sync_command,
+                                      self.ACCESS_DENIED_MESSAGE,
+                                      bucket_name=self.name)
+
+    def batch_gsutil_rsync(self,
+                           source_path_list: List[Path],
+                           create_dirs: bool = False) -> None:
+        """Invokes gsutil rsync to batch upload a list of local paths
+
+        Since gsutil rsync does not support include commands, We use negative
+        look-ahead regex to exclude everything else than the path(s) we want to
+        upload.
+
+        Since gsutil rsync does not support batch operations, we construct
+        multiple commands to be run in parallel.
+
+        Args:
+            source_path_list: List of paths to local files or directories
+            create_dirs: If the local_path is a directory and this is set to
+                False, the contents of the directory are directly uploaded to
+                root of the bucket. If the local_path is a directory and this is
+                set to True, the directory is created in the bucket root and
+                contents are uploaded to it.
+        """
+
+        def get_file_sync_command(base_dir_path, file_names):
+            sync_format = '|'.join(file_names)
+            sync_command = (f'gsutil -m rsync -x \'^(?!{sync_format}$).*\' '
+                            f'{base_dir_path} gs://{self.name}')
+            return sync_command
+
+        def get_dir_sync_command(src_dir_path, dest_dir_name):
+            sync_command = (f'gsutil -m rsync -r {src_dir_path} '
+                            f'gs://{self.name}/{dest_dir_name}')
+            return sync_command
+
+        # Generate message for upload
+        if len(source_path_list) > 1:
+            source_message = f'{len(source_path_list)} paths'
+        else:
+            source_message = source_path_list[0]
+
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Syncing '
+                f'[green]{source_message}[/] to [green]gs://{self.name}/[/]'):
+            data_utils.parallel_upload(
+                source_path_list,
+                get_file_sync_command,
+                get_dir_sync_command,
+                self.name,
+                self.ACCESS_DENIED_MESSAGE,
+                create_dirs=create_dirs,
+                max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_gcs(self) -> None:
         if self.source.startswith('s3://'):
@@ -1127,7 +1261,7 @@ class GcsStore(AbstractStore):
             bucket = self.client.get_bucket(self.name)
             return bucket, False
         except gcp.not_found_exception() as e:
-            if self.source is not None and self.source.startswith('gs://'):
+            if isinstance(self.source, str) and self.source.startswith('gs://'):
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
                         'Attempted to connect to a non-existent bucket: '
@@ -1145,20 +1279,12 @@ class GcsStore(AbstractStore):
                 # Check if bucket can be listed/read from
                 next(bucket.list_blobs())
                 return bucket, False
-            except gcp.not_found_exception() as e:
+            except (gcp.not_found_exception(), ValueError) as e:
                 command = f'gsutil ls gs://{self.name}'
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketGetError(
-                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
-                            name=self.name, command=command)) from e
-            except ValueError as e:
-                ex = exceptions.StorageBucketGetError(
-                    f'Attempted to access a private external bucket {self.name}'
-                    '\nCheck if the 1) the bucket name is taken and/or '
-                    '2) the bucket permissions are not setup correctly. '
-                    f'Consider using `gsutil ls gs://{self.name}` to debug.')
-                with ux_utils.print_exception_no_traceback():
-                    raise ex from e
+                        _BUCKET_FAIL_TO_CONNECT_MESSAGE.format(name=self.name) +
+                        f' To debug, consider using {command}.') from e
 
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the bucket to the mount_path.
@@ -1173,9 +1299,11 @@ class GcsStore(AbstractStore):
                        '-O /tmp/gcsfuse.deb && '
                        'sudo dpkg --install /tmp/gcsfuse.deb')
         mount_cmd = ('gcsfuse -o allow_other '
+                     '--implicit-dirs '
                      f'--stat-cache-capacity {self._STAT_CACHE_CAPACITY} '
                      f'--stat-cache-ttl {self._STAT_CACHE_TTL} '
                      f'--type-cache-ttl {self._TYPE_CACHE_TTL} '
+                     f'--rename-dir-limit {self._RENAME_DIR_LIMIT} '
                      f'{self.bucket.name} {mount_path}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
@@ -1220,7 +1348,7 @@ class GcsStore(AbstractStore):
           bucket_name: str; Name of bucket
         """
         try:
-            bucket = self.client.get_bucket(bucket_name)
+            self.client.get_bucket(bucket_name)
         except gcp.forbidden_exception() as e:
             # Try public bucket to see if bucket exists
             with ux_utils.print_exception_no_traceback():
@@ -1228,17 +1356,13 @@ class GcsStore(AbstractStore):
                     'External Bucket detected. User not allowed to delete '
                     'external bucket.') from e
 
-        num_files = subprocess.check_output(
-            f'gsutil du gs://{bucket_name} | wc -l', shell=True)
-        num_files = int(num_files)
-
         try:
             with backend_utils.safe_console_status(
-                    f'[bold cyan]Deleting [green]bucket {bucket_name}'):
-                if num_files >= _GCS_RM_MAX_OBJS:
-                    remove_obj_command = f'gsutil -m rm -a gs://{bucket_name}/*'
-                    subprocess.check_output(remove_obj_command.split(' '))
-                bucket.delete(force=True)
+                    f'[bold cyan]Deleting GCS bucket {bucket_name}[/]'):
+                remove_obj_command = ('gsutil -m rm -r'
+                                      f' gs://{bucket_name}')
+                subprocess.check_output(remove_obj_command.split(' '),
+                                        stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             logger.error(e.output)
             with ux_utils.print_exception_no_traceback():

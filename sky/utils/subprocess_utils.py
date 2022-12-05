@@ -1,5 +1,6 @@
 """Utility functions for subprocesses."""
 from multiprocessing import pool
+import psutil
 import subprocess
 from typing import Any, Callable, List, Optional, Union
 
@@ -74,3 +75,16 @@ def handle_returncode(returncode: int,
             f'{colorama.Fore.RED}{error_msg}{colorama.Style.RESET_ALL}')
         with ux_utils.print_exception_no_traceback():
             raise exceptions.CommandError(returncode, command, format_err_msg)
+
+
+def kill_children_processes():
+    # We need to kill the children, so that the underlying subprocess
+    # will not print the logs to the terminal, after this program
+    # exits.
+    parent_process = psutil.Process()
+    for child in parent_process.children(recursive=True):
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            # The child process may have already been terminated.
+            pass

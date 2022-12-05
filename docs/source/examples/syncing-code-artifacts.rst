@@ -64,6 +64,7 @@ scripts, access checkpoints, etc.).
     $ # cluster1 will get the updated code.
     $ sky exec cluster1 task.yaml
 
+.. _file-mounts-example:
 
 Uploading files outside of workdir
 --------------------------------------
@@ -92,6 +93,9 @@ Example file mounts:
 
 
 For more details, see `this example <https://github.com/skypilot-org/skypilot/blob/master/examples/using_file_mounts.yaml>`_ and :ref:`YAML Configuration <yaml-spec>`.
+
+If you have edited the ``file_mounts`` section and would like to have it reflected on an existing cluster without rerunning the ``setup`` commands,
+pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-setup -c <cluster_name> <task.yaml>``.
 
 .. note::
 
