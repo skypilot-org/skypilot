@@ -346,7 +346,7 @@ def _configure_iam_role(config):
                     }
                 ]
             }
-            role.Policy('GetPassRolePolicy').put(
+            role.Policy("GetPassRolePolicy").put(
                 PolicyDocument=json.dumps(get_pass_role_policy_doc)
             )
 
