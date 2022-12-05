@@ -3,7 +3,6 @@
 # pylint: disable=import-outside-toplevel
 
 import json
-import os
 import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
