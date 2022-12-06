@@ -2680,12 +2680,9 @@ class CloudVmRayBackend(backends.Backend):
                     # check if gcloud includes TPU VM API
                     backend_utils.check_gcp_cli_include_tpu_vm()
 
-                    # Excluding preempted VMs is safe as they are already
-                    # terminated and do not charge.
                     query_cmd = (
                         f'gcloud compute tpus tpu-vm list --filter='
-                        f'"(labels.ray-cluster-name={cluster_name} AND '
-                        f'state!=PREEMPTED)" '
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zone={zone} --format=value\\(name\\)')
                     terminate_cmd = (
                         f'gcloud compute tpus tpu-vm delete --zone={zone}'
