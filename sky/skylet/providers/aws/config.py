@@ -338,7 +338,7 @@ def _configure_iam_role(config):
             # SkyPilot: "PassRole" is required by the head node to pass the role to
             # the workers, so we can access S3 buckets on the workers. "Resource"
             # is to limit the role to only able to pass itself to the workers.
-            get_pass_role_policy_doc = {
+            iam_self_read_write_policy_doc = {
                 "Statement": [
                     {
                         "Effect": "Allow",
@@ -355,8 +355,8 @@ def _configure_iam_role(config):
                     }
                 ]
             }
-            role.Policy("GetPassRolePolicy").put(
-                PolicyDocument=json.dumps(get_pass_role_policy_doc)
+            role.Policy("IAMSelfReadWritePolicy").put(
+                PolicyDocument=json.dumps(iam_self_read_write_policy_doc)
             )
 
         profile.add_role(RoleName=role.name)
