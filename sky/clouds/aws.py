@@ -306,16 +306,19 @@ class AWS(clouds.Cloud):
         )
 
         # Checks if the AWS CLI is installed properly
-        try:
-            _run_output('aws configure list')
-        except subprocess.CalledProcessError:
+        proc = subprocess.run('aws configure list', shell=True, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            additional_help = '\n     Credentials may also need to be set.' + help_str
+            if 'SSO' in proc.stderr.decode().split():
+                additional_help = (f'\n    You are using SSO account, please update the awscli package with:'
+                                   f'\n     $ pip install awscli>=1.27.10 boto3')
             return False, (
-                'AWS CLI is not installed properly.'
-                ' Run the following commands under sky folder:'
+                'AWS CLI is not installed properly. '
+                'Run the following commands under sky folder:'
                 # TODO(zhwu): after we publish sky to PyPI,
                 # change this to `pip install sky[aws]`
                 '\n     $ pip install .[aws]'
-                '\n   Credentials may also need to be set.' + help_str)
+                f'{additional_help}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3

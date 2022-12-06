@@ -102,7 +102,7 @@ install_requires = [
 extras_require = {
     'aws': [
         # awscli>=1.27.10 is required for SSO support.
-        'awscli>=1.27.10',
+        'awscli',
         'boto3',
         # 'Crypto' module used in authentication.py for AWS.
         'pycryptodome==3.12.0',
