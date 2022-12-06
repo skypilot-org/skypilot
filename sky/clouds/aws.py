@@ -373,8 +373,7 @@ class AWS(clouds.Cloud):
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
             for filename in _CREDENTIAL_FILES
-            if (os.path.exists(
-                os.path.expanduser(f'~/.aws/{filename}')) and
+            if (os.path.exists(os.path.expanduser(f'~/.aws/{filename}')) and
                 not self._is_sso_identity())
         }
 
