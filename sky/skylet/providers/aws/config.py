@@ -347,6 +347,11 @@ def _configure_iam_role(config):
                             "iam:PassRole",
                         ],
                         "Resource": role.arn,
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": "iam:GetInstanceProfile",
+                        "Resource": profile.arn,
                     }
                 ]
             }
