@@ -297,27 +297,33 @@ class AWS(clouds.Cloud):
         except ImportError:
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
+        prefix = '    '
         help_str = (
             ' Run the following commands:'
-            '\n      $ pip install boto3'
-            '\n      $ aws configure'
-            '\n    For more info: '
+            f'\n{prefix}  $ pip install boto3'
+            f'\n{prefix}  $ aws configure'
+            f'\n{prefix}For more info: '
             'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
         )
 
         # Checks if the AWS CLI is installed properly
-        proc = subprocess.run('aws configure list', shell=True, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc = subprocess.run('aws configure list',
+                              shell=True,
+                              check=False,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            additional_help = '\n     Credentials may also need to be set.' + help_str
+            additional_help = f'\n{prefix}Credentials may also need to be set.' + help_str
             if 'SSO' in proc.stderr.decode().split():
-                additional_help = (f'\n    You are using SSO account, please update the awscli package with:'
-                                   f'\n     $ pip install awscli>=1.27.10 boto3')
+                additional_help = (
+                    f'\n{prefix}You are using SSO account, please update the awscli package with:'
+                    f'\n{prefix}  $ pip install awscli>=1.27.10 boto3')
             return False, (
                 'AWS CLI is not installed properly. '
                 'Run the following commands under sky folder:'
                 # TODO(zhwu): after we publish sky to PyPI,
                 # change this to `pip install sky[aws]`
-                '\n     $ pip install .[aws]'
+                f'\n{prefix}  $ pip install .[aws]'
                 f'{additional_help}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
