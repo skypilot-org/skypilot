@@ -22,6 +22,8 @@ if typing.TYPE_CHECKING:
 # We Should still upload the credentials file to the VM, when the VM
 # is not running on AWS (access s3 or spot controller managing
 # instances).
+# TODO(zhwu): For VMs on other clouds, we should find a way to not
+# upload the credentials file.
 _CREDENTIAL_FILES = [
     'credentials',
 ]
@@ -354,11 +356,26 @@ class AWS(clouds.Cloud):
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, hints
 
+    def _is_sso_identity(self) -> bool:
+        proc = subprocess.run('aws configure list',
+                              shell=True,
+                              check=False,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            return False
+        return 'sso' in proc.stdout.decode().split()
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        # Do not upload the credential file if the user is using SSO, as
+        # the credential file can from a different account, and will cause
+        # autopstop/autodown/spot controller misbehave.
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
             for filename in _CREDENTIAL_FILES
-            if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
+            if (os.path.exists(
+                os.path.expanduser(f'~/.aws/{filename}')) and
+                not self._is_sso_identity())
         }
 
     def instance_type_exists(self, instance_type):
