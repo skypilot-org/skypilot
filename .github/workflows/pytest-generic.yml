@@ -1,6 +1,6 @@
 # This is needed for GitHub Actions for the "Waiting for status to be reported" problem,
 # according to https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/defining-the-mergeability-of-pull-requests/troubleshooting-required-status-checks
-name: Run Python Tests
+name: Python Tests
 on:
   # Trigger the workflow on push or pull request,
   # but only for the main branch
@@ -13,7 +13,9 @@ on:
       - master
       - 'releases/**'
 jobs:
-  test:
-    runs-on: ubuntu-latest
+  python-test:
+    # Need to specify 20.04, because ubuntu-latest does not work with
+    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
+    runs-on: ubuntu-20.04
     steps:
       - run: 'echo "No tests to run"'
