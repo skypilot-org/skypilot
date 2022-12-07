@@ -2934,9 +2934,10 @@ def spot_launch(
         disk_size=disk_size,
         spot_recovery=spot_recovery,
     )
-    controller_resources = spot_lib.DEFAULT_SPOT_CONTROLLER_RESOURCES
-    controller_resources = controller_resources.copy(
-        instance_type=controller_type)
+    controller_resources = spot_lib.SPOT_CONTROLLER_DEFAULT_RESOURCES
+    if controller_type is not None:
+        controller_resources = controller_resources.copy(
+            instance_type=controller_type)
 
     if not yes:
         prompt = f'Launching a new spot task {name!r}. Proceed?'
