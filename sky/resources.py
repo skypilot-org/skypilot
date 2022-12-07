@@ -608,6 +608,10 @@ class Resources:
             return False
         if self._instance_type is not None or other.instance_type is not None:
             return self._instance_type == other.instance_type
+        if self._region is not None or other.region is not None:
+            return self._region == other.region
+        if self._zone is not None or other.zone is not None:
+            return self._zone == other.zone
         return self.accelerators.keys() == other.accelerators.keys()
 
     def is_empty(self) -> bool:

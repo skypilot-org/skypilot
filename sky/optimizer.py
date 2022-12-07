@@ -871,11 +871,7 @@ def _filter_out_blocked_launchable_resources(
     for resources in launchable_resources:
         for blocked_resources in blocked_launchable_resources:
             if resources.is_launchable_fuzzy_equal(blocked_resources):
-                if (blocked_resources.region is None or
-                        blocked_resources.region == resources.region):
-                    if (blocked_resources.zone is None or
-                            blocked_resources.zone == resources.zone):
-                        break
+                break
         else:  # non-blokced launchable resources. (no break)
             available_resources.append(resources)
     return available_resources
@@ -907,13 +903,13 @@ def _fill_in_launchable_resources(
                     f'sky check {colorama.Style.RESET_ALL}, or change the '
                     'cloud requirement')
         elif resources.is_launchable():
-            launchable[resources] = _make_launchables_for_valid_region_zones(
-                resources)
             if isinstance(resources.cloud, clouds.GCP):
                 # Check if the host VM satisfies the max vCPU and memory limits.
-                for r in launchable[resources]:
-                    clouds.GCP.check_accelerator_attachable_to_host(
-                        r.instance_type, r.accelerators, r.zone)
+                clouds.GCP.check_accelerator_attachable_to_host(
+                    resources.instance_type, resources.accelerators,
+                    resources.zone)
+            launchable[resources] = _make_launchables_for_valid_region_zones(
+                resources)
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds
