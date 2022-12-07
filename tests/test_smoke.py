@@ -125,6 +125,7 @@ def test_example_app():
     )
     run_one_test(test)
 
+
 # ---------- A minimal task ----------
 def test_minimal(instance_type_restriction: str):
     name = _get_cluster_name()

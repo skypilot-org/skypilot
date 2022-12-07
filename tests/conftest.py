@@ -15,13 +15,15 @@ def pytest_addoption(parser):
                      default=False,
                      help='run slow tests')
     parser.addoption('--sso',
-                    action='store_true',
-                    default=False,
-                    help='run tests that require SSO')
-    
+                     action='store_true',
+                     default=False,
+                     help='run tests that require SSO')
+
+
 @pytest.fixture
 def sso(request):
     return request.config.getoption('--sso')
+
 
 @pytest.fixture
 def instance_type_restrcition(request) -> str:
@@ -32,7 +34,8 @@ def instance_type_restrcition(request) -> str:
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
-    config.addinivalue_line('markers', 'nosso: mark test as not running under SSO')
+    config.addinivalue_line('markers',
+                            'nosso: mark test as not running under SSO')
 
 
 def pytest_collection_modifyitems(config, items):

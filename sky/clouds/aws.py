@@ -28,6 +28,7 @@ _CREDENTIAL_FILES = [
     'credentials',
 ]
 
+
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
