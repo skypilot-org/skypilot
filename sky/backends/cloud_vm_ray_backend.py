@@ -1032,7 +1032,8 @@ class RetryingVmProvisioner(object):
                     is not None)
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found.
-                logger.info(f'Failed to find catalog in region {region}: {e}')
+                logger.info(
+                    f'Failed to find catalog in region {region.name}: {e}')
                 continue
             if dryrun:
                 return
