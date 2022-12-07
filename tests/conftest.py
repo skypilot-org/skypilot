@@ -26,7 +26,7 @@ def sso(request):
 
 
 @pytest.fixture
-def instance_type_restrcition(request) -> str:
+def instance_type_restriction(request) -> str:
     if request.config.getoption('--sso'):
         return '--instance-type t3.micro'
     return ''
