@@ -29,8 +29,8 @@ logger = logging.getLogger(__name__)
 
 # TODO(skypilot, zhwu): backward compatibility for old config
 SKYPILOT = "skypilot-service"
-DEFAULT_RAY_INSTANCE_PROFILE = SKYPILOT + "-v1"
-DEFAULT_RAY_IAM_ROLE = SKYPILOT + "-v1"
+DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + "-v1"
+DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
 SECURITY_GROUP_TEMPLATE = SKYPILOT + "-{}"
 
 # V61.0 has CUDA 11.2
@@ -276,7 +276,7 @@ def _configure_iam_role(config):
 
     instance_profile_name = cwh.resolve_instance_profile_name(
         config["provider"],
-        DEFAULT_RAY_INSTANCE_PROFILE,
+        DEFAULT_SKYPILOT_INSTANCE_PROFILE,
     )
     profile = _get_instance_profile(instance_profile_name, config)
 
@@ -296,7 +296,7 @@ def _configure_iam_role(config):
     assert profile is not None, "Failed to create instance profile"
 
     if not profile.roles:
-        role_name = cwh.resolve_iam_role_name(config["provider"], DEFAULT_RAY_IAM_ROLE)
+        role_name = cwh.resolve_iam_role_name(config["provider"], DEFAULT_SKYPILOT_IAM_ROLE)
         role = _get_role(role_name, config)
         if role is None:
             cli_logger.verbose(
