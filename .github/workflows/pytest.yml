@@ -11,7 +11,7 @@ on:
       - master
       - 'releases/**'
 jobs:
-  test:
+  python-test:
     strategy:
       matrix:
         python-version: [3.6]
