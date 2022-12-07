@@ -887,8 +887,8 @@ class RetryingVmProvisioner(object):
             if cluster_status == global_user_state.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
-                    f'cluster {cluster_name} on {region}. Please retry again '
-                    'later.')
+                    f'cluster {cluster_name} on {region.name}. Please retry '
+                    'again later.')
 
                 # Reset to STOPPED (rather than keeping it at INIT), because
                 # (1) the cluster is not up (2) it ensures future `sky start`
@@ -1952,7 +1952,7 @@ class CloudVmRayBackend(backends.Backend):
                         '`--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message) from e
+                            error_message) from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
