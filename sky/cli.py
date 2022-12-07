@@ -2934,9 +2934,9 @@ def spot_launch(
         disk_size=disk_size,
         spot_recovery=spot_recovery,
     )
-    controller_resources = spot_lib.SPOT_CONTROLLER_DEFAULT_RESOURCES
+    controller_resources = None
     if controller_type is not None:
-        controller_resources = controller_resources.copy(
+        controller_resources = spot_lib.SPOT_CONTROLLER_DEFAULT_RESOURCES.copy(
             instance_type=controller_type)
 
     if not yes:

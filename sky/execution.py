@@ -532,7 +532,11 @@ def spot_launch(
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
 
-        if controller_resources is None:
+        if controller_resources is not None:
+            print(f'{colorama.Style.DIM}WARNING: Using customized spot '
+                  'controller is experimental and can cause unexpected '
+                  f'hanging or failure.{colorama.Style.RESET_ALL}')
+        else:
             controller_resources = spot.SPOT_CONTROLLER_DEFAULT_RESOURCES
         controller_task.set_resources(controller_resources)
 
