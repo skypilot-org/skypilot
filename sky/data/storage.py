@@ -906,6 +906,7 @@ class S3Store(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
+            # we exclude .git directory from the sync
             sync_command = (
                 'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
                 f'{src_dir_path} '
@@ -1220,6 +1221,7 @@ class GcsStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
+            # we exclude .git directory from the sync
             sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
