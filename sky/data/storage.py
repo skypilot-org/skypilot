@@ -906,9 +906,10 @@ class S3Store(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            sync_command = ('aws s3 sync --no-follow-symlinks '
-                            f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+            sync_command = (
+                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
+                f'{src_dir_path} '
+                f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
