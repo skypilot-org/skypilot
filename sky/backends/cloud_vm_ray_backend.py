@@ -1004,6 +1004,10 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
             cluster_name, acquire_per_cluster_status_lock=False)[0]
+        prev_cluster_exists = prev_cluster_status in [
+            global_user_state.ClusterStatus.STOPPED,
+            global_user_state.ClusterStatus.UP
+        ]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -1104,10 +1108,7 @@ class RetryingVmProvisioner(object):
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            need_terminate = prev_cluster_status not in [
-                global_user_state.ClusterStatus.STOPPED,
-                global_user_state.ClusterStatus.UP
-            ]
+            need_terminate = not prev_cluster_exists
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
@@ -1145,7 +1146,12 @@ class RetryingVmProvisioner(object):
         message = ('Failed to acquire resources in all regions/zones of '
                    f'{to_provision.cloud}. '
                    'Try changing resource requirements or use another cloud.')
-        raise exceptions.ResourcesUnavailableError(message)
+        e = exceptions.ResourcesUnavailableError(message)
+        if prev_cluster_exists:
+            # Do not failover to other clouds if the cluster was previously
+            # UP or STOPPED.
+            e.no_failover = True
+        return e
 
     def _tpu_pod_setup(self, cluster_yaml: str,
                        cluster_handle: 'backends.Backend.ResourceHandle'):
