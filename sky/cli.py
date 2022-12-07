@@ -2849,11 +2849,13 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--controller-type',
-              default=None,
-              type=str,
-              required=False,
-              help='Instance type of the controller VM.')
+@click.option(
+    '--controller-type',
+    default=None,
+    type=str,
+    required=False,
+    help=('Instance type of the controller VM. Default to each cloud\'s '
+          'default VM type.'))
 @click.option(
     '--detach-run',
     '-d',
