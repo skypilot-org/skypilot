@@ -532,11 +532,9 @@ def spot_launch(
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
 
-        # Default controller resources.
-        resources = spot.DEFAULT_SPOT_CONTROLLER_RESOURCES
-        if controller_resources is not None:
-            resources = controller_resources
-        controller_task.set_resources({resources})
+        controller_resources = (controller_resources or
+                                spot.DEFAULT_SPOT_CONTROLLER_RESOURCES)
+        controller_task.set_resources({controller_resources})
 
         controller_task.spot_task = task
         assert len(controller_task.resources) == 1
