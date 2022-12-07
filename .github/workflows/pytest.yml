@@ -14,7 +14,9 @@ jobs:
   test:
     strategy:
       matrix:
-        os: ["ubuntu-latest"]
+        # Need to specify 20.04, because ubuntu-latest does not work with
+        # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
+        os: ["ubuntu-20.04"]
         python-version: [3.6]
         test-path:
           - tests/test_cli.py
