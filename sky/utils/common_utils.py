@@ -246,9 +246,9 @@ def retry(method, max_retries=3, initial_backoff=1):
             try:
                 return method(*args, **kwargs)
             except Exception as e:  # pylint: disable=broad-except
-                logger.warning(f'Caught {e}. Retrying.')
                 try_count += 1
                 if try_count < max_retries:
+                    logger.warning(f'Caught {e}. Retrying.')
                     time.sleep(backoff.current_backoff())
                 else:
                     raise

@@ -46,7 +46,6 @@ class TestReservedClustersOperations:
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster1',
             cluster_yaml='/tmp/cluster1.yaml',
-            head_ip='1.1.1.1',
             launched_nodes=2,
             launched_resources=sky.Resources(sky.AWS(),
                                              instance_type='p3.2xlarge',
@@ -58,7 +57,6 @@ class TestReservedClustersOperations:
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster2',
             cluster_yaml='/tmp/cluster2.yaml',
-            head_ip='1.1.1.2',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.GCP(),
                                              instance_type='a2-highgpu-4g',
@@ -71,7 +69,6 @@ class TestReservedClustersOperations:
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name='test-cluster3',
             cluster_yaml='/tmp/cluster3.yaml',
-            head_ip='1.1.1.3',
             launched_nodes=4,
             launched_resources=sky.Resources(sky.Azure(),
                                              instance_type='Standard_D4s_v3',
@@ -83,7 +80,6 @@ class TestReservedClustersOperations:
         handle = backends.CloudVmRayBackend.ResourceHandle(
             cluster_name=spot.SPOT_CONTROLLER_NAME,
             cluster_yaml='/tmp/spot_controller.yaml',
-            head_ip='1.1.1.4',
             launched_nodes=1,
             launched_resources=sky.Resources(sky.AWS(),
                                              instance_type='m4.2xlarge',
@@ -141,7 +137,7 @@ class TestReservedClustersOperations:
         assert result.exit_code == click.UsageError.exit_code
         assert (
             f'Stopping reserved cluster(s) \'{spot.SPOT_CONTROLLER_NAME}\' is '
-            'not supported' in result.output)
+            'currently not supported' in result.output)
 
         result = cli_runner.invoke(cli.stop, ['sky-spot-con*'])
         assert not result.exception
@@ -157,7 +153,7 @@ class TestReservedClustersOperations:
         result = cli_runner.invoke(cli.autostop, [spot.SPOT_CONTROLLER_NAME])
         assert result.exit_code == click.UsageError.exit_code
         assert ('Scheduling autostop on reserved cluster(s) '
-                f'\'{spot.SPOT_CONTROLLER_NAME}\' is not supported'
+                f'\'{spot.SPOT_CONTROLLER_NAME}\' is currently not supported'
                 in result.output)
 
         result = cli_runner.invoke(cli.autostop, ['sky-spot-con*'])
