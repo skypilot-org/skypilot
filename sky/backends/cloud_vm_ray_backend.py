@@ -1017,18 +1017,23 @@ class RetryingVmProvisioner(object):
                 continue
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
-            config_dict = backend_utils.write_cluster_config(
-                to_provision,
-                num_nodes,
-                _get_cluster_config_template(to_provision.cloud),
-                cluster_name,
-                self._local_wheel_path,
-                self._wheel_hash,
-                region=region,
-                zones=zones,
-                dryrun=dryrun,
-                keep_launch_fields_in_existing_config=prev_cluster_status
-                is not None)
+            try:
+                config_dict = backend_utils.write_cluster_config(
+                    to_provision,
+                    num_nodes,
+                    _get_cluster_config_template(to_provision.cloud),
+                    cluster_name,
+                    self._local_wheel_path,
+                    self._wheel_hash,
+                    region=region,
+                    zones=zones,
+                    dryrun=dryrun,
+                    keep_launch_fields_in_existing_config=prev_cluster_status
+                    is not None)
+            except exceptions.ResourcesUnavailableError as e:
+                # Failed due to catalog issue, e.g. image not found.
+                logger.info(f'Failed to find catalog in region {region}: {e}')
+                continue
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1146,11 +1151,10 @@ class RetryingVmProvisioner(object):
         message = ('Failed to acquire resources in all regions/zones of '
                    f'{to_provision.cloud}. '
                    'Try changing resource requirements or use another cloud.')
-        e = exceptions.ResourcesUnavailableError(message)
-        if prev_cluster_exists:
-            # Do not failover to other clouds if the cluster was previously
-            # UP or STOPPED.
-            e.no_failover = True
+        # Do not failover to other clouds if the cluster was previously
+        # UP or STOPPED.
+        e = exceptions.ResourcesUnavailableError(
+            message, no_failover=prev_cluster_exists)
         return e
 
     def _tpu_pod_setup(self, cluster_yaml: str,
@@ -1947,7 +1951,7 @@ class CloudVmRayBackend(backends.Backend):
                         '`--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message) from None
+                            error_message) from e
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
