@@ -1,4 +1,4 @@
-name: Run Python Tests
+name: Python Tests
 on:
   # Trigger the workflow on push or pull request,
   # but only for the main branch
@@ -11,7 +11,7 @@ on:
       - master
       - 'releases/**'
 jobs:
-  test:
+  python-test:
     strategy:
       matrix:
         # Need to specify 20.04, because ubuntu-latest does not work with
