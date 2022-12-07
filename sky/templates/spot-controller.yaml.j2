@@ -2,8 +2,9 @@
 
 name: {{cluster_name}}
 
-resources:
-  disk_size: 50
+# The resources will be defined in sky.spot_launch
+# resources:
+#   disk_size: 50
 # It is now using default CPU instance type hard-coded in code for spot controller,
 # i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4 (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
 # This allows users without the credits for some of the clouds available to use managed spot instances.

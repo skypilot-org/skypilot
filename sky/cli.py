@@ -2849,6 +2849,11 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
+@click.option('--controller-type',
+              default=None,
+              type=str,
+              required=False,
+              help='Instance type of the controller VM.')
 @click.option(
     '--detach-run',
     '-d',
@@ -2883,6 +2888,7 @@ def spot_launch(
     zone: Optional[str],
     gpus: Optional[str],
     instance_type: Optional[str],
+    controller_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
     image_id: Optional[str],
@@ -2928,6 +2934,9 @@ def spot_launch(
         disk_size=disk_size,
         spot_recovery=spot_recovery,
     )
+    controller_resources = spot_lib.DEFAULT_SPOT_CONTROLLER_RESOURCES
+    controller_resources = controller_resources.copy(
+        instance_type=controller_type)
 
     if not yes:
         prompt = f'Launching a new spot task {name!r}. Proceed?'
@@ -2936,6 +2945,7 @@ def spot_launch(
 
     sky.spot_launch(task,
                     name,
+                    controller_resources=controller_resources,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
 

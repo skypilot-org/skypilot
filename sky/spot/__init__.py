@@ -12,6 +12,7 @@ from sky.spot.recovery_strategy import SPOT_STRATEGIES
 from sky.spot.recovery_strategy import SPOT_DEFAULT_STRATEGY
 from sky.spot.spot_utils import SpotCodeGen
 from sky.spot.spot_utils import SPOT_CONTROLLER_NAME
+from sky.spot.spot_utils import DEFAULT_SPOT_CONTROLLER_RESOURCES
 from sky.spot.spot_utils import dump_job_table_cache
 from sky.spot.spot_utils import load_job_table_cache
 from sky.spot.spot_utils import format_job_table
@@ -24,6 +25,7 @@ __all__ = [
     'SPOT_STRATEGIES',
     'SPOT_DEFAULT_STRATEGY',
     'SPOT_CONTROLLER_NAME',
+    'DEFAULT_SPOT_CONTROLLER_RESOURCES',
     # Constants
     'SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP',
     'SPOT_CONTROLLER_TEMPLATE',

@@ -14,6 +14,7 @@ import rich
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky import resources
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import job_lib
@@ -42,6 +43,8 @@ _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
                                '{status_str}.[/] It may take a few minutes.')
 _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
                           '[/] It may take a minute.')
+
+DEFAULT_SPOT_CONTROLLER_RESOURCES = resources.Resources(disk_size=50)
 
 
 class UserSignal(enum.Enum):
