@@ -721,6 +721,10 @@ class Storage(object):
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
         try:
+            if self.source is not None and os.path.isdir(
+                    os.path.join(self.source, '.git')):
+                logger.warning(f'\'.git\' directory under \'{self.source}\' '
+                               'is excluded during sync.')
             store.upload()
         except exceptions.StorageUploadError:
             logger.error(f'Could not upload {self.source} to store '
@@ -906,9 +910,11 @@ class S3Store(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            sync_command = ('aws s3 sync --no-follow-symlinks '
-                            f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+            # we exclude .git directory from the sync
+            sync_command = (
+                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
+                f'{src_dir_path} '
+                f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1219,7 +1225,8 @@ class GcsStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            sync_command = (f'gsutil -m rsync -r {src_dir_path} '
+            # we exclude .git directory from the sync
+            sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
