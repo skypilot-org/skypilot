@@ -298,9 +298,9 @@ class SSHCommandRunner:
         # --filter
         rsync_command.append(RSYNC_FILTER_OPTION)
 
-        # --exclude-from
         if up:
             # The source is a local path, so we need to resolve it.
+            # --exclude-from
             resolved_source = pathlib.Path(source).expanduser().resolve()
             if (resolved_source / GIT_EXCLUDE).exists():
                 # Ensure file exists; otherwise, rsync will error out.
@@ -308,17 +308,16 @@ class SSHCommandRunner:
                     RSYNC_EXCLUDE_OPTION.format(
                         str(resolved_source / GIT_EXCLUDE)))
 
-            # rsync doesn't support '~' in a quoted target path. need to
-            # expand it.
-            full_source_str = str(resolved_source)
-            if resolved_source.is_dir():
-                full_source_str = os.path.join(full_source_str, '')
-
         ssh_options = ' '.join(
             ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
         if up:
+            # rsync doesn't support '~' in a quoted target path. need to
+            # expand it.
+            full_source_str = str(resolved_source)
+            if resolved_source.is_dir():
+                full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
                 f'{self.ssh_user}@{self.ip}:{target!r}',
