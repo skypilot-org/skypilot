@@ -1004,7 +1004,7 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
             cluster_name, acquire_per_cluster_status_lock=False)[0]
-        prev_cluster_exists = prev_cluster_status in [
+        is_prev_cluster_healthy = prev_cluster_status in [
             global_user_state.ClusterStatus.STOPPED,
             global_user_state.ClusterStatus.UP
         ]
@@ -1114,7 +1114,7 @@ class RetryingVmProvisioner(object):
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            need_terminate = not prev_cluster_exists
+            need_terminate = not is_prev_cluster_healthy
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
@@ -1155,7 +1155,7 @@ class RetryingVmProvisioner(object):
         # Do not failover to other clouds if the cluster was previously
         # UP or STOPPED.
         e = exceptions.ResourcesUnavailableError(
-            message, no_failover=prev_cluster_exists)
+            message, no_failover=is_prev_cluster_healthy)
         raise e
 
     def _tpu_pod_setup(self, cluster_yaml: str,
