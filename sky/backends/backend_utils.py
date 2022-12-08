@@ -730,10 +730,16 @@ def write_cluster_config(
         - 'ray'
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
+    Raises:
+        ResourceUnavailableError: if the region/zones requested does not appear
+            in the catalog.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
+    # This can raise a ResourceUnavailableError, when the region/zones requested
+    # does not appear in the catalog. It can be triggered when the user changed
+    # the catalog file, while there is a cluster in the removed region/zone.
     resources_vars = cloud.make_deploy_resources_variables(
         to_provision, region, zones)
     config_dict = {}

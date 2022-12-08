@@ -887,7 +887,7 @@ class RetryingVmProvisioner(object):
             if cluster_status == global_user_state.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
-                    f'cluster {cluster_name} on {region.name}. Please retry '
+                    f'cluster {cluster_name} in {region.name}. Please retry '
                     'again later.')
 
                 # Reset to STOPPED (rather than keeping it at INIT), because
@@ -1156,7 +1156,7 @@ class RetryingVmProvisioner(object):
         # UP or STOPPED.
         e = exceptions.ResourcesUnavailableError(
             message, no_failover=prev_cluster_exists)
-        return e
+        raise e
 
     def _tpu_pod_setup(self, cluster_yaml: str,
                        cluster_handle: 'backends.Backend.ResourceHandle'):
