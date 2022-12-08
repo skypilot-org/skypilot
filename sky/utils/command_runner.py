@@ -305,7 +305,8 @@ class SSHCommandRunner:
             if (resolved_source / GIT_EXCLUDE).exists():
                 # Ensure file exists; otherwise, rsync will error out.
                 rsync_command.append(
-                    RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
+                    RSYNC_EXCLUDE_OPTION.format(
+                        str(resolved_source / GIT_EXCLUDE)))
 
             # rsync doesn't support '~' in a quoted target path. need to expand it.
             full_source_str = str(resolved_source)
