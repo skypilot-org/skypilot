@@ -42,7 +42,7 @@ We can launch it with the following:
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
   workdir: ~/transformers
 
   setup: |
@@ -51,7 +51,6 @@ We can launch it with the following:
     # to pass the key in the command line, during `sky spot launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
@@ -117,7 +116,7 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
 
   # Assume your working directory is under `~/transformers`.
   # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
   workdir: ~/transformers
 
   file_mounts:
@@ -131,7 +130,6 @@ Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/
     # to pass the key in the command line, during `sky spot launch`.
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt
