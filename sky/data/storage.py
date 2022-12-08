@@ -721,7 +721,8 @@ class Storage(object):
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
         try:
-            if os.path.isdir(os.path.join(self.source, '.git')):
+            if self.source is not None and os.path.isdir(
+                    os.path.join(self.source, '.git')):
                 logger.warning(f'\'.git\' directory under \'{self.source}\' '
                                'is excluded during sync.')
             store.upload()
