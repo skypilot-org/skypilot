@@ -2,11 +2,11 @@
 
 1. Install skypilot package by following these [instructions](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
 
-2. Run `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`.
+2. Run `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`
 
-3. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml`  
+3. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml` 
 
-4. Run `ssh -L 7860:localhost:7860 stable-diffusion`.
+4. Run `ssh -L 7860:localhost:7860 stable-diffusion`
 
 5. Open [`http://localhost:7860/`](http://localhost:7860/) in browser.
 
