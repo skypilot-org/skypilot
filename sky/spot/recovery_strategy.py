@@ -12,6 +12,7 @@ from sky.skylet import job_lib
 from sky.spot import spot_utils
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -305,6 +306,13 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                 new_resources = resources.copy(cloud=launched_cloud,
                                                region=launched_region)
                 task.set_resources({new_resources})
+
+                # Clean up preempted TPU VM before launching the cluster.
+                # This is needed as status -r will not remove it if GCP
+                # turns the VM state to other than PREEMPTED.
+                is_tpuvm = tpu_utils.is_tpu_vm(new_resources)
+                if is_tpuvm:
+                    self.terminate_cluster()
                 # Not using self.launch to avoid the retry until up logic.
                 launched_time = self._launch(raise_on_failure=False)
                 # Restore the original dag, i.e. reset the region constraint.
