@@ -333,7 +333,9 @@ def get_region_zones(df: pd.DataFrame,
     sort_keys = [price_str, 'Region']
     if 'AvailabilityZone' in df.columns:
         sort_keys.append('AvailabilityZone')
-    df = df.dropna(subset=[price_str]).sort_values(sort_keys)
+    # If NaN appears in any of the sort keys, drop the row, as that means
+    # errors in the data.
+    df = df.dropna(subset=sort_keys).sort_values(sort_keys)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(
