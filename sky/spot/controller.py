@@ -22,6 +22,7 @@ from sky.spot import spot_state
 from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
+from sky.utils import tpu_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -144,6 +145,13 @@ class SpotController:
                 logger.info('Failed to fetch the job status while the '
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
+
+            # Clean up preempted TPU VM before recovering the cluster.
+            # This is needed as "status -r" may not remove it if GCP
+            # turns the VM state to other than PREEMPTED.
+            is_tpuvm = tpu_utils.is_tpu_vm(list(self._task.resources)[0])
+            if is_tpuvm:
+                self._strategy_executor.terminate_cluster()
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
