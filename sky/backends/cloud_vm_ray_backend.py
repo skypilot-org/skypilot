@@ -1153,10 +1153,9 @@ class RetryingVmProvisioner(object):
                    f'{to_provision.cloud}. '
                    'Try changing resource requirements or use another cloud.')
         # Do not failover to other clouds if the cluster was previously
-        # UP or STOPPED.
-        e = exceptions.ResourcesUnavailableError(
+        # UP or STOPPED, since the user can have some data on the cluster.
+        raise exceptions.ResourcesUnavailableError(
             message, no_failover=is_prev_cluster_healthy)
-        raise e
 
     def _tpu_pod_setup(self, cluster_yaml: str,
                        cluster_handle: 'backends.Backend.ResourceHandle'):
