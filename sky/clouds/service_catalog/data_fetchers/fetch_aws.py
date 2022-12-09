@@ -355,6 +355,8 @@ if __name__ == '__main__':
         fetched_regions = set(df['Region'].unique())
         requested_regions = set(region_filter)
         if fetched_regions != requested_regions:
+            # This is a sanity check to make sure that the regions we
+            # requested are the same as the ones we fetched.
             raise RuntimeError(
                 f'Fetched regions {fetched_regions} does not match '
                 f'requested regions {requested_regions} for {name}.')
