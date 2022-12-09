@@ -357,6 +357,8 @@ if __name__ == '__main__':
         if fetched_regions != requested_regions:
             # This is a sanity check to make sure that the regions we
             # requested are the same as the ones we fetched.
+            # The mismatch could happen for network issues or glitches
+            # in the AWS API.
             raise RuntimeError(
                 f'Fetched regions {fetched_regions} does not match '
                 f'requested regions {requested_regions} for {name}.')
