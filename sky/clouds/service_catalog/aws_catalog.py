@@ -52,7 +52,10 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
-    df = df.merge(az_mappings, on=['AvailabilityZone'], how='left')
+    # Use inner join to drop rows with unknown AZ IDs, which are likely
+    # because the user does not have access to that Region. Otherwise,
+    # there will be rows with NaN in the AvailabilityZone column.
+    df = df.merge(az_mappings, on=['AvailabilityZone'], how='inner')
     df = df.drop(columns=['AvailabilityZone']).rename(
         columns={'AvailabilityZoneName': 'AvailabilityZone'})
     return df
