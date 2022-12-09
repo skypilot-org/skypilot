@@ -5,7 +5,7 @@ import argparse
 import datetime
 import os
 import subprocess
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -48,8 +48,6 @@ ALL_REGIONS = [
 ]
 US_REGIONS = ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2']
 
-REGIONS = US_REGIONS
-
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'AvailabilityZone'
@@ -59,6 +57,18 @@ USEFUL_COLUMNS = [
 # only available in this region, but it serves pricing information for all
 # regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
+
+regions_enabled: Set[str] = None
+
+
+def get_enabled_regions() -> Set[str]:
+    global regions_enabled
+    if regions_enabled is None:
+        aws_client = aws.client('ec2')
+        regions_enabled = aws_client.describe_regions()['Regions']
+        regions_enabled = {r['RegionName'] for r in regions_enabled}
+        regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
+    return regions_enabled
 
 
 @ray.remote
@@ -319,8 +329,15 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az1          us-east-1b
         use1-az2          us-east-1a
     """
-    az_mappings = [_get_availability_zones.remote(r) for r in ALL_REGIONS]
+    regions = get_enabled_regions()
+    az_mappings = [_get_availability_zones.remote(r) for r in regions]
     az_mappings = ray.get(az_mappings)
+    missing_regions = {
+        regions[i] for i, m in enumerate(az_mappings) if m is None
+    }
+    if missing_regions:
+        print('WARNING: Missing availability zone mappings for the following '
+              f'enabled regions: {missing_regions}')
     # Remove the regions that the user does not have access to.
     az_mappings = [m for m in az_mappings if m is not None]
     az_mappings = pd.concat(az_mappings)
@@ -330,10 +347,6 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--all-regions',
-        action='store_true',
-        help='Fetch all global regions, not just the U.S. ones.')
-    parser.add_argument(
         '--az-mappings',
         dest='az_mappings',
         action='store_true',
@@ -342,18 +355,24 @@ if __name__ == '__main__':
                         dest='az_mappings',
                         action='store_false')
     parser.add_argument(
-        '--check-regions-match-request',
+        '--strict-all-regions',
         action='store_true',
-        help=('Check whether the fetched data contains all regions '
-              'requested.'))
+        help=('Enforce the fetched data to contains all regions requested (all '
+              'regions or US regions).'))
     parser.set_defaults(az_mappings=True)
     args = parser.parse_args()
 
-    region_filter = ALL_REGIONS if args.all_regions else US_REGIONS
+    user_regions = get_enabled_regions()
+    if args.strict_all_regions and set(ALL_REGIONS) - user_regions:
+        raise RuntimeError('The following regions are not enabled: '
+                           f'{set(ALL_REGIONS) - user_regions}')
 
     def _check_regions_integrity(df: pd.DataFrame, name: str):
+        # Check whether the fetched regions match the requested regions to
+        # guard against network issues or glitches in the AWS API.
         fetched_regions = set(df['Region'].unique())
-        requested_regions = set(region_filter)
+        requested_regions = set(
+            ALL_REGIONS) if args.strict_all_regions else user_regions
         if fetched_regions != requested_regions:
             # This is a sanity check to make sure that the regions we
             # requested are the same as the ones we fetched.
@@ -364,17 +383,15 @@ if __name__ == '__main__':
                 f'requested regions {requested_regions} for {name}.')
 
     ray.init()
-    instance_df = get_all_regions_instance_types_df(region_filter)
-    if args.check_regions_integrity:
-        _check_regions_integrity(instance_df, 'instance types')
+    instance_df = get_all_regions_instance_types_df(ALL_REGIONS)
+    _check_regions_integrity(instance_df, 'instance types')
 
     os.makedirs('aws', exist_ok=True)
     instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
     image_df = get_all_regions_images_df()
-    if args.check_regions_integrity:
-        _check_regions_integrity(image_df, 'images')
+    _check_regions_integrity(image_df, 'images')
 
     image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
