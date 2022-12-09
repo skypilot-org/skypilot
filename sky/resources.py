@@ -601,18 +601,18 @@ class Resources:
         # self <= other
         return True
 
-    def is_launchable_fuzzy_equal(self, other: 'Resources') -> bool:
-        """Whether the resources are the fuzzily same launchable resources."""
-        assert self.cloud is not None and other.cloud is not None
-        if not self.cloud.is_same_cloud(other.cloud):
+    def should_be_blocked_by(self, blocked: 'Resources') -> bool:
+        """Is this Resources fuzzily equal to the blocked Resources?"""
+        assert self.cloud is not None and blocked.cloud is not None
+        if not self.cloud.is_same_cloud(blocked.cloud):
             return False
-        if self._instance_type is not None or other.instance_type is not None:
-            return self._instance_type == other.instance_type
-        if self._region is not None or other.region is not None:
-            return self._region == other.region
-        if self._zone is not None or other.zone is not None:
-            return self._zone == other.zone
-        return self.accelerators.keys() == other.accelerators.keys()
+        if self._instance_type is not None or blocked.instance_type is not None:
+            return self._instance_type == blocked.instance_type
+        if self._region is not None or blocked.region is not None:
+            return self._region == blocked.region
+        if self._zone is not None or blocked.zone is not None:
+            return self._zone == blocked.zone
+        return self.accelerators.keys() == blocked.accelerators.keys()
 
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""
