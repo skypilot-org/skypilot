@@ -5,7 +5,7 @@ import argparse
 import datetime
 import os
 import subprocess
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,8 @@ import ray
 
 from sky.adaptors import aws
 
-# Turn off the regions disabled for a new AWS account by default.
+# Enable all the regions. The regions enabled by the user's AWS account will be
+# filtered by joining with the availability zone mapping in `aws_catalog`.
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -21,20 +22,20 @@ ALL_REGIONS = [
     'us-west-2',
     'ca-central-1',
     'eu-central-1',
-    # 'eu-central-2',
+    'eu-central-2',
     'eu-west-1',
     'eu-west-2',
-    # 'eu-south-1',
-    # 'eu-south-2',
+    'eu-south-1',
+    'eu-south-2',
     'eu-west-3',
     'eu-north-1',
-    # 'me-south-1',
-    # 'me-central-1',
-    # 'af-south-1',
-    'ap-east-1',  # enable this non-default region due to user request
-    # 'ap-southeast-3',
+    'me-south-1',
+    'me-central-1',
+    'af-south-1',
+    'ap-east-1',
+    'ap-southeast-3',
     'ap-south-1',
-    # 'ap-south-2',
+    'ap-south-2',
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
@@ -69,8 +70,11 @@ def _get_instance_types(region: str) -> pd.DataFrame:
 
 
 @ray.remote
-def _get_availability_zones(region: str) -> pd.DataFrame:
-    client = aws.client('ec2', region_name=region)
+def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
+    try:
+        client = aws.client('ec2', region_name=region)
+    except aws.client_exception():
+        return None
     zones = []
     response = client.describe_availability_zones()
     for resp in response['AvailabilityZones']:
@@ -133,9 +137,14 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
 @ray.remote
 def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     try:
-        df, zone_df, pricing_df, spot_pricing_df = ray.get([
+        # Fetch the zone info first to make sure the account has access to the
+        # region.
+        zone_df = ray.get(_get_availability_zones.remote(region))
+        if zone_df is None:
+            raise RuntimeError(f'No access to region {region}')
+
+        df, pricing_df, spot_pricing_df = ray.get([
             _get_instance_types.remote(region),
-            _get_availability_zones.remote(region),
             _get_pricing_table.remote(region),
             _get_spot_pricing_table.remote(region),
         ])
@@ -302,6 +311,8 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
     """
     az_mappings = [_get_availability_zones.remote(r) for r in ALL_REGIONS]
     az_mappings = ray.get(az_mappings)
+    # Remove the regions that the user does not have access to.
+    az_mappings = [m for m in az_mappings if m is not None]
     az_mappings = pd.concat(az_mappings)
     return az_mappings
 
