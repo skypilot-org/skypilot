@@ -64,7 +64,7 @@ regions_enabled: Set[str] = None
 def get_enabled_regions() -> Set[str]:
     global regions_enabled
     if regions_enabled is None:
-        aws_client = aws.client('ec2')
+        aws_client = aws.client('ec2', region_name='us-east-1')
         regions_enabled = aws_client.describe_regions()['Regions']
         regions_enabled = {r['RegionName'] for r in regions_enabled}
         regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
