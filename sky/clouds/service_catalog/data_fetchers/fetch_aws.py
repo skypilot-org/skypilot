@@ -360,7 +360,7 @@ if __name__ == '__main__':
         help=('Enforce the fetched data to contains all regions requested (all '
               'regions or US regions).'))
     parser.set_defaults(az_mappings=True)
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
 
     user_regions = get_enabled_regions()
     if args.strict_all_regions and set(ALL_REGIONS) - user_regions:
