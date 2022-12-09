@@ -381,8 +381,8 @@ if __name__ == '__main__':
             # The mismatch could happen for network issues or glitches
             # in the AWS API.
             raise RuntimeError(
-                f'Fetched regions {fetched_regions} does not match '
-                f'requested regions {requested_regions} for {name}.')
+                f'{name}: Fetched regions {fetched_regions} does not match '
+                f'requested regions {requested_regions}.')
 
     ray.init()
     instance_df = get_all_regions_instance_types_df()
