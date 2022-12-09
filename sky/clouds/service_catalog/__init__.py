@@ -15,7 +15,7 @@ if typing.TYPE_CHECKING:
     from sky.clouds.service_catalog import common
 
 CloudFilter = Optional[Union[List[str], str]]
-_ALL_CLOUDS = ('aws', 'azure', 'gcp')
+_ALL_CLOUDS = ('aws', 'azure', 'gcp', 'lambda')
 
 
 def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):

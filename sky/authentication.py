@@ -299,3 +299,30 @@ def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['file_mounts'] = file_mounts
 
     return config
+
+
+def setup_lambda_authentication(config):
+    # TODO: Fold Azure and Lambda auth setups into a single method?
+    # Doesn't need special library calls!
+    config = copy.deepcopy(config)
+    private_key_path = config['auth'].get('ssh_private_key', None)
+    if private_key_path is None:
+        private_key_path = PRIVATE_SSH_KEY_PATH
+        config['auth']['ssh_private_key'] = private_key_path
+
+    private_key_path = os.path.expanduser(private_key_path)
+    public_key_path = get_public_key_path(private_key_path)
+
+    # Generating ssh key if it does not exist
+    _, _ = get_or_generate_keys(private_key_path, public_key_path)
+
+    # Need to convert /Users/<username> back to ~ because Ray uses the same
+    # path for finding the public key path on both local and head node.
+    public_key_path = _unexpand_user(public_key_path)
+    config['auth']['ssh_public_key'] = public_key_path
+
+    file_mounts = config['file_mounts']
+    file_mounts[public_key_path] = public_key_path
+    config['file_mounts'] = file_mounts
+
+    return config
