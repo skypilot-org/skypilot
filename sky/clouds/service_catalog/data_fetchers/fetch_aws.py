@@ -342,7 +342,7 @@ if __name__ == '__main__':
                         dest='az_mappings',
                         action='store_false')
     parser.add_argument(
-        '--check-regions-integrity',
+        '--check-regions-match-request',
         action='store_true',
         help=('Check whether the fetched data contains all regions '
               'requested.'))
