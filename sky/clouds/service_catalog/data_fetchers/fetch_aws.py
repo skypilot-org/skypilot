@@ -15,6 +15,7 @@ from sky.adaptors import aws
 
 # Enable all the regions. The regions enabled by the user's AWS account will be
 # filtered by joining with the availability zone mapping in `aws_catalog`.
+# TODO(zhwu): fix the regions with no supported AMI.
 ALL_REGIONS = [
     'us-east-1',
     'us-east-2',
@@ -22,11 +23,11 @@ ALL_REGIONS = [
     'us-west-2',
     'ca-central-1',
     'eu-central-1',
-    'eu-central-2',
+    # 'eu-central-2', # no supported AMI
     'eu-west-1',
     'eu-west-2',
     'eu-south-1',
-    'eu-south-2',
+    # 'eu-south-2', # no supported AMI
     'eu-west-3',
     'eu-north-1',
     'me-south-1',
@@ -35,7 +36,7 @@ ALL_REGIONS = [
     'ap-east-1',
     'ap-southeast-3',
     'ap-south-1',
-    'ap-south-2',
+    # 'ap-south-2', # no supported AMI
     'ap-northeast-3',
     'ap-northeast-2',
     'ap-southeast-1',
