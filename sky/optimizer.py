@@ -696,8 +696,9 @@ class Optimizer:
                         best_per_cloud[cloud] = (resources, cost)
                 else:
                     best_per_cloud[cloud] = (resources, cost)
-            # In a multi-node DAG, the chosen resources may not be the best
-            # resources for the task.
+
+            # If the DAG has multiple tasks, the chosen resources may not be
+            # the best resources for the task.
             chosen = best_plan[task]
             best_per_cloud[str(chosen.cloud)] = (chosen, v[chosen])
 
