@@ -1028,8 +1028,7 @@ class RetryingVmProvisioner(object):
                     region=region,
                     zones=zones,
                     dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=prev_cluster_status
-                    is not None)
+                    keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found.
                 logger.info(
