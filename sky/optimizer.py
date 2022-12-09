@@ -908,6 +908,15 @@ def _fill_in_launchable_resources(
                 clouds.GCP.check_accelerator_attachable_to_host(
                     resources.instance_type, resources.accelerators,
                     resources.zone)
+            # If the user has specified a GCP zone and the zone does not support
+            # the host-accelerator combination, then an error will be raised by
+            # the above check_accelerator_attachable_to_host() call.
+            # If the user has not specified any zone, a launchable will be made
+            # for every zone even if some of the zones do not support the
+            # host-accelerator combination. Then the provisioner may try to
+            # launch the instance, and failover to other zones. We find this
+            # behavior acceptable because this will happen only when the user
+            # requested GCP 4:P100 or 8:K80 with a very large host VM.
             launchable[resources] = _make_launchables_for_valid_region_zones(
                 resources)
         else:
