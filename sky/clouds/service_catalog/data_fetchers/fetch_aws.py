@@ -285,7 +285,6 @@ def _get_image_row(region: str, ubuntu_version: str,
     tag = f'skypilot:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
-
 def get_all_regions_images_df() -> pd.DataFrame:
     workers = []
     for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
@@ -331,22 +330,44 @@ if __name__ == '__main__':
     parser.add_argument('--no-az-mappings',
                         dest='az_mappings',
                         action='store_false')
+    parser.add_argument('--check-regions-integrity',
+                        action='store_true',
+                        help='Check the region integrity of the fetched data.')
     parser.set_defaults(az_mappings=True)
     args = parser.parse_args()
 
     region_filter = ALL_REGIONS if args.all_regions else US_REGIONS
 
+    def _check_regions_integrity(df: pd.DataFrame, name: str):
+        fetched_regions = set(df['Region'].unique())
+        requested_regions = set(region_filter)
+        if fetched_regions != requested_regions:
+            raise RuntimeError(
+                f'Fetched regions {fetched_regions} does not match '
+                f'requested regions {requested_regions} for {name}.'
+            )
+
     ray.init()
     instance_df = get_all_regions_instance_types_df(region_filter)
+    if args.check_regions_integrity:
+        _check_regions_integrity(instance_df, 'instance types')
+
+
     os.makedirs('aws', exist_ok=True)
     instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
     image_df = get_all_regions_images_df()
+    if args.check_regions_integrity:
+        _check_regions_integrity(image_df, 'images')
+
     image_df.to_csv('aws/images.csv', index=False)
     print('AWS Images saved to aws/images.csv')
 
     if args.az_mappings:
         az_mappings_df = fetch_availability_zone_mappings()
+        if args.check_regions_integrity:
+            _check_regions_integrity(az_mappings_df, 'availability zones mappings')
+
         az_mappings_df.to_csv('aws/az_mappings.csv', index=False)
         print('AWS Availability Zone mapping saved to aws/az_mappings.csv')
