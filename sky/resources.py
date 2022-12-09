@@ -602,17 +602,19 @@ class Resources:
         return True
 
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
-        """Is this Resources fuzzily equal to the blocked Resources?"""
-        assert self.cloud is not None and blocked.cloud is not None
-        if not self.cloud.is_same_cloud(blocked.cloud):
-            return False
-        if self._instance_type is not None or blocked.instance_type is not None:
-            return self._instance_type == blocked.instance_type
-        if self._region is not None or blocked.region is not None:
-            return self._region == blocked.region
-        if self._zone is not None or blocked.zone is not None:
-            return self._zone == blocked.zone
-        return self.accelerators.keys() == blocked.accelerators.keys()
+        """Whether this Resources matches the blocked Resources."""
+        is_matched = True
+        if blocked.cloud is not None and not self.cloud.is_same_cloud(blocked.cloud):
+            is_matched = False
+        if blocked.instance_type is not None and self.instance_type != blocked.instance_type:
+            is_matched = False
+        if blocked.region is not None and self._region != blocked.region:
+            is_matched = False
+        if blocked.zone is not None and self._zone != blocked.zone:
+            is_matched = False
+        if blocked.accelerators is not None and self.accelerators != blocked.accelerators:
+            is_matched = False
+        return is_matched
 
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""
