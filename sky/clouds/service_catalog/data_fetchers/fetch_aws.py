@@ -341,9 +341,11 @@ if __name__ == '__main__':
     parser.add_argument('--no-az-mappings',
                         dest='az_mappings',
                         action='store_false')
-    parser.add_argument('--check-regions-integrity',
-                        action='store_true',
-                        help='Check the region integrity of the fetched data.')
+    parser.add_argument(
+        '--check-regions-integrity',
+        action='store_true',
+        help=('Check whether the fetched data contains all regions '
+              'requested.'))
     parser.set_defaults(az_mappings=True)
     args = parser.parse_args()
 
