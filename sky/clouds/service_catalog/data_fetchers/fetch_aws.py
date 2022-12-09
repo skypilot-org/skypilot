@@ -5,7 +5,7 @@ import argparse
 import datetime
 import os
 import subprocess
-from typing import List, Optional, Set, Tuple, Union
+from typing import Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -235,7 +235,8 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     return df
 
 
-def get_all_regions_instance_types_df(regions: List[str]) -> pd.DataFrame:
+def get_all_regions_instance_types_df() -> pd.DataFrame:
+    regions = get_enabled_regions()
     df_or_regions = ray.get([_get_instance_types_df.remote(r) for r in regions])
     new_dfs = []
     for df_or_region in df_or_regions:
@@ -307,10 +308,11 @@ def _get_image_row(region: str, ubuntu_version: str,
 
 
 def get_all_regions_images_df() -> pd.DataFrame:
+    regions = get_enabled_regions()
     workers = []
     for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
         for ubuntu_version in _UBUNTU_VERSION:
-            for region in ALL_REGIONS:
+            for region in regions:
                 workers.append(
                     _get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
 
@@ -383,7 +385,7 @@ if __name__ == '__main__':
                 f'requested regions {requested_regions} for {name}.')
 
     ray.init()
-    instance_df = get_all_regions_instance_types_df(ALL_REGIONS)
+    instance_df = get_all_regions_instance_types_df()
     _check_regions_integrity(instance_df, 'instance types')
 
     os.makedirs('aws', exist_ok=True)
