@@ -146,9 +146,9 @@ class GCP(clouds.Cloud):
             if instance_type == 'TPU-VM':
                 regions = acc_regions
             else:
-                # Host VM and accelerator must be in the same region and zone.
                 vm_regions = service_catalog.get_region_zones_for_instance_type(
                     instance_type, use_spot, clouds='gcp')
+                # Find the intersection between `acc_regions` and `vm_regions`.
                 regions = []
                 for r1 in acc_regions:
                     for r2 in vm_regions:
@@ -184,9 +184,9 @@ class GCP(clouds.Cloud):
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
+                                               use_spot=use_spot,
                                                region=region,
                                                zone=zone,
-                                               use_spot=use_spot,
                                                clouds='gcp')
 
     def accelerators_to_hourly_cost(self,

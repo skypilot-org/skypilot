@@ -129,9 +129,9 @@ def get_region_zones_for_instance_type(
 
 
 def get_hourly_cost(instance_type: str,
+                    use_spot: bool,
                     region: Optional[str],
                     zone: Optional[str],
-                    use_spot: bool,
                     clouds: CloudFilter = None) -> float:
     """Returns the hourly price of a VM instance in the given region and zone.
 
