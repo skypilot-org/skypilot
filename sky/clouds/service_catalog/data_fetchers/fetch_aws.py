@@ -13,8 +13,10 @@ import ray
 
 from sky.adaptors import aws
 
-# Enable all the regions. The regions enabled by the user's AWS account will be
-# filtered by joining with the availability zone mapping in `aws_catalog`.
+# Enable most of the regions. Each user's account may have a subset of these
+# enabled; this is ok because we take the intersection of the list here with
+# the user-specific enabled regions in `aws_catalog`, via the "availability
+# zone mapping".
 # TODO(zhwu): fix the regions with no supported AMI (maybe by finding AMIs
 # similar to the Deep Learning AMI).
 ALL_REGIONS = [
@@ -73,12 +75,17 @@ def _get_instance_types(region: str) -> pd.DataFrame:
 
 @ray.remote
 def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
+    client = aws.client('ec2', region_name=region)
+    zones = []
     try:
-        client = aws.client('ec2', region_name=region)
-        zones = []
         response = client.describe_availability_zones()
     except aws.client_exception():
         # The user's AWS account may not have access to this region.
+        # The error looks like:
+        # botocore.exceptions.ClientError: An error occurred
+        # (AuthFailure) when calling the DescribeAvailabilityZones
+        # operation: AWS was not able to validate the provided
+        # access credentials
         return None
     for resp in response['AvailabilityZones']:
         zones.append({
