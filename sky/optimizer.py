@@ -699,8 +699,9 @@ class Optimizer:
 
             # If the DAG has multiple tasks, the chosen resources may not be
             # the best resources for the task.
-            chosen = best_plan[task]
-            best_per_cloud[str(chosen.cloud)] = (chosen, v[chosen])
+            chosen_resources = best_plan[task]
+            best_per_cloud[str(chosen_resources.cloud)] = (chosen_resources,
+                                                           v[chosen_resources])
 
             rows = []
             for resources, cost in best_per_cloud.values():
@@ -845,8 +846,8 @@ def _make_launchables_for_valid_region_zones(
     # requests since Azure spot prices are region-level.
     # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
     # in the same region and have the same price.
-    # FIXME(woosuk): Batching should be done at a higher level (e.g., by
-    # provisioner or optimizer), not here.
+    # TODO(woosuk): A better design is to implement batching at a higher level
+    # (e.g., in provisioner or optimizer), not here.
     launchables = []
     region_zones = launchable_resources.get_valid_region_zones_for_launchable()
     for region, zones in region_zones:
