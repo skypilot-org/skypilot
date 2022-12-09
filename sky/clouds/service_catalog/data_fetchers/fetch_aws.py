@@ -75,10 +75,11 @@ def _get_instance_types(region: str) -> pd.DataFrame:
 def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     try:
         client = aws.client('ec2', region_name=region)
+        zones = []
+        response = client.describe_availability_zones()
     except aws.client_exception():
+        # The user's AWS account may not have access to this region.
         return None
-    zones = []
-    response = client.describe_availability_zones()
     for resp in response['AvailabilityZones']:
         zones.append({
             'AvailabilityZoneName': resp['ZoneName'],
