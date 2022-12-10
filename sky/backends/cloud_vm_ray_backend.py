@@ -1516,10 +1516,13 @@ class RetryingVmProvisioner(object):
 
                 logger.warning(e)
                 provision_failed = True
+                region_or_zone_str = str(to_provision.zone) if to_provision.zone else str(
+                    to_provision.region)
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                    f'{to_provision}. Trying other launchable resources '
-                    f'(if any).{style.RESET_ALL}')
+                    f'{to_provision} in {region_or_zone_str}. '
+                    f'Trying other launchable resources (if any).'
+                    f'{style.RESET_ALL}')
                 if not cluster_exists:
                     # Add failed resources to the blocklist, only when it
                     # is in fallback mode.
