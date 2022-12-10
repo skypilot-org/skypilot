@@ -890,8 +890,8 @@ class RetryingVmProvisioner(object):
             if cluster_status == global_user_state.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
-                    f'cluster {cluster_name} on {region}. Please retry again '
-                    'later.')
+                    f'cluster {cluster_name} in {region.name}. Please retry '
+                    'again later.')
 
                 # Reset to STOPPED (rather than keeping it at INIT), because
                 # (1) the cluster is not up (2) it ensures future `sky start`
@@ -1007,6 +1007,10 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
             cluster_name, acquire_per_cluster_status_lock=False)[0]
+        is_prev_cluster_healthy = prev_cluster_status in [
+            global_user_state.ClusterStatus.STOPPED,
+            global_user_state.ClusterStatus.UP
+        ]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -1016,18 +1020,23 @@ class RetryingVmProvisioner(object):
                 continue
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
-            config_dict = backend_utils.write_cluster_config(
-                to_provision,
-                num_nodes,
-                _get_cluster_config_template(to_provision.cloud),
-                cluster_name,
-                self._local_wheel_path,
-                self._wheel_hash,
-                region=region,
-                zones=zones,
-                dryrun=dryrun,
-                keep_launch_fields_in_existing_config=prev_cluster_status
-                is not None)
+            try:
+                config_dict = backend_utils.write_cluster_config(
+                    to_provision,
+                    num_nodes,
+                    _get_cluster_config_template(to_provision.cloud),
+                    cluster_name,
+                    self._local_wheel_path,
+                    self._wheel_hash,
+                    region=region,
+                    zones=zones,
+                    dryrun=dryrun,
+                    keep_launch_fields_in_existing_config=cluster_exists)
+            except exceptions.ResourcesUnavailableError as e:
+                # Failed due to catalog issue, e.g. image not found.
+                logger.info(
+                    f'Failed to find catalog in region {region.name}: {e}')
+                continue
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1107,10 +1116,7 @@ class RetryingVmProvisioner(object):
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            need_terminate = prev_cluster_status not in [
-                global_user_state.ClusterStatus.STOPPED,
-                global_user_state.ClusterStatus.UP
-            ]
+            need_terminate = not is_prev_cluster_healthy
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
@@ -1153,7 +1159,10 @@ class RetryingVmProvisioner(object):
             message = (
                 f'Failed to acquire resources in {to_provision.zone}. '
                 'Try changing resource requirements or use another zone.')
-        raise exceptions.ResourcesUnavailableError(message)
+        # Do not failover to other clouds if the cluster was previously
+        # UP or STOPPED, since the user can have some data on the cluster.
+        raise exceptions.ResourcesUnavailableError(
+            message, no_failover=is_prev_cluster_healthy)
 
     def _tpu_pod_setup(self, cluster_yaml: str,
                        cluster_handle: 'backends.Backend.ResourceHandle'):
