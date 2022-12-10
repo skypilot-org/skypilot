@@ -261,6 +261,7 @@ class Resources:
         return self.cloud is not None and self._instance_type is not None
 
     def is_spot_restartable(self) -> bool:
+        """Returns whether the resource is restartable after preeemption."""
         return self.cloud.is_spot_restartable(self)
 
     def _set_region_zone(self, region: Optional[str],
