@@ -468,6 +468,21 @@ class GCP(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'gcp')
 
+    def is_spot_restartable(self, resources: 'resources.Resources') -> bool:
+        """Returns whether a spot instance can be restarted after preemption."""
+        # By default, GCP Compute VMs are restartable after preemption.
+        # "If ... not specified, then Compute Engine stops the VM,
+        # transitioning the VM to a TERMINATED state."
+        # See: https://cloud.google.com/compute/docs/instances/spot#preemption-process # pylint: disable=line-too-long
+        # However, Spot TPU VMs are not restartable after preemption.
+        # "If your Cloud TPU is preempted,
+        # you must delete it and create a new one ..."
+        # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm
+
+        # pylint: disable=import-outside-toplevel
+        from sky.utils import tpu_utils
+        return not tpu_utils.is_tpu_vm(resources)
+
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         # TODO(zhwu): change the project id fetching with the following command

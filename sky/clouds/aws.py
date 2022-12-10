@@ -351,3 +351,11 @@ class AWS(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'aws')
+
+    def is_spot_restartable(self, resources: 'resources_lib.Resources') -> bool:
+        """Returns whether a spot instance can be restarted after preemption."""
+        # By default, AWS Spot instances are not restartable after preemption.
+        # "Terminate interrupted Spot Instances (this is the default behavior)"
+        # See: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/interruption-behavior.html # pylint: disable=line-too-long
+        del resources  # unused
+        return False

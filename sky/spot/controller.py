@@ -22,7 +22,6 @@ from sky.spot import spot_state
 from sky.spot import spot_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
-from sky.utils import tpu_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -146,11 +145,12 @@ class SpotController:
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
 
-            # Clean up preempted TPU VM before recovering the cluster.
-            # This is needed as "status -r" may not remove it if GCP
-            # turns the VM state to other than PREEMPTED.
-            is_tpuvm = tpu_utils.is_tpu_vm(list(self._task.resources)[0])
-            if is_tpuvm:
+            resources = list(self._task.resources)[0]
+            if not resources.is_spot_restartable():
+                # If the resource is not restartable after preemption,
+                # we need to terminate the cluster before recovering it.
+                logger.info('Resource not restartable. Cleaning up '
+                            'the cluster.')
                 self._strategy_executor.terminate_cluster()
 
             # Try to recover the spot jobs, when the cluster is preempted

@@ -260,6 +260,9 @@ class Resources:
     def is_launchable(self) -> bool:
         return self.cloud is not None and self._instance_type is not None
 
+    def is_spot_restartable(self) -> bool:
+        return self.cloud.is_spot_restartable(self)
+
     def _set_region_zone(self, region: Optional[str],
                          zone: Optional[str]) -> None:
         if region is None and zone is None:

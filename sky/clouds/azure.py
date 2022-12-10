@@ -305,6 +305,15 @@ class Azure(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
 
+    def is_spot_restartable(self, resources: 'resources.Resources') -> bool:
+        """Returns whether a spot instance can be restarted after preemption."""
+        # By default, Azure Spot instances are restartable after preemption.
+        # "When creating an Azure Spot Virtual Machine, you can set
+        # the eviction policy to Deallocate (default) or Delete."
+        # See: https://learn.microsoft.com/en-us/azure/virtual-machines/spot-vms#eviction-policy # pylint: disable=line-too-long
+        del resources  # Unused.
+        return True
+
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:

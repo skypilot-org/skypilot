@@ -214,5 +214,9 @@ class Cloud:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
 
+    def is_spot_restartable(self, resource: 'resources.Resources') -> bool:
+        """Returns whether a spot instance can be restarted after preemption."""
+        raise NotImplementedError
+
     def __repr__(self):
         return self._REPR

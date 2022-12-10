@@ -1273,7 +1273,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
             # May be a leaked preempted resource.
-            logger.warning(f'TPU VM {tpu_id} is not in READY state.'
+            logger.warning(f'TPU VM {tpu_id} is not in READY state. '
                            'Could be a garbage resource. Skipping...')
             continue
 
