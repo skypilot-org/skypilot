@@ -363,7 +363,7 @@ if __name__ == '__main__':
         action='store_true',
         help=('Check that this account has enabled "all" global regions '
               'hardcoded in this script. Useful to ensure our automatic '
-              'fetcher fetches the expected data.s'))
+              'fetcher fetches the expected data.'))
     parser.set_defaults(az_mappings=True)
     args, _ = parser.parse_known_args()
 
