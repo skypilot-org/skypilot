@@ -523,14 +523,12 @@ def test_tpu_vm():
 
 
 # ---------- TPU VM Pod. ----------
-# Mark slow because it's expensive to run.
-@pytest.mark.slow
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
         'tpu_pod',
         [
-            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32 --use-spot --zone europe-west4-a',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
@@ -625,15 +623,46 @@ def test_autostop():
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop -y {name} -i 1',
+
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m"',
-            'sleep 180',
+
+            # Ensure the cluster is not stopped early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+
             # Ensure the cluster is STOPPED.
+            'sleep 90',
             f'sky status --refresh | grep {name} | grep STOPPED',
+
+            # Ensure the cluster is UP and the autostop setting is reset ('-').
             f'sky start -y {name}',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+
+            # Ensure the job succeeded.
             f'sky exec {name} examples/minimal.yaml',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 2 --status',
+
+            # Test restarting the idleness timer via cancel + reset:
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky autostop -y {name} --cancel',
+            f'sky autostop -y {name} -i 1',  # Should restart the timer.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            'sleep 90',
+            f'sky status --refresh | grep {name} | grep STOPPED',
+
+            # Test restarting the idleness timer via exec:
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky exec {name} echo hi',  # Should restart the timer.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            'sleep 90',
+            f'sky status --refresh | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -647,12 +676,15 @@ def test_autodown():
     test = Test(
         'autodown',
         [
-            f'sky launch -y -d -c {name} --num-nodes 2 --cloud gcp examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --num-nodes 2 --cloud aws examples/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 240',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
             # Ensure the cluster is terminated.
+            'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
@@ -759,6 +791,8 @@ def test_use_spot():
 def test_spot():
     """Test the spot yaml."""
     name = _get_cluster_name()
+    cancel_command = (
+        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2')
     test = Test(
         'managed-spot',
         [
@@ -772,8 +806,15 @@ def test_spot():
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
             'sleep 200',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            # Test autostop. This assumes no regular spot jobs are running.
+            cancel_command,
+            'sleep 720',  # Sleep for a bit more than the default 10m.
+            'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
+            'sky start "sky-spot-controller-*" -y',
+            # Ensures it's up and the autostop setting is restored.
+            'sky status | grep sky-spot-controller- | grep UP | grep 10m',
         ],
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        cancel_command,
     )
     run_one_test(test)
 
@@ -806,7 +847,7 @@ def test_spot_recovery():
     test = Test(
         'managed-spot-recovery',
         [
-            f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 360',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -823,6 +864,7 @@ def test_spot_recovery():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -834,7 +876,7 @@ def test_spot_recovery_multi_node():
     test = Test(
         'managed-spot-recovery-multi',
         [
-            f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1000"  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -852,6 +894,7 @@ def test_spot_recovery_multi_node():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -903,10 +946,12 @@ def test_spot_cancellation():
             'sleep 10',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
+            # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
+            # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
              f'--query Reservations[].Instances[].State[].Name '
-             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+             '--output text) && printf "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
         ])
     run_one_test(test)

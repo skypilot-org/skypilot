@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import contextlib
 import copy
 from datetime import datetime
 import difflib
@@ -48,6 +47,7 @@ from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
@@ -395,7 +395,8 @@ class SSHConfigHelper(object):
 
         Args:
             cluster_name: Cluster name (see `sky status`)
-            ips: List of IP addresses in the cluster. First IP is head node.
+            ips: List of public IP addresses in the cluster. First IP is head
+              node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
@@ -468,7 +469,7 @@ class SSHConfigHelper(object):
     def _add_multinode_config(
         cls,
         cluster_name: str,
-        worker_ips: List[str],
+        external_worker_ips: List[str],
         auth_config: Dict[str, str],
     ):
         username = auth_config['ssh_user']
@@ -477,13 +478,17 @@ class SSHConfigHelper(object):
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
 
-        overwrites = [False] * len(worker_ips)
-        overwrite_begin_idxs = [None] * len(worker_ips)
-        codegens = [None] * len(worker_ips)
+        # Ensure stableness of the aliases worker-<i> by sorting based on
+        # public IPs.
+        external_worker_ips = list(sorted(external_worker_ips))
+
+        overwrites = [False] * len(external_worker_ips)
+        overwrite_begin_idxs = [None] * len(external_worker_ips)
+        codegens = [None] * len(external_worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
-        for idx in range(len(worker_ips)):
+        for idx in range(len(external_worker_ips)):
             worker_names.append(cluster_name + f'-worker{idx+1}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -527,11 +532,11 @@ class SSHConfigHelper(object):
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
                                f'host named {worker_names[idx]}.')
-                host_name = worker_ips[idx]
+                host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, worker_ips[idx], username,
-                    key_path)
+                    sky_autogen_comment, host_name, external_worker_ips[idx],
+                    username, key_path)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -543,17 +548,17 @@ class SSHConfigHelper(object):
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, worker_ips[idx], username,
-                    key_path)
+                    sky_autogen_comment, host_name, external_worker_ips[idx],
+                    username, key_path)
 
         # This checks if all codegens have been created.
-        for idx, ip in enumerate(worker_ips):
+        for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
                     key_path)
 
-        for idx in range(len(worker_ips)):
+        for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
@@ -725,10 +730,20 @@ def write_cluster_config(
         - 'ray'
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
+    Raises:
+        ResourceUnavailableError: if the region/zones requested does not appear
+            in the catalog.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
+    # This can raise a ResourceUnavailableError, when the region/zones requested
+    # does not appear in the catalog. It can be triggered when the user changed
+    # the catalog file, while there is a cluster in the removed region/zone.
+    # TODO(zhwu): We should change the exception type to a more specific one,
+    # as the ResourceUnavailableError is overly used. Also, it would be better
+    # to move the check out of this function, i.e. the caller should be
+    # responsible for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
         to_provision, region, zones)
     config_dict = {}
@@ -1138,7 +1153,7 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all nodes in the cluster."""
+    """Returns the IPs of all nodes in the cluster, with head node at front."""
 
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
@@ -1147,12 +1162,11 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        return _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
-
-    # Try optimize for the common case where we have 1 node.
-    if (expected_num_nodes == 1 and handle is not None and
-            handle.head_ip is not None):
-        return [handle.head_ip]
+        assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
+        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -1182,6 +1196,7 @@ def get_node_ips(cluster_yaml: str,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE)
                 out = proc.stdout.decode()
+                break
             except subprocess.CalledProcessError as e:
                 if retry_cnt == worker_ip_max_attempts - 1:
                     raise exceptions.FetchIPError(
@@ -1242,10 +1257,14 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                            '**** STDOUT ****\n'
                            '{stdout}\n'
                            '**** STDERR ****\n'
-                           '{stderr}')
+                           '{stderr}\n'
+                           '**** CMD ****\n'
+                           '{tpuvm_cmd}')
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                failure_massage.format(stdout=stdout, stderr=stderr))
+                failure_massage.format(stdout=stdout,
+                                       stderr=stderr,
+                                       tpuvm_cmd=tpuvm_cmd))
     all_ips = re.findall(IP_ADDR_REGEX, stdout)
     return all_ips
 
@@ -1257,8 +1276,6 @@ def get_head_ip(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    assert not use_cached_head_ip or max_attempts == 1, (
-        'Cannot use cached_head_ip when max_attempts is not 1')
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
@@ -1418,15 +1435,6 @@ def _process_cli_query(
     ]
 
 
-@contextlib.contextmanager
-def suppress_output():
-    """Suppress stdout and stderr."""
-    with open(os.devnull, 'w') as devnull:
-        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
-                devnull):
-            yield
-
-
 def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     """Returns a set of Ray launch config hashes, one per node type."""
     # Use the cached Ray launch hashes if they exist.
@@ -1436,7 +1444,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_caches')
         return set(ray_launch_hashes)
-    with suppress_output():
+    with ux_utils.suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
@@ -1450,7 +1458,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
-        with suppress_output():
+        with ux_utils.suppress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
         launch_hashes.add(current_hash)
@@ -1615,9 +1623,9 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        external_ips = handle.external_ips(use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if len(ips) == 0:
+        if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
@@ -1625,16 +1633,16 @@ def _update_cluster_status_no_lock(
             # case, since the get_node_ips() does not require ray cluster to be
             # running.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(ips[0], **ssh_credentials)
+            runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     **ssh_credentials)
             returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `get_node_ips` function uses ray
+        # set the status to UP, as the `handle.external_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
-        handle.head_ip = ips[0]
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
@@ -1685,8 +1693,10 @@ def _update_cluster_status_no_lock(
         # that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        global_user_state.set_cluster_status(
-            cluster_name, global_user_state.ClusterStatus.INIT)
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle,
+                                                ready=False,
+                                                is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
@@ -1955,7 +1965,7 @@ def check_cluster_name_not_reserved(
     return None.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for '
+        msg = (f'Cluster {cluster_name!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'

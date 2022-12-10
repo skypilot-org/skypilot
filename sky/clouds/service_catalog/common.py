@@ -1,8 +1,11 @@
 """Common utilities for service catalog."""
+import hashlib
 import os
+import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
 import difflib
+import filelock
 import requests
 import pandas as pd
 
@@ -46,32 +49,70 @@ def get_catalog_path(filename: str) -> str:
     return os.path.join(_CATALOG_DIR, filename)
 
 
-def read_catalog(filename: str) -> pd.DataFrame:
+def read_catalog(filename: str,
+                 pull_frequency_hours: Optional[int] = None) -> pd.DataFrame:
     """Reads the catalog from a local CSV file.
 
     If the file does not exist, download the up-to-date catalog that matches
     the schema version.
+    If `pull_frequency_hours` is not None: pull the latest catalog with
+    possibly updated prices, if the local catalog file is older than
+    `pull_frequency_hours` and no changes to the local catalog file are
+    made after the last pull.
     """
     assert filename.endswith('.csv'), 'The catalog file must be a CSV file.'
+    assert (pull_frequency_hours is None or
+            pull_frequency_hours > 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
     cloud = cloud_lib.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
-    if not os.path.exists(catalog_path):
-        url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-        with backend_utils.safe_console_status(
-                f'Downloading {cloud} catalog...'):
-            try:
-                r = requests.get(url)
-                r.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                logger.error(f'Failed to download {cloud} catalog:')
-                with ux_utils.print_exception_no_traceback():
-                    raise e
-        # Save the catalog to a local file.
-        os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-        with open(catalog_path, 'w') as f:
-            f.write(r.text)
-        logger.info(f'A new {cloud} catalog has been downloaded to '
-                    f'{catalog_path}')
+
+    meta_path = os.path.join(_CATALOG_DIR, '.meta', filename)
+    os.makedirs(os.path.dirname(meta_path), exist_ok=True)
+
+    # Atomic check, to avoid conflicts with other processes.
+    # TODO(mraheja): remove pylint disabling when filelock version updated
+    # pylint: disable=abstract-class-instantiated
+    with filelock.FileLock(meta_path + '.lock'):
+
+        def _need_update() -> bool:
+            if not os.path.exists(catalog_path):
+                return True
+            if pull_frequency_hours is None:
+                return False
+            # Check the md5 of the file to see if it has changed.
+            with open(catalog_path, 'rb') as f:
+                file_md5 = hashlib.md5(f.read()).hexdigest()
+            md5_filepath = meta_path + '.md5'
+            if os.path.exists(md5_filepath):
+                with open(md5_filepath, 'r') as f:
+                    last_md5 = f.read()
+                if file_md5 != last_md5:
+                    # Do not update the file if the user modified it.
+                    return False
+
+            last_update = os.path.getmtime(catalog_path)
+            return last_update + pull_frequency_hours * 3600 < time.time()
+
+        if _need_update():
+            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            update_frequency_str = ''
+            if pull_frequency_hours is not None:
+                update_frequency_str = f' (every {pull_frequency_hours} hours)'
+            with backend_utils.safe_console_status(
+                    f'Updating {cloud} catalog{update_frequency_str}'):
+                try:
+                    r = requests.get(url)
+                    r.raise_for_status()
+                except requests.exceptions.RequestException as e:
+                    logger.error(f'Failed to download {cloud} catalog:')
+                    with ux_utils.print_exception_no_traceback():
+                        raise e
+            # Save the catalog to a local file.
+            os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+            with open(catalog_path, 'w') as f:
+                f.write(r.text)
+            with open(meta_path + '.md5', 'w') as f:
+                f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:
         df = pd.read_csv(catalog_path)
@@ -289,7 +330,12 @@ def get_region_zones(df: pd.DataFrame,
                      use_spot: bool) -> List[cloud_lib.Region]:
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
-    df = df.dropna(subset=[price_str]).sort_values(price_str)
+    sort_keys = [price_str, 'Region']
+    if 'AvailabilityZone' in df.columns:
+        sort_keys.append('AvailabilityZone')
+    # If NaN appears in any of the sort keys, drop the row, as that means
+    # errors in the data.
+    df = df.dropna(subset=sort_keys).sort_values(sort_keys)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(
