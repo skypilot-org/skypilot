@@ -436,6 +436,15 @@ class Resources:
                         'image_id is only supported for AWS in a specific '
                         'region, please explicitly specify the region.')
 
+        # Validate the image size is smaller than the disk size.
+        for region, image_id in self._image_id.items():
+            image_size = self.cloud.get_image_size(image_id, region)
+            if image_size > self.disk_size:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'The image size {image_size} GB is larger than the '
+                        f'disk size {self.disk_size} GB.')
+
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         hours = seconds / 3600

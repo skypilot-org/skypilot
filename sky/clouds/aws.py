@@ -10,6 +10,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky.adaptors import aws
 from sky.clouds import service_catalog
 
 if typing.TYPE_CHECKING:
@@ -30,6 +31,7 @@ def _run_output(cmd):
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
 
+DEFAULT_AMI_GB = 45
 
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
@@ -114,27 +116,39 @@ class AWS(clouds.Cloud):
             f'{region_name}. Try setting a valid image_id.')
 
     @classmethod
-    def _get_image_id(cls, region_name: str, instance_type: str,
-                      image_id: Optional[Dict[str, str]]) -> str:
-        if image_id is not None:
-            if None in image_id:
-                image_id = image_id[None]
-            else:
-                assert region_name in image_id, image_id
-                image_id = image_id[region_name]
-            if image_id.startswith('skypilot:'):
-                image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                                 region_name,
-                                                                 clouds='aws')
-                if image_id is None:
-                    # Raise ResourcesUnavailableError to make sure the failover
-                    # in CloudVMRayBackend will be correctly triggered.
-                    # TODO(zhwu): This is a information leakage to the cloud
-                    # implementor, we need to find a better way to handle this.
-                    raise exceptions.ResourcesUnavailableError(
-                        f'No image found for region {region_name}')
-            return image_id
-        return cls.get_default_ami(region_name, instance_type)
+    def _get_image_id(cls, region_name: str, image_id: Optional[Dict[str, str]]) -> str:
+        if image_id is None:
+            return None
+        if None in image_id:
+            image_id = image_id[None]
+        else:
+            assert region_name in image_id, image_id
+            image_id = image_id[region_name]
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                                region_name,
+                                                                clouds='aws')
+            if image_id is None:
+                # Raise ResourcesUnavailableError to make sure the failover
+                # in CloudVMRayBackend will be correctly triggered.
+                # TODO(zhwu): This is a information leakage to the cloud
+                # implementor, we need to find a better way to handle this.
+                raise exceptions.ResourcesUnavailableError(
+                    f'No image found for region {region_name}')
+        return image_id
+    
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_AMI_GB
+        assert region is not None, (image_id, region)
+        client = aws.client('ec2', region_name=region)
+        try:
+            image_info = client.describe_images(ImageIds=[image_id])
+            image_info = image_info['Images'][0]
+            image_size = image_info['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
+        except:
+            raise RuntimeError(f'Image {image_id} does not found in AWS region {region}')
+        return image_size
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -234,7 +248,9 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(region_name, r.instance_type, r.image_id)
+        image_id = self._get_image_id(region_name, r.image_id)
+        if image_id is None:
+            image_id = self.get_default_ami(region_name, r.instance_type)
 
         return {
             'instance_type': r.instance_type,

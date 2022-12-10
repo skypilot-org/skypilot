@@ -9,6 +9,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from google import auth
 
 from sky import clouds
+from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
@@ -51,6 +52,7 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
 
+DEFAULT_GCP_IMAGE_GB = 50
 
 def _run_output(cmd):
     proc = subprocess.run(cmd,
@@ -186,6 +188,23 @@ class GCP(clouds.Cloud):
 
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
+
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_GCP_IMAGE_GB
+        compute = gcp.build('compute',
+                        'v1',
+                        credentials=None,
+                        cache_discovery=False)
+        try:
+            image_attrs = image_id.split('/')
+            project = image_attrs[1]
+            image_name = image_attrs[-1]
+            image_infos = compute.images().get(project=project, image=image_name).execute()
+            return image_infos['diskSizeGb']
+        except:
+            raise RuntimeError(f'Image {image_id} not found in GCP.')
+        
 
     @classmethod
     def get_default_instance_type(cls) -> str:
