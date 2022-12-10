@@ -74,11 +74,6 @@ class Resources:
             self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
-            if disk_size < 50:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'OS disk size must be larger than 50GB. Got: '
-                        f'{disk_size}.')
             if round(disk_size) != disk_size:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -444,9 +439,9 @@ class Resources:
             if image_size > self.disk_size:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Resources: image {image_id!r} is {image_size}GB, '
-                        f'which is larger than the disk size {self.disk_size} '
-                        'GB.')
+                        f'Image {image_id!r} is {image_size}GB, which is larger '
+                        f'than the specified disk_size: {self.disk_size} GB. '
+                        'Please specify a larger disk_size.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

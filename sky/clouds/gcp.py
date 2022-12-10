@@ -207,7 +207,7 @@ class GCP(clouds.Cloud):
             image_name = image_attrs[-1]
             image_infos = compute.images().get(project=project,
                                                image=image_name).execute()
-            return image_infos['diskSizeGb']
+            return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
             if e.resp.status == 404 and 'was not found' in e.reason:
                 with ux_utils.print_exception_no_traceback():
