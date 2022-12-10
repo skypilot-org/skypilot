@@ -319,6 +319,7 @@ def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
     results = pd.DataFrame(
         results,
         columns=['Tag', 'Region', 'OS', 'OSVersion', 'ImageId', 'CreationDate'])
+    results.sort_values(['Tag', 'Region'], inplace=True)
     return results
 
 
