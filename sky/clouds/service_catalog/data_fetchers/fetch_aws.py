@@ -62,6 +62,7 @@ regions_enabled: Set[str] = None
 
 
 def get_enabled_regions() -> Set[str]:
+    # Should not be called concurrently.
     global regions_enabled
     if regions_enabled is None:
         aws_client = aws.client('ec2', region_name='us-east-1')
@@ -235,8 +236,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
     return df
 
 
-def get_all_regions_instance_types_df() -> pd.DataFrame:
-    regions = get_enabled_regions()
+def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
     df_or_regions = ray.get([_get_instance_types_df.remote(r) for r in regions])
     new_dfs = []
     for df_or_region in df_or_regions:
@@ -307,8 +307,7 @@ def _get_image_row(region: str, ubuntu_version: str,
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
 
-def get_all_regions_images_df() -> pd.DataFrame:
-    regions = get_enabled_regions()
+def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
     workers = []
     for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
         for ubuntu_version in _UBUNTU_VERSION:
@@ -338,6 +337,8 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         regions[i] for i, m in enumerate(az_mappings) if m is None
     }
     if missing_regions:
+        # This could happen if a AWS API glitch happens, it is to make sure
+        # that the availability zone does not get lost silently.
         print('WARNING: Missing availability zone mappings for the following '
               f'enabled regions: {missing_regions}')
     # Remove the regions that the user does not have access to.
@@ -357,15 +358,17 @@ if __name__ == '__main__':
                         dest='az_mappings',
                         action='store_false')
     parser.add_argument(
-        '--strict-all-regions',
+        '--check-all-regions-enabled-for-account',
         action='store_true',
-        help=('Enforce the fetched data to contains all regions requested (all '
-              'regions or US regions).'))
+        help=('Check that this account has enabled "all" global regions '
+              'hardcoded in this script. Useful to ensure our automatic '
+              'fetcher fetches the expected data.s'))
     parser.set_defaults(az_mappings=True)
     args, _ = parser.parse_known_args()
 
     user_regions = get_enabled_regions()
-    if args.strict_all_regions and set(ALL_REGIONS) - user_regions:
+    if args.check_all_regions_enabled_for_account and set(
+            ALL_REGIONS) - user_regions:
         raise RuntimeError('The following regions are not enabled: '
                            f'{set(ALL_REGIONS) - user_regions}')
 
@@ -373,26 +376,24 @@ if __name__ == '__main__':
         # Check whether the fetched regions match the requested regions to
         # guard against network issues or glitches in the AWS API.
         fetched_regions = set(df['Region'].unique())
-        requested_regions = set(
-            ALL_REGIONS) if args.strict_all_regions else user_regions
-        if fetched_regions != requested_regions:
+        if fetched_regions != user_regions:
             # This is a sanity check to make sure that the regions we
             # requested are the same as the ones we fetched.
             # The mismatch could happen for network issues or glitches
             # in the AWS API.
             raise RuntimeError(
                 f'{name}: Fetched regions {fetched_regions} does not match '
-                f'requested regions {requested_regions}.')
+                f'requested regions {user_regions}.')
 
     ray.init()
-    instance_df = get_all_regions_instance_types_df()
+    instance_df = get_all_regions_instance_types_df(user_regions)
     _check_regions_integrity(instance_df, 'instance types')
 
     os.makedirs('aws', exist_ok=True)
     instance_df.to_csv('aws/vms.csv', index=False)
     print('AWS Service Catalog saved to aws/vms.csv')
 
-    image_df = get_all_regions_images_df()
+    image_df = get_all_regions_images_df(user_regions)
     _check_regions_integrity(image_df, 'images')
 
     image_df.to_csv('aws/images.csv', index=False)
