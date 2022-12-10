@@ -48,7 +48,7 @@ def _apply_az_mapping(df: 'pd.DataFrame') -> 'pd.DataFrame':
                     f'for AWS...{colorama.Style.RESET_ALL}')
         with ux_utils.suppress_output():
             ray.init()
-            az_mappings = fetch_aws.fetch_availability_zone_mappings()
+        az_mappings = fetch_aws.fetch_availability_zone_mappings()
         az_mappings.to_csv(az_mapping_path, index=False)
     else:
         az_mappings = pd.read_csv(az_mapping_path)
