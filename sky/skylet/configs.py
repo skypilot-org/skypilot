@@ -13,12 +13,15 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 def _safe_cursor():
     """A newly created, auto-commiting, auto-closing cursor."""
     conn = sqlite3.connect(_DB_PATH)
+    # Use WAL mode to avoid locking problem in #1507.
+    # Reference: https://stackoverflow.com/a/39265148
+    conn.execute("PRAGMA journal_mode=WAL")
     cursor = conn.cursor()
     try:
         yield cursor
     finally:
-        conn.commit()
         cursor.close()
+        conn.commit()
         conn.close()
 
 
