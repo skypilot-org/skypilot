@@ -17,8 +17,8 @@ def _safe_cursor():
     try:
         yield cursor
     finally:
-        cursor.close()
         conn.commit()
+        cursor.close()
         conn.close()
 
 
