@@ -633,7 +633,8 @@ class RetryingVmProvisioner(object):
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
-            if 'Requested disk size cannot be smaller than the image size' in httperror_str[0]:
+            if ('Requested disk size cannot be smaller than the image size'
+                    in httperror_str[0]):
                 logger.info(f'Got {httperror_str[0]}')
                 logger.info('Skipping all regions due to disk size issue.')
                 for r, _ in clouds.GCP.region_zones_provision_loop():

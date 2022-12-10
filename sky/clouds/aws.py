@@ -12,6 +12,7 @@ from sky import clouds
 from sky import exceptions
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
@@ -31,7 +32,9 @@ def _run_output(cmd):
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
 
+
 DEFAULT_AMI_GB = 45
+
 
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
@@ -116,7 +119,8 @@ class AWS(clouds.Cloud):
             f'{region_name}. Try setting a valid image_id.')
 
     @classmethod
-    def _get_image_id(cls, region_name: str, image_id: Optional[Dict[str, str]]) -> str:
+    def _get_image_id(cls, region_name: str,
+                      image_id: Optional[Dict[str, str]]) -> str:
         if image_id is None:
             return None
         if None in image_id:
@@ -126,8 +130,8 @@ class AWS(clouds.Cloud):
             image_id = image_id[region_name]
         if image_id.startswith('skypilot:'):
             image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                                region_name,
-                                                                clouds='aws')
+                                                             region_name,
+                                                             clouds='aws')
             if image_id is None:
                 # Raise ResourcesUnavailableError to make sure the failover
                 # in CloudVMRayBackend will be correctly triggered.
@@ -136,8 +140,8 @@ class AWS(clouds.Cloud):
                 raise exceptions.ResourcesUnavailableError(
                     f'No image found for region {region_name}')
         return image_id
-    
-    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+
+    def get_image_size(self, region: Optional[str], image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
@@ -145,9 +149,12 @@ class AWS(clouds.Cloud):
         try:
             image_info = client.describe_images(ImageIds=[image_id])
             image_info = image_info['Images'][0]
-            image_size = image_info['BlockDeviceMappings'][0]['Ebs']['VolumeSize']
-        except:
-            raise RuntimeError(f'Image {image_id} does not found in AWS region {region}')
+            image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
+                'VolumeSize']
+        except aws.client_exception() as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Image {image_id!r} does not found '
+                                 f'in AWS region {region}') from e
         return image_size
 
     @classmethod

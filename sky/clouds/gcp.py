@@ -54,6 +54,7 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
 
 DEFAULT_GCP_IMAGE_GB = 50
 
+
 def _run_output(cmd):
     proc = subprocess.run(cmd,
                           shell=True,
@@ -190,21 +191,26 @@ class GCP(clouds.Cloud):
         return isinstance(other, GCP)
 
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        del region  # unused
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
         compute = gcp.build('compute',
-                        'v1',
-                        credentials=None,
-                        cache_discovery=False)
+                            'v1',
+                            credentials=None,
+                            cache_discovery=False)
         try:
             image_attrs = image_id.split('/')
             project = image_attrs[1]
             image_name = image_attrs[-1]
-            image_infos = compute.images().get(project=project, image=image_name).execute()
+            image_infos = compute.images().get(project=project,
+                                               image=image_name).execute()
             return image_infos['diskSizeGb']
-        except:
-            raise RuntimeError(f'Image {image_id} not found in GCP.')
-        
+        except gcp.http_error_exception() as e:
+            if e.resp.status == 404 and 'was not found' in e.reason:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Image {image_id} not found in '
+                                     'GCP.') from e
+            raise
 
     @classmethod
     def get_default_instance_type(cls) -> str:

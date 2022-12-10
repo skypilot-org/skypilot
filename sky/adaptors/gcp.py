@@ -68,3 +68,10 @@ def forbidden_exception():
     """Forbidden exception."""
     from google.api_core import exceptions as gcs_exceptions
     return gcs_exceptions.Forbidden
+
+
+@import_package
+def http_error_exception():
+    """HttpError exception."""
+    from googleapiclient import errors
+    return errors.HttpError
