@@ -119,8 +119,11 @@ class AWS(clouds.Cloud):
             f'{region_name}. Try setting a valid image_id.')
 
     @classmethod
-    def _get_image_id(cls, region_name: str,
-                      image_id: Optional[Dict[str, str]]) -> str:
+    def _get_image_id(
+        cls,
+        image_id: Optional[Dict[str, str]],
+        region_name: str,
+    ) -> str:
         if image_id is None:
             return None
         if None in image_id:
@@ -141,7 +144,7 @@ class AWS(clouds.Cloud):
                     f'No image found for region {region_name}')
         return image_id
 
-    def get_image_size(self, region: Optional[str], image_id: str) -> float:
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
@@ -151,15 +154,15 @@ class AWS(clouds.Cloud):
             image_info = image_info['Images'][0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
-        except aws.botocore.exceptions.NoCredentialsError as e:
+        except aws.botocore.exceptions.NoCredentialsError:
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be handled when actually provisioning
             # the instance.
             return DEFAULT_AMI_GB
-        except aws.client_exception() as e:
+        except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Image {image_id!r} does not found '
-                                 f'in AWS region {region}') from e
+                                 f'in AWS region {region}') from None
         return image_size
 
     @classmethod
@@ -260,7 +263,7 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(region_name, r.image_id)
+        image_id = self._get_image_id(r.image_id, region_name)
         if image_id is None:
             image_id = self.get_default_ami(region_name, r.instance_type)
 

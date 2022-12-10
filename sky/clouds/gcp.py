@@ -211,8 +211,8 @@ class GCP(clouds.Cloud):
         except gcp.http_error_exception() as e:
             if e.resp.status == 404 and 'was not found' in e.reason:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Image {image_id} not found in '
-                                     'GCP.') from e
+                    raise ValueError(f'Image {image_id!r} not found in '
+                                     'GCP.') from None
             raise
 
     @classmethod
