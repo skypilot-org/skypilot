@@ -194,10 +194,13 @@ class GCP(clouds.Cloud):
         del region  # unused
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
-        compute = gcp.build('compute',
-                            'v1',
-                            credentials=None,
-                            cache_discovery=False)
+        try:
+            compute = gcp.build('compute',
+                                'v1',
+                                credentials=None,
+                                cache_discovery=False)
+        except gcp.credential_error_exception() as e:
+            return DEFAULT_GCP_IMAGE_GB
         try:
             image_attrs = image_id.split('/')
             project = image_attrs[1]

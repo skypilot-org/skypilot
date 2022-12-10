@@ -151,6 +151,11 @@ class AWS(clouds.Cloud):
             image_info = image_info['Images'][0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
+        except aws.botocore.exceptions.NoCredentialsError as e:
+            # Fallback to default image size if no credentials are available.
+            # The credentials issue will be handled when actually provisioning
+            # the instance.
+            return DEFAULT_AMI_GB
         except aws.client_exception() as e:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Image {image_id!r} does not found '

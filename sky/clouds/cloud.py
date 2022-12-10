@@ -200,7 +200,7 @@ class Cloud:
         """Check the image size from the cloud.
 
         Returns: the image size in GB.
-        Raises: ValueError if the image size cannot be found.
+        Raises: ValueError if the image cannot be found.
         """
         raise NotImplementedError
 
