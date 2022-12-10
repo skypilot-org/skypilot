@@ -606,15 +606,18 @@ class Resources:
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
         """Whether this Resources matches the blocked Resources."""
         is_matched = True
-        if blocked.cloud is not None and not self.cloud.is_same_cloud(blocked.cloud):
+        if (blocked.cloud is not None and
+                not self.cloud.is_same_cloud(blocked.cloud)):
             is_matched = False
-        if blocked.instance_type is not None and self.instance_type != blocked.instance_type:
+        if (blocked.instance_type is not None and
+                self.instance_type != blocked.instance_type):
             is_matched = False
         if blocked.region is not None and self._region != blocked.region:
             is_matched = False
         if blocked.zone is not None and self._zone != blocked.zone:
             is_matched = False
-        if blocked.accelerators is not None and self.accelerators != blocked.accelerators:
+        if (blocked.accelerators is not None and
+                self.accelerators != blocked.accelerators):
             is_matched = False
         return is_matched
 

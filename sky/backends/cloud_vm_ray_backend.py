@@ -1525,8 +1525,10 @@ class RetryingVmProvisioner(object):
 
                 logger.warning(e)
                 provision_failed = True
-                region_or_zone_str = str(to_provision.zone) if to_provision.zone else str(
-                    to_provision.region)
+                if to_provision.zone is None:
+                    region_or_zone_str = str(to_provision.region)
+                else:
+                    region_or_zone_str = str(to_provision.zone)
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
                     f'{to_provision} in {region_or_zone_str}. '
