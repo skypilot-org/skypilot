@@ -303,9 +303,11 @@ class Resources:
 
         # If the region or zone is specified, filter out the other regions
         # and zones.
+        if self._region is None:
+            return region_zones
         filtered_region_zones = []
         for region, zones in region_zones:
-            if self._region is not None and region.name != self._region:
+            if region.name != self._region:
                 continue
             if self._zone is None:
                 filtered_region_zones.append((region, zones))
