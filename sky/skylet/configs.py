@@ -15,7 +15,7 @@ def _safe_cursor():
     conn = sqlite3.connect(_DB_PATH)
     # Use WAL mode to avoid locking problem in #1507.
     # Reference: https://stackoverflow.com/a/39265148
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute('PRAGMA journal_mode=WAL')
     cursor = conn.cursor()
     try:
         yield cursor
