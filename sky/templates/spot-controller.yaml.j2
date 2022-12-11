@@ -4,8 +4,6 @@ name: {{cluster_name}}
 
 # The default resources is defined in sky.spot_utils.DEFAULT_SPOT_CONTROLLER_RESOURCES,
 # and will be assigned to the spot controller task in `sky.spot_launch`.
-# resources:
-#   disk_size: 50
 
 file_mounts:
   {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
