@@ -44,7 +44,7 @@ _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
 _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
                           '[/] It may take a minute.')
 
-# It is now using default CPU instance type hard-coded in code for spot
+# This will map to the default CPU instance type on each cloud for the spot
 # controller, i.e. m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8_v4
 # (8vCPUs, 32 GB) for Azure, and n1-highmem-8 (8 vCPUs, 52 GB) for GCP.
 # It can be overridden by passing the controller-type to sky spot launch
