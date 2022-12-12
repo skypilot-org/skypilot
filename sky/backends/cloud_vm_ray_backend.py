@@ -322,7 +322,7 @@ class RayCodeGen:
                 # error message.
                 ray.get(pg.ready())
                 job_lib.scheduler.remove_job({self.job_id!r})
-                job_lib.scheduler.run_next_if_possible()
+                job_lib.scheduler.schedule_step()
                 print('INFO: All task resources reserved.',
                       file=sys.stderr,
                       flush=True)
@@ -507,7 +507,7 @@ class RayCodeGen:
                 job_lib.set_status({self.job_id!r}, job_lib.JobStatus.SUCCEEDED)
                 # This waits for all streaming logs to finish.
                 time.sleep(1)
-            job_lib.scheduler.run_next_if_possible()
+            job_lib.scheduler.schedule_step()
             """)
         ]
 
@@ -2268,7 +2268,7 @@ class CloudVmRayBackend(backends.Backend):
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir}'
+        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && touch {remote_log_path}'
                       '&& echo START > {remote_log_path} 2>&1')
         code += '&&' + mkdir_code
 

@@ -56,7 +56,7 @@ class JobSchedulerEvent(SkyletEvent):
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
-        job_lib.scheduler.run_next_if_possible()
+        job_lib.scheduler.schedule_step()
 
 
 class SpotJobUpdateEvent(SkyletEvent):

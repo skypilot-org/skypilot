@@ -401,6 +401,7 @@ def tail_logs(job_owner: str,
     retry_cnt = 0
     while status is not None and not status.is_terminal():
         retry_cnt += 1
+        print(log_path)
         if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
             break
         if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:

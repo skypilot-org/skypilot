@@ -8,3 +8,4 @@
 
 resources:
   cloud: aws
+  accelerators: K80

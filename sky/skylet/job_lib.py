@@ -230,7 +230,7 @@ class JobScheduler:
                         (job_id, cmd, 0, int(time.time())))
         _CONN.commit()
         set_status(job_id, JobStatus.PENDING)
-        self.run_next_if_possible()
+        self.schedule_step()
 
     def _get_job_status(self, job_id: int):
         status = list(
@@ -245,7 +245,7 @@ class JobScheduler:
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
-    def remove_job(self, job_id: str):
+    def set_scheduled(self, job_id: str):
         with filelock.FileLock(_get_lock_path(job_id)):
             self.remove_job_no_lock(job_id)
 
@@ -253,7 +253,7 @@ class JobScheduler:
         _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
         _CONN.commit()
 
-    def run_next_if_possible(self) -> None:
+    def schedule_step(self) -> None:
         raise NotImplementedError
 
 
@@ -263,10 +263,11 @@ class FIFOScheduler(JobScheduler):
     def _get_jobs(self) -> Tuple:
         return _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id')
 
-    def run_next_if_possible(self) -> None:
+    def schedule_step(self) -> None:
         job_owner = getpass.getuser()
-        update_status(job_owner)
         jobs = list(self._get_jobs())
+        if len(jobs) > 0:
+            update_status(job_owner, end_job = jobs[-1][0])
         for job_id, run_cmd, submit, _ in jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = self._get_job_status(job_id)
@@ -415,14 +416,17 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 
 def _get_pending_jobs():
-    rows = _CURSOR.execute('SELECT job_id, created_time FROM pending_jobs')
+    rows = _CURSOR.execute('SELECT job_id, created_time, submit FROM pending_jobs')
     rows = list(rows)
-    return [int(row[0]) for row in rows], [int(row[1]) for row in rows]
+    return {
+        job_id: {'created_time': created_time, 'submit': submit} for job_id, created_time, submit in rows
+    }
 
 
 def update_job_status(job_owner: str,
                       job_ids: List[int],
-                      silent: bool = False) -> List[JobStatus]:
+                      silent: bool = False,
+                      end_job: int = -1) -> List[JobStatus]:
     """Updates and returns the job statuses matching our `JobStatus` semantics
 
     "True" statuses: this function queries `ray job status` and processes
@@ -454,16 +458,16 @@ def update_job_status(job_owner: str,
         if job_detail.submission_id in ray_job_ids_set:
             job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(job_ids)
-    pending_jobs, start_times = _get_pending_jobs()
-    assert len(pending_jobs) == len(start_times)
+    pending_jobs = _get_pending_jobs()
     for i, job_id in enumerate(job_ids):
         ray_job_id = make_ray_job_id(job_id, job_owner)
         if ray_job_id in job_details:
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
-            idx = pending_jobs.index(job_id)
-            if start_times[idx] < psutil.boot_time():
+            if pending_jobs[job_id]['submit']:
+                continue
+            if pending_jobs[job_id]['created_time'] < psutil.boot_time():
                 job_statuses[i] = JobStatus.FAILED
             else:
                 job_statuses[i] = JobStatus.PENDING
@@ -475,6 +479,9 @@ def update_job_status(job_owner: str,
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
+        if end_job != -1 and job_id > end_job: 
+            # Do not update jobs past current one
+            continue
         # TODO(mraheja): remove pylint disabling when filelock version
         # updated
         # pylint: disable=abstract-class-instantiated
@@ -524,7 +531,7 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
+def update_status(job_owner: str, submitted_gap_sec: int = 0, end_job: int = -1) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -536,7 +543,7 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0) -> None:
                                  submitted_gap_sec=submitted_gap_sec)
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
-    update_job_status(job_owner, nonterminal_job_ids)
+    update_job_status(job_owner, nonterminal_job_ids, end_job = end_job)
 
 
 def is_cluster_idle() -> bool:
