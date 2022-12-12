@@ -668,7 +668,10 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'An error occurred' in s.strip()
+            # 'An error occurred': boto3 errors
+            # 'ERROR': skypilot's changes to the AWS node provider (for errors
+            #   like VPC setup)
+            if 'An error occurred' in s or 'ERROR: ' in s
         ]
         # Need to handle boto3 printing error but its retry succeeded:
         #   error occurred (Unsupported) .. not supported in your requested
@@ -692,8 +695,7 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        # The underlying ray autoscaler / boto3 will try all zones of a region
-        # at once.
+        # Underlying ray autoscaler will try all specified zones of a region.
         logger.warning(f'Got error(s) in all zones of {region.name}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
