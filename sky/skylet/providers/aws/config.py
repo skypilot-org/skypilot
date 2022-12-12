@@ -3,6 +3,7 @@ import itertools
 import json
 import logging
 import os
+import sys
 import time
 from distutils.version import StrictVersion
 from functools import lru_cache, partial
@@ -231,10 +232,15 @@ def bootstrap_aws(config):
 
     # If NetworkInterfaces are provided, extract the necessary fields for the
     # config stages below.
+    # This basically adds two fields 'SubnetIds', 'SecurityGroupIds' to the
+    # node_config dict.
     config = _configure_from_network_interfaces(config)
 
     # The head node needs to have an IAM role that allows it to create further
     # EC2 instances.
+    # This adds {'IamInstanceProfile': {'Arn':
+    # 'arn:aws:iam::xxxxxx:instance-profile/ray-autoscaler-v1'}} to
+    # config['head_node'].
     config = _configure_iam_role(config)
 
     # Configure SSH access, using an existing key pair if possible.
@@ -466,6 +472,14 @@ def _usable_subnet_ids(
         user_specified_subnet_ids = {s.subnet_id for s in user_specified_subnets}
         return user_specified_subnet_ids - current_subnet_ids
 
+    def _subnet_name_tag_contains(subnet, substr: str) -> bool:
+        tags = subnet.meta.data["Tags"]
+        for tag in tags:
+            if tag["Key"] == "Name":
+                name = tag["Value"]
+                return substr in name
+        return False
+
     try:
         candidate_subnets = (
             user_specified_subnets
@@ -476,12 +490,53 @@ def _usable_subnet_ids(
             candidate_subnets = [
                 s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
             ]
+
         subnets = sorted(
             (
                 s
                 for s in candidate_subnets
                 if s.state == "available"
-                and (use_internal_ips or s.map_public_ip_on_launch)
+                and (
+                    # If using internal IPs, the subnets must not assign public
+                    # IPs. Additionally, requires that each eligible subnet
+                    # contain a name tag which includes the substring
+                    # 'private'. This is a HACK; see below.
+                    #
+                    # Reason: the first two checks alone are not enough. For
+                    # example, the VPC creation helper from AWS will create a
+                    # "public" and a "private" subnet per AZ. However, the
+                    # "public" subnet has map_public_ip_on_launch set to False
+                    # as well. This means we could've launched in that subnet,
+                    # which will cause connectivity issues due to how route
+                    # tables/gateways are set up for that subnet. The "public"
+                    # subnets are NOT intended to host data plane VMs, while
+                    # the "private" subnets are.
+                    #
+                    # An alternative to the subnet name hack is to ensure
+                    # there's a route (dest=0.0.0.0/0, target=nat-*) in the
+                    # subnet's route table so that outbound connections
+                    # work. This seems hard to do, given a ec2.Subnet
+                    # object. (Easy to see in console though.) So we opt for
+                    # the subnet name requirement for now.
+                    (
+                        use_internal_ips
+                        and not s.map_public_ip_on_launch
+                        and _subnet_name_tag_contains(s, "private")
+                    )
+                    or
+                    # Or if using public IPs, the subnets must assign public
+                    # IPs.
+                    (not use_internal_ips and s.map_public_ip_on_launch)
+                    # NOTE: SkyPilot also changes the semantics of
+                    # 'use_internal_ips' through the above two conditions.
+                    # Previously, this flag by itself does not enforce only
+                    # choosing subnets that do not assign public IPs.  Now we
+                    # do so.
+                    #
+                    # In both before and now, this flag makes Ray communicate
+                    # between the client and the head node using the latter's
+                    # private ip.
+                )
             ),
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
@@ -557,7 +612,11 @@ def _configure_subnet(config):
     for node_type in config["available_node_types"].values():
         node_config = node_type["node_config"]
         sg_ids.extend(node_config.get("SecurityGroupIds", []))
-    if sg_ids:
+
+    if "vpc_name" in config["provider"]:
+        # NOTE: This is a new field added by SkyPilot and parsed by our own AWSNodeProvider.
+        vpc_id_of_sg = _get_vpc_id_by_name(config["provider"]["vpc_name"], config)
+    elif sg_ids:
         vpc_id_of_sg = _get_vpc_id_of_sg(sg_ids, config)
     else:
         vpc_id_of_sg = None
@@ -565,7 +624,7 @@ def _configure_subnet(config):
     # map from node type key -> source of SubnetIds field
     subnet_src_info = {}
     _set_config_info(subnet_src=subnet_src_info)
-    all_subnets = list(ec2.subnets.all())
+    all_subnets = list(ec2.subnets.all())  # All subnets of this region.
     # separate node types with and without user-specified subnets
     node_types_subnets = []
     node_types_no_subnets = []
@@ -612,6 +671,38 @@ def _configure_subnet(config):
     return config
 
 
+def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
+    """Returns the VPC ID of the unique VPC with a given name.
+
+    Exits with code 1 if:
+      - No VPC with the given name is found in the current region.
+      - More than 1 VPC with the given name are found in the current region.
+    """
+    ec2 = _resource("ec2", config)
+    # Look in the "Name" tag (shown as Name column in console).
+    filters = [{"Name": "tag:Name", "Values": [vpc_name]}]
+    vpcs = [vpc for vpc in ec2.vpcs.filter(Filters=filters)]
+    if not vpcs:
+        logger.error(
+            f"ERROR: No VPC with name {vpc_name!r} is found in "
+            f'{config["provider"]["region"]}. '
+            "To fix: specify a correct VPC name."
+        )
+        # Raising would exit the caller, while exit triggers SkyPilot failover.
+        sys.exit(1)
+    elif len(vpcs) > 1:
+        logger.error(
+            f"ERROR: Multiple VPCs with name {vpc_name!r} found in region "
+            f' {config["provider"]["region"]}: {vpcs}. '
+            "It is ambiguous as to which VPC to use. To fix: specify a "
+            "VPC name that is uniquely identifying."
+        )
+        # Raising would exit the caller, while exit triggers SkyPilot failover.
+        sys.exit(1)
+    assert len(vpcs) == 1, vpcs
+    return vpcs[0].id
+
+
 def _get_vpc_id_of_sg(sg_ids: List[str], config: Dict[str, Any]) -> str:
     """Returns the VPC id of the security groups with the provided security
     group ids.
@@ -630,7 +721,9 @@ def _get_vpc_id_of_sg(sg_ids: List[str], config: Dict[str, Any]) -> str:
 
     multiple_vpc_msg = (
         "All security groups specified in the cluster config "
-        "should belong to the same VPC."
+        "should belong to the same VPC.\n"
+        f"Security group IDs: {sg_ids}\n"
+        f"Their VPC IDs (expected 1 element): {vpc_ids}\n"
     )
     cli_logger.doassert(len(vpc_ids) <= 1, multiple_vpc_msg)
     assert len(vpc_ids) <= 1, multiple_vpc_msg
