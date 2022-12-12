@@ -1620,8 +1620,8 @@ def _check_user_identity_no_lock(cluster_name: str):
     elif user_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
-                f'The cluster {cluster_name!r} (on {cloud}) is created by account '
-                f'{user_identity!r}, but the activated is {current_user_identity!r}.'
+                f'The cluster {cluster_name!r} (on {cloud}) is created by the account '
+                f'{user_identity!r}, but the activated one is {current_user_identity!r}.'
             )
 
 
