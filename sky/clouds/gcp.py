@@ -468,8 +468,9 @@ class GCP(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'gcp')
 
-    def is_spot_restartable(self, resources: 'resources.Resources') -> bool:
-        """Returns whether a spot instance can be restarted after preemption."""
+    def need_cleanup_after_preemption(self,
+                                      resources: 'resources.Resources') -> bool:
+        """Returns whether a spot resource needs cleanup after preeemption."""
         # By default, GCP Compute VMs are restartable after preemption.
         # "If ... not specified, then Compute Engine stops the VM,
         # transitioning the VM to a TERMINATED state."

@@ -146,11 +146,10 @@ class SpotController:
                             '(the cluster will not be restarted).')
 
             resources = list(self._task.resources)[0]
-            if not resources.is_spot_restartable():
-                # If the resource is not restartable after preemption,
-                # we need to terminate the cluster before recovering it.
-                logger.info('Resource not restartable. Cleaning up '
-                            'the cluster.')
+            if not resources.need_cleanup_after_preemption():
+                # Some spot resource may need to be cleaned up after
+                # preemption, if the resource is not reusable.
+                logger.info('Cleaning up the preempted spot cluster...')
                 self._strategy_executor.terminate_cluster()
 
             # Try to recover the spot jobs, when the cluster is preempted
