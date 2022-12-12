@@ -527,6 +527,7 @@ def spot_launch(
                 'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
                 'logging_user_hash': common_utils.get_user_hash(),
                 'retry_until_up': retry_until_up,
+                'user': os.environ.get('USER', None),
             },
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
