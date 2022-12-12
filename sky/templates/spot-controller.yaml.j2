@@ -13,6 +13,10 @@ resources:
 file_mounts:
   {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
 
+{% if user_config_path is not none %}
+  {{remote_user_config_path}}: {{user_config_path}}
+{% endif %}
+
 setup: |
   # Install cli dependencies
   # Not using SkyPilot wheels because the wheel can be cleaned up by another process.
