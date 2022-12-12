@@ -1056,6 +1056,10 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
+            cloud = handle.launched_resources.cloud
+            cloud_user_id = cloud.get_cloud_user_identity()
+            global_user_state.set_cluster_user_identity(cluster_name,
+                                                        cloud_user_id)
 
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
@@ -2038,10 +2042,6 @@ class CloudVmRayBackend(backends.Backend):
                 global_user_state.add_or_update_cluster(cluster_name,
                                                         handle,
                                                         ready=True)
-                cloud = handle.launched_resources.cloud
-                cloud_user_id = cloud.get_cloud_user_identity()
-                global_user_state.set_cluster_user_identity(
-                    cluster_name, cloud_user_id)
                 usage_lib.messages.usage.update_final_cluster_status(
                     global_user_state.ClusterStatus.UP)
                 auth_config = common_utils.read_yaml(

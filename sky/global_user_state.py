@@ -116,7 +116,8 @@ def add_or_update_cluster(cluster_name: str,
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status, autostop, to_down) '
+        '(name, launched_at, handle, last_use, status, '
+        'autostop, to_down, metadata) '
         'VALUES ('
         # name
         '?, '
@@ -138,7 +139,11 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old to_down value if it exists, otherwise set it to
         # default 0.
         'COALESCE('
-        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0)'
+        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0), '
+        # Keep the old metadata value if it exists, otherwise set it to
+        # default {}.
+        'COALESCE('
+        '(SELECT metadata FROM clusters WHERE name=?), "{}")'
         ')',
         (
             # name
@@ -156,8 +161,11 @@ def add_or_update_cluster(cluster_name: str,
             # autostop
             cluster_name,
             ClusterStatus.STOPPED.value,
+            # to_down
             cluster_name,
             ClusterStatus.STOPPED.value,
+            # metadata
+            cluster_name,
         ))
     _DB.conn.commit()
 

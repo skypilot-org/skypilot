@@ -1601,14 +1601,22 @@ _QUERY_STATUS_FUNCS = {
 }
 
 
-def _check_user_identity(cloud: clouds.Cloud, cluster_name: str):
+def _check_user_identity_no_lock(cluster_name: str):
     """Check if the current user is the same as the user who created the cluster."""
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return
+    handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        return
+
+    cloud = handle.launched_resources.cloud
     user_identity = global_user_state.get_cluster_user_identity(cluster_name)
     current_user_identity = cloud.get_cloud_user_identity()
     if user_identity is None:
         if current_user_identity is not None:
             global_user_state.set_cluster_user_identity(cluster_name,
-                                                       current_user_identity)
+                                                        current_user_identity)
     elif user_identity != current_user_identity:
         raise exceptions.ClusterStatusFetchingError(
             f'The cluster {cluster_name!r} (on {cloud}) is created by user {user_identity!r}, '
@@ -1720,10 +1728,12 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(
-        cluster_name: str,
+def _update_cluster_identity_and_status(
+        cluster_name: str, update_status: bool,
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
-    """Update the cluster status by checking ray cluster and real status from cloud.
+    """Update the cluster identity and status.
+
+    The cluster status is updated by checking ray cluster and real status from cloud.
 
     The function will update the cached cluster status in the global state. For the
     design of the cluster status and transition, please refer to the
@@ -1733,8 +1743,14 @@ def _update_cluster_status(
       If the cluster is terminated or does not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
     """
+
+    def apply_check():
+        _check_user_identity_no_lock(cluster_name)
+        if update_status:
+            return _update_cluster_status_no_lock(cluster_name)
+
     if not acquire_per_cluster_status_lock:
-        return _update_cluster_status_no_lock(cluster_name)
+        return apply_check()
 
     try:
         # TODO(mraheja): remove pylint disabling when filelock
@@ -1742,7 +1758,7 @@ def _update_cluster_status(
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
                                CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-            return _update_cluster_status_no_lock(cluster_name)
+            return apply_check()
     except filelock.Timeout:
         logger.debug(
             f'Refreshing status: Failed get the lock for cluster {cluster_name!r}.'
@@ -1764,15 +1780,16 @@ def refresh_cluster_status_handle(
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-        _check_user_identity(handle.launched_resources.cloud, handle.cluster_name)
-        if force_refresh or record['autostop'] >= 0:
-            # Refresh the status only when force_refresh is True or the cluster
-            # has autostopped turned on.
-            record = _update_cluster_status(
-                cluster_name,
-                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
-            if record is None:
-                return None, None
+        use_spot = handle.launched_resources.use_spot
+        update_status = (force_refresh or record['autostop'] >= 0 or use_spot)
+        # Refresh the status only when force_refresh is True or the cluster
+        # has autostopped turned on or the cluster is a spot cluster.
+        record = _update_cluster_identity_and_status(
+            cluster_name,
+            update_status=update_status,
+            acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+        if record is None:
+            return None, None
     return record['status'], record['handle']
 
 
@@ -1844,8 +1861,10 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _update_cluster_status(
-                cluster_name, acquire_per_cluster_status_lock=True)
+            record = _update_cluster_identity_and_status(
+                cluster_name,
+                update_status=True,
+                acquire_per_cluster_status_lock=True)
         except exceptions.ClusterStatusFetchingError as e:
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
