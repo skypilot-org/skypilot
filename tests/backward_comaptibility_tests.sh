@@ -1,3 +1,7 @@
+# This script is used to test backward compatibility of skypilot.
+# To run this script, you need to remove the skypilot and ray in the base
+# conda environment, and run it in the base conda environment.
+
 #!/bin/bash
 set -ev
 
@@ -19,6 +23,7 @@ conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 cd ../sky-master
 git pull origin master
+pip uninstall -y skypilot
 pip install -e ".[all]"
 cd -
 

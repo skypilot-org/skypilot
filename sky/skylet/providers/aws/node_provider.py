@@ -665,6 +665,12 @@ class AWSNodeProvider(NodeProvider):
 
 
 class AWSNodeProviderV2(AWSNodeProvider):
+    # The new version of the AWS node provider uses a new IAM role
+    # with different permissions for the head node and worker nodes,
+    # so as to support AWS SSO login system (see #1489).
+    # We did not overwrite the original AWSNodeProvider class to avoid
+    # breaking existing clusters. Otherwise, the existing clusters will
+    # have a new launch_hash and will be restarted.
     @staticmethod
     def bootstrap_config(cluster_config):
         from sky.skylet.providers.aws.config_v2 import bootstrap_aws
