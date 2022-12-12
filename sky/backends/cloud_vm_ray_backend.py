@@ -2039,7 +2039,7 @@ class CloudVmRayBackend(backends.Backend):
                                                         handle,
                                                         ready=True)
                 cloud = handle.launched_resources.cloud
-                cloud_user_id = cloud.get_cloud_user_dentity()
+                cloud_user_id = cloud.get_cloud_user_identity()
                 global_user_state.set_cluster_user_identity(
                     cluster_name, cloud_user_id)
                 usage_lib.messages.usage.update_final_cluster_status(
