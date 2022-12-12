@@ -1843,10 +1843,11 @@ def get_clusters(
         total=len(records))
 
     failed_clusters = []
+
     def _refresh_cluster(cluster_name):
         try:
-            record = _update_cluster_status(cluster_name,
-                                            acquire_per_cluster_status_lock=True)
+            record = _update_cluster_status(
+                cluster_name, acquire_per_cluster_status_lock=True)
         except exceptions.ClusterStatusFetchingError as e:
             failed_clusters.append((cluster_name, e))
         progress.update(task, advance=1)
