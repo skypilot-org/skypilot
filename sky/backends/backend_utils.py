@@ -1620,8 +1620,6 @@ def _get_cluster_status_via_cloud_cli(
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
-    cloud = resources.cloud
-    _check_user_identity(cloud, handle.cluster_name)
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
@@ -1765,6 +1763,7 @@ def refresh_cluster_status_handle(
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        _check_user_identity(handle.launched_resources.cloud, handle.cluster_name)
         if force_refresh or record['autostop'] >= 0:
             # Refresh the status only when force_refresh is True or the cluster
             # has autostopped turned on.
