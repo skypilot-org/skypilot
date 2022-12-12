@@ -18,14 +18,14 @@ def import_package(func):
         if boto3 is None or botocore is None:
             try:
                 import boto3 as _boto3
-                import boto3.session as session
+                import boto3.session as _session
                 import botocore as _botocore
                 boto3 = _boto3
                 botocore = _botocore
                 # Create session per thread to avoid thread-safety issues.
                 # See: https://github.com/boto/boto3/issues/1592 and https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html?highlight=multithreading#multithreading-and-multiprocessing # pylint: disable=line-too-long
                 if not hasattr(cache, 'session'):
-                    cache.session = session.Session()
+                    cache.session = _session.Session()
             except ImportError:
                 raise ImportError('Fail to import dependencies for AWS.'
                                   'Try pip install "skypilot[aws]"') from None
