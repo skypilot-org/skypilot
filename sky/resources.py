@@ -604,7 +604,11 @@ class Resources:
         return True
 
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
-        """Whether this Resources matches the blocked Resources."""
+        """Whether this Resources matches the blocked Resources.
+        
+        If a field in `blocked` is None, it should be considered as a wildcard
+        for that field.
+        """
         is_matched = True
         if (blocked.cloud is not None and
                 not self.cloud.is_same_cloud(blocked.cloud)):
