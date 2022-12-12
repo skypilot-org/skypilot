@@ -1468,7 +1468,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     assert metadata is not None, cluster_name
     ray_launch_hashes = metadata.get('ray_launch_hashes', None)
     if ray_launch_hashes is not None:
-        logger.debug('Using cached launch_caches')
+        logger.debug('Using cached launch_hashes.')
         return set(ray_launch_hashes)
     with ux_utils.suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
