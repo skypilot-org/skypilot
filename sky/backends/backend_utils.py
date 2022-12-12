@@ -1889,6 +1889,9 @@ def get_clusters(
         elif updated_records[i]['status'] == 'UNKNOWN':
             failed_clusters.append(
                 (cluster_names[i], updated_records[i]['error']))
+            # Keep the original record if the status is unknown,
+            # so that the user can still see the cluster.
+            normal_updated_records.append(record)
         else:
             normal_updated_records.append(updated_records[i])
 
