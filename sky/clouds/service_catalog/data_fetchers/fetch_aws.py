@@ -90,7 +90,7 @@ def _get_availability_zones(region: str) -> Optional[pd.DataFrame]:
     zones = []
     try:
         response = client.describe_availability_zones()
-    except aws.client_exception():
+    except aws.exceptions().ClientError:
         # The user's AWS account may not have access to this region.
         # The error looks like:
         # botocore.exceptions.ClientError: An error occurred

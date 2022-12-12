@@ -8,6 +8,7 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+from sky.adaptors import aws
 from sky import clouds
 from sky import exceptions
 from sky.clouds import service_catalog
@@ -331,15 +332,13 @@ class AWS(clouds.Cloud):
 
     def get_cloud_user_identity(self) -> Optional[str]:
         """Returns the identity of the user on this cloud."""
-        import boto3
-        import botocore
         try:
-            sts = boto3.client('sts')
+            sts = aws.client('sts')
             user_id = sts.get_caller_identity()['UserId']
-        except botocore.exceptions.NoCredentialsError:
+        except aws.exceptions().NoCredentialsError:
             raise exceptions.CloudUserIdentityError(
                 'AWS credentials are not set.') from None
-        except botocore.exceptions.ClientError:
+        except aws.exceptions().ClientError:
             raise exceptions.CloudUserIdentityError(
                 'Failed to access AWS services with credentials. '
                 'Make sure that the access and secret keys are correct.'
