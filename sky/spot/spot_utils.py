@@ -313,7 +313,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
     spot_status = spot_state.get_status(job_id)
-    while not spot_status.is_terminal():
+    while not spot_status.is_terminal() and follow:
         time.sleep(1)
         spot_status = spot_state.get_status(job_id)
     logger.info(f'Logs finished for job {job_id} '
