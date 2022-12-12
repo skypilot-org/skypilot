@@ -26,6 +26,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import sky_config
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -516,18 +517,37 @@ def spot_launch(
         common_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
+        vars_to_fill = {
+            'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+            'user_yaml_path': f.name,
+            'user_config_path': None,
+            'spot_controller': controller_name,
+            'cluster_name': name,
+            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+            'logging_user_hash': common_utils.get_user_hash(),
+            'retry_until_up': retry_until_up,
+        }
+        if sky_config.loaded():
+            # Look up the contents of the already loaded configs via the
+            # 'sky_config' module. Don't simply read the on-disk file as it may
+            # have changed since this process started.
+            #
+            # Pop any proxy command, because the controller would've been
+            # launched behind the proxy, and in general any nodes we launch may
+            # not have or need the proxy setup.
+            config_dict = sky_config.pop_nested(('auth', 'ssh_proxy_command'))
+            tmpfile = tempfile.NamedTemporaryFile(mode='w', delete=False)
+            common_utils.dump_yaml(tmpfile.name, config_dict)
+            vars_to_fill.update({
+                'user_config_path': tmpfile.name,
+                'remote_user_config_path': sky_config.REMOTE_CONFIG_PATH,
+            })
+
         yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
-                'is_dev': env_options.Options.IS_DEVELOPER.get(),
-                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': common_utils.get_user_hash(),
-                'retry_until_up': retry_until_up,
-            },
+            spot.SPOT_CONTROLLER_TEMPLATE,
+            vars_to_fill,
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task
