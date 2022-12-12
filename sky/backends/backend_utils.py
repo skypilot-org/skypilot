@@ -1747,9 +1747,11 @@ def _update_cluster_identity_and_status(
     """
 
     def apply_check():
+        record = global_user_state.get_cluster_from_name(cluster_name)
         _check_user_identity_no_lock(cluster_name)
         if update_status:
-            return _update_cluster_status_no_lock(cluster_name)
+            record = _update_cluster_status_no_lock(cluster_name)
+        return record
 
     if not acquire_per_cluster_status_lock:
         return apply_check()
