@@ -329,7 +329,6 @@ class AWS(clouds.Cloud):
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, None
 
-
     def get_cloud_user_identity(self) -> Optional[str]:
         """Returns the identity of the user on this cloud."""
         import boto3
@@ -346,7 +345,6 @@ class AWS(clouds.Cloud):
                 'Make sure that the access and secret keys are correct.'
             ) from None
         return user_id
-
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {

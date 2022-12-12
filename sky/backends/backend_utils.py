@@ -45,6 +45,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -1841,9 +1842,13 @@ def get_clusters(
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
+    failed_clusters = []
     def _refresh_cluster(cluster_name):
-        record = _update_cluster_status(cluster_name,
-                                        acquire_per_cluster_status_lock=True)
+        try:
+            record = _update_cluster_status(cluster_name,
+                                            acquire_per_cluster_status_lock=True)
+        except exceptions.ClusterStatusFetchingError as e:
+            failed_clusters.append((cluster_name, e))
         progress.update(task, advance=1)
         return record
 
@@ -1874,6 +1879,14 @@ def get_clusters(
         cluster_str = ', '.join(name for name in remaining_clusters)
         logger.warning(f'{yellow}Cluster{plural} terminated on '
                        f'the cloud: {reset}{bright}{cluster_str}{reset}')
+
+    if failed_clusters:
+        plural = 's' if len(failed_clusters) > 1 else ''
+        logger.warning(f'{yellow}Failed to refresh status for '
+                       f'{len(failed_clusters)} cluster{plural}:{reset}')
+        table = log_utils.create_table(['Cluster', 'Error'])
+        for cluster_name, e in failed_clusters:
+            table.add_row(cluster_name, str(e))
 
     # Filter out removed clusters.
     updated_records = [
