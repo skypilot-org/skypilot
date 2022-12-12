@@ -807,12 +807,13 @@ def test_spot():
             'sleep 200',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
             # Test autostop. This assumes no regular spot jobs are running.
-            cancel_command,
-            'sleep 720',  # Sleep for a bit more than the default 10m.
-            'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
-            'sky start "sky-spot-controller-*" -y',
-            # Ensures it's up and the autostop setting is restored.
-            'sky status | grep sky-spot-controller- | grep UP | grep 10m',
+            # This will not work if there are other spot jobs running.
+            # cancel_command,
+            # 'sleep 720',  # Sleep for a bit more than the default 10m.
+            # 'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
+            # 'sky start "sky-spot-controller-*" -y',
+            # # Ensures it's up and the autostop setting is restored.
+            # 'sky status | grep sky-spot-controller- | grep UP | grep 10m',
         ],
         cancel_command,
     )
