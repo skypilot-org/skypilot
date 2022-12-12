@@ -128,8 +128,8 @@ class AutostopEvent(SkyletEvent):
     def _stop_cluster(self, autostop_config):
 
         def _ray_up_to_reset_upscaling_params():
-            from ray.autoscaler import sdk
-            from ray.autoscaler._private import command_runner
+            from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
+            from ray.autoscaler._private import command_runner  # pylint: disable=import-outside-toplevel
 
             # Monkey patch. We must do this, otherwise with ssh_proxy_command
             # still under 'auth:' `ray up ~/.sky/sky_ray.yaml` on the head node
@@ -142,7 +142,7 @@ class AutostopEvent(SkyletEvent):
             # node and launch a new one.
             #
             # Ref:
-            # 2.2.0: https://github.com/ray-project/ray/blame/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py#L114-L143
+            # 2.2.0: https://github.com/ray-project/ray/blame/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py#L114-L143  # pylint: disable=line-too-long
             # which has not changed for 3 years, so it covers all local Ray
             # versions we support inside setup.py.
             def monkey_patch_init(self, ssh_key, control_path=None, **kwargs):
@@ -150,28 +150,28 @@ class AutostopEvent(SkyletEvent):
                 self.ssh_key = ssh_key
                 self.arg_dict = {
                     # Supresses initial fingerprint verification.
-                    "StrictHostKeyChecking": "no",
+                    'StrictHostKeyChecking': 'no',
                     # SSH IP and fingerprint pairs no longer added to
-                    # known_hosts.  This is to remove a "REMOTE HOST
-                    # IDENTIFICATION HAS CHANGED" warning if a new node has the
+                    # known_hosts.  This is to remove a 'REMOTE HOST
+                    # IDENTIFICATION HAS CHANGED' warning if a new node has the
                     # same IP as a previously deleted node, because the
                     # fingerprints will not match in that case.
-                    "UserKnownHostsFile": os.devnull,
+                    'UserKnownHostsFile': os.devnull,
                     # Try fewer extraneous key pairs.
-                    "IdentitiesOnly": "yes",
+                    'IdentitiesOnly': 'yes',
                     # Abort if port forwarding fails (instead of just printing
                     # to stderr).
-                    "ExitOnForwardFailure": "yes",
+                    'ExitOnForwardFailure': 'yes',
                     # Quickly kill the connection if network connection breaks
                     # (as opposed to hanging/blocking).
-                    "ServerAliveInterval": 5,
-                    "ServerAliveCountMax": 3,
+                    'ServerAliveInterval': 5,
+                    'ServerAliveCountMax': 3,
                 }
                 if control_path:
                     self.arg_dict.update({
-                        "ControlMaster": "auto",
-                        "ControlPath": "{}/%C".format(control_path),
-                        "ControlPersist": "10s",
+                        'ControlMaster': 'auto',
+                        'ControlPath': '{}/%C'.format(control_path),
+                        'ControlPersist': '10s',
                     })
                 # NOTE(skypilot): pops ProxyCommand. This is the only change.
                 kwargs.pop('ProxyCommand', None)

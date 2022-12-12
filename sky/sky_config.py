@@ -113,14 +113,15 @@ def pop_nested(keys: Tuple[str]) -> Dict[str, Any]:
     curr = copy.deepcopy(_dict)
     to_return = curr
     prev = None
-    for key in keys:
+    for i, key in enumerate(keys):
         if key in curr:
             prev = curr
             curr = curr[key]
+            if i == len(keys) - 1:
+                prev.pop(key)
+                # FIXME: remove this logging:
+                logger.info(f'Popped {keys}. Returning conf: {to_return}')
         else:
             # If any key not found, simply return.
             return to_return
-    prev.pop(key)
-    # FIXME: remove this logging:
-    logger.info(f'Popped {keys}. Returning conf: {to_return}')
     return to_return

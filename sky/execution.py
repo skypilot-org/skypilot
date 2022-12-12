@@ -538,12 +538,12 @@ def spot_launch(
             # launched behind the proxy, and in general any nodes we launch may
             # not have or need the proxy setup.
             config_dict = sky_config.pop_nested(('auth', 'ssh_proxy_command'))
-            tmpfile = tempfile.NamedTemporaryFile(mode='w', delete=False)
-            common_utils.dump_yaml(tmpfile.name, config_dict)
-            vars_to_fill.update({
-                'user_config_path': tmpfile.name,
-                'remote_user_config_path': sky_config.REMOTE_CONFIG_PATH,
-            })
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+                common_utils.dump_yaml(tmpfile.name, config_dict)
+                vars_to_fill.update({
+                    'user_config_path': tmpfile.name,
+                    'remote_user_config_path': sky_config.REMOTE_CONFIG_PATH,
+                })
 
         yaml_path = backend_utils.fill_template(
             spot.SPOT_CONTROLLER_TEMPLATE,
