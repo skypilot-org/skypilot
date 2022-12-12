@@ -126,22 +126,78 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):
+
+        def _ray_up_to_reset_upscaling_params():
+            from ray.autoscaler import sdk
+            from ray.autoscaler._private import command_runner
+
+            # Monkey patch. We must do this, otherwise with ssh_proxy_command
+            # still under 'auth:' `ray up ~/.sky/sky_ray.yaml` on the head node
+            # will fail (in general, the clusters do not need or have the proxy
+            # set up).
+            #
+            # Note also that we can't simply drop ssh_proxy_command from that
+            # yaml: this is because then the `ray up` command would calculate a
+            # different launch hash, prompting the autoscaler to stop the head
+            # node and launch a new one.
+            #
+            # Ref:
+            # 2.2.0: https://github.com/ray-project/ray/blame/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py#L114-L143
+            # which has not changed for 3 years, so it covers all local Ray
+            # versions we support inside setup.py.
+            def monkey_patch_init(self, ssh_key, control_path=None, **kwargs):
+                """SSHOptions.__init__(), but pops 'ProxyCommand'."""
+                self.ssh_key = ssh_key
+                self.arg_dict = {
+                    # Supresses initial fingerprint verification.
+                    "StrictHostKeyChecking": "no",
+                    # SSH IP and fingerprint pairs no longer added to
+                    # known_hosts.  This is to remove a "REMOTE HOST
+                    # IDENTIFICATION HAS CHANGED" warning if a new node has the
+                    # same IP as a previously deleted node, because the
+                    # fingerprints will not match in that case.
+                    "UserKnownHostsFile": os.devnull,
+                    # Try fewer extraneous key pairs.
+                    "IdentitiesOnly": "yes",
+                    # Abort if port forwarding fails (instead of just printing
+                    # to stderr).
+                    "ExitOnForwardFailure": "yes",
+                    # Quickly kill the connection if network connection breaks
+                    # (as opposed to hanging/blocking).
+                    "ServerAliveInterval": 5,
+                    "ServerAliveCountMax": 3,
+                }
+                if control_path:
+                    self.arg_dict.update({
+                        "ControlMaster": "auto",
+                        "ControlPath": "{}/%C".format(control_path),
+                        "ControlPersist": "10s",
+                    })
+                # NOTE(skypilot): pops ProxyCommand. This is the only change.
+                kwargs.pop('ProxyCommand', None)
+                self.arg_dict.update(kwargs)
+
+            command_runner.SSHOptions.__init__ = monkey_patch_init
+            sdk.create_or_update_cluster(self._ray_yaml_path, no_restart=True)
+
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             self._replace_yaml_for_stopping(self._ray_yaml_path,
                                             autostop_config.down)
+
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
-            subprocess.run([
-                'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
-                self._ray_yaml_path
-            ],
-                           check=True)
+            logger.info('Running ray up.')
+            _ray_up_to_reset_upscaling_params()
+
+            logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self._ray_yaml_path],
                 check=True)
+
+            logger.info('Running final ray down.')
             subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
                            check=True)
         else:
