@@ -19,6 +19,7 @@ from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
     CLOUDWATCH_AGENT_INSTALLED_TAG,
 )
 from sky.skylet.providers.aws.config import bootstrap_aws
+from sky.skylet.providers.aws.config_v2 import bootstrap_aws_v2
 from sky.skylet.providers.aws.utils import (
     boto_exception_handler,
     resource_cache,
@@ -662,3 +663,9 @@ class AWSNodeProvider(NodeProvider):
                     + "."
                 )
         return cluster_config
+
+
+class AWSNodeProviderV2(AWSNodeProvider):
+    @staticmethod
+    def bootstrap_config(cluster_config):
+        return bootstrap_aws_v2(cluster_config)
