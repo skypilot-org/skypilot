@@ -1607,7 +1607,7 @@ def _check_user_identity(cloud: clouds.Cloud, cluster_name: str):
     current_user_identity = cloud.get_cloud_user_identity()
     if user_identity is None:
         if current_user_identity is not None:
-            global_user_state.setcluster_user_identity(cluster_name,
+            global_user_state.set_cluster_user_identity(cluster_name,
                                                        current_user_identity)
     elif user_identity != current_user_identity:
         raise exceptions.ClusterStatusFetchingError(
@@ -1620,6 +1620,7 @@ def _get_cluster_status_via_cloud_cli(
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
+    cloud = resources.cloud
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
