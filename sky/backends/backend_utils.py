@@ -1842,14 +1842,12 @@ def get_clusters(
         f'[bold cyan]Refreshing status for {len(records)} cluster{plural}[/]',
         total=len(records))
 
-    failed_clusters = []
-
     def _refresh_cluster(cluster_name):
         try:
             record = _update_cluster_status(
                 cluster_name, acquire_per_cluster_status_lock=True)
         except exceptions.ClusterStatusFetchingError as e:
-            failed_clusters.append((cluster_name, e))
+            record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record
 
@@ -1859,13 +1857,19 @@ def get_clusters(
             _refresh_cluster, cluster_names)
 
     # Show information for removed clusters.
-    autodown_clusters, remaining_clusters = [], []
+    normal_updated_records = []
+    autodown_clusters, remaining_clusters, failed_clusters = [], [], []
     for i, record in enumerate(records):
         if updated_records[i] is None:
             if record['to_down']:
                 autodown_clusters.append(cluster_names[i])
             else:
                 remaining_clusters.append(cluster_names[i])
+        elif updated_records[i]['status'] == 'UNKNOWN':
+            failed_clusters.append(
+                (cluster_names[i], updated_records[i]['error']))
+        else:
+            normal_updated_records.append(updated_records[i])
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -1890,11 +1894,7 @@ def get_clusters(
             table.add_row([cluster_name, str(e)])
         logger.warning([f'\t{row}' for row in str(table).split('\n')])
 
-    # Filter out removed clusters.
-    updated_records = [
-        record for record in updated_records if record is not None
-    ]
-    return updated_records
+    return normal_updated_records
 
 
 def get_backend_from_handle(
