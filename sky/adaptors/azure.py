@@ -28,3 +28,10 @@ def get_subscription_id() -> str:
     """Get the default subscription id."""
     from azure.common import credentials
     return credentials.get_cli_profile().get_subscription_id()
+
+
+@import_package
+def get_account_user() -> str:
+    """Get the default account user."""
+    from azure.common import credentials
+    return credentials.get_cli_profile().get_current_account_user()

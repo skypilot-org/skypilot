@@ -189,6 +189,10 @@ class Cloud:
         """
         raise NotImplementedError
 
+    def get_cloud_user_identity(self) -> Optional[str]:
+        """Returns the identity of the user on this cloud."""
+        return None
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
 

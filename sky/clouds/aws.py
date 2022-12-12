@@ -287,6 +287,7 @@ class AWS(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
+            # pylint: disable=unused-import
             import boto3
             import botocore
         except ImportError:
@@ -319,21 +320,33 @@ class AWS(clouds.Cloud):
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
-        sts = boto3.client('sts')
         try:
-            sts.get_caller_identity()
-        except botocore.exceptions.NoCredentialsError:
-            return False, 'AWS credentials are not set.' + help_str
-        except botocore.exceptions.ClientError:
-            return False, (
-                'Failed to access AWS services with credentials stored in ~/.aws/credentials.'
-                ' Make sure that the access and secret keys are correct.'
-                ' To reconfigure the credentials, ' + help_str[1].lower() +
-                help_str[2:])
+            self.get_cloud_user_identity()
+        except exceptions.CloudUserIdentityError as e:
+            return False, (str(e) + help_str)
 
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, None
+
+
+    def get_cloud_user_identity(self) -> Optional[str]:
+        """Returns the identity of the user on this cloud."""
+        import boto3
+        import botocore
+        try:
+            sts = boto3.client('sts')
+            user_id = sts.get_caller_identity()['UserId']
+        except botocore.exceptions.NoCredentialsError:
+            raise exceptions.CloudUserIdentityError(
+                'AWS credentials are not set.') from None
+        except botocore.exceptions.ClientError:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to access AWS services with credentials. '
+                'Make sure that the access and secret keys are correct.'
+            ) from None
+        return user_id
+
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {

@@ -6,6 +6,7 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
@@ -269,7 +270,7 @@ class Azure(clouds.Cloud):
                     f'{azure_token_cache_file} does not exist.' + help_str)
 
         try:
-            output = _run_output('az account show --output=json')
+            _run_output('az --version')
         except subprocess.CalledProcessError:
             return False, (
                 'Azure CLI returned error. Run the following commands:'
@@ -278,13 +279,15 @@ class Azure(clouds.Cloud):
                 '\n    Or:'
                 '\n      $ pip install .[azure]  # if installed from source'
                 '\n    Credentials may also need to be set.' + help_str)
-        # If Azure is properly logged in, this will return something like:
-        #   {"id": ..., "user": ...}
+        # If Azure is properly logged in, this will return the account email
+        # address.
         # and if not, it will return:
         #   Please run 'az login' to setup account.
-        if output.startswith('{'):
-            return True, None
-        return False, 'Azure credentials not set.' + help_str
+        try:
+            self.get_cloud_user_identity()
+        except exceptions.CloudUserIdentityError:
+            return False, 'Azure credential is not set.' + help_str
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
@@ -304,6 +307,18 @@ class Azure(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
+
+    def get_cloud_user_identity(self) -> Optional[str]:
+        """Returns the cloud user identity."""
+        # This returns the user's email address + @subscription_id.
+        try:
+            import knack  # pylint: disable=import-outside-toplevel
+            account_email = azure.get_account_user()
+        except (FileNotFoundError, knack.util.CLIError, ImportError):
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get activated Azure account.') from None
+        return f'{account_email}@{self.get_project_id()}'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

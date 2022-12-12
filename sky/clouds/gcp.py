@@ -6,9 +6,8 @@ import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from google import auth
-
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
@@ -343,6 +342,11 @@ class GCP(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
+            # pylint: disable=import-outside-toplevel,unused-import
+            from google import auth
+            # Check google-api-python-client installation.
+            import googleapiclient
+
             # These files are required because they will be synced to remote
             # VMs for `gsutil` to access private storage buckets.
             # `auth.default()` does not guarantee these files exist.
@@ -351,19 +355,16 @@ class GCP(clouds.Cloud):
                     '~/.config/gcloud/credentials.db'
             ]:
                 assert os.path.isfile(os.path.expanduser(file))
-            # Check if application default credentials are set.
-            self.get_project_id()
-            # Calling `auth.default()` ensures the GCP client library works,
-            # which is used by Ray Autoscaler to launch VMs.
-            auth.default()
-            # Check google-api-python-client installation.
-            # pylint: disable=import-outside-toplevel,unused-import
-            import googleapiclient
-
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
+
+            # Check if application default credentials are set.
+            project_id = self.get_project_id()
+
+            # Check if the user is activated.
+            self.get_cloud_user_identity()
         except (AssertionError, auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError, FileNotFoundError, KeyError,
+                exceptions.CloudUserIdentityError, FileNotFoundError, KeyError,
                 ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
@@ -382,7 +383,6 @@ class GCP(clouds.Cloud):
             )
 
         # Check APIs.
-        project_id = self.get_project_id()
         apis = (
             ('compute', 'Compute Engine'),
             ('cloudresourcemanager', 'Cloud Resource Manager'),
@@ -457,6 +457,24 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
+    def get_cloud_user_identity(self) -> Optional[str]:
+        # Returns the email address of the currently activated user.
+        try:
+            account = subprocess.check_output(
+                'gcloud auth list --filter=status:ACTIVE '
+                '--format="value(account)"',
+                shell=True)
+        except subprocess.CalledProcessError:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get the activated GCP account.') from None
+        account = account.decode().strip()
+        if not account:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'No GCP account is activated.')
+        return f'{account}@{self.get_project_id()}'
+
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
@@ -470,27 +488,10 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
-        # TODO(zhwu): change the project id fetching with the following command
-        # `gcloud info --format='value(config.project)'`
         if dryrun:
             return 'dryrun-project-id'
-        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-            gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        else:
-            gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
-        if not os.path.exists(gcp_credential_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    f'No GCP credentials found at '
-                    f'{gcp_credential_path}. Please set the '
-                    f'GOOGLE_APPLICATION_CREDENTIALS '
-                    f'environment variable to point to '
-                    f'the path of your credentials file.')
-
-        with open(gcp_credential_path, 'r') as fp:
-            gcp_credentials = json.load(fp)
-        project_id = gcp_credentials.get('quota_project_id',
-                                         None) or gcp_credentials['project_id']
+        from google import auth  # pylint: disable=import-outside-toplevel
+        _, project_id = auth.default()
         return project_id
 
     @staticmethod

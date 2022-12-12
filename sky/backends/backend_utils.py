@@ -1600,12 +1600,27 @@ _QUERY_STATUS_FUNCS = {
 }
 
 
+def _check_user_identity(cloud: clouds.Cloud, cluster_name: str):
+    """Check if the current user is the same as the user who created the cluster."""
+    user_identity = global_user_state.get_cluster_user_identity()
+    current_user_identity = cloud.get_user_identity()
+    if user_identity is None:
+        if current_user_identity is not None:
+            global_user_state.setcluster_user_identity(cluster_name,
+                                                       current_user_identity)
+    elif user_identity != current_user_identity:
+        raise exceptions.ClusterStatusFetchingError(
+            f'The cluster {cluster_name!r} (on {cloud}) is created by user {user_identity!r}, '
+            f'but you are currently logged in as {current_user_identity!r}. ')
+
+
 def _get_cluster_status_via_cloud_cli(
-    handle: 'backends.Backend.ResourceHandle'
+    handle: 'backends.CloudVmRayBackend.ResourceHandle'
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
     cloud = resources.cloud
+    _check_user_identity(cloud, handle.cluster_name)
     ray_config = common_utils.read_yaml(handle.cluster_yaml)
     return _QUERY_STATUS_FUNCS[str(cloud)](handle.cluster_name, ray_config)
 
