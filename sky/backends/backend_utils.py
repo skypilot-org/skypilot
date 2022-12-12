@@ -26,7 +26,7 @@ import requests
 from requests import adapters
 from requests.packages.urllib3.util import retry as retry_lib
 from ray.autoscaler._private import commands as ray_commands
-from ray.autoscaler._private import util as ray_util
+from ray.autoscaler._private import util as ray_autoscaler_private_util
 import rich.console as rich_console
 import rich.progress as rich_progress
 import yaml
@@ -1479,14 +1479,27 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     for node_type, node_config in ray_config['available_node_types'].items():
         if node_type == head_node_type:
             launch_config = ray_config.get('head_node', {})
+            auth_config = ray_config['auth']
         else:
             launch_config = ray_config.get('worker_nodes', {})
+            auth_config = dict(ray_config['auth'])
+            # Ray uses the head node to launch worker nodes. On the head node,
+            # ~/ray_bootstrap_config.yaml, which has any ssh_proxy_command
+            # field removed (see Ray's autoscaler/_private/commands.py), is
+            # passed to the autoscaler. Therefore when Ray calculates the hash
+            # for workers, ssh_proxy_command is not included. Here we follow
+            # this (otherwise our hash here would not match with what's on the
+            # console for workers).
+            #
+            # Note that head node is launched from the local client, whose
+            # launch has *does* include ssh_proxy_command.
+            auth_config.pop('ssh_proxy_command', None)
         launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
         with ux_utils.suppress_output():
-            current_hash = ray_util.hash_launch_conf(launch_config,
-                                                     ray_config['auth'])
+            current_hash = ray_autoscaler_private_util.hash_launch_conf(
+                launch_config, auth_config)
         launch_hashes.add(current_hash)
     # Cache the launch hashes for the cluster.
     metadata['ray_launch_hashes'] = list(launch_hashes)
@@ -1685,18 +1698,22 @@ def _update_cluster_status_no_lock(
     # where the cluster is terminated by the user manually through the UI.
     to_terminate = not node_statuses
 
-    # A cluster is considered "abnormal", if not all nodes are TERMINATED or not all
-    # nodes are STOPPED. We check that with the following logic:
-    #   * not all nodes are terminated and there's at least one node terminated; or
-    #   * any of the non-TERMINATED nodes is in a non-STOPPED status.
+    # A cluster is considered "abnormal", if not all nodes are TERMINATED or
+    # not all nodes are STOPPED. We check that with the following logic:
+    #   * Not all nodes are terminated and there's at least one node
+    #     terminated; or
+    #   * Any of the non-TERMINATED nodes is in a non-STOPPED status.
     #
     # This includes these special cases:
-    # All stopped are considered normal and will be cleaned up at the end of the function.
-    # Some of the nodes UP should be considered abnormal, because the ray cluster is
-    # probably down.
-    # The cluster is partially terminated or stopped should be considered abnormal.
+    #   * All stopped are considered normal and will be cleaned up at the end
+    #     of the function.
+    #   * Some of the nodes UP should be considered abnormal, because the ray
+    #     cluster is probably down.
+    #   * The cluster is partially terminated or stopped should be considered
+    #     abnormal.
     #
-    # An abnormal cluster will transition to INIT and have any autostop setting reset.
+    # An abnormal cluster will transition to INIT and have any autostop setting
+    # reset.
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
