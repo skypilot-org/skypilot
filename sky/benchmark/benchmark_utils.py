@@ -21,14 +21,14 @@ from rich import progress as rich_progress
 
 import sky
 from sky import backends
-from sky import constants
 from sky import data
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
-from sky.skylet import job_lib
+from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
@@ -315,7 +315,7 @@ def _update_benchmark_result(benchmark_result: Dict[str, Any]) -> Optional[str]:
 
     # Update the benchmark status.
     if (cluster_status == global_user_state.ClusterStatus.INIT or
-            job_status in [job_lib.JobStatus.INIT, job_lib.JobStatus.PENDING]):
+            job_status < job_lib.JobStatus.RUNNING):
         benchmark_status = benchmark_state.BenchmarkStatus.INIT
     elif job_status == job_lib.JobStatus.RUNNING:
         benchmark_status = benchmark_state.BenchmarkStatus.RUNNING

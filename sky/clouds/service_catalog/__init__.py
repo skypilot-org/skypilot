@@ -100,9 +100,10 @@ def instance_type_exists(instance_type: str,
     return _map_clouds_catalog(clouds, 'instance_type_exists', instance_type)
 
 
-def validate_region_zone(region_name: Optional[str],
-                         zone_name: Optional[str],
-                         clouds: CloudFilter = None) -> bool:
+def validate_region_zone(
+        region_name: Optional[str],
+        zone_name: Optional[str],
+        clouds: CloudFilter = None) -> Tuple[Optional[str], Optional[str]]:
     """Returns the zone by name."""
     return _map_clouds_catalog(clouds, 'validate_region_zone', region_name,
                                zone_name)
@@ -237,6 +238,20 @@ def get_tpus() -> List[str]:
     ]
 
 
+def get_image_id_from_tag(tag: str,
+                          region: Optional[str] = None,
+                          clouds: CloudFilter = None) -> str:
+    """Returns the image ID from the tag."""
+    return _map_clouds_catalog(clouds, 'get_image_id_from_tag', tag, region)
+
+
+def is_image_tag_valid(tag: str,
+                       region: Optional[str],
+                       clouds: CloudFilter = None) -> None:
+    """Validates the image tag."""
+    return _map_clouds_catalog(clouds, 'is_image_tag_valid', tag, region)
+
+
 __all__ = [
     'list_accelerators',
     'list_accelerator_counts',
@@ -248,6 +263,9 @@ __all__ = [
     'get_region_zones_for_accelerators',
     'get_common_gpus',
     'get_tpus',
+    # Images
+    'get_image_id_from_tag',
+    'is_image_tag_valid',
     # Constants
     'HOSTED_CATALOG_DIR_URL',
     'CATALOG_SCHEMA_VERSION',

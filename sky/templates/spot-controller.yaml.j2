@@ -25,18 +25,17 @@ setup: |
   # pip list | grep azure-cli > /dev/null 2>&1 || \
   #  pip3 install azure-cli==2.31.0 azure-core
 
-  gcloud --help > /dev/null 2>&1 || \
-  (wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \
-    tar xzf google-cloud-sdk-382.0.0-linux-x86_64.tar.gz && \
-    mv google-cloud-sdk ~/ && \
-    ~/google-cloud-sdk/install.sh -q > /dev/null 2>&1 && \
-    source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1 && \
-    echo 'source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1' >> ~/.bashrc)
+  {{gcloud_installation_commands}}
+
+  # Internal: disable logging for manually logging into the spot controller for debugging.
+  {% if is_dev %}
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
 
 run: |
   python -u -m sky.spot.controller \
     {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml \
-    --job-id $SKY_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+    --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
 
 envs:
   SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}

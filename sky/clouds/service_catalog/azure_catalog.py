@@ -3,21 +3,22 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
-import ast
 from typing import Dict, List, Optional, Tuple
 
-from sky.clouds import cloud
+from sky import clouds as cloud_lib
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-_df = common.read_catalog('azure.csv')
+_df = common.read_catalog('azure/vms.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def validate_region_zone(region: Optional[str], zone: Optional[str]):
+def validate_region_zone(
+        region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
@@ -61,20 +62,14 @@ def get_instance_type_for_accelerator(
                                                          acc_count=acc_count)
 
 
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+def get_region_zones_for_instance_type(
+        instance_type: str, use_spot: bool) -> List[cloud_lib.Region]:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 
 
 def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
-    cell = _df[_df['InstanceType'] == instance_type]['capabilities'].iloc[0]
-    cap_list = ast.literal_eval(cell)
-    gen_version = None
-    for cap in cap_list:
-        if cap['name'] == 'HyperVGenerations':
-            gen_version = cap['value']
-    return gen_version
+    return _df[_df['InstanceType'] == instance_type]['Generation'].iloc[0]
 
 
 def list_accelerators(

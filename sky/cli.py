@@ -27,6 +27,7 @@ NOTE: the order of command definitions in this file corresponds to how they are
 listed in "sky --help".  Take care to put logically connected commands close to
 each other.
 """
+import copy
 import datetime
 import functools
 import getpass
@@ -47,7 +48,6 @@ import sky
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import constants
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
@@ -59,6 +59,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.utils import log_utils
 from sky.utils import common_utils
@@ -207,15 +208,66 @@ def _interactive_node_cli_command(cli_func):
                               default=False,
                               required=False,
                               help='Skip confirmation prompt.')
+    idle_autostop = click.option('--idle-minutes-to-autostop',
+                                 '-i',
+                                 default=None,
+                                 type=int,
+                                 required=False,
+                                 help=('Automatically stop the cluster after '
+                                       'this many minutes of idleness, i.e. '
+                                       'no running or pending jobs in the '
+                                       'cluster\'s job queue. Idleness gets '
+                                       'reset whenever setting-up/running/'
+                                       'pending jobs are found in the job '
+                                       'queue. If not set, the cluster '
+                                       'will not be auto-stopped.'))
+    autodown = click.option('--down',
+                            default=False,
+                            is_flag=True,
+                            required=False,
+                            help=('Autodown the cluster: tear down the '
+                                  'cluster after all jobs finish '
+                                  '(successfully or abnormally). If '
+                                  '--idle-minutes-to-autostop is also set, '
+                                  'the cluster will be torn down after the '
+                                  'specified idle time. Note that if errors '
+                                  'occur during provisioning/data syncing/'
+                                  'setting up, the cluster will not be torn '
+                                  'down for debugging purposes.'))
+    retry_until_up = click.option('--retry-until-up',
+                                  '-r',
+                                  is_flag=True,
+                                  default=False,
+                                  required=False,
+                                  help=('Whether to retry provisioning '
+                                        'infinitely until the cluster is up '
+                                        'if we fail to launch the cluster on '
+                                        'any possible region/cloud due to '
+                                        'unavailability errors.'))
+    region_option = click.option('--region',
+                                 default=None,
+                                 type=str,
+                                 required=False,
+                                 help='The region to use.')
+    zone_option = click.option('--zone',
+                               default=None,
+                               type=str,
+                               required=False,
+                               help='The zone to use.')
 
     click_decorators = [
         cli.command(cls=_DocumentedCodeCommand),
         cluster_option,
         no_confirm,
         port_forward_option,
+        idle_autostop,
+        autodown,
+        retry_until_up,
 
         # Resource options
         *([cloud_option] if cli_func.__name__ != 'tpunode' else []),
+        region_option,
+        zone_option,
         instance_type_option,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
@@ -334,6 +386,7 @@ _EXTRA_RESOURCES_OPTIONS = [
          'Passing "none" resets the config.')),
     click.option(
         '--instance-type',
+        '-t',
         required=False,
         type=str,
         help=('The instance type to use. If specified, overrides the '
@@ -366,6 +419,17 @@ def _complete_file_name(ctx: click.Context, param: click.Parameter,
     """
     del ctx, param  # Unused.
     return [click.shell_completion.CompletionItem(incomplete, type='file')]
+
+
+def _get_click_major_version():
+    return int(click.__version__.split('.')[0])
+
+
+def _get_shell_complete_args(complete_fn):
+    # The shell_complete argument is only valid on click >= 8.0.
+    if _get_click_major_version() >= 8:
+        return dict(shell_complete=complete_fn)
+    return {}
 
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
@@ -595,24 +659,36 @@ def _check_resources_match(backend: backends.Backend,
 
 
 def _launch_with_confirm(
-    dag: sky.Dag,
+    task: sky.Task,
     backend: backends.Backend,
     cluster: str,
     *,
     dryrun: bool,
     detach_run: bool,
+    detach_setup: bool = False,
     no_confirm: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
     retry_until_up: bool = False,
+    no_setup: bool = False,
     node_type: Optional[str] = None,
     is_local_cloud: Optional[bool] = False,
 ):
-    """Launch a cluster with a DAG."""
+    """Launch a cluster with a Task."""
+    with sky.Dag() as dag:
+        dag.add(task)
     if cluster is None:
         cluster = backend_utils.generate_cluster_name()
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster)
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
+        try:
+            backend_utils.check_public_cloud_enabled()
+        except RuntimeError as e:
+            # Catch the exception where the public cloud is not enabled, and
+            # only print the error message without the error type.
+            click.secho(e, fg='yellow')
+            sys.exit(1)
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -639,19 +715,32 @@ def _launch_with_confirm(
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',
                         fg='yellow')
+
+        # We do not sky.launch if interactive node is already up, so we need
+        # to update idle timeout and autodown here.
+        elif idle_minutes_to_autostop is not None:
+            core.autostop(cluster, idle_minutes_to_autostop, down)
+        elif down:
+            core.autostop(cluster, 1, down)
+
     elif not confirm_shown:
         click.secho(f'Running task on cluster {cluster}...', fg='yellow')
 
     if node_type is None or maybe_status != global_user_state.ClusterStatus.UP:
         # No need to sky.launch again when interactive node is already up.
-        sky.launch(dag,
-                   dryrun=dryrun,
-                   stream_logs=True,
-                   cluster_name=cluster,
-                   detach_run=detach_run,
-                   backend=backend,
-                   idle_minutes_to_autostop=idle_minutes_to_autostop,
-                   retry_until_up=retry_until_up)
+        sky.launch(
+            dag,
+            dryrun=dryrun,
+            stream_logs=True,
+            cluster_name=cluster,
+            detach_setup=detach_setup,
+            detach_run=detach_run,
+            backend=backend,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            retry_until_up=retry_until_up,
+            no_setup=no_setup,
+        )
 
 
 # TODO: skip installing ray to speed up provisioning.
@@ -664,6 +753,9 @@ def _create_and_ssh_into_node(
     session_manager: Optional[str] = None,
     user_requested_resources: Optional[bool] = False,
     no_confirm: bool = False,
+    idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool = False,
 ):
     """Creates and attaches to an interactive node.
 
@@ -676,6 +768,16 @@ def _create_and_ssh_into_node(
         session_manager: Attach session manager: { 'screen', 'tmux' }.
         user_requested_resources: If true, user requested resources explicitly.
         no_confirm: If true, skips confirmation prompt presented to user.
+        idle_minutes_to_autostop: Automatically stop the cluster after
+                                  specified minutes of idleness. Idleness gets
+                                  reset whenever setting-up/running/pending
+                                  jobs are found in the job queue.
+        down: If true, autodown the cluster after all jobs finish. If
+              idle_minutes_to_autostop is also set, the cluster will be torn
+              down after the specified idle time.
+        retry_until_up: Whether to retry provisioning infinitely until the
+                        cluster is up if we fail to launch due to
+                        unavailability errors.
     """
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
     assert session_manager in (None, 'screen', 'tmux'), session_manager
@@ -683,17 +785,17 @@ def _create_and_ssh_into_node(
         raise click.BadParameter(
             f'Name {cluster_name!r} taken by a local cluster and cannot '
             f'be used for a {node_type}.')
-    with sky.Dag() as dag:
-        # TODO: Add conda environment replication
-        # should be setup =
-        # 'conda env export | grep -v "^prefix: " > environment.yml'
-        # && conda env create -f environment.yml
-        task = sky.Task(
-            node_type,
-            workdir=None,
-            setup=None,
-        )
-        task.set_resources(resources)
+
+    # TODO: Add conda environment replication
+    # should be setup =
+    # 'conda env export | grep -v "^prefix: " > environment.yml'
+    # && conda env create -f environment.yml
+    task = sky.Task(
+        node_type,
+        workdir=None,
+        setup=None,
+    )
+    task.set_resources(resources)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     maybe_status, _ = backend_utils.refresh_cluster_status_handle(cluster_name)
@@ -708,12 +810,15 @@ def _create_and_ssh_into_node(
             f'sky {node_type}{name_arg}{colorama.Style.RESET_ALL}')
 
     _launch_with_confirm(
-        dag,
+        task,
         backend,
         cluster_name,
         dryrun=False,
         detach_run=True,
         no_confirm=no_confirm,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
         node_type=node_type,
     )
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
@@ -794,7 +899,7 @@ def _check_yaml(entrypoint: str) -> Tuple[bool, dict]:
     return is_yaml, config
 
 
-def _make_dag_from_entrypoint_with_overrides(
+def _make_task_from_entrypoint_with_overrides(
     entrypoint: List[str],
     *,
     name: Optional[str] = None,
@@ -812,93 +917,72 @@ def _make_dag_from_entrypoint_with_overrides(
     env: List[Dict[str, str]] = None,
     # spot launch specific
     spot_recovery: Optional[str] = None,
-) -> sky.Dag:
+) -> sky.Task:
     entrypoint = ' '.join(entrypoint)
-    with sky.Dag() as dag:
-        is_yaml, yaml_config = _check_yaml(entrypoint)
-        if is_yaml:
-            # Treat entrypoint as a yaml.
-            click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+    is_yaml, yaml_config = _check_yaml(entrypoint)
+    if is_yaml:
+        # Treat entrypoint as a yaml.
+        click.secho('Task from YAML spec: ', fg='yellow', nl=False)
+        click.secho(entrypoint, bold=True)
+    else:
+        if not entrypoint:
+            entrypoint = None
+        else:
+            # Treat entrypoint as a bash command.
+            click.secho('Task from command: ', fg='yellow', nl=False)
             click.secho(entrypoint, bold=True)
+
+    if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
+        cloud = 'local'
+
+    if is_yaml:
+        usage_lib.messages.usage.update_user_task_yaml(entrypoint)
+        task = sky.Task.from_yaml(entrypoint)
+    else:
+        task = sky.Task(name='sky-cmd', run=entrypoint)
+        task.set_resources({sky.Resources()})
+
+    # Override.
+    if workdir is not None:
+        task.workdir = workdir
+
+    override_params = _parse_override_params(cloud=cloud,
+                                             region=region,
+                                             zone=zone,
+                                             gpus=gpus,
+                                             instance_type=instance_type,
+                                             use_spot=use_spot,
+                                             image_id=image_id,
+                                             disk_size=disk_size)
+    # Spot launch specific.
+    if spot_recovery is not None:
+        if spot_recovery.lower() == 'none':
+            override_params['spot_recovery'] = None
         else:
-            if not entrypoint:
-                entrypoint = None
-            else:
-                # Treat entrypoint as a bash command.
-                click.secho('Task from command: ', fg='yellow', nl=False)
-                click.secho(entrypoint, bold=True)
+            override_params['spot_recovery'] = spot_recovery
 
-        if onprem_utils.check_local_cloud_args(cloud, cluster, yaml_config):
-            cloud = 'local'
+    assert len(task.resources) == 1
+    old_resources = list(task.resources)[0]
+    new_resources = old_resources.copy(**override_params)
 
-        if is_yaml:
-            usage_lib.messages.usage.update_user_task_yaml(entrypoint)
-            task = sky.Task.from_yaml(entrypoint)
-        else:
-            task = sky.Task(name='sky-cmd', run=entrypoint)
-            task.set_resources({sky.Resources()})
+    task.set_resources({new_resources})
 
-        # Override.
-        if workdir is not None:
-            task.workdir = workdir
-
-        override_params = _parse_override_params(cloud=cloud,
-                                                 region=region,
-                                                 zone=zone,
-                                                 gpus=gpus,
-                                                 instance_type=instance_type,
-                                                 use_spot=use_spot,
-                                                 image_id=image_id,
-                                                 disk_size=disk_size)
-        # Spot launch specific.
-        if spot_recovery is not None:
-            if spot_recovery.lower() == 'none':
-                override_params['spot_recovery'] = None
-            else:
-                override_params['spot_recovery'] = spot_recovery
-
-        assert len(task.resources) == 1
-        old_resources = list(task.resources)[0]
-        new_resources = old_resources.copy(**override_params)
-
-        task.set_resources({new_resources})
-
-        if num_nodes is not None:
-            task.num_nodes = num_nodes
-        if name is not None:
-            task.name = name
-        task.set_envs(env)
-        # TODO(wei-lin): move this validation into Python API.
-        if new_resources.accelerators is not None:
-            acc, _ = list(new_resources.accelerators.items())[0]
-            if acc.startswith('tpu-') and task.num_nodes > 1:
-                raise ValueError('Multi-node TPU cluster is not supported. '
-                                 f'Got num_nodes={task.num_nodes}.')
-    return dag
-
-
-def _start_cluster(cluster_name: str,
-                   idle_minutes_to_autostop: Optional[int] = None,
-                   retry_until_up: bool = False):
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    assert isinstance(backend, backends.CloudVmRayBackend)
-    with sky.Dag():
-        dummy_task = sky.Task().set_resources(handle.launched_resources)
-        dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name,
-                               retry_until_up=retry_until_up)
-    if idle_minutes_to_autostop is not None:
-        backend.set_autostop(handle, idle_minutes_to_autostop)
-    return handle
+    if num_nodes is not None:
+        task.num_nodes = num_nodes
+    if name is not None:
+        task.name = name
+    task.set_envs(env)
+    # TODO(wei-lin): move this validation into Python API.
+    if new_resources.accelerators is not None:
+        acc, _ = list(new_resources.accelerators.items())[0]
+        if acc.startswith('tpu-') and task.num_nodes > 1:
+            raise ValueError('Multi-node TPU cluster is not supported. '
+                             f'Got num_nodes={task.num_nodes}.')
+    return task
 
 
 class _NaturalOrderGroup(click.Group):
-    """Lists commands in the order they are defined in this script.
+    """Lists commands in the order defined in this script.
 
     Reference: https://github.com/pallets/click/issues/513
     """
@@ -922,6 +1006,33 @@ class _DocumentedCodeCommand(click.Command):
         return super().get_help(ctx)
 
 
+def _with_deprecation_warning(f, original_name, alias_name):
+
+    @functools.wraps(f)
+    def wrapper(self, *args, **kwargs):
+        click.secho(
+            f'WARNING: `{alias_name}` is deprecated and will be removed in a '
+            f'future release. Please use `{original_name}` instead.\n',
+            err=True,
+            fg='yellow')
+        return f(self, *args, **kwargs)
+
+    return wrapper
+
+
+def _add_command_alias_to_group(group, command, name, hidden):
+    """Add a alias of a command to a group."""
+    new_command = copy.deepcopy(command)
+    new_command.hidden = hidden
+    new_command.name = name
+
+    orig = f'sky {group.name} {command.name}'
+    alias = f'sky {group.name} {name}'
+    new_command.invoke = _with_deprecation_warning(new_command.invoke, orig,
+                                                   alias)
+    group.add_command(new_command, name=name)
+
+
 @click.group(cls=_NaturalOrderGroup, context_settings=_CONTEXT_SETTINGS)
 @click.option('--install-shell-completion',
               type=click.Choice(['bash', 'zsh', 'fish', 'auto']),
@@ -942,26 +1053,38 @@ def cli():
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('entrypoint',
-                required=True,
+                required=False,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_file_name)
+                **_get_shell_complete_args(_complete_file_name))
 @click.option('--cluster',
               '-c',
               default=None,
               type=str,
-              shell_complete=_complete_cluster_name,
+              **_get_shell_complete_args(_complete_cluster_name),
               help=_CLUSTER_FLAG_HELP)
 @click.option('--dryrun',
               default=False,
               is_flag=True,
               help='If True, do not actually run the job.')
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-setup',
+    '-s',
+    default=False,
+    is_flag=True,
+    help=
+    ('If True, run setup in non-interactive mode as part of the job itself. '
+     'You can safely ctrl-c to detach from logging, and it will not interrupt '
+     'the setup process. To see the logs again after detaching, use `sky logs`.'
+     ' To cancel setup, cancel the job via `sky cancel`. Useful for long-'
+     'running setup commands.'))
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
@@ -981,12 +1104,23 @@ def cli():
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
+          '. If not set, the cluster will not be autostopped.'))
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=
+    ('Autodown the cluster: tear down the cluster after all jobs finish '
+     '(successfully or abnormally). If --idle-minutes-to-autostop is also set, '
+     'the cluster will be torn down after the specified idle time. '
+     'Note that if errors occur during provisioning/data syncing/setting up, '
+     'the cluster will not be torn down for debugging purposes.'),
+)
 @click.option(
     '--retry-until-up',
     '-r',
@@ -1002,11 +1136,17 @@ def cli():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--no-setup',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip setup phase when (re-)launching cluster.')
 @usage_lib.entrypoint
 def launch(
     entrypoint: str,
     cluster: Optional[str],
     dryrun: bool,
+    detach_setup: bool,
     detach_run: bool,
     backend_name: Optional[str],
     name: Optional[str],
@@ -1022,9 +1162,12 @@ def launch(
     env: List[Dict[str, str]],
     disk_size: Optional[int],
     idle_minutes_to_autostop: Optional[int],
+    down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
+    no_setup: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task from a YAML or a command (rerun setup if cluster exists).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1034,11 +1177,11 @@ def launch(
     and they undergo job queue scheduling.
     """
     backend_utils.check_cluster_name_not_reserved(
-        cluster, operation_str='Launching task on it')
+        cluster, operation_str='Launching tasks on it')
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
-    dag = _make_dag_from_entrypoint_with_overrides(
+    task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1064,14 +1207,17 @@ def launch(
             raise ValueError(f'{backend_name} backend is not supported.')
 
     _launch_with_confirm(
-        dag,
+        task,
         backend,
         cluster,
         dryrun=dryrun,
+        detach_setup=detach_setup,
         detach_run=detach_run,
         no_confirm=yes,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
         retry_until_up=retry_until_up,
+        no_setup=no_setup,
         is_local_cloud=onprem_utils.check_if_local_cloud(cluster))
 
 
@@ -1079,14 +1225,19 @@ def launch(
 @click.argument('cluster',
                 required=True,
                 type=str,
-                shell_complete=_complete_cluster_name)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run workdir syncing first (blocking), '
-              'then detach from the job\'s execution.')
+                **_get_shell_complete_args(_complete_cluster_name))
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
@@ -1106,19 +1257,21 @@ def exec(
     image_id: Optional[str],
     env: List[Dict[str, str]],
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or a command on a cluster (skip setup).
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
     specification. Otherwise, it is interpreted as a bash command.
 
-    \b
     Actions performed by ``sky exec``:
 
-    \b
-    (1) workdir syncing, if:
-      - ENTRYPOINT is a YAML and ``workdir`` is specified inside; or
-      - ENTRYPOINT is a command and flag ``--workdir=<local_path>`` is set.
-    (2) executing the specified task's ``run`` commands / the bash command.
+    1. Workdir syncing, if:
+
+       - ENTRYPOINT is a YAML with the ``workdir`` field specified; or
+
+       - Flag ``--workdir=<local_dir>`` is set.
+
+    2. Executing the specified task's ``run`` commands / the bash command.
 
     ``sky exec`` is thus typically faster than ``sky launch``, provided a
     cluster already exists.
@@ -1128,17 +1281,17 @@ def exec(
     reflect those changes.  To ensure a cluster's setup is up to date, use ``sky
     launch`` instead.
 
-    \b
     Execution and scheduling behavior:
 
-    \b
     - The task/command will undergo job queue scheduling, respecting any
       specified resource requirement. It can be executed on any node of the
       cluster with enough resources.
+
     - The task/command is run under the workdir (if specified).
+
     - The task/command is run non-interactively (without a pseudo-terminal or
-      pty), so interactive commands such as ``htop`` do not work.
-      Use ``ssh my_cluster`` instead.
+      pty), so interactive commands such as ``htop`` do not work. Use ``ssh
+      my_cluster`` instead.
 
     Typical workflow:
 
@@ -1173,7 +1326,7 @@ def exec(
                                  'Use `sky launch` to provision first.')
     backend = backend_utils.get_backend_from_handle(handle)
 
-    dag = _make_dag_from_entrypoint_with_overrides(
+    task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
         cluster=cluster,
@@ -1190,7 +1343,7 @@ def exec(
     )
 
     click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
-    sky.exec(dag, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
 @cli.command()
@@ -1200,14 +1353,16 @@ def exec(
               is_flag=True,
               required=False,
               help='Show all information in full.')
-@click.option('--refresh',
-              '-r',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Query cluster status from the cloud provider.')
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest cluster statuses from the cloud provider(s).')
 @usage_lib.entrypoint
 def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
     The following fields for each cluster are recorded: cluster name, time
@@ -1216,25 +1371,73 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
     Display all fields using ``sky status -a``.
 
-    \b
     Each cluster can have one of the following statuses:
 
-    \b
-    - INIT: The cluster may be live or down. It can happen in following cases:
-      (1) undergoing provisioning or runtime setup. (In other words, a
-      ``sky launch`` has started but has not completed.)
-      (2) Or, the cluster is in an abnormal state, e.g., some cluster nodes are
-      down, or the sky runtime has crashed.
-    - UP: Provisioning and runtime setup have succeeded and the cluster is
+    - ``INIT``: The cluster may be live or down. It can happen in the following
+      cases:
+
+      - Ongoing provisioning or runtime setup. (A ``sky launch`` has started
+        but has not completed.)
+
+      - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
+        try ``sky launch`` again on it.)
+
+    - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
       live.  (The most recent ``sky launch`` has completed successfully.)
-    - STOPPED: The cluster is stopped and the storage is persisted. Use
+
+    - ``STOPPED``: The cluster is stopped and the storage is persisted. Use
       ``sky start`` to restart the cluster.
 
+    Autostop column:
+
+    - Indicates after how many minutes of idleness (no in-progress jobs) the
+      cluster will be autostopped. '-' means disabled.
+
+    - If the time is followed by '(down)', e.g., '1m (down)', the cluster will
+      be autodowned, rather than autostopped.
+
+    Getting up-to-date cluster statuses:
+
+    - In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations in cloud consoles) and no autostopping is used, the
+      table returned by this command will accurately reflect the cluster
+      statuses.
+
+    - In cases where clusters are changed outside of SkyPilot (e.g., manual
+      operations in cloud consoles; unmanaged spot clusters getting preempted)
+      or for autostop-enabled clusters, use ``--refresh`` to query the latest
+      cluster statuses from the cloud providers.
     """
-    cluster_records = core.status(all=all, refresh=refresh)
+    cluster_records = core.status(refresh=refresh)
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
     local_clusters = onprem_utils.check_and_get_local_clusters(
         suppress_error=True)
-    status_utils.show_status_table(cluster_records, all)
+
+    num_pending_autostop = 0
+    num_pending_autostop += status_utils.show_status_table(
+        nonreserved_cluster_records, all)
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        num_pending_autostop += status_utils.show_status_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
+    if num_pending_autostop > 0:
+        plural = ' has'
+        if num_pending_autostop > 1:
+            plural = 's have'
+        click.echo('\n'
+                   f'{num_pending_autostop} cluster{plural} '
+                   'auto{stop,down} scheduled. Refresh statuses with: '
+                   f'{colorama.Style.BRIGHT}sky status --refresh'
+                   f'{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
 
 
@@ -1255,9 +1458,10 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                 required=False,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
 def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='yellow')
     show_local_clusters = False
@@ -1311,14 +1515,27 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     default=False,
     help=('If specified, do not show logs but exit with a status code for the '
           'job\'s status: 0 for succeeded, or 1 for all other statuses.'))
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow] '
+          'If --no-follow is specified, print the log so far and exit.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @click.argument('job_ids', type=str, nargs=-1)
 # TODO(zhwu): support logs by job name
 @usage_lib.entrypoint
-def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # pylint: disable=redefined-outer-name
+def logs(
+    cluster: str,
+    job_ids: Tuple[str],
+    sync_down: bool,
+    status: bool,  # pylint: disable=redefined-outer-name
+    follow: bool,
+):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
 
     If JOB_ID is not provided, the latest job on the cluster will be used.
@@ -1362,21 +1579,21 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
-            sys.exit(0)
+            return
         else:
             if job_status is None:
                 id_str = '' if job_id is None else f'{job_id} '
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id)
+    core.tail_logs(cluster, job_id, follow)
 
 
 @cli.command()
 @click.argument('cluster',
                 required=True,
                 type=str,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
               default=False,
@@ -1386,23 +1603,27 @@ def logs(cluster: str, job_ids: Tuple[str], sync_down: bool, status: bool):  # p
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
     try:
         core.cancel(cluster, all, jobs)
     except ValueError as e:
         raise click.UsageError(str(e))
+    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+        click.echo(str(e))
+        sys.exit(1)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
               default=None,
               is_flag=True,
-              help='Tear down all existing clusters.')
+              help='Stop all existing clusters.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1415,14 +1636,15 @@ def stop(
     all: Optional[bool],  # pylint: disable=redefined-builtin
     yes: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stop cluster(s).
 
     CLUSTER is the name (or glob pattern) of the cluster to stop.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
-    the instances will stop while the disks will still be charged.  Those disks
-    will be reattached when restarting the cluster.
+    the instances will stop, while the disks will still be charged.  Those
+    disks will be reattached when restarting the cluster.
 
     Currently, spot instance clusters cannot be stopped.
 
@@ -1443,17 +1665,17 @@ def stop(
       sky stop -a
 
     """
-    _terminate_or_stop_clusters(clusters,
-                                apply_to_all=all,
-                                terminate=False,
-                                no_confirm=yes)
+    _down_or_stop_clusters(clusters,
+                           apply_to_all=all,
+                           down=False,
+                           no_confirm=yes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
               default=None,
@@ -1464,12 +1686,22 @@ def stop(
               type=int,
               default=None,
               required=False,
-              help='Set the idle minutes before auto-stopping the cluster.')
-@click.option('--cancel',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Cancel the auto-stopping.')
+              help=('Set the idle minutes before autostopping the cluster. '
+                    'See the doc above for detailed semantics.'))
+@click.option(
+    '--cancel',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Cancel any currently active auto{stop,down} setting for the '
+    'cluster. No-op if there is no active setting.')
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Use autodown (tear down the cluster; non-restartable), instead '
+    'of autostop (restartable).')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -1482,32 +1714,50 @@ def autostop(
     all: Optional[bool],  # pylint: disable=redefined-builtin
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
+    down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
 ):
-    """Schedule or cancel auto-stopping for cluster(s).
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Schedule an autostop or autodown for cluster(s).
 
-    CLUSTERS are the name (or glob pattern) of the clusters to stop.  If both
+    Autostop/autodown will automatically stop or teardown a cluster when it
+    becomes idle for a specified duration.  Idleness means there are no
+    in-progress (pending/running) jobs in a cluster's job queue.
+
+    CLUSTERS are the names (or glob patterns) of the clusters to stop. If both
     CLUSTERS and ``--all`` are supplied, the latter takes precedence.
 
-    ``--idle-minutes`` is the number of minutes of idleness (no pending/running
-    jobs) after which the cluster will be stopped automatically.
+    Idleness time of a cluster is reset to zero, when any of these happens:
 
-    ``--cancel`` will cancel the autostopping. If the cluster was not scheduled
-    autostop, this will do nothing to autostop.
+    - A job is submitted (``sky launch`` or ``sky exec``).
 
-    If ``--idle-minutes`` and ``--cancel`` are not specified, default to 5
-    minutes.
+    - The cluster has restarted.
 
-    Examples:
+    - An autostop is set when there is no active setting. (Namely, either
+      there's never any autostop setting set, or the previous autostop setting
+      was canceled.) This is useful for restarting the autostop timer.
+
+    Example: say a cluster without any autostop set has been idle for 1 hour,
+    then an autostop of 30 minutes is set. The cluster will not be immediately
+    autostopped. Instead, the idleness timer only starts counting after the
+    autostop setting was set.
+
+    When multiple autostop settings are specified for the same cluster, the
+    last setting takes precedence.
+
+    Typical usage:
 
     .. code-block:: bash
 
-        # Set auto stopping for a specific cluster.
+        # Autostop this cluster after 60 minutes of idleness.
         sky autostop cluster_name -i 60
         \b
-        # Cancel auto stopping for a specific cluster.
+        # Cancel autostop for a specific cluster.
         sky autostop cluster_name --cancel
-
+        \b
+        # Since autostop was canceled in the last command, idleness will
+        # restart counting after this command.
+        sky autostop cluster_name -i 60
     """
     if cancel and idle_minutes is not None:
         raise click.UsageError(
@@ -1517,18 +1767,18 @@ def autostop(
         idle_minutes = -1
     elif idle_minutes is None:
         idle_minutes = 5
-    _terminate_or_stop_clusters(clusters,
-                                apply_to_all=all,
-                                terminate=False,
-                                no_confirm=yes,
-                                idle_minutes_to_autostop=idle_minutes)
+    _down_or_stop_clusters(clusters,
+                           apply_to_all=all,
+                           down=down,
+                           no_confirm=yes,
+                           idle_minutes_to_autostop=idle_minutes)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
               default=False,
@@ -1549,12 +1799,21 @@ def autostop(
     required=False,
     help=('Automatically stop the cluster after this many minutes '
           'of idleness, i.e., no running or pending jobs in the cluster\'s job '
-          'queue. Idleness starts counting after setup/file_mounts are done; '
-          'the clock gets reset whenever there are running/pending jobs in the '
-          'job queue. '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
           'Setting this flag is equivalent to '
           'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
-          '. If not set, the cluster will not be auto-stopped.'))
+          '. If not set, the cluster will not be autostopped.'))
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=
+    ('Autodown the cluster: tear down the cluster after specified minutes of '
+     'idle time after all jobs finish (successfully or abnormally). Requires '
+     ' --idle-minutes-to-autostop to be set.'),
+)
 @click.option(
     '--retry-until-up',
     '-r',
@@ -1563,22 +1822,37 @@ def autostop(
     required=False,
     help=('Retry provisioning infinitely until the cluster is up, '
           'if we fail to start the cluster due to unavailability errors.'))
+@click.option(
+    '--force',
+    '-f',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=('Force start the cluster even if it is already UP. Useful for '
+          'upgrading the SkyPilot runtime on the cluster.'))
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def start(clusters: Tuple[str], all: bool, yes: bool,
-          idle_minutes_to_autostop: int, retry_until_up: bool):
+def start(
+        clusters: Tuple[str],
+        all: bool,
+        yes: bool,
+        idle_minutes_to_autostop: Optional[int],
+        down: bool,  # pylint: disable=redefined-outer-name
+        retry_until_up: bool,
+        force: bool):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
     If a cluster is previously stopped (status is STOPPED) or failed in
-    provisioning/runtime setup (status is INIT), this command will attempt to
-    start the cluster.  (In the second case, any failed setup steps are not
-    performed and only a request to start the machines is attempted.)
+    provisioning/runtime installation (status is INIT), this command will
+    attempt to start the cluster.  In the latter case, provisioning and runtime
+    installation will be retried.
 
-    Auto-failover provisioning is not used when restarting stopped
-    clusters. They will be started on the same cloud and region that was chosen
-    before.
+    Auto-failover provisioning is not used when restarting a stopped
+    cluster. It will be started on the same cloud, region, and zone that were
+    chosen before.
 
-    If a cluster is already in the UP status, this command has no effect on it.
+    If a cluster is already in the UP status, this command has no effect.
 
     Examples:
 
@@ -1594,6 +1868,9 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
       sky start -a
 
     """
+    if down and idle_minutes_to_autostop is None:
+        raise click.UsageError(
+            '--idle-minutes-to-autostop must be set if --down is set.')
     to_start = []
 
     if not clusters and not all:
@@ -1650,7 +1927,8 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
             #      INIT state cluster due to head_ip not being cached).
             #
             #      This can be replicated by adding `exit 1` to Task.setup.
-            if cluster_status == global_user_state.ClusterStatus.UP:
+            if (not force and
+                    cluster_status == global_user_state.ClusterStatus.UP):
                 # An UP cluster; skipping 'sky start' because:
                 #  1. For a really up cluster, this has no effects (ray up -y
                 #    --no-restart) anyway.
@@ -1663,12 +1941,37 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
                 #    This is dangerous and unwanted behavior!
                 click.echo(f'Cluster {name} already has status UP.')
                 continue
-            assert cluster_status in (
+
+            assert force or cluster_status in (
                 global_user_state.ClusterStatus.INIT,
                 global_user_state.ClusterStatus.STOPPED), cluster_status
             to_start.append(name)
     if not to_start:
         return
+
+    # Checks for reserved clusters (spot controller).
+    reserved, non_reserved = [], []
+    for name in to_start:
+        if name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            reserved.append(name)
+        else:
+            non_reserved.append(name)
+    if reserved and non_reserved:
+        assert len(reserved) == 1, reserved
+        # Keep this behavior the same as _down_or_stop_clusters().
+        raise click.UsageError(
+            'Starting the spot controller with other cluster(s) '
+            'is currently not supported.\n'
+            'Please start the former independently.')
+    if reserved:
+        assert len(reserved) == 1, reserved
+        bold = backend_utils.BOLD
+        reset_bold = backend_utils.RESET_BOLD
+        if idle_minutes_to_autostop is not None:
+            raise click.UsageError(
+                'Autostop options are currently not allowed when starting the '
+                'spot controller. Use the default autostop settings by directly'
+                f' calling: {bold}sky start {reserved[0]}{reset_bold}')
 
     if not yes:
         cluster_str = 'clusters' if len(to_start) > 1 else 'cluster'
@@ -1682,7 +1985,11 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
 
     for name in to_start:
         try:
-            core.start(name, idle_minutes_to_autostop, retry_until_up)
+            core.start(name,
+                       idle_minutes_to_autostop,
+                       retry_until_up,
+                       down=down,
+                       force=force)
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
         click.secho(f'Cluster {name} started.', fg='green')
@@ -1692,7 +1999,7 @@ def start(clusters: Tuple[str], all: bool, yes: bool,
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
-                shell_complete=_complete_cluster_name)
+                **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
               default=None,
@@ -1718,17 +2025,19 @@ def down(
     yes: bool,
     purge: bool,
 ):
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
 
     CLUSTER is the name of the cluster (or glob pattern) to tear down.  If both
     CLUSTER and ``--all`` are supplied, the latter takes precedence.
 
-    Terminating a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost. For local clusters,
-    `sky down` does not terminate the local cluster, but instead removes the
-    cluster from `sky status` and terminates the calling user's running jobs.
+    Tearing down a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.  Accelerators
+    (e.g., TPUs) that are part of the cluster will be deleted too.
 
-    Accelerators (e.g., TPUs) that are part of the cluster will be deleted too.
+    For local on-prem clusters, this command does not terminate the local
+    cluster, but instead removes the cluster from the status table and
+    terminates the calling user's running jobs.
 
     Examples:
 
@@ -1747,38 +2056,89 @@ def down(
       sky down -a
 
     """
-    _terminate_or_stop_clusters(clusters,
-                                apply_to_all=all,
-                                terminate=True,
-                                no_confirm=yes,
-                                purge=purge)
+    _down_or_stop_clusters(clusters,
+                           apply_to_all=all,
+                           down=True,
+                           no_confirm=yes,
+                           purge=purge)
 
 
-def _terminate_or_stop_clusters(
+def _hint_for_down_spot_controller(controller_name: str):
+    # spot_jobs will be empty when the spot cluster is not running.
+    cluster_status, _ = backend_utils.refresh_cluster_status_handle(
+        controller_name)
+    if cluster_status is None:
+        click.echo('Managed spot controller has already been torn down.')
+        return
+
+    msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
+           f'spot controller ({cluster_status.value}). Please be '
+           f'aware of the following:{colorama.Style.RESET_ALL}'
+           '\n * All logs and status information of the spot '
+           'jobs (output of `sky spot queue`) will be lost.')
+    if cluster_status == global_user_state.ClusterStatus.UP:
+        try:
+            spot_jobs = core.spot_queue(refresh=False)
+        except exceptions.ClusterNotUpError:
+            # The spot controller cluster status changed during querying
+            # the spot jobs, use the latest cluster status, so that the
+            # message for INIT and STOPPED states will be correctly
+            # added to the message.
+            cluster_status = backend_utils.refresh_cluster_status_handle(
+                controller_name)
+            spot_jobs = []
+
+        # Find in-progress spot jobs, and hint users to cancel them.
+        non_terminal_jobs = [
+            job for job in spot_jobs if not job['status'].is_terminal()
+        ]
+        if (cluster_status == global_user_state.ClusterStatus.UP and
+                non_terminal_jobs):
+            msg += ('\n * In-progress spot jobs found, their resources '
+                    'will not be terminated and require manual cleanup:\n')
+            job_table = spot_lib.format_job_table(non_terminal_jobs,
+                                                  show_all=False)
+            # Add prefix to each line to align with the bullet point.
+            msg += '\n'.join(
+                ['   ' + line for line in job_table.split('\n') if line != ''])
+    if cluster_status == global_user_state.ClusterStatus.INIT:
+        msg += ('\n * If there are pending/in-progress spot jobs, those '
+                'resources will not be terminated and require manual cleanup.')
+    click.echo(msg)
+
+
+def _down_or_stop_clusters(
         names: Tuple[str],
         apply_to_all: Optional[bool],
-        terminate: bool,
+        down: bool,  # pylint: disable=redefined-outer-name
         no_confirm: bool,
         purge: bool = False,
         idle_minutes_to_autostop: Optional[int] = None) -> None:
-    """Terminates or (auto-)stops a cluster (or all clusters).
+    """Tears down or (auto-)stops a cluster (or all clusters).
 
     Reserved clusters (spot controller) can only be terminated if the cluster
     name is explicitly and uniquely specified (not via glob) and purge is set
     to True.
     """
-    assert idle_minutes_to_autostop is None or not terminate, (
-        idle_minutes_to_autostop, terminate)
-    command = 'down' if terminate else 'stop'
+    if down:
+        command = 'down'
+    elif idle_minutes_to_autostop is not None:
+        command = 'autostop'
+    else:
+        command = 'stop'
     if not names and apply_to_all is None:
         raise click.UsageError(
-            f'sky {command} requires either a cluster name (see `sky status`) '
-            'or --all.')
+            f'`sky {command}` requires either a cluster name (see `sky status`)'
+            ' or --all.')
 
-    operation = 'Terminating' if terminate else 'Stopping'
+    operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
-        verb = 'Scheduling' if idle_minutes_to_autostop >= 0 else 'Cancelling'
-        operation = f'{verb} auto-stop on'
+        is_cancel = idle_minutes_to_autostop < 0
+        verb = 'Cancelling' if is_cancel else 'Scheduling'
+        option_str = 'down' if down else 'stop'
+        if is_cancel:
+            option_str = '{stop,down}'
+        operation = f'{verb} auto{option_str} on'
 
     if len(names) > 0:
         reserved_clusters = [
@@ -1790,7 +2150,7 @@ def _terminate_or_stop_clusters(
             name for name in _get_glob_clusters(names)
             if name not in backend_utils.SKY_RESERVED_CLUSTER_NAMES
         ]
-        if not terminate:
+        if not down:
             local_clusters = onprem_utils.check_and_get_local_clusters()
             # Local clusters are allowed to `sky down`, but not
             # `sky start/stop`. `sky down` unregisters the local cluster
@@ -1802,30 +2162,37 @@ def _terminate_or_stop_clusters(
                     '`sky stop/autostop`.'))
             ]
         # Make sure the reserved clusters are explicitly specified without other
-        # normal clusters and purge is True.
+        # normal clusters.
         if len(reserved_clusters) > 0:
-            if not purge:
-                msg = (f'{operation} reserved cluster(s) '
-                       f'{reserved_clusters_str} is not supported.')
-                if terminate:
-                    msg += (
-                        '\nPlease specify --purge to force termination of the '
-                        'reserved cluster(s).')
-                raise click.UsageError(msg)
             if len(names) != 0:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
                     f'{operation} reserved cluster(s) '
-                    f'{reserved_clusters_str} with multiple other cluster(s) '
-                    f'{names_str} is not supported.\n'
+                    f'{reserved_clusters_str} with other cluster(s) '
+                    f'{names_str} is currently not supported.\n'
                     f'Please omit the reserved cluster(s) {reserved_clusters}.')
+            if not down:
+                raise click.UsageError(
+                    f'{operation} reserved cluster(s) '
+                    f'{reserved_clusters_str} is currently not supported.')
+            else:
+                # TODO(zhwu): We can only have one reserved cluster (spot
+                # controller).
+                assert len(reserved_clusters) == 1, reserved_clusters
+                _hint_for_down_spot_controller(reserved_clusters[0])
+
+                click.confirm('Proceed?',
+                              default=False,
+                              abort=True,
+                              show_default=True)
+                no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
         if len(names) > 0:
             click.echo(
-                f'Both --all and cluster(s) specified for sky {command}. '
+                f'Both --all and cluster(s) specified for `sky {command}`. '
                 'Letting --all take effect.')
         # We should not remove reserved clusters when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a reserved
@@ -1845,7 +2212,7 @@ def _terminate_or_stop_clusters(
             # should've been printed by _get_glob_clusters() above.
             continue
         clusters.append(name)
-    usage_lib.messages.usage.update_cluster_name(clusters)
+    usage_lib.record_cluster_name_for_current_operation(clusters)
 
     if not clusters:
         click.echo('\nCluster(s) not found (tip: see `sky status`).')
@@ -1869,11 +2236,11 @@ def _terminate_or_stop_clusters(
         f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
         total=len(clusters))
 
-    def _terminate_or_stop(name: str):
+    def _down_or_stop(name: str):
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                core.autostop(name, idle_minutes_to_autostop)
+                core.autostop(name, idle_minutes_to_autostop, down)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -1882,16 +2249,20 @@ def _terminate_or_stop_clusters(
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
                 if idle_minutes_to_autostop >= 0:
+                    option_str = 'down' if down else 'stop'
+                    passive_str = 'downed' if down else 'stopped'
+                    plural = 's' if idle_minutes_to_autostop != 1 else ''
                     message += (
-                        f'\n  The cluster will be stopped after '
-                        f'{idle_minutes_to_autostop} minutes of idleness.'
-                        '\n  To cancel the autostop, run: '
+                        f'\n  The cluster will be auto{passive_str} after '
+                        f'{idle_minutes_to_autostop} minute{plural} of '
+                        'idleness.'
+                        f'\n  To cancel the auto{option_str}, run: '
                         f'{colorama.Style.BRIGHT}'
                         f'sky autostop {name} --cancel'
                         f'{colorama.Style.RESET_ALL}')
         else:
             try:
-                if terminate:
+                if down:
                     core.down(name, purge=purge)
                 else:
                     core.stop(name, purge=purge)
@@ -1906,7 +2277,7 @@ def _terminate_or_stop_clusters(
                 message = (
                     f'{colorama.Fore.GREEN}{operation} cluster {name}...done.'
                     f'{colorama.Style.RESET_ALL}')
-                if not terminate:
+                if not down:
                     message += ('\n  To restart the cluster, run: '
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
@@ -1918,7 +2289,7 @@ def _terminate_or_stop_clusters(
         progress.start()
 
     with progress:
-        subprocess_utils.run_in_parallel(_terminate_or_stop, clusters)
+        subprocess_utils.run_in_parallel(_down_or_stop, clusters)
         progress.live.transient = False
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
@@ -1928,10 +2299,12 @@ def _terminate_or_stop_clusters(
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            gpus: Optional[str], use_spot: Optional[bool],
-            screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], gpus: Optional[str],
+            use_spot: Optional[bool], screen: Optional[bool],
+            tmux: Optional[bool], disk_size: Optional[int],
+            idle_minutes_to_autostop: Optional[int], down: bool,
+            retry_until_up: bool):
     """Launch or attach to an interactive GPU node.
 
     Examples:
@@ -1968,7 +2341,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('gpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -1979,6 +2353,8 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=gpus,
                               use_spot=use_spot,
@@ -1992,6 +2368,9 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -1999,9 +2378,11 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
-            cloud: Optional[str], instance_type: Optional[str],
-            use_spot: Optional[bool], screen: Optional[bool],
-            tmux: Optional[bool], disk_size: Optional[int]):
+            cloud: Optional[str], region: Optional[str], zone: Optional[str],
+            instance_type: Optional[str], use_spot: Optional[bool],
+            screen: Optional[bool], tmux: Optional[bool],
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive CPU node.
 
     Examples:
@@ -2037,7 +2418,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('cpunode')
 
-    user_requested_resources = not (cloud is None and instance_type is None and
+    user_requested_resources = not (cloud is None and region is None and
+                                    zone is None and instance_type is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2046,6 +2428,8 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=cloud_provider,
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2058,6 +2442,9 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2065,10 +2452,12 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 @usage_lib.entrypoint
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
+            region: Optional[str], zone: Optional[str],
             instance_type: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
-            disk_size: Optional[int]):
+            disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
+            down: bool, retry_until_up: bool):
     """Launch or attach to an interactive TPU node.
 
     Examples:
@@ -2104,7 +2493,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if name is None:
         name = _default_interactive_node_name('tpunode')
 
-    user_requested_resources = not (instance_type is None and tpus is None and
+    user_requested_resources = not (region is None and zone is None and
+                                    instance_type is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
@@ -2118,6 +2508,8 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
     if use_spot is None:
         use_spot = default_resources.use_spot
     resources = sky.Resources(cloud=sky.GCP(),
+                              region=region,
+                              zone=zone,
                               instance_type=instance_type,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
@@ -2132,6 +2524,9 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         session_manager=session_manager,
         user_requested_resources=user_requested_resources,
         no_confirm=yes,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
     )
 
 
@@ -2169,10 +2564,15 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
               region: Optional[str]):  # pylint: disable=redefined-builtin
     """Show supported GPU/TPU/accelerators.
 
+    The names and counts shown can be set in the ``accelerators`` field in task
+    YAMLs, or in the ``--gpus`` flag in CLI commands. For example, if this
+    table shows 8x V100s are supported, then the string ``V100:8`` will be
+    accepted by the above.
+
     To show the detailed information of a GPU/TPU type (which clouds offer it,
     the quantity in each VM type, etc.), use ``sky show-gpus <gpu>``.
 
-    To show all GPUs, including less common ones and their detailed
+    To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
     NOTE: The price displayed for each instance type is the lowest across all
@@ -2311,7 +2711,7 @@ def storage_ls():
                 required=False,
                 type=str,
                 nargs=-1,
-                shell_complete=_complete_storage_name)
+                **_get_shell_complete_args(_complete_storage_name))
 @click.option('--all',
               '-a',
               default=False,
@@ -2387,15 +2787,15 @@ def admin_deploy(clusterspec_yaml: str):
     if not isinstance(ips, list):
         ips = [ips]
     local_cluster_name = yaml_config['cluster']['name']
-    usage_lib.messages.usage.update_cluster_name(local_cluster_name)
+    usage_lib.record_cluster_name_for_current_operation(local_cluster_name)
     usage_lib.messages.usage.update_cluster_resources(
         len(ips), sky.Resources(sky.Local()))
 
     # Check for Ray
-    click.secho(f'[{steps}/4] Checking on-premise environment\n',
+    click.secho(f'[{steps}/4] Installing on-premise dependencies\n',
                 fg='green',
                 nl=False)
-    onprem_utils.check_local_installation(ips, auth_config)
+    onprem_utils.check_and_install_local_env(ips, auth_config)
     steps += 1
 
     # Detect what GPUs the cluster has (which can be heterogeneous)
@@ -2446,12 +2846,16 @@ def _is_spot_controller_up(
 
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Managed spot instances related commands."""
+    """Commands for managed spot jobs."""
     pass
 
 
 @spot.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
 @click.option('--spot-recovery',
@@ -2463,12 +2867,13 @@ def spot():
               type=int,
               required=False,
               help=('OS disk size in GBs.'))
-@click.option('--detach-run',
-              '-d',
-              default=False,
-              is_flag=True,
-              help='If True, run setup first (blocking), '
-              'then detach from the job\'s execution.')
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as a job is submitted, return from this call '
+          'and do not stream execution logs.'))
 @click.option(
     '--retry-until-up',
     '-r',
@@ -2506,13 +2911,26 @@ def spot_launch(
     retry_until_up: bool,
     yes: bool,
 ):
-    """Launch a managed spot job."""
+    """Launch a managed spot job from a YAML or a command.
+
+    If ENTRYPOINT points to a valid YAML file, it is read in as the task
+    specification. Otherwise, it is interpreted as a bash command.
+
+    Examples:
+
+    .. code-block:: bash
+
+      # You can use normal task YAMLs.
+      sky spot launch task.yaml
+
+      sky spot launch 'echo hello!'
+    """
     if name is None:
         name = backend_utils.generate_cluster_name()
     else:
         backend_utils.check_cluster_name_is_valid(name)
 
-    dag = _make_dag_from_entrypoint_with_overrides(
+    task = _make_task_from_entrypoint_with_overrides(
         entrypoint,
         name=name,
         workdir=workdir,
@@ -2534,13 +2952,13 @@ def spot_launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    sky.spot_launch(dag,
+    sky.spot_launch(task,
                     name,
                     detach_run=detach_run,
                     retry_until_up=retry_until_up)
 
 
-@spot.command('status', cls=_DocumentedCodeCommand)
+@spot.command('queue', cls=_DocumentedCodeCommand)
 @click.option('--all',
               '-a',
               default=False,
@@ -2557,7 +2975,7 @@ def spot_launch(
 )
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_status(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2578,34 +2996,37 @@ def spot_status(all: bool, refresh: bool):
 
     If the job failed, either due to user code or spot unavailability, the error
     log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
-    Please find your exact spot controller name with ``sky status -a``.
+    Please find your exact spot controller name with ``sky status``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
     .. code-block:: bash
 
-      watch -n60 sky spot status
+      watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
-        job_table = core.spot_status(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh)
     except exceptions.ClusterNotUpError:
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
-            job_table_json = (
+            table_message = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
                 f'{cache[1]}\n')
         else:
-            job_table_json = 'No cached job status table found.'
-        click.echo(job_table_json)
+            table_message = 'No cached job status table found.'
+        click.echo(table_message)
         return
     job_table = spot_lib.format_job_table(job_table, all)
 
     # Dump cache
     spot_lib.dump_job_table_cache(job_table)
     click.echo(f'Managed spot jobs:\n{job_table}')
+
+
+_add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
 
 
 @spot.command('cancel', cls=_DocumentedCodeCommand)
@@ -2679,11 +3100,21 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
               required=False,
               type=str,
               help='Managed spot job name.')
+@click.option(
+    '--follow/--no-follow',
+    is_flag=True,
+    default=True,
+    help=('Follow the logs of the job. [default: --follow] '
+          'If --no-follow is specified, print the log so far and exit.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def spot_logs(name: Optional[str], job_id: Optional[int]):
+def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool):
     """Tail the log of a managed spot job."""
-    core.spot_tail_logs(name=name, job_id=job_id)
+    try:
+        core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
+    except exceptions.ClusterNotUpError:
+        # Hint messages already printed by the call above.
+        sys.exit(1)
 
 
 # ==============================
@@ -2736,7 +3167,11 @@ def bench():
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
-@click.argument('entrypoint', required=True, type=str, nargs=-1)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
 @click.option('--benchmark',
               '-b',
               required=True,
@@ -2762,7 +3197,7 @@ def bench():
     help=('Automatically stop the cluster after this many minutes '
           'of idleness after setup/file_mounts. This is equivalent to '
           'running `sky launch -d ...` and then `sky autostop -i <minutes>`. '
-          'If not set, the cluster will not be auto-stopped.'))
+          'If not set, the cluster will not be autostopped.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3155,7 +3590,7 @@ def benchmark_down(
     clusters_to_exclude: List[str],
     yes: bool,
 ) -> None:
-    """Terminate all clusters belonging to a benchmark."""
+    """Tear down all clusters belonging to a benchmark."""
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is None:
         raise click.BadParameter(f'Benchmark {benchmark} does not exist.')
@@ -3169,10 +3604,10 @@ def benchmark_down(
             continue
         to_stop.append(cluster)
 
-    _terminate_or_stop_clusters(to_stop,
-                                apply_to_all=False,
-                                terminate=True,
-                                no_confirm=yes)
+    _down_or_stop_clusters(to_stop,
+                           apply_to_all=False,
+                           down=True,
+                           no_confirm=yes)
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
@@ -3181,7 +3616,7 @@ def benchmark_down(
               '-a',
               default=None,
               is_flag=True,
-              help='Tear down all existing clusters.')
+              help='Delete all benchmark reports from the history.')
 @click.option('--yes',
               '-y',
               is_flag=True,

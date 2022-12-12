@@ -1,6 +1,6 @@
 .. _benchmark-overview:
 
-Benchmark
+Benchmark: Find the Best Hardware for Your Jobs
 ================================================
 
 SkyPilot allows **easy measurement of performance and cost of different kinds of cloud resources** through the benchmark feature.

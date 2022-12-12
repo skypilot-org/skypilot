@@ -11,7 +11,6 @@ import pytest
 import yaml
 
 from sky import cli
-from sky import exceptions
 from sky.utils import command_runner
 from sky.utils import subprocess_utils
 
@@ -213,9 +212,9 @@ class TestOnprem:
         test = Test(
             'test_onprem_inline_commands',
             [
-                f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+                f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
                 f'sky logs {name} 1 --status',
-                f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+                f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
                 f'sky logs {name} 2 --status',
             ],
             # Cleaning up artifacts created from the test.
@@ -236,8 +235,8 @@ class TestOnprem:
                     set -e
                     echo $(whoami)
                     pkill -f ray
-                    echo NODE ID: $SKY_NODE_RANK
-                    echo NODE IPS: "$SKY_NODE_IPS"
+                    echo NODE ID: $SKYPILOT_NODE_RANK
+                    echo NODE IPS: "$SKYPILOT_NODE_IPS"
                     exit 0""")
         }
 

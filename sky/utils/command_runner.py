@@ -107,7 +107,7 @@ class SSHCommandRunner:
         ip: str,
         ssh_user: str,
         ssh_private_key: str,
-        ssh_control_name: str = '__default__',
+        ssh_control_name: Optional[str] = '__default__',
     ):
         """Initialize SSHCommandRunner.
 
@@ -128,8 +128,9 @@ class SSHCommandRunner:
         self.ip = ip
         self.ssh_user = ssh_user
         self.ssh_private_key = ssh_private_key
-        self.ssh_control_name = hashlib.md5(
-            ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH]
+        self.ssh_control_name = (
+            None if ssh_control_name is None else hashlib.md5(
+                ssh_control_name.encode()).hexdigest()[:_HASH_MAX_LENGTH])
 
     @staticmethod
     def make_runner_list(
@@ -175,6 +176,7 @@ class SSHCommandRunner:
             process_stream: bool = True,
             stream_logs: bool = True,
             ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
@@ -192,6 +194,7 @@ class SSHCommandRunner:
             check: Check the success of the command.
             ssh_mode: The mode to use for ssh.
                 See SSHMode for more details.
+            separate_stderr: Whether to separate stderr from stdout.
 
 
         Returns:
@@ -223,8 +226,9 @@ class SSHCommandRunner:
         command += [
             shlex.quote(f'true && source ~/.bashrc && export OMP_NUM_THREADS=1 '
                         f'PYTHONWARNINGS=ignore && ({cmd})'),
-            '2>&1',
         ]
+        if not separate_stderr:
+            command.append('2>&1')
         if not process_stream and ssh_mode == SshMode.NON_INTERACTIVE:
             command += [
                 # A hack to remove the following bash warnings (twice):
@@ -301,18 +305,24 @@ class SSHCommandRunner:
             rsync_command.append(
                 RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
 
+        # rsync doesn't support '~' in a quoted target path. need to expand it.
+        full_source_str = str(resolved_source)
+        if resolved_source.is_dir():
+            full_source_str = os.path.join(full_source_str, '')
+
         ssh_options = ' '.join(
             ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
+        # To support spaces in the path, we need to quote source and target.
         if up:
             rsync_command.extend([
-                source,
-                f'{self.ssh_user}@{self.ip}:{target}',
+                f'{full_source_str!r}',
+                f'{self.ssh_user}@{self.ip}:{target!r}',
             ])
         else:
             rsync_command.extend([
-                f'{self.ssh_user}@{self.ip}:{source}',
-                target,
+                f'{self.ssh_user}@{self.ip}:{full_source_str!r}',
+                f'{target!r}',
             ])
         command = ' '.join(rsync_command)
 

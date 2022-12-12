@@ -2,6 +2,7 @@
 import json
 import os
 import subprocess
+import time
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
@@ -18,6 +19,11 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
+GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
+# Do not place the backup under the gcloud config directory, as ray
+# autoscaler can overwrite that directory on the remote nodes.
+GCP_CONFIG_SKY_BACKUP_PATH = '~/.sky/.sky_gcp_config_default'
+
 # Minimum set of files under ~/.config/gcloud that grant GCP access.
 _CREDENTIAL_FILES = [
     'credentials.db',
@@ -25,9 +31,25 @@ _CREDENTIAL_FILES = [
     'access_tokens.db',
     'configurations',
     'legacy_credentials',
+    'active_config',
 ]
 
-_IMAGE_ID_PREFIX = ('projects/deeplearning-platform-release/global/images/')
+_GCLOUD_INSTALLATION_LOG = '~/.sky/logs/gcloud_installation.log'
+# Need to be run with /bin/bash
+# We factor out the installation logic to keep it align in both spot
+# controller and cloud stores.
+GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
+    gcloud --help > /dev/null 2>&1 || \
+    {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
+    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-382.0.0-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \
+    tar xzf google-cloud-sdk-382.0.0-linux-x86_64.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    rm -rf ~/google-cloud-sdk >> {_GCLOUD_INSTALLATION_LOG}  && \
+    mv google-cloud-sdk ~/ && \
+    ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
+    echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
+    source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
+    {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
+    popd &>/dev/null'
 
 
 def _run_output(cmd):
@@ -37,6 +59,16 @@ def _run_output(cmd):
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
+
+
+def is_api_disabled(endpoint: str, project_id: str) -> bool:
+    proc = subprocess.run((f'gcloud services list --project {project_id} '
+                           f' | grep {endpoint}.googleapis.com'),
+                          check=False,
+                          shell=True,
+                          stderr=subprocess.PIPE,
+                          stdout=subprocess.PIPE)
+    return proc.returncode != 0
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -180,7 +212,13 @@ class GCP(clouds.Cloud):
         region_name = region.name
         zones = [zones[0].name]
 
-        image_id = _IMAGE_ID_PREFIX + 'common-cpu-v20220806'
+        # gcloud compute images list \
+        # --project deeplearning-platform-release \
+        # --no-standard-images
+        # We use the debian image, as the ubuntu image has some connectivity
+        # issue when first booted.
+        image_id = service_catalog.get_image_id_from_tag(
+            'skypilot:cpu-debian-10', clouds='gcp')
 
         r = resources
         # Find GPU spec, if any.
@@ -213,18 +251,35 @@ class GCP(clouds.Cloud):
             else:
                 # Convert to GCP names:
                 # https://cloud.google.com/compute/docs/gpus
-                resources_vars['gpu'] = 'nvidia-tesla-{}'.format(acc.lower())
+                if acc == 'A100-80GB':
+                    # A100-80GB has a different name pattern.
+                    resources_vars['gpu'] = 'nvidia-{}'.format(acc.lower())
+                else:
+                    resources_vars['gpu'] = 'nvidia-tesla-{}'.format(
+                        acc.lower())
                 resources_vars['gpu_count'] = acc_count
                 if acc == 'K80':
+                    # Though the image is called cu113, it actually has later
+                    # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220701'
+                    image_id = service_catalog.get_image_id_from_tag(
+                        'skypilot:k80-debian-10', clouds='gcp')
                 else:
+                    # Though the image is called cu113, it actually has later
+                    # versions of CUDA as noted below.
                     # CUDA driver version 510.47.03, CUDA Library 11.6
-                    image_id = _IMAGE_ID_PREFIX + 'common-cu113-v20220806'
+                    # Does not support torch==1.13.0 with cu117
+                    image_id = service_catalog.get_image_id_from_tag(
+                        'skypilot:gpu-debian-10', clouds='gcp')
 
         if resources.image_id is not None:
-            image_id = resources.image_id
+            if None in resources.image_id:
+                image_id = resources.image_id[None]
+            else:
+                assert region_name in resources.image_id, resources.image_id
+                image_id = resources.image_id[region_name]
 
+        assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id
 
         return resources_vars
@@ -316,7 +371,7 @@ class GCP(clouds.Cloud):
                 'Run the following commands:\n    '
                 # Install the Google Cloud SDK:
                 '  $ pip install google-api-python-client\n    '
-                '  $ conda install -c conda-forge google-cloud-sdk\n    '
+                '  $ conda install -c conda-forge google-cloud-sdk -y\n    '
                 # This authenticates the CLI to make `gsutil` work:
                 '  $ gcloud init\n    '
                 # This will generate
@@ -325,22 +380,85 @@ class GCP(clouds.Cloud):
                 'For more info: '
                 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'  # pylint: disable=line-too-long
             )
+
+        # Check APIs.
+        project_id = self.get_project_id()
+        apis = (
+            ('compute', 'Compute Engine'),
+            ('cloudresourcemanager', 'Cloud Resource Manager'),
+            ('iam', 'Identity and Access Management (IAM)'),
+            ('tpu', 'Cloud TPU'),  # Keep as final element.
+        )
+        enabled_api = False
+        for endpoint, display_name in apis:
+            if is_api_disabled(endpoint, project_id):
+                # For 'compute': ~55-60 seconds for the first run. If already
+                # enabled, ~1s. Other API endpoints take ~1-5s to enable.
+                if endpoint == 'compute':
+                    suffix = ' (free of charge; this may take a minute)'
+                else:
+                    suffix = ' (free of charge)'
+                print(f'\nEnabling {display_name} API{suffix}...')
+                t1 = time.time()
+                proc = subprocess.run(
+                    f'gcloud services enable {endpoint}.googleapis.com '
+                    f'--project {project_id}',
+                    check=False,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT)
+                if proc.returncode == 0:
+                    enabled_api = True
+                    print(f'Done. Took {time.time() - t1:.1f} secs.')
+                elif endpoint != 'tpu':
+                    print('Failed. Detailed output:')
+                    print(proc.stdout.decode())
+                    return False, (
+                        f'{display_name} API is disabled. Please retry '
+                        '`sky check` in a few minutes, or manually enable it.')
+                else:
+                    # TPU API failed. Should still enable GCP.
+                    print('Failed to enable Cloud TPU API. '
+                          'This can be ignored if you do not use TPUs. '
+                          'Otherwise, please enable it manually.\n'
+                          'Detailed output:')
+                    print(proc.stdout.decode())
+
+        if enabled_api:
+            print('\nHint: Enabled GCP API(s) may take a few minutes to take '
+                  'effect. If any SkyPilot commands/calls failed, retry after '
+                  'some time.')
+
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        # Create a backup of the config_default file, as the original file can
+        # be modified on the remote cluster by ray causing authentication
+        # problems. The backup file will be updated to the remote cluster
+        # whenever the original file is not empty and will be applied
+        # appropriately on the remote cluster when neccessary.
+        if (os.path.exists(os.path.expanduser(GCP_CONFIG_PATH)) and
+                os.path.getsize(os.path.expanduser(GCP_CONFIG_PATH)) > 0):
+            subprocess.run(f'cp {GCP_CONFIG_PATH} {GCP_CONFIG_SKY_BACKUP_PATH}',
+                           shell=True,
+                           check=True)
+        elif not os.path.exists(os.path.expanduser(GCP_CONFIG_SKY_BACKUP_PATH)):
+            raise RuntimeError(
+                'GCP credential file is empty. Please make sure you '
+                'have run: gcloud init')
+
         # Excluding the symlink to the python executable created by the gcp
         # credential, which causes problem for ray up multiple nodes, tracked
         # in #494, #496, #483.
-        return {
+        credentials = {
             f'~/.config/gcloud/{filename}': f'~/.config/gcloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
+        return credentials
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
-
-    def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        return service_catalog.validate_region_zone(region, zone, clouds='gcp')
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
