@@ -1604,7 +1604,7 @@ _QUERY_STATUS_FUNCS = {
 def _check_user_identity(cloud: clouds.Cloud, cluster_name: str):
     """Check if the current user is the same as the user who created the cluster."""
     user_identity = global_user_state.get_cluster_user_identity(cluster_name)
-    current_user_identity = cloud.get_user_identity()
+    current_user_identity = cloud.get_cloud_user_identity()
     if user_identity is None:
         if current_user_identity is not None:
             global_user_state.setcluster_user_identity(cluster_name,
@@ -1887,7 +1887,8 @@ def get_clusters(
                        f'{len(failed_clusters)} cluster{plural}:{reset}')
         table = log_utils.create_table(['Cluster', 'Error'])
         for cluster_name, e in failed_clusters:
-            table.add_row(cluster_name, str(e))
+            table.add_row([cluster_name, str(e)])
+        logger.warning([f'\t{row}' for row in str(table).split('\n')])
 
     # Filter out removed clusters.
     updated_records = [
