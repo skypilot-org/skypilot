@@ -38,6 +38,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import sky_config
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
@@ -361,7 +362,12 @@ class SSHConfigHelper(object):
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
-                              ip: str, username: str, ssh_key_path: str):
+                              ip: str, username: str, ssh_key_path: str,
+                              proxy_command: Optional[str]):
+        if proxy_command is not None:
+            proxy = f'ProxyCommand {proxy_command}'
+        else:
+            proxy = ''
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -372,6 +378,7 @@ class SSHConfigHelper(object):
               ForwardAgent yes
               StrictHostKeyChecking no
               Port 22
+              {proxy}
             """)
         return codegen
 
@@ -437,8 +444,9 @@ class SSHConfigHelper(object):
                 f.writelines(config)
             os.chmod(config_path, 0o644)
 
+        proxy_command = auth_config.get('ssh_proxy_command', None)
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
-                                            username, key_path)
+                                            username, key_path, proxy_command)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -524,6 +532,8 @@ class SSHConfigHelper(object):
         with open(config_path) as f:
             config = f.readlines()
 
+        proxy_command = auth_config.get('ssh_proxy_command', None)
+
         # Check if ~/.ssh/config contains existing names
         host_lines = [f'Host {c_name}' for c_name in worker_names]
         for i, line in enumerate(config):
@@ -536,7 +546,7 @@ class SSHConfigHelper(object):
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path)
+                    username, key_path, proxy_command)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -549,14 +559,14 @@ class SSHConfigHelper(object):
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path)
+                    username, key_path, proxy_command)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path)
+                    key_path, proxy_command)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
@@ -768,7 +778,8 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
-    # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
+    # Use a tmp file path to avoid incomplete YAML file being re-used in the
+    # future.
     tmp_yaml_path = yaml_path + '.tmp'
     tmp_yaml_path = fill_template(
         cluster_config_template,
@@ -778,18 +789,31 @@ def write_cluster_config(
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
+
+                # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/skypilot-org/skypilot/pull/742.
                 # Generate the name of the security group we're looking for.
                 # (username, last 4 chars of hash of hostname): for uniquefying
-                # users on shared-account cloud providers. Using uuid.getnode()
-                # is incorrect; observed to collide on Macs.
-                'security_group': f'sky-sg-{common_utils.user_and_hostname_hash()}',
-                # Azure only.
+                # users on shared-account scenarios.
+                'security_group': sky_config.get_nested(
+                    ('aws', 'security_group_name'),
+                    f'sky-sg-{common_utils.user_and_hostname_hash()}'),
+                'vpc_name': sky_config.get_nested(('aws', 'vpc_name'), None),
+                'use_internal_ips': sky_config.get_nested(
+                    ('aws', 'use_internal_ips'), False),
+                # Not exactly AWS only, but we only test it's supported on AWS
+                # for now:
+                'ssh_proxy_command': sky_config.get_nested(
+                    ('auth', 'ssh_proxy_command'), None),
+
+                # Azure only:
                 'azure_subscription_id': azure_subscription_id,
                 'resource_group': f'{cluster_name}-{region_name}',
-                # GCP only.
+
+                # GCP only:
                 'gcp_project_id': gcp_project_id,
+
                 # Ray version.
                 'ray_version': constants.SKY_REMOTE_RAY_VERSION,
                 # Cloud credentials for cloud storage.
@@ -1025,10 +1049,12 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
     ssh_user = auth_section['ssh_user'].strip()
     ssh_private_key = auth_section.get('ssh_private_key')
     ssh_control_name = config.get('cluster_name', '__default__')
+    ssh_proxy_command = auth_section.get('ssh_proxy_command')
     return {
         'ssh_user': ssh_user,
         'ssh_private_key': ssh_private_key,
-        'ssh_control_name': ssh_control_name
+        'ssh_control_name': ssh_control_name,
+        'ssh_proxy_command': ssh_proxy_command,
     }
 
 
