@@ -1892,7 +1892,7 @@ def get_clusters(
         table = log_utils.create_table(['Cluster', 'Error'])
         for cluster_name, e in failed_clusters:
             table.add_row([cluster_name, str(e)])
-        logger.warning([f'\t{row}' for row in str(table).split('\n')])
+        logger.warning(table)
 
     return normal_updated_records
 
