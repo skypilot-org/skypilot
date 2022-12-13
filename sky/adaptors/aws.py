@@ -18,14 +18,11 @@ def import_package(func):
         if boto3 is None or botocore is None:
             try:
                 import boto3 as _boto3
-                import boto3.session as _session
                 import botocore as _botocore
                 boto3 = _boto3
                 botocore = _botocore
-                # Create session per thread to avoid thread-safety issues.
-                # See: https://github.com/boto/boto3/issues/1592 and https://boto3.amazonaws.com/v1/documentation/api/latest/guide/resources.html?highlight=multithreading#multithreading-and-multiprocessing # pylint: disable=line-too-long
-                if not hasattr(cache, 'session'):
-                    cache.session = _session.Session()
+                from ray.autoscaler._private.cli_logger import cli_logger
+                cli_logger.configure(verbosity=0)
             except ImportError:
                 raise ImportError('Fail to import dependencies for AWS.'
                                   'Try pip install "skypilot[aws]"') from None
@@ -42,9 +39,9 @@ def client(service_name: str, **kwargs):
         service_name: AWS service name (e.g., 's3', 'ec2').
         kwargs: Other options.
     """
-    # Cache clients to avoid creating multiple clients, as the creation of the
-    # client is not thread-safe, though the client itself is thread-safe.
-    return cache.session.client(service_name, **kwargs)
+    from sky.skylet.providers.aws import utils
+    region = kwargs.pop('region', None)
+    return utils.client_cache(service_name, region, **kwargs)
 
 
 @import_package
@@ -55,13 +52,15 @@ def resource(resource_name: str, **kwargs):
         resource_name: AWS resource name (e.g., 's3').
         kwargs: Other options.
     """
-    return cache.session.resource(resource_name, **kwargs)
+    from sky.skylet.providers.aws import utils
+    region = kwargs.pop('region', None)
+    return utils.resource_cache(resource_name, region, **kwargs)
 
 
 @import_package
 def session():
     """Create an AWS session."""
-    return cache.session
+    return boto3.session.Session()
 
 
 @import_package

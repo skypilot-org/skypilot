@@ -12,6 +12,7 @@ from sky.adaptors import aws
 from sky import clouds
 from sky import exceptions
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
@@ -336,20 +337,24 @@ class AWS(clouds.Cloud):
             sts = aws.client('sts')
             user_id = sts.get_caller_identity()['UserId']
         except aws.exceptions().NoCredentialsError:
-            raise exceptions.CloudUserIdentityError(
-                'AWS credentials are not set.') from None
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'AWS credentials are not set.') from None
         except aws.exceptions().ClientError:
-            raise exceptions.CloudUserIdentityError(
-                'Failed to access AWS services with credentials. '
-                'Make sure that the access and secret keys are correct.'
-            ) from None
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to access AWS services with credentials. '
+                    'Make sure that the access and secret keys are correct.'
+                ) from None
         except aws.exceptions().TokenRetrievalError:
-            raise exceptions.CloudUserIdentityError(
-                'Access token is expired. ') from None
-        except Exception as e:
-            raise exceptions.CloudUserIdentityError(
-                f'Failed to get AWS user identity with unknown exception: {e}'
-            ) from None
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Access token is expired. ') from None
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get AWS user identity with unknown '
+                    f'exception: {e}') from None
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
