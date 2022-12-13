@@ -364,6 +364,7 @@ class GCP(clouds.Cloud):
             # Check if the user is activated.
             self.get_cloud_user_identity()
         except (AssertionError, auth.exceptions.DefaultCredentialsError,
+                subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError, KeyError,
                 ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
