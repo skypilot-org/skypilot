@@ -312,9 +312,9 @@ class SSHCommandRunner:
             ssh_options_list(self.ssh_private_key, self.ssh_control_name))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
+        # rsync doesn't support '~' in a quoted local path, but it is ok to
+        # have '~' in a quoted remote path.
         if up:
-            # rsync doesn't support '~' in a quoted target path. need to
-            # expand it.
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
                 full_source_str = os.path.join(full_source_str, '')
