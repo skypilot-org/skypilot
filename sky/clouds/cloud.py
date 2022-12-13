@@ -190,7 +190,12 @@ class Cloud:
         raise NotImplementedError
 
     def get_cloud_user_identity(self) -> Optional[str]:
-        """Returns the identity of the user on this cloud."""
+        """Returns the identity of the user on this cloud.
+
+        Raises:
+            exceptions.CloudUserIdentityError: If the user identity cannot be
+                retrieved.
+        """
         return None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

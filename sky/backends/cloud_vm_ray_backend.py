@@ -1057,7 +1057,8 @@ class RetryingVmProvisioner(object):
                                                     cluster_handle=handle,
                                                     ready=False)
             cloud = handle.launched_resources.cloud
-            cloud_user_id = cloud.get_cloud_user_identity()
+            cloud_user_id = backend_utils.get_cloud_user_identity_no_error(
+                cloud)
             global_user_state.set_cluster_user_identity(cluster_name,
                                                         cloud_user_id)
 

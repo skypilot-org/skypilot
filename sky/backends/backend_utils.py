@@ -1602,6 +1602,14 @@ _QUERY_STATUS_FUNCS = {
 }
 
 
+def get_cloud_user_identity_no_error(cloud: clouds.Cloud) -> Optional[str]:
+    try:
+        return cloud.get_cloud_user_identity()
+    except exceptions.CloudUserIdentityError as e:
+        logger.warning(
+            f'Failed to get the current user identity for {cloud}: {e}')
+
+
 def _check_user_identity_no_lock(cluster_name: str):
     """Check if the current user is the same as the user who created the cluster."""
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
@@ -1614,12 +1622,15 @@ def _check_user_identity_no_lock(cluster_name: str):
         return
 
     cloud = handle.launched_resources.cloud
+    current_user_identity = get_cloud_user_identity_no_error(cloud)
+    if current_user_identity is None:
+        # Skip the check if the cloud does not support user identity,
+        # or we fail to get the user identity.
+        return
     user_identity = global_user_state.get_cluster_user_identity(cluster_name)
-    current_user_identity = cloud.get_cloud_user_identity()
     if user_identity is None:
-        if current_user_identity is not None:
-            global_user_state.set_cluster_user_identity(cluster_name,
-                                                        current_user_identity)
+        global_user_state.set_cluster_user_identity(cluster_name,
+                                                    current_user_identity)
     elif user_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(

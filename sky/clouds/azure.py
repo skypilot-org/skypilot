@@ -322,7 +322,7 @@ class Azure(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure user identity with unknown '
-                    f'exception: {e}') from e
+                    f'exception: {type(e)} {e}') from e
         return f'{account_email}@{self.get_project_id()}'
 
     @classmethod

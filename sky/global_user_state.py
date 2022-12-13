@@ -270,7 +270,10 @@ def get_cluster_user_identity(cluster_name: str) -> Optional[str]:
     return metadata.get('user_identity')
 
 
-def set_cluster_user_identity(cluster_name: str, user_identity: str) -> None:
+def set_cluster_user_identity(cluster_name: str,
+                              user_identity: Optional[str]) -> None:
+    if user_identity is None:
+        return
     # This must be called when the lock is acquired for the cluster.
     metadata = get_cluster_metadata(cluster_name)
     if metadata is None:
