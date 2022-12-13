@@ -29,34 +29,6 @@ def import_package(func):
     return wrapper
 
 
-@functools.lru_cache()
-@import_package
-def client_cache(name, **kwargs):
-    # Adapts from sky.skylet.providers.aws.utils, as clients like 'sts'
-    # don't have associated resources, i.e. should not use resource_cache.
-    from ray.autoscaler._private import constants
-    kwargs.setdefault(
-        'config',
-        botocore.config.Config(
-            retries={'max_attempts': constants.BOTO_MAX_RETRIES}),
-    )
-    return boto3.client(
-        name,
-        **kwargs,
-    )
-
-
-@import_package
-def client(service_name: str, **kwargs):
-    """Create an AWS client of a certain service.
-
-    Args:
-        service_name: AWS service name (e.g., 's3', 'ec2').
-        kwargs: Other options.
-    """
-    return client_cache(service_name, **kwargs)
-
-
 @import_package
 def resource(resource_name: str, **kwargs):
     """Create an AWS resource.
@@ -69,11 +41,31 @@ def resource(resource_name: str, **kwargs):
     region = kwargs.pop('region', None)
     return utils.resource_cache(resource_name, region, **kwargs)
 
-
+@functools.lru_cache()
 @import_package
 def session():
     """Create an AWS session."""
+    # functools.lru_cache() is used to cache the session object
+    # for each thread.
     return boto3.session.Session()
+
+@functools.lru_cache()
+def client(service_name: str, **kwargs):
+    """Create an AWS client of a certain service.
+
+    Args:
+        service_name: AWS service name (e.g., 's3', 'ec2').
+        kwargs: Other options.
+    """
+    # Need to use the client retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.client() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+    for _ in range(3):
+        try:
+            return session().client(service_name, **kwargs)
+        except KeyError:
+            pass
 
 
 @import_package
