@@ -684,7 +684,7 @@ def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
     vpcs = [vpc for vpc in ec2.vpcs.filter(Filters=filters)]
     if not vpcs:
         logger.error(
-            f"ERROR: No VPC with name {vpc_name!r} is found in "
+            f"SKYPILOT_ERROR: No VPC with name {vpc_name!r} is found in "
             f'{config["provider"]["region"]}. '
             "To fix: specify a correct VPC name."
         )
@@ -692,8 +692,8 @@ def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
         sys.exit(1)
     elif len(vpcs) > 1:
         logger.error(
-            f"ERROR: Multiple VPCs with name {vpc_name!r} found in region "
-            f' {config["provider"]["region"]}: {vpcs}. '
+            f"SKYPILOT_ERROR: Multiple VPCs with name {vpc_name!r} found in "
+            f'{config["provider"]["region"]}: {vpcs}. '
             "It is ambiguous as to which VPC to use. To fix: specify a "
             "VPC name that is uniquely identifying."
         )

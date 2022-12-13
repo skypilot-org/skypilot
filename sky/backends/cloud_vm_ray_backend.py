@@ -669,9 +669,9 @@ class RetryingVmProvisioner(object):
             s.strip()
             for s in stdout_splits + stderr_splits
             # 'An error occurred': boto3 errors
-            # 'ERROR': skypilot's changes to the AWS node provider (for errors
-            #   like VPC setup)
-            if 'An error occurred' in s or 'ERROR: ' in s
+            # 'SKYPILOT_ERROR': skypilot's changes to the AWS node provider
+            #   (for errors like VPC setup)
+            if 'An error occurred' in s or 'SKYPILOT_ERROR: ' in s
         ]
         # Need to handle boto3 printing error but its retry succeeded:
         #   error occurred (Unsupported) .. not supported in your requested
