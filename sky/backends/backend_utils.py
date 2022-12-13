@@ -1604,7 +1604,7 @@ _QUERY_STATUS_FUNCS = {
 
 def _check_user_identity_no_lock(cluster_name: str):
     """Check if the current user is the same as the user who created the cluster."""
-    if env_options.SKIP_CLOUD_IDENTITY_CHECK.get():
+    if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
         return
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
