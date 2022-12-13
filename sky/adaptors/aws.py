@@ -3,11 +3,9 @@
 # pylint: disable=import-outside-toplevel
 
 from functools import wraps
-import threading
 
 boto3 = None
 botocore = None
-cache = threading.local()
 
 
 def import_package(func):

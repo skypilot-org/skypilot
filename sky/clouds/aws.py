@@ -335,6 +335,12 @@ class AWS(clouds.Cloud):
         """Returns the identity of the user on this cloud."""
         try:
             sts = aws.client('sts')
+            # The caller identity contains: UserId, AccountId, Arn.
+            # AWS user ID is unique across all AWS entity. We use it because:
+            # AccountId: can be shared by multiple users under the same
+            # organization
+            # Arn: is the full path to the user, which can be reused when
+            # the user is deleted and recreated.
             user_id = sts.get_caller_identity()['UserId']
         except aws.exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
@@ -354,7 +360,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get AWS user identity with unknown '
-                    f'exception: {e}') from None
+                    f'exception: {e}') from e
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

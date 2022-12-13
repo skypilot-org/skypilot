@@ -464,10 +464,11 @@ class GCP(clouds.Cloud):
                 'gcloud auth list --filter=status:ACTIVE '
                 '--format="value(account)"',
                 shell=True)
-        except subprocess.CalledProcessError:
+        except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'Failed to get the activated GCP account.') from None
+                    'Failed to get GCP user identity with unknown '
+                    f'exception: {e}') from e
         account = account.decode().strip()
         if not account:
             with ux_utils.print_exception_no_traceback():
