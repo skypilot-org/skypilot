@@ -64,11 +64,7 @@ def client(service_name: str, **kwargs):
     # to avoid thread-safety issues (Directly creating the client
     # with boto3.client() is not thread-safe).
     # Reference: https://stackoverflow.com/a/59635814
-    for _ in range(3):
-        try:
-            return session().client(service_name, **kwargs)
-        except KeyError:
-            pass
+    return session().client(service_name, **kwargs)
 
 
 @import_package
