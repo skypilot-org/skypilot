@@ -343,6 +343,13 @@ class AWS(clouds.Cloud):
                 'Failed to access AWS services with credentials. '
                 'Make sure that the access and secret keys are correct.'
             ) from None
+        except aws.exceptions().TokenRetrievalError:
+            raise exceptions.CloudUserIdentityError(
+                'Access token is expired. ') from None
+        except Exception as e:
+            raise exceptions.CloudUserIdentityError(
+                f'Failed to get AWS user identity with unknown exception: {e}'
+            ) from None
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
