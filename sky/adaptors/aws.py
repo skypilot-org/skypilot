@@ -41,6 +41,7 @@ def resource(resource_name: str, **kwargs):
     region = kwargs.pop('region', None)
     return utils.resource_cache(resource_name, region, **kwargs)
 
+
 @functools.lru_cache()
 @import_package
 def session():
@@ -48,6 +49,7 @@ def session():
     # functools.lru_cache() is used to cache the session object
     # for each thread.
     return boto3.session.Session()
+
 
 @functools.lru_cache()
 def client(service_name: str, **kwargs):
