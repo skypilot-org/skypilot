@@ -9,6 +9,7 @@ class Options(enum.Enum):
     SHOW_DEBUG_INFO = 'SKYPILOT_DEBUG'
     DISABLE_LOGGING = 'SKYPILOT_DISABLE_USAGE_COLLECTION'
     MINIMIZE_LOGGING = 'SKYPILOT_MINIMIZE_LOGGING'
+    SKIP_CLOUD_IDENTITY_CHECK = 'SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK'
 
     def get(self):
         """Check if an environment variable is set to True."""

@@ -45,6 +45,7 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
@@ -1603,6 +1604,8 @@ _QUERY_STATUS_FUNCS = {
 
 def _check_user_identity_no_lock(cluster_name: str):
     """Check if the current user is the same as the user who created the cluster."""
+    if env_options.SKIP_CLOUD_IDENTITY_CHECK.get():
+        return
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return
