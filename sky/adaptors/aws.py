@@ -19,27 +19,12 @@ def import_package(func):
                 import botocore as _botocore
                 boto3 = _boto3
                 botocore = _botocore
-                from ray.autoscaler._private.cli_logger import cli_logger
-                cli_logger.configure(verbosity=0)
             except ImportError:
                 raise ImportError('Fail to import dependencies for AWS.'
                                   'Try pip install "skypilot[aws]"') from None
         return func(*args, **kwargs)
 
     return wrapper
-
-
-@import_package
-def resource(resource_name: str, **kwargs):
-    """Create an AWS resource.
-
-    Args:
-        resource_name: AWS resource name (e.g., 's3').
-        kwargs: Other options.
-    """
-    from sky.skylet.providers.aws import utils
-    region = kwargs.pop('region', None)
-    return utils.resource_cache(resource_name, region, **kwargs)
 
 
 @functools.lru_cache()
@@ -49,6 +34,22 @@ def session():
     # functools.lru_cache() is used to cache the session object
     # for each thread.
     return boto3.session.Session()
+
+
+@functools.lru_cache()
+@import_package
+def resource(resource_name: str, **kwargs):
+    """Create an AWS resource.
+
+    Args:
+        resource_name: AWS resource name (e.g., 's3').
+        kwargs: Other options.
+    """
+    # Need to use the resource retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.resource() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+    return session().resource(resource_name, **kwargs)
 
 
 @functools.lru_cache()
