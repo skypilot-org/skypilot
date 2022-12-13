@@ -354,7 +354,8 @@ class GCP(clouds.Cloud):
                     '~/.config/gcloud/access_tokens.db',
                     '~/.config/gcloud/credentials.db'
             ]:
-                assert os.path.isfile(os.path.expanduser(file))
+                if not os.path.isfile(os.path.expanduser(file)):
+                    raise FileNotFoundError(file)
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
 
@@ -363,9 +364,9 @@ class GCP(clouds.Cloud):
 
             # Check if the user is activated.
             self.get_cloud_user_identity()
-        except (AssertionError, auth.exceptions.DefaultCredentialsError,
+        except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
-                exceptions.CloudUserIdentityError, FileNotFoundError, KeyError,
+                exceptions.CloudUserIdentityError, FileNotFoundError,
                 ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
@@ -461,10 +462,8 @@ class GCP(clouds.Cloud):
     def get_cloud_user_identity(self) -> Optional[str]:
         # Returns the email address of the currently activated user.
         try:
-            account = subprocess.check_output(
-                'gcloud auth list --filter=status:ACTIVE '
-                '--format="value(account)"',
-                shell=True)
+            account = _run_output('gcloud auth list --filter=status:ACTIVE '
+                                  '--format="value(account)"')
         except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
