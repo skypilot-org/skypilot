@@ -2,7 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 
-from functools import wraps
+import functools
 
 boto3 = None
 botocore = None
@@ -10,7 +10,7 @@ botocore = None
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global boto3, botocore
         if boto3 is None or botocore is None:
@@ -29,6 +29,23 @@ def import_package(func):
     return wrapper
 
 
+@functools.lru_cache()
+@import_package
+def client_cache(name, **kwargs):
+    # Adapts from sky.skylet.providers.aws.utils, as clients like 'sts'
+    # don't have associated resources, i.e. should not use resource_cache.
+    from ray.autoscaler._private import constants
+    kwargs.setdefault(
+        'config',
+        botocore.config.Config(
+            retries={'max_attempts': constants.BOTO_MAX_RETRIES}),
+    )
+    return boto3.client(
+        name,
+        **kwargs,
+    )
+
+
 @import_package
 def client(service_name: str, **kwargs):
     """Create an AWS client of a certain service.
@@ -37,9 +54,7 @@ def client(service_name: str, **kwargs):
         service_name: AWS service name (e.g., 's3', 'ec2').
         kwargs: Other options.
     """
-    from sky.skylet.providers.aws import utils
-    region = kwargs.pop('region', None)
-    return utils.client_cache(service_name, region, **kwargs)
+    return client_cache(service_name, **kwargs)
 
 
 @import_package
