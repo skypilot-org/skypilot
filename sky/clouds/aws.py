@@ -349,7 +349,7 @@ class AWS(clouds.Cloud):
         except aws.exceptions().TokenRetrievalError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'Access token is expired. ') from None
+                    'AWS access token is expired. ') from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
