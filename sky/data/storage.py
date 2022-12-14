@@ -391,7 +391,7 @@ class Storage(object):
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
-            self.handle = handle 
+            self.handle = handle
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
@@ -429,8 +429,8 @@ class Storage(object):
                 if s.is_sky_managed
             }
             self.handle = self.StorageMetadata(storage_name=self.name,
-                                          source=self.source,
-                                          sky_stores=sky_managed_stores)
+                                               source=self.source,
+                                               sky_stores=sky_managed_stores)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
