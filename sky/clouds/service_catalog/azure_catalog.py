@@ -39,8 +39,8 @@ def get_hourly_cost(instance_type: str,
                     zone: Optional[str] = None) -> float:
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
-    return common.get_hourly_cost_impl(_df, instance_type, region, zone,
-                                       use_spot)
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
