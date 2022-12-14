@@ -391,10 +391,11 @@ class Storage(object):
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
         if handle is not None:
+            self.handle = handle 
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
-            for s_type, s_metadata in handle.sky_stores.items():
+            for s_type, s_metadata in self.handle.sky_stores.items():
                 # When initializing from global_user_state, we override the
                 # source from the YAML
                 if s_type == StoreType.S3:
@@ -427,7 +428,7 @@ class Storage(object):
                 for t, s in self.stores.items()
                 if s.is_sky_managed
             }
-            handle = self.StorageMetadata(storage_name=self.name,
+            self.handle = self.StorageMetadata(storage_name=self.name,
                                           source=self.source,
                                           sky_stores=sky_managed_stores)
 
@@ -439,8 +440,6 @@ class Storage(object):
                         self.add_store(StoreType.S3)
                     elif self.source.startswith('gs://'):
                         self.add_store(StoreType.GCS)
-        assert handle is not None, 'handle should not be None'
-        self.handle = handle
 
     @staticmethod
     def _validate_source(
