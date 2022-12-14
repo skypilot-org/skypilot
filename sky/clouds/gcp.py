@@ -478,7 +478,7 @@ class GCP(clouds.Cloud):
 
         # pylint: disable=import-outside-toplevel
         from sky.utils import tpu_utils
-        return not tpu_utils.is_tpu_vm(resources)
+        return tpu_utils.is_tpu_vm(resources)
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
