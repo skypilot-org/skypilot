@@ -144,8 +144,8 @@ def get_hourly_cost(instance_type: str,
     * If (region, zone) == (str, str), zone must be in the region, and the
         function returns the hourly price of the instance type in the zone.
     """
-    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
-                               zone, use_spot)
+    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type,
+                               use_spot, region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str,

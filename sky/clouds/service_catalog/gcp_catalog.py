@@ -146,9 +146,9 @@ def instance_type_exists(instance_type: str) -> bool:
 
 def get_hourly_cost(
     instance_type: str,
-    region: Optional[str],
-    zone: Optional[str],
     use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
 ) -> float:
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
@@ -296,14 +296,14 @@ def list_accelerators(
         memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
                                                a100_host_vm_type,
+                                               use_spot=False,
                                                region=None,
-                                               zone=None,
-                                               use_spot=False)
+                                               zone=None)
         vm_spot_price = common.get_hourly_cost_impl(_df,
                                                     a100_host_vm_type,
+                                                    use_spot=True,
                                                     region=None,
-                                                    zone=None,
-                                                    use_spot=True)
+                                                    zone=None)
         new_infos[info.accelerator_name].append(
             info._replace(
                 instance_type=a100_host_vm_type,

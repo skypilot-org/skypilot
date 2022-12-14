@@ -190,9 +190,9 @@ def validate_region_zone_impl(
 def get_hourly_cost_impl(
     df: pd.DataFrame,
     instance_type: str,
+    use_spot: bool,
     region: Optional[str],
     zone: Optional[str],
-    use_spot: bool = False,
 ) -> float:
     """Returns the hourly price of a VM instance in the given region and zone.
 
