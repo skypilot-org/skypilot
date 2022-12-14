@@ -2692,8 +2692,11 @@ class CloudVmRayBackend(backends.Backend):
                         require_outputs=True)
 
                     # Needs to create a list as GCP does not allow deleting
-                    # multiple TPU VMs at once
-                    tpu_terminate_cmds = []
+                    # multiple TPU VMs at once.
+                    # Skip the termination commands, if the TPU ID
+                    # query command fails.
+                    tpu_terminate_cmds = [f'exit {returncode}'
+                                         ] if returncode != 0 else []
                     for tpu_id in stdout.splitlines():
                         tpu_terminate_cmds.append(
                             f'gcloud compute tpus tpu-vm delete --zone={zone} '
