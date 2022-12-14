@@ -666,7 +666,7 @@ class Optimizer:
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS', 'REGION (ZONE)'
+            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS', 'REGION/ZONE'
         ]
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
