@@ -66,7 +66,7 @@ class Cloud:
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> Set[Region]:
-        """Look up the regions with the offerings.
+        """Returns the regions that offer the specified resources.
 
         When region or zone is not None, the returned value will be limited to
         the specified region/zone.
