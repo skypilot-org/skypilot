@@ -4,7 +4,7 @@ import os
 
 
 class Options(enum.Enum):
-    """Environment options for SkyPilot."""
+    """Environment variables for SkyPilot."""
     IS_DEVELOPER = 'SKYPILOT_DEV'
     SHOW_DEBUG_INFO = 'SKYPILOT_DEBUG'
     DISABLE_LOGGING = 'SKYPILOT_DISABLE_USAGE_COLLECTION'
