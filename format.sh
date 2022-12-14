@@ -59,12 +59,10 @@ MYPY_FILES=(
 # Runs mypy on each argument in sequence. This is different than running mypy
 # once on the list of arguments.
 mypy_on_each() {
-    pushd python/ray
     for file in "$@"; do
        echo "Running mypy on $file"
        mypy "$file"
     done
-    popd
 }
 
 # Format specified files
