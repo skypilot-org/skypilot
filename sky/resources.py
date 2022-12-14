@@ -277,7 +277,7 @@ class Resources:
 
     def get_offering_regions_for_launchable(self) -> Set[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
-        
+
         Each `Region` has a list of `Zone`s that can provision this Resources.
         """
         assert self.is_launchable()
