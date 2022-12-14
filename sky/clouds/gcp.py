@@ -176,8 +176,11 @@ class GCP(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: Optional[bool] = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        regions = cls.regions_with_offering(instance_type, accelerators,
-                                            use_spot, None, None)
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
         # GCP provisioner currently takes 1 zone per request.
         for region in regions:
             for zone in region.zones:

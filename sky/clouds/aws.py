@@ -103,8 +103,11 @@ class AWS(clouds.Cloud):
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
-        regions = cls.regions_with_offering(instance_type, accelerators,
-                                            use_spot, None, None)
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
         for region in regions:
             yield region, region.zones
 
