@@ -24,6 +24,7 @@ builtin cd "$ROOT" || exit 1
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
 PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
+MYPY_VERSION=$(mypy --version | awk '{print $2}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {
@@ -36,6 +37,7 @@ tool_version_check() {
 tool_version_check "yapf" $YAPF_VERSION "0.32.0"
 tool_version_check "pylint" $PYLINT_VERSION "2.8.2"
 tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "0.2.3"
+tool_version_check "mypy" "$MYPY_VERSION" "0.991"
 
 YAPF_FLAGS=(
     '--recursive'
@@ -45,6 +47,25 @@ YAPF_FLAGS=(
 YAPF_EXCLUDES=(
     '--exclude' 'sky/skylet/providers/**'
 )
+
+# TODO(zhwu): When more of the codebase is typed properly, the mypy flags
+# should be set to do a more stringent check.
+# Keep sync with .github/workflows/mypy.yml
+MYPY_FILES=(
+    # Relative to python/ray
+    'sky/data/storage.py'
+)
+
+# Runs mypy on each argument in sequence. This is different than running mypy
+# once on the list of arguments.
+mypy_on_each() {
+    pushd python/ray
+    for file in "$@"; do
+       echo "Running mypy on $file"
+       mypy "$file"
+    done
+    popd
+}
 
 # Format specified files
 format() {
@@ -74,6 +95,7 @@ format_all() {
     yapf --in-place "${YAPF_FLAGS[@]}" "${YAPF_EXCLUDES[@]}" sky tests examples
 }
 
+
 ## This flag formats individual files. --files *must* be the first command line
 ## arg to use this option.
 if [[ "$1" == '--files' ]]; then
@@ -101,3 +123,7 @@ if ! git diff --quiet &>/dev/null; then
 
     exit 1
 fi
+
+# Run mypy
+echo 'SkyPilot MYPY:'
+mypy_on_each "${MYPY_FILES[@]}"
