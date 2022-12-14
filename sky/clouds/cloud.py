@@ -1,7 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
@@ -59,6 +59,24 @@ class Cloud:
 
     @classmethod
     def regions(cls) -> List[Region]:
+        raise NotImplementedError
+
+    @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> Set[Region]:
+        """Look up the regions with the offerings.
+
+        When region or zone is not None, the returned value will be limited to
+        the specified region/zone.
+
+        Returns:
+            A set of `Region`s that have the offerings for the specified
+            resources.
+            For each `Region` in the set, `region.zones` is the list of in that
+            region that has the resources.
+        """
         raise NotImplementedError
 
     @classmethod

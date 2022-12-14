@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -275,49 +275,16 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def get_valid_region_zones_for_launchable(
-            self) -> List[Tuple[clouds.Region, List[clouds.Zone]]]:
+    def get_valid_region_zones_for_launchable(self) -> Set[clouds.Region]:
         """Returns a set of (region, zone) that can provision this Resources."""
         assert self.is_launchable()
-
-        # Get the resource-offering regions and zones.
-        region_zones = list(
-            self._cloud.region_zones_provision_loop(
-                instance_type=self._instance_type,
-                accelerators=self.accelerators,
-                use_spot=self._use_spot))
-        if isinstance(self._cloud, clouds.GCP):
-            # GCP provision loop yields 1 zone per request. For consistency with
-            # other clouds, we should group the zones in the same region.
-            # Otherwise, there will be duplicate regions in the returned list.
-            gcp_region_zones = []
-            regions = set()
-            # This utilizes the knowledge that GCP.region_zones_provision_loop()
-            # will set the zones field of each returned Region to be the
-            # resource-offering zones.
-            for region, _ in region_zones:
-                if region.name not in regions:
-                    regions.add(region.name)
-                    gcp_region_zones.append((region, region.zones))
-            region_zones = gcp_region_zones
-
-        # If the region or zone is specified, filter out the other regions
-        # and zones.
-        if self._region is None:
-            return region_zones
-        filtered_region_zones = []
-        for region, zones in region_zones:
-            if region.name != self._region:
-                continue
-            if self._zone is None:
-                filtered_region_zones.append((region, zones))
-            else:
-                filtered_zones = [
-                    zone for zone in zones if zone.name == self._zone
-                ]
-                if filtered_zones:
-                    filtered_region_zones.append((region, filtered_zones))
-        return filtered_region_zones
+        regions = self._cloud.regions_with_offering(self._instance_type,
+                                                    self.accelerators,
+                                                    self._use_spot,
+                                                    self._region, self._zone)
+        if self._image_id is not None:
+            regions = [r for r in regions if r.name in self._image_id]
+        return regions
 
     def _try_validate_instance_type(self) -> None:
         if self.instance_type is None:
@@ -605,7 +572,7 @@ class Resources:
 
     def should_be_blocked_by(self, blocked: 'Resources') -> bool:
         """Whether this Resources matches the blocked Resources.
-        
+
         If a field in `blocked` is None, it should be considered as a wildcard
         for that field.
         """

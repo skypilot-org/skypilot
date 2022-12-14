@@ -856,12 +856,12 @@ def _make_launchables_for_valid_region_zones(
     # TODO(woosuk): A better design is to implement batching at a higher level
     # (e.g., in provisioner or optimizer), not here.
     launchables = []
-    region_zones = launchable_resources.get_valid_region_zones_for_launchable()
-    for region, zones in region_zones:
+    regions = launchable_resources.get_valid_region_zones_for_launchable()
+    for region in regions:
         if launchable_resources.use_spot:
             # Spot instances.
             # Do not batch the per-zone requests.
-            for zone in zones:
+            for zone in region.zones:
                 launchables.append(
                     launchable_resources.copy(region=region.name,
                                               zone=zone.name))

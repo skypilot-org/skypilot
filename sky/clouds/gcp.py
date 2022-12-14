@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from google import auth
 
@@ -122,17 +122,13 @@ class GCP(clouds.Cloud):
         return cls._regions
 
     @classmethod
-    def region_zones_provision_loop(
-        cls,
-        *,
-        instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        # GCP provisioner currently takes 1 zone per request.
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> Set[clouds.Region]:
         if accelerators is None:
             if instance_type is None:
-                # fallback to manually specified region/zones
+                # Fall back to default regions
                 regions = cls.regions()
             else:
                 regions = service_catalog.get_region_zones_for_instance_type(
@@ -163,6 +159,26 @@ class GCP(clouds.Cloud):
                             regions.append(r1.set_zones(zones))
                         break
 
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
+
+        return set(regions)
+
+    @classmethod
+    def region_zones_provision_loop(
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: Optional[bool] = False,
+    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        regions = cls.regions_with_offering(instance_type, accelerators,
+                                            use_spot, None, None)
+        # GCP provisioner currently takes 1 zone per request.
         for region in regions:
             for zone in region.zones:
                 yield (region, [zone])
