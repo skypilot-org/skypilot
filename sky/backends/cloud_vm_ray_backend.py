@@ -1059,8 +1059,8 @@ class RetryingVmProvisioner(object):
             cloud = handle.launched_resources.cloud
             cloud_user_id = backend_utils.get_cloud_user_identity_no_error(
                 cloud)
-            global_user_state.set_cluster_user_identity(cluster_name,
-                                                        cloud_user_id)
+            global_user_state.set_user_identity_for_cluster(
+                cluster_name, cloud_user_id)
 
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:

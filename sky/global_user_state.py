@@ -272,15 +272,15 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_cluster_user_identity(cluster_name: str) -> Optional[str]:
+def get_user_identity_for_cluster(cluster_name: str) -> Optional[str]:
     metadata = get_cluster_metadata(cluster_name)
     if metadata is None:
         return None
     return metadata.get('user_identity')
 
 
-def set_cluster_user_identity(cluster_name: str,
-                              user_identity: Optional[str]) -> None:
+def set_user_identity_for_cluster(cluster_name: str,
+                                  user_identity: Optional[str]) -> None:
     if user_identity is None:
         return
     # This must be called when the lock is acquired for the cluster.
