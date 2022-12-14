@@ -1,0 +1,36 @@
+name: yapf
+
+on:
+  # Trigger the workflow on push or pull request,
+  # but only for the main branch
+  push:
+    branches:
+      - master
+      - 'releases/**'
+  pull_request:
+    branches:
+      - master
+      - 'releases/**'
+jobs:
+  yapf:
+    # Need to specify 20.04, because ubuntu-latest does not work with
+    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        python-version: ["3.9"]
+        mypy-path:
+          - sky/data/storage.py
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mypy==0.991
+    - name: Running yapf
+      run: |
+        mypy ${{ matrix.mypy-path }}

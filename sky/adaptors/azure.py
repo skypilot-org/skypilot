@@ -13,7 +13,7 @@ def import_package(func):
         global azure
         if azure is None:
             try:
-                import azure as _azure
+                import azure as _azure # type: ignore
                 azure = _azure
             except ImportError:
                 raise ImportError('Fail to import dependencies for Azure.'

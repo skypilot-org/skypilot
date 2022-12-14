@@ -110,7 +110,7 @@ def _group_files_by_dir(
     return grouped_files, dirs
 
 
-def parallel_upload(source_path_list: List[Path],
+def parallel_upload(source_path_list: List[str],
                     filesync_command_generator: Callable[[str, List[str]], str],
                     dirsync_command_generator: Callable[[str, str], str],
                     bucket_name: str,
