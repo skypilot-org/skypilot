@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-20.04
     strategy:
       matrix:
-        python-version: ["3.9"]
+        python-version: ["3.8"]
         mypy-path:
           - sky/data/storage.py
     steps:
