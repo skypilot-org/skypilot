@@ -363,7 +363,7 @@ class GCP(clouds.Cloud):
             project_id = self.get_project_id()
 
             # Check if the user is activated.
-            self.get_cloud_user_identity()
+            self.get_current_user_identity()
         except (auth.exceptions.DefaultCredentialsError,
                 subprocess.CalledProcessError,
                 exceptions.CloudUserIdentityError, FileNotFoundError,
@@ -459,8 +459,8 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
-    def get_cloud_user_identity(self) -> Optional[str]:
-        # Returns the email address of the currently activated user.
+    def get_current_user_identity(self) -> Optional[str]:
+        """Returns the email address + project id of the active user."""
         try:
             account = _run_output('gcloud auth list --filter=status:ACTIVE '
                                   '--format="value(account)"')
@@ -472,8 +472,11 @@ class GCP(clouds.Cloud):
         if not account:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'No GCP account is activated.')
-        return f'{account}@{self.get_project_id()}'
+                    'No GCP account is activated. Try running `gcloud '
+                    'auth list --filter=status:ACTIVE '
+                    '--format="value(account)"` and ensure it correctly '
+                    'returns the current user.')
+        return f'{account}[project={self.get_project_id()}]'
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')

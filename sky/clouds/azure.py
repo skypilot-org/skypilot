@@ -280,11 +280,9 @@ class Azure(clouds.Cloud):
                 '\n      $ pip install .[azure]  # if installed from source'
                 '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return the account email
-        # address.
-        # and if not, it will return:
-        #   Please run 'az login' to setup account.
+        # address + subscription ID.
         try:
-            self.get_cloud_user_identity()
+            self.get_current_user_identity()
         except exceptions.CloudUserIdentityError:
             return False, 'Azure credential is not set.' + help_str
         return True, None
@@ -308,13 +306,13 @@ class Azure(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
 
-    def get_cloud_user_identity(self) -> Optional[str]:
+    def get_current_user_identity(self) -> Optional[str]:
         """Returns the cloud user identity."""
-        # This returns the user's email address + @subscription_id.
+        # This returns the user's email address + [subscription_id].
         try:
             import knack  # pylint: disable=import-outside-toplevel
-            account_email = azure.get_account_user()
-        except (FileNotFoundError, knack.util.CLIError, ImportError):
+            account_email = azure.get_current_account_user()
+        except (FileNotFoundError, knack.util.CLIError):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get activated Azure account.') from None
@@ -323,7 +321,7 @@ class Azure(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure user identity with unknown '
                     f'exception: {type(e)} {e}') from e
-        return f'{account_email}@{self.get_project_id()}'
+        return f'{account_email}[subscription={self.get_project_id()}]'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

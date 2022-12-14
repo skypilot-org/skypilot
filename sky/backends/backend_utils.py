@@ -1604,7 +1604,7 @@ _QUERY_STATUS_FUNCS = {
 
 def get_cloud_user_identity_no_error(cloud: clouds.Cloud) -> Optional[str]:
     try:
-        return cloud.get_cloud_user_identity()
+        return cloud.get_current_user_identity()
     except exceptions.CloudUserIdentityError as e:
         logger.warning(
             f'Failed to get the current user identity for {cloud}: {e}')
@@ -1628,6 +1628,9 @@ def _check_user_identity_no_lock(cluster_name: str):
         # or we fail to get the user identity.
         return
     user_identity = global_user_state.get_cluster_user_identity(cluster_name)
+    # The user identity can be None, if the cluster is created by an older
+    # version of SkyPilot. In that case, we set the user identity to the
+    # current one.
     if user_identity is None:
         global_user_state.set_cluster_user_identity(cluster_name,
                                                     current_user_identity)

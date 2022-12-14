@@ -189,9 +189,27 @@ class Cloud:
         """
         raise NotImplementedError
 
-    def get_cloud_user_identity(self) -> Optional[str]:
-        """Returns the identity of the user on this cloud.
+    def get_current_user_identity(self) -> Optional[str]:
+        """(Advanced) Returns currently active user identity of on this cloud.
 
+        The user "identity" is associated with each SkyPilot cluster they
+        creates. This is used in protecting cluster operations in a multi-
+        identity scenario, where the same user/device can switch between
+        different cloud identities.
+
+        The choice of what constitutes an identity is up to each cloud's
+        implementation. In general, to suffice for the above purposes,
+        ensure that different identities imply different resources are
+        displayed in the cloud's console.
+
+        Example identities (see cloud implementations):
+            - AWS: unique aws:user_id
+            - GCP: email address + project ID
+            - Azure: email address + subscription ID
+
+        Returns:
+            None if the cloud does not have a concept of user identity;
+            otherwise the currently active user identity.
         Raises:
             exceptions.CloudUserIdentityError: If the user identity cannot be
                 retrieved.

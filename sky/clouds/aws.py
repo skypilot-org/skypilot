@@ -323,7 +323,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            self.get_cloud_user_identity()
+            self.get_current_user_identity()
         except exceptions.CloudUserIdentityError as e:
             return False, (str(e) + help_str)
 
@@ -331,16 +331,19 @@ class AWS(clouds.Cloud):
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, None
 
-    def get_cloud_user_identity(self) -> Optional[str]:
+    def get_current_user_identity(self) -> Optional[str]:
         """Returns the identity of the user on this cloud."""
         try:
             sts = aws.client('sts')
             # The caller identity contains: UserId, AccountId, Arn.
-            # AWS user ID is unique across all AWS entity. We use it because:
+            # User ID: is unique across all AWS entity, which looks like
+            # "AROADBQP57FF2AEXAMPLE:role-session-name"
             # AccountId: can be shared by multiple users under the same
             # organization
             # Arn: is the full path to the user, which can be reused when
             # the user is deleted and recreated.
+            # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
+            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html # pylint: disable=line-too-long
             user_id = sts.get_caller_identity()['UserId']
         except aws.exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
@@ -353,14 +356,17 @@ class AWS(clouds.Cloud):
                     'Make sure that the access and secret keys are correct.'
                 ) from None
         except aws.exceptions().TokenRetrievalError:
+            # This is raised when the access token is expired, which mainly
+            # happens when the user is using temporary credentials or SSO
+            # login.
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'AWS access token is expired. ') from None
+                    'AWS access token is expired.') from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get AWS user identity with unknown '
-                    f'exception: {type(e)} {e}') from e
+                    f'exception: {type(e)} {e}.') from e
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

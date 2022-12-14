@@ -108,7 +108,16 @@ def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool,
                           is_launch: bool = True):
-    """Adds or updates cluster_name -> cluster_handle mapping."""
+    """Adds or updates cluster_name -> cluster_handle mapping.
+
+    Args:
+        cluster_name: Name of the cluster.
+        cluster_handle: Backend.ResourceHandle of the cluster.
+        ready: Whether the cluster is ready to use. If False, the cluster will
+            be marked as INIT, otherwise it will be marked as UP.
+        is_launch: if the cluster is firstly launched. If True, the launched_at
+            and last_use will be updated. Otherwise, use the old value.
+    """
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
