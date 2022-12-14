@@ -2657,7 +2657,6 @@ class CloudVmRayBackend(backends.Backend):
         elif (terminate and
               (prev_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
-            terminate_cmds = []
             # For TPU VMs, gcloud CLI is used for VM termination.
             if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
@@ -2670,7 +2669,7 @@ class CloudVmRayBackend(backends.Backend):
                     f'Name=tag:ray-cluster-name,Values={handle.cluster_name} '
                     f'--query Reservations[].Instances[].InstanceId '
                     '--output text')
-                terminate_cmds.append(
+                terminate_cmd = (
                     f'aws ec2 terminate-instances --region {region} '
                     f'--instance-ids $({query_cmd})')
             elif isinstance(cloud, clouds.GCP):
@@ -2694,16 +2693,18 @@ class CloudVmRayBackend(backends.Backend):
 
                     # Needs to create a list as GCP does not allow deleting
                     # multiple TPU VMs at once
+                    tpu_terminate_cmds = []
                     for tpu_id in stdout.splitlines():
-                        terminate_cmds.append(
+                        tpu_terminate_cmds.append(
                             f'gcloud compute tpus tpu-vm delete --zone={zone} '
                             f'--quiet {tpu_id}')
+                    terminate_cmd = ' && '.join(tpu_terminate_cmds)
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='
                         f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zones={zone} --format=value\\(name\\)')
-                    terminate_cmds.append(
+                    terminate_cmd = (
                         f'gcloud compute instances delete --zone={zone}'
                         f' --quiet $({query_cmd})')
             else:
@@ -2712,13 +2713,12 @@ class CloudVmRayBackend(backends.Backend):
                                      f'cluster {cluster_name!r}.')
             with backend_utils.safe_console_status(f'[bold cyan]Terminating '
                                                    f'[green]{cluster_name}'):
-                for terminate_cmd in terminate_cmds:
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        terminate_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
+                returncode, stdout, stderr = log_lib.run_with_log(
+                    terminate_cmd,
+                    log_abs_path,
+                    shell=True,
+                    stream_logs=False,
+                    require_outputs=True)
         else:
             config['provider']['cache_stopped_nodes'] = not terminate
             with tempfile.NamedTemporaryFile('w',
