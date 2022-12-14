@@ -471,11 +471,7 @@ class GCP(clouds.Cloud):
     def need_cleanup_after_preemption(self,
                                       resources: 'resources.Resources') -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""
-        # By default, GCP Compute VMs are restartable after preemption.
-        # "If ... not specified, then Compute Engine stops the VM,
-        # transitioning the VM to a TERMINATED state."
-        # See: https://cloud.google.com/compute/docs/instances/spot#preemption-process # pylint: disable=line-too-long
-        # However, Spot TPU VMs are not restartable after preemption.
+        # Spot TPU VMs require manual cleanup after preemption.
         # "If your Cloud TPU is preempted,
         # you must delete it and create a new one ..."
         # See: https://cloud.google.com/tpu/docs/preemptible#tpu-vm

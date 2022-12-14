@@ -216,8 +216,14 @@ class Cloud:
 
     def need_cleanup_after_preemption(self,
                                       resource: 'resources.Resources') -> bool:
-        """Returns whether a spot resource needs cleanup after preeemption."""
-        raise NotImplementedError
+        """Returns whether a spot resource needs cleanup after preeemption.
+
+        In most cases, spot resources do not need cleanup after preemption.
+        The only exception by far is GCP's Spot TPU VM. We override this method
+        in gcp.py.
+        """
+        del resource
+        return False
 
     def __repr__(self):
         return self._REPR

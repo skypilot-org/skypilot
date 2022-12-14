@@ -1233,22 +1233,17 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                                                       shell=True,
                                                       stream_logs=False,
                                                       require_outputs=True)
-    if returncode != 0:
-        failure_massage = ('Failed to run gcloud to get TPU VM IDs.\n'
-                           '**** STDOUT ****\n'
-                           f'{stdout}\n'
-                           '**** STDERR ****\n'
-                           f'{stderr}\n'
-                           '**** CMD ****\n'
-                           f'{query_cmd}\n')
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(failure_massage)
+    subprocess_utils.handle_returncode(
+        returncode,
+        query_cmd,
+        'Failed to run gcloud to get TPU VM IDs.',
+        stderr=stdout + stderr)
     if len(stdout) == 0:
         logger.warning('No TPU VMs found with cluster name '
                        f'{cluster_name} in zone {zone}.')
     if len(stdout.splitlines()) > 1:
-        logger.warning('Found more than one TPU VM with cluster name '
-                       f'{cluster_name} in zone {zone}.')
+        logger.warning('Found more than one TPU VM/Pod with the same cluster '
+                       f'name {cluster_name} in zone {zone}.')
 
     all_ips = []
     for tpu_id in stdout.splitlines():
@@ -1259,16 +1254,11 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
                                                           shell=True,
                                                           stream_logs=False,
                                                           require_outputs=True)
-        if returncode != 0:
-            failure_massage = ('Failed to run gcloud tpu-vm describe.\n'
-                               '**** STDOUT ****\n'
-                               f'{stdout}\n'
-                               '**** STDERR ****\n'
-                               f'{stderr}\n'
-                               '**** CMD ****\n'
-                               f'{tpuvm_cmd}\n')
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(failure_massage)
+        subprocess_utils.handle_returncode(
+            returncode,
+            tpuvm_cmd,
+            'Failed to run gcloud tpu-vm describe.',
+            stderr=stdout + stderr)
 
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
