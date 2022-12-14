@@ -335,12 +335,12 @@ class AWS(clouds.Cloud):
         """Returns the identity of the user on this cloud."""
         try:
             sts = aws.client('sts')
-            # The caller identity contains: UserId, AccountId, Arn.
-            # User ID: is unique across all AWS entity, which looks like
+            # The caller identity contains 3 fields: UserId, AccountId, Arn.
+            # 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
-            # AccountId: can be shared by multiple users under the same
+            # 'AccountId' can be shared by multiple users under the same
             # organization
-            # Arn: is the full path to the user, which can be reused when
+            # 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html # pylint: disable=line-too-long
