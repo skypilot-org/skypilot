@@ -275,7 +275,7 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def get_valid_region_zones_for_launchable(self) -> Set[clouds.Region]:
+    def get_offering_regions_for_launchable(self) -> Set[clouds.Region]:
         """Returns a set of (region, zone) that can provision this Resources."""
         assert self.is_launchable()
         regions = self._cloud.regions_with_offering(self._instance_type,
