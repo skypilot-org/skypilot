@@ -1239,9 +1239,10 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         'Failed to run gcloud to get TPU VM IDs.',
         stderr=stdout + stderr)
     if len(stdout) == 0:
-        logger.warning('No TPU VMs found with cluster name '
-                       f'{cluster_name} in zone {zone}.')
+        logger.debug('No TPU VMs found with cluster name '
+                     f'{cluster_name} in zone {zone}.')
     if len(stdout.splitlines()) > 1:
+        # Rare case, this could mean resource leakage. Hint user.
         logger.warning('Found more than one TPU VM/Pod with the same cluster '
                        f'name {cluster_name} in zone {zone}.')
 
