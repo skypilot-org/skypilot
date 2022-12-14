@@ -226,25 +226,14 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    # def download_remote_dir(self, local_path: str) -> None:
-    #     """Downloads directory from remote bucket to the specified
-    #     local_path
+    def download_remote_dir(self, local_path: str) -> None:
+        """Downloads directory from remote bucket to the specified
+        local_path
 
-    #     Args:
-    #       local_path: Local path on user's device
-    #     """
-    #     assert local_path is not None
-    #     local_path = os.path.expanduser(local_path)
-    #     iterator = self._remote_filepath_iterator()
-    #     for remote_path in iterator:
-    #         remote_path = next(iterator)
-    #         if remote_path[-1] == '/':
-    #             continue
-    #         path = os.path.join(local_path, remote_path)
-    #         if not os.path.exists(os.path.dirname(path)):
-    #             os.makedirs(os.path.dirname(path))
-    #         logger.info(f'Downloading {remote_path} to {path}')
-    #         self._download_file(remote_path, path)
+        Args:
+          local_path: Local path on user's device
+        """
+        raise NotImplementedError
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on Store
