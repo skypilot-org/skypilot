@@ -74,8 +74,9 @@ class Cloud:
         Returns:
             A set of `Region`s that have the offerings for the specified
             resources.
-            For each `Region` in the set, `region.zones` is the list of in that
-            region that has the resources.
+            For each `Region` in the set, `region.zones` is the list of `Zone`s
+            which have the offerings. For the clouds that do not expose `Zone`s,
+            `region.zones` is an empty list.
         """
         raise NotImplementedError
 
