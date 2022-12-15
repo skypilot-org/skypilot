@@ -10,6 +10,7 @@ import urllib.parse
 import uuid
 
 import colorama
+import jinja2
 import pytest
 
 import sky
@@ -30,6 +31,12 @@ _smoke_test_hash = hashlib.md5(
 # from the different spot launch with the same cluster name but a different job
 # id.
 test_id = str(uuid.uuid4())[-2:]
+
+storage_setup_commands = [
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
+    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
+    'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
+]
 
 
 class Test(NamedTuple):
@@ -327,21 +334,49 @@ def test_env_check():
 # ---------- file_mounts ----------
 def test_file_mounts():
     name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        f'sky launch -y -c {name} examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
     test = Test(
         'using_file_mounts',
-        [
-            'touch ~/tmpfile',
-            'mkdir -p ~/tmp-workdir',
-            'touch ~/tmp-workdir/tmp\ file',
-            'touch ~/tmp-workdir/foo',
-            'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
-            f'sky launch -y -c {name} examples/using_file_mounts.yaml',
-            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-        ],
+        test_commands,
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
+
+
+# ---------- storage ----------
+def test_storage_mounts():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name}-aws --cloud aws {file_path}',
+            f'sky logs {name}-aws 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky storage delete {storage_name}',  # Prepare for next cloud
+            f'sky launch -y -c {name}-gcp --cloud gcp {file_path}',
+            f'sky logs {name}-gcp 1 --status',  # Ensure job succeeded.
+            f'gsutil ls gs://{storage_name}/hello.txt',
+        ]
+        test = Test(
+            'storage_mounts',
+            test_commands,
+            f'sky down -y {name}-aws {name}-gcp; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
 
 
 # ---------- CLI logs ----------
@@ -921,7 +956,7 @@ def test_spot_cancellation():
              '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
@@ -974,6 +1009,7 @@ def test_spot_storage():
         test = Test(
             'managed-spot-storage',
             [
+                *storage_setup_commands,
                 f'sky spot launch -n {name} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
                 f'sky spot queue | grep {name} | grep SUCCEEDED',
