@@ -1532,7 +1532,7 @@ class RetryingVmProvisioner(object):
                 logger.warning(
                     f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
                     f'{to_provision} in {region_or_zone_str}. '
-                    f'Trying other launchable resources (if any).'
+                    f'Trying other locations (if any).'
                     f'{style.RESET_ALL}')
                 if not cluster_exists:
                     # Add failed resources to the blocklist, only when it
