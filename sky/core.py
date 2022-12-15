@@ -51,6 +51,41 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
             'metadata': (dict) metadata of the cluster,
         }
 
+    Each cluster can have one of the following statuses:
+
+    - ``INIT``: The cluster may be live or down. It can happen in the following
+      cases:
+
+      - Ongoing provisioning or runtime setup. (A ``sky.launch()`` has started
+        but has not completed.)
+      - Or, the cluster is in an abnormal state, e.g., some cluster nodes are
+        down, or the SkyPilot runtime is unhealthy. (To recover the cluster,
+        try ``sky launch`` again on it.)
+
+    - ``UP``: Provisioning and runtime setup have succeeded and the cluster is
+      live.  (The most recent ``sky.launch()`` has completed successfully.)
+
+    - ``STOPPED``: The cluster is stopped and the storage is persisted. Use
+      ``sky.start()`` to restart the cluster.
+
+    Autostop column:
+
+    - The autostop column indicates how long the cluster will be autostopped
+      after minutes of idling (no jobs running). If ``to_down`` is True, the
+      cluster will be autodowned, rather than autostopped.
+
+    Getting up-to-date cluster statuses:
+
+    - In normal cases where clusters are entirely managed by SkyPilot (i.e., no
+      manual operations in cloud consoles) and no autostopping is used, the
+      table returned by this command will accurately reflect the cluster
+      statuses.
+
+    - In cases where the clusters are changed outside of SkyPilot (e.g., manual
+      operations in cloud consoles; unmanaged spot clusters getting preempted)
+      or for autostop-enabled clusters, use ``refresh=True`` to query the
+      latest cluster statuses from the cloud providers.
+
     Args:
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
@@ -88,6 +123,19 @@ def _start(
         raise exceptions.NotSupportedError(
             f'Starting cluster {cluster_name!r} with backend {backend.NAME} '
             'is not supported.')
+
+    if cluster_name == spot.SPOT_CONTROLLER_NAME:
+        if down:
+            raise ValueError('Using autodown (rather than autostop) is not '
+                             'supported for the spot controller. Pass '
+                             '`down=False` or omit it instead.')
+        if idle_minutes_to_autostop is not None:
+            raise ValueError(
+                'Passing a custom autostop setting is currently not '
+                'supported when starting the spot controller. To '
+                'fix: omit the `idle_minutes_to_autostop` argument to use the '
+                f'default autostop settings (got: {idle_minutes_to_autostop}).')
+        idle_minutes_to_autostop = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
 
     # NOTE: if spot_queue() calls _start() and hits here, that entrypoint
     # would have a cluster name (the controller) filled in.
@@ -148,8 +196,12 @@ def start(
             Useful for upgrading SkyPilot runtime.
 
     Raises:
-        ValueError: the specified cluster does not exist; or if ``down`` is set
-          to True but ``idle_minutes_to_autostop`` is None.
+        ValueError: argument values are invalid: (1) the specified cluster does
+          not exist; (2) if ``down`` is set to True but
+          ``idle_minutes_to_autostop`` is None; (3) if the specified cluster is
+          the managed spot controller, and either ``idle_minutes_to_autostop``
+          is not None or ``down`` is True (omit them to use the default
+          autostop settings).
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
@@ -253,16 +305,35 @@ def autostop(
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Schedule or cancel an autostop/autodown for a cluster.
+    """Schedule an autostop/autodown for a cluster.
 
-    When multiple configurations are specified for the same cluster (e.g., this
-    function is called multiple times), the last one takes precedence.
+    Autostop/autodown will automatically stop or teardown a cluster when it
+    becomes idle for a specified duration.  Idleness means there are no
+    in-progress (pending/running) jobs in a cluster's job queue.
+
+    Idleness time of a cluster is reset to zero, whenever:
+
+    - A job is submitted (``sky.launch()`` or ``sky.exec()``).
+
+    - The cluster has restarted.
+
+    - An autostop is set when there is no active setting. (Namely, either
+      there's never any autostop setting set, or the previous autostop setting
+      was canceled.) This is useful for restarting the autostop timer.
+
+    Example: say a cluster without any autostop set has been idle for 1 hour,
+    then an autostop of 30 minutes is set. The cluster will not be immediately
+    autostopped. Instead, the idleness timer only starts counting after the
+    autostop setting was set.
+
+    When multiple autostop settings are specified for the same cluster, the
+    last setting takes precedence.
 
     Args:
         cluster_name: name of the cluster.
         idle_minutes: the number of minutes of idleness (no pending/running
           jobs) after which the cluster will be stopped automatically. Setting
-          to a negative number means cancel any autostop/autodown setting.
+          to a negative number cancels any autostop/autodown setting.
         down: if true, use autodown (tear down the cluster; non-restartable),
           rather than autostop (restartable).
 
@@ -612,9 +683,7 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
               'Restarting controller for latest status...'
               f'{colorama.Style.RESET_ALL}')
 
-        handle = _start(spot.SPOT_CONTROLLER_NAME,
-                        idle_minutes_to_autostop=spot.
-                        SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP)
+        handle = _start(spot.SPOT_CONTROLLER_NAME)
 
     if handle is None or handle.head_ip is None:
         raise exceptions.ClusterNotUpError('Spot controller is not up.')
@@ -709,7 +778,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     # TODO(zhwu): Automatically restart the spot controller
     controller_status, handle = _is_spot_controller_up(
         'Please restart the spot controller with '
-        f'`sky start {spot.SPOT_CONTROLLER_NAME} -i 5`.')
+        f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:

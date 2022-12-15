@@ -1,4 +1,4 @@
-name: Run Python Tests
+name: Python Tests
 on:
   # Trigger the workflow on push or pull request,
   # but only for the main branch
@@ -11,10 +11,9 @@ on:
       - master
       - 'releases/**'
 jobs:
-  test:
+  python-test:
     strategy:
       matrix:
-        os: ["ubuntu-latest"]
         python-version: [3.6]
         test-path:
           - tests/test_cli.py
@@ -26,7 +25,9 @@ jobs:
           - tests/test_storage.py
           - tests/test_wheels.py
           - tests/test_spot.py
-    runs-on: ${{ matrix.os }}
+    # Need to specify 20.04, because ubuntu-latest does not work with
+    # python 3.6: https://github.com/actions/setup-python/issues/355#issuecomment-1335042510
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v2
@@ -44,7 +45,6 @@ jobs:
           key: ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
           restore-keys: |
             ${{ runner.os }}-pip-pytest-${{ matrix.python-version }}
-
 
       - name: Install dependencies
         run: |
