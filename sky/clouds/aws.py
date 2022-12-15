@@ -324,7 +324,7 @@ class AWS(clouds.Cloud):
         except subprocess.CalledProcessError:
             return False, (
                 'AWS CLI is not installed properly.'
-                ' Run the following commands in the skypilot codebase:'
+                ' Run the following commands in the SkyPilot codebase:'
                 '\n     $ pip install .[aws]'
                 '\n   Credentials may also need to be set. ' +
                 self._STATIC_CREDENTIAL_HELP_STR)
