@@ -205,6 +205,8 @@ def start(
         sky.exceptions.NotSupportedError: if the cluster to restart was
           launched using a non-default backend that does not support this
           operation.
+        sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
+            restart was launched by a different user.
     """
     if down and idle_minutes_to_autostop is None:
         raise ValueError(
@@ -826,6 +828,7 @@ def storage_delete(name: str) -> None:
     Raises:
         ValueError: If the storage does not exist.
     """
+    # TODO(zhwu): check the storage owner matches the current user
     handle = global_user_state.get_handle_from_storage_name(name)
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')

@@ -1059,7 +1059,7 @@ class RetryingVmProvisioner(object):
             cloud = handle.launched_resources.cloud
             cloud_user_id = backend_utils.get_cloud_user_identity_no_error(
                 cloud)
-            global_user_state.set_user_identity_for_cluster(
+            global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_id)
 
             tpu_name = config_dict.get('tpu_name')
@@ -1874,6 +1874,9 @@ class CloudVmRayBackend(backends.Backend):
         """Provisions using 'ray up'."""
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
+        # Check if the cluster is owned by the current user. Raise
+        # exceptions.ClusterOwnerIdentityMismatchError
+        backend_utils.check_owner_identity(cluster_name)
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
         with timeline.FileLockEvent(lock_path):
@@ -2444,6 +2447,9 @@ class CloudVmRayBackend(backends.Backend):
                   terminate: bool,
                   purge: bool = False):
         cluster_name = handle.cluster_name
+        # Check if the cluster is owned by the current user. Raise
+        # exceptions.ClusterOwnerIdentityMismatchError
+        backend_utils.check_owner_identity(cluster_name)
         lock_path = os.path.expanduser(
             backend_utils.CLUSTER_STATUS_LOCK_PATH.format(cluster_name))
 

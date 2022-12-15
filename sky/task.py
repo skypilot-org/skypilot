@@ -8,7 +8,6 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import yaml
 
 import sky
-from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state

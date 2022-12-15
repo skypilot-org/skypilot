@@ -1990,9 +1990,12 @@ def start(
                        retry_until_up,
                        down=down,
                        force=force)
+        except exceptions.ClusterOwnerIdentityMismatchError as e:
+            click.echo(str(e))
         except exceptions.NotSupportedError as e:
             click.echo(str(e))
-        click.secho(f'Cluster {name} started.', fg='green')
+        else:
+            click.secho(f'Cluster {name} started.', fg='green')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2271,6 +2274,8 @@ def _down_or_stop_clusters(
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     'Please check the logs and try again.'
                     f'{colorama.Style.RESET_ALL}')
+            except exceptions.ClusterOwnerIdentityMismatchError as e:
+                message = str(e)
             except exceptions.NotSupportedError as e:
                 message = str(e)
             else:  # no exception raised

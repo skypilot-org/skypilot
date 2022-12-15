@@ -137,3 +137,8 @@ class InvalidClusterNameError(Exception):
 class CloudUserIdentityError(Exception):
     """Raised when the cloud identity is invalid."""
     pass
+
+
+class ClusterOwnerIdentityMismatchError(Exception):
+    """The cluster owner identity does not match user identity."""
+    pass

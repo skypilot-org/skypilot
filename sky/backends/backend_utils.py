@@ -1156,7 +1156,6 @@ def get_node_ips(cluster_yaml: str,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster, with head node at front."""
-
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
     # won't work and we need to query the node IPs with gcloud as
@@ -1610,8 +1609,16 @@ def get_cloud_user_identity_no_error(cloud: clouds.Cloud) -> Optional[str]:
             f'Failed to get the current user identity for {cloud}: {e}')
 
 
-def _check_user_identity_no_lock(cluster_name: str):
-    """Check if the current user is the same as the user who created the cluster."""
+def check_owner_identity(cluster_name: str):
+    """Check if the current user is the same as the user who created the cluster.
+
+    This should be called before any operation that will modify the cluster, or query
+    from the cloud provider.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+            same as the user who created the cluster.
+    """
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
         return
     record = global_user_state.get_cluster_from_name(cluster_name)
@@ -1623,23 +1630,22 @@ def _check_user_identity_no_lock(cluster_name: str):
 
     cloud = handle.launched_resources.cloud
     current_user_identity = get_cloud_user_identity_no_error(cloud)
+    owner_identity = record['owner']
     if current_user_identity is None:
         # Skip the check if the cloud does not support user identity,
         # or we fail to get the user identity.
         return
-    user_identity = global_user_state.get_user_identity_for_cluster(
-        cluster_name)
     # The user identity can be None, if the cluster is created by an older
     # version of SkyPilot. In that case, we set the user identity to the
     # current one.
-    if user_identity is None:
-        global_user_state.set_user_identity_for_cluster(cluster_name,
-                                                        current_user_identity)
-    elif user_identity != current_user_identity:
+    if owner_identity is None:
+        global_user_state.set_owner_identity_for_cluster(
+            cluster_name, current_user_identity)
+    elif owner_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterStatusFetchingError(
+            raise exceptions.ClusterOwnerIdentityMismatchError(
                 f'The cluster {cluster_name!r} (on {cloud}) is created by the account '
-                f'{user_identity!r}, but the activated one is {current_user_identity!r}.'
+                f'{owner_identity!r}, but the activated one is {current_user_identity!r}.'
             )
 
 
@@ -1748,8 +1754,8 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_identity_and_status(
-        cluster_name: str, update_status: bool,
+def _update_cluster_status(
+        cluster_name: str,
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
     """Update the cluster identity and status.
 
@@ -1763,16 +1769,10 @@ def _update_cluster_identity_and_status(
       If the cluster is terminated or does not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
     """
-
-    def apply_check():
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        _check_user_identity_no_lock(cluster_name)
-        if update_status:
-            record = _update_cluster_status_no_lock(cluster_name)
-        return record
+    check_owner_identity(cluster_name)
 
     if not acquire_per_cluster_status_lock:
-        return apply_check()
+        return _update_cluster_status_no_lock(cluster_name)
 
     try:
         # TODO(mraheja): remove pylint disabling when filelock
@@ -1780,7 +1780,7 @@ def _update_cluster_identity_and_status(
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(CLUSTER_STATUS_LOCK_PATH.format(cluster_name),
                                CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-            return apply_check()
+            return _update_cluster_status_no_lock(cluster_name)
     except filelock.Timeout:
         logger.debug(
             f'Refreshing status: Failed get the lock for cluster {cluster_name!r}.'
@@ -1803,15 +1803,14 @@ def refresh_cluster_status_handle(
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         use_spot = handle.launched_resources.use_spot
-        update_status = (force_refresh or record['autostop'] >= 0 or use_spot)
-        # Refresh the status only when force_refresh is True or the cluster
-        # has autostopped turned on or the cluster is a spot cluster.
-        record = _update_cluster_identity_and_status(
-            cluster_name,
-            update_status=update_status,
-            acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
-        if record is None:
-            return None, None
+        if (force_refresh or record['autostop'] >= 0 or use_spot):
+            # Refresh the status only when force_refresh is True or the cluster
+            # has autostopped turned on.
+            record = _update_cluster_status(
+                cluster_name,
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+            if record is None:
+                return None, None
     return record['status'], record['handle']
 
 
@@ -1883,11 +1882,10 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _update_cluster_identity_and_status(
-                cluster_name,
-                update_status=True,
-                acquire_per_cluster_status_lock=True)
-        except exceptions.ClusterStatusFetchingError as e:
+            record = _update_cluster_status(
+                cluster_name, acquire_per_cluster_status_lock=True)
+        except (exceptions.ClusterStatusFetchingError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record

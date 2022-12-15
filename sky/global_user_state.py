@@ -63,6 +63,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'owner', 'TEXT')
     conn.commit()
 
 
@@ -272,23 +273,24 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_user_identity_for_cluster(cluster_name: str) -> Optional[str]:
-    metadata = get_cluster_metadata(cluster_name)
-    if metadata is None:
-        return None
-    return metadata.get('user_identity')
+def get_owner_identity_for_cluster(cluster_name: str) -> Optional[str]:
+    rows = _DB.cursor.execute('SELECT owner FROM clusters WHERE name=(?)',
+                              (cluster_name,))
+    for (owner,) in rows:
+        return owner
 
 
-def set_user_identity_for_cluster(cluster_name: str,
-                                  user_identity: Optional[str]) -> None:
-    if user_identity is None:
+def set_owner_identity_for_cluster(cluster_name: str,
+                                   owner_identity: Optional[str]) -> None:
+    if owner_identity is None:
         return
-    # This must be called when the lock is acquired for the cluster.
-    metadata = get_cluster_metadata(cluster_name)
-    if metadata is None:
-        metadata = {}
-    metadata['user_identity'] = user_identity
-    set_cluster_metadata(cluster_name, metadata)
+    _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
+                       (owner_identity, cluster_name))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
 
 
 def get_cluster_from_name(
@@ -296,7 +298,7 @@ def get_cluster_from_name(
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,))
     for (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down) in rows:
+         to_down, owner) in rows:
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -305,6 +307,7 @@ def get_cluster_from_name(
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
+            'owner': owner,
             'metadata': json.loads(metadata),
         }
         return record
@@ -315,7 +318,7 @@ def get_clusters() -> List[Dict[str, Any]]:
         'select * from clusters order by launched_at desc')
     records = []
     for (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down) in rows:
+         to_down, owner) in rows:
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -325,6 +328,7 @@ def get_clusters() -> List[Dict[str, Any]]:
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
+            'owner': owner,
             'metadata': json.loads(metadata),
         }
         records.append(record)
