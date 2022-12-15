@@ -677,12 +677,8 @@ class Task:
             storage_cloud = resources.cloud
             if storage_cloud is None:
                 # Get the first enabled cloud.
+                backend_utils.check_public_cloud_enabled()
                 enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    check.check(quiet=True)
-                    enabled_clouds = global_user_state.get_enabled_clouds()
-                if len(enabled_clouds) == 0:
-                    raise ValueError('No enabled clouds.')
 
                 for cloud in storage_lib.STORE_ENABLED_CLOUDS:
                     for enabled_cloud in enabled_clouds:
