@@ -669,9 +669,9 @@ class RetryingVmProvisioner(object):
             s.strip()
             for s in stdout_splits + stderr_splits
             # 'An error occurred': boto3 errors
-            # 'SKYPILOT_ERROR': skypilot's changes to the AWS node provider
-            #   (for errors like VPC setup)
-            if 'An error occurred' in s or 'SKYPILOT_ERROR: ' in s
+            # 'ERROR_NO_NODES_LAUNCHED': skypilot's changes to the AWS node
+            #    provider; for errors prior to provisioning like VPC setup.
+            if 'An error occurred' in s or 'ERROR_NO_NODES_LAUNCHED: ' in s
         ]
         # Need to handle boto3 printing error but its retry succeeded:
         #   error occurred (Unsupported) .. not supported in your requested
@@ -760,36 +760,50 @@ class RetryingVmProvisioner(object):
         self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
-                                   stderr) -> None:
+                                   stderr) -> bool:
         """Handles cloud-specific errors and updates the block list.
 
         This parses textual stdout/stderr because we don't directly use the
         underlying clouds' SDKs.  If we did that, we could catch proper
         exceptions instead.
+
+        Returns:
+          definitely_no_nodes_launched: bool, True if definitely no nodes
+            launched (e.g., due to VPC errors we have never sent the provision
+            request), False otherwise.
         """
         if stdout is None:
-            # Gang scheduling failure.  Simply block the region.
+            # Gang scheduling failure (head node is definitely up, but some
+            # workers' provisioning failed).  Simply block the region.
             assert stderr is None, stderr
             self._blocked_regions.add(region.name)
-            return
+            return False  # definitely_no_nodes_launched
 
-        if isinstance(cloud, clouds.GCP):
-            return self._update_blocklist_on_gcp_error(region, zones, stdout,
-                                                       stderr)
+        # TODO(zongheng): refactor into Cloud interface?
+        handlers = {
+            clouds.AWS: self._update_blocklist_on_aws_error,
+            clouds.Azure: self._update_blocklist_on_azure_error,
+            clouds.GCP: self._update_blocklist_on_gcp_error,
+            clouds.Local: self._update_blocklist_on_local_error,
+        }
+        cloud_type = type(cloud)
+        if cloud_type not in handlers:
+            raise NotImplementedError(
+                'Cloud {cloud} unknown, or has not added '
+                'support for parsing and handling provision failures.')
+        handler = handlers[cloud_type]
+        handler(region, zones, stdout, stderr)
 
-        if isinstance(cloud, clouds.AWS):
-            return self._update_blocklist_on_aws_error(region, zones, stdout,
-                                                       stderr)
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        head_node_launch_requested = any(
+            line.startswith('<1/1> Setting up head node')
+            for line in stdout_splits + stderr_splits)
 
-        if isinstance(cloud, clouds.Azure):
-            return self._update_blocklist_on_azure_error(
-                region, zones, stdout, stderr)
-
-        if isinstance(cloud, clouds.Local):
-            return self._update_blocklist_on_local_error(
-                region, zones, stdout, stderr)
-
-        assert False, f'Unknown cloud: {cloud}.'
+        # If head node request has not been sent (this happens when there are
+        # errors during node provider "bootstrapping", e.g., VPC-not-found
+        # errors), then definitely no nodes are launched.
+        return not head_node_launch_requested
 
     def _yield_region_zones(self, to_provision: resources_lib.Resources,
                             cluster_name: str, cluster_exists: bool):
@@ -1108,47 +1122,65 @@ class RetryingVmProvisioner(object):
                                 f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
-            # The cluster is not ready.
+            # The cluster is not ready. We must perform error recording and/or
+            # cleanup.
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            need_terminate = not is_prev_cluster_healthy
+            terminate_or_stop = not is_prev_cluster_healthy
+            definitely_no_nodes_launched = False
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
-                self._update_blocklist_on_error(to_provision.cloud, region,
-                                                zones, stdout, stderr)
+                definitely_no_nodes_launched = self._update_blocklist_on_error(
+                    to_provision.cloud, region, zones, stdout, stderr)
             else:
                 # gang scheduling failed.
                 assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
-                self._update_blocklist_on_error(
+                definitely_no_nodes_launched = self._update_blocklist_on_error(
                     to_provision.cloud,
                     region,
                     # Ignored and block region:
                     zones=None,
                     stdout=None,
                     stderr=None)
+                # GANG_FAILED means head is up, workers failed.
+                assert definitely_no_nodes_launched is False, (
+                    definitely_no_nodes_launched)
 
                 # Only log the errors for GANG_FAILED, since HEAD_FAILED may
                 # not have created any resources (it can happen however) and
                 # HEAD_FAILED can happen in "normal" failover cases.
                 logger.error('*** Failed provisioning the cluster. ***')
-                terminate_str = 'Terminating' if need_terminate else 'Stopping'
+                terminate_str = ('Terminating'
+                                 if terminate_or_stop else 'Stopping')
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-            # There may exists partial nodes (e.g., head node) so we must
+            # If these conditions hold, it *should* be safe to skip the cleanup
+            # action.
+            #
+            # We want to skip mainly for custom VPC: if users encountered "No
+            # VPC with name 'xxx' is found in <region>.", then going ahead to
+            # down the non-existent cluster will itself error out with the same
+            # error message.  This was found to be confusing. In that case we
+            # skip termination.
+            skip_cleanup = not cluster_exists and definitely_no_nodes_launched
+            if skip_cleanup:
+                continue
+
+            # There may exist partial nodes (e.g., head node) so we must
             # terminate or stop before moving on to other regions.
             #
-            # NOTE: even HEAD_FAILED could've left a live head node there, so
-            # we must terminate/stop here too. E.g., node is up, and ray
+            # NOTE: even HEAD_FAILED could've left a live head node there,
+            # so we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
             CloudVmRayBackend().teardown_no_lock(handle,
-                                                 terminate=need_terminate)
+                                                 terminate=terminate_or_stop)
 
         message = ('Failed to acquire resources in all regions/zones of '
                    f'{to_provision.cloud}. '
@@ -1932,7 +1964,7 @@ class CloudVmRayBackend(backends.Backend):
                             'Failed to provision all possible launchable '
                             'resources.'
                             f' Relax the task\'s resource requirements: '
-                            f'{task.num_nodes}x {task.resources}')
+                            f'{task.num_nodes}x {list(task.resources)[0]}')
                     if retry_until_up:
                         logger.error(error_message)
                         # Sleep and retry.
@@ -2749,11 +2781,17 @@ class CloudVmRayBackend(backends.Backend):
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
                         reason='stopping/terminating cluster nodes'))
-            # This error returns when we call "gcloud delete" with an empty VM
-            # list where no instance exists. Safe to ignore it and do cleanup
-            # locally.
-            # TODO(wei-lin): refactor error handling mechanism.
-            elif 'TPU must be specified.' not in stderr:
+            # 'TPU must be specified.': This error returns when we call "gcloud
+            #   delete" with an empty VM list where no instance exists. Safe to
+            #   ignore it and do cleanup locally. TODO(wei-lin): refactor error
+            #   handling mechanism.
+            #
+            # 'ERROR_NO_NODES_LAUNCHED': this indicates nodes are never
+            #   launched and the errors are related to pre-launch
+            #   configurations (such as VPC not found). So it's safe & good UX
+            #   to not print a failure message.
+            elif ('TPU must be specified.' not in stderr and
+                  'ERROR_NO_NODES_LAUNCHED: ' not in stderr):
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
