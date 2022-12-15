@@ -768,14 +768,6 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
-    login_user = None
-    try:
-        login_user = getpass.getuser()
-    except Exception:  # pylint: disable=broad-except
-        # https://docs.python.org/3/library/getpass.html#getpass.getuser
-        # did not specify what exceptions will be raised if all attempts fail.
-        pass
-
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -790,7 +782,7 @@ def write_cluster_config(
                 # If the current code is run by controller, propagate the real
                 # calling user which should've been passed in as the
                 # SKYPILOT_USER env var (see spot-controller.yaml.j2).
-                'user': os.environ.get('SKYPILOT_USER', login_user),
+                'user': os.environ.get('SKYPILOT_USER', getpass.getuser()),
 
                 # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.
