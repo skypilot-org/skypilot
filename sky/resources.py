@@ -127,7 +127,11 @@ class Resources:
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
-        return (f'{self.cloud}({self._instance_type}{use_spot}'
+        if self._instance_type is not None:
+            instance_type = f'{self._instance_type}'
+        else:
+            instance_type = '<instance_type not set>'
+        return (f'{self.cloud}({instance_type}{use_spot}'
                 f'{accelerators}{accelerator_args}{image_id}{disk_size})')
 
     @property
