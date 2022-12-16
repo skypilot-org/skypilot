@@ -529,7 +529,7 @@ def spot_launch(
             'logging_user_hash': common_utils.get_user_hash(),
             'retry_until_up': retry_until_up,
         }
-        if sky_config.loaded():
+        if sky_config.exists():
             # Look up the contents of the already loaded configs via the
             # 'sky_config' module. Don't simply read the on-disk file as it may
             # have changed since this process started.
@@ -538,12 +538,17 @@ def spot_launch(
             # launched behind the proxy, and in general any nodes we launch may
             # not have or need the proxy setup.
             config_dict = sky_config.pop_nested(('auth', 'ssh_proxy_command'))
-            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
-                common_utils.dump_yaml(tmpfile.name, config_dict)
-                vars_to_fill.update({
-                    'user_config_path': tmpfile.name,
-                    'remote_user_config_path': sky_config.REMOTE_CONFIG_PATH,
-                })
+            if config_dict:
+                with tempfile.NamedTemporaryFile(mode='w',
+                                                 delete=False) as tmpfile:
+                    common_utils.dump_yaml(tmpfile.name, config_dict)
+                    vars_to_fill.update({
+                        'user_config_path': tmpfile.name,
+                        'remote_user_config_path':
+                            sky_config.REMOTE_CONFIG_PATH,
+                        'skypilot_config_env_var':
+                            sky_config.SKYPILOT_CONFIG_ENV_VAR,
+                    })
 
         yaml_path = backend_utils.fill_template(
             spot.SPOT_CONTROLLER_TEMPLATE,

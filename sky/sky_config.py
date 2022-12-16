@@ -1,11 +1,25 @@
 """Immutable user configurations (EXPERIMENTAL).
 
-On module import, we attempt to parse the config located at CONFIG_PATH. Caller
-can then use
+On module import, we parse the config file pointed to by an env var
+('SKYPILOT_CONFIG').
 
-  >> sky_config.loaded()
+User example usage:
 
-to check if the config is successfully loaded.
+    # Use a config.
+    SKYPILOT_CONFIG=config1.yaml sky launch ...
+
+    # This `sky launch` will use a different config.
+    SKYPILOT_CONFIG=config2.yaml sky launch ...
+
+    # No configs will be used.
+    SKYPILOT_CONFIG=nonexist-file sky launch ...
+    sky launch ...
+
+Module API:
+
+To check if the config is successfully loaded and non-empty:
+
+  >> sky_config.exists()
 
 To read a nested-key config:
 
@@ -15,10 +29,8 @@ To pop a nested-key config:
 
   >> config_dict = sky_config.pop_nested(('auth', 'some_key'))
 
-This operation returns a deep-copy dict, and is safe in that any key not found
-will not raise an error.
-
-Example usage:
+The pop operation returns a deep-copy dict, and is safe in that any key not
+found will not raise an error.
 
 Consider the following config contents:
 
@@ -28,59 +40,69 @@ Consider the following config contents:
 
 then:
 
-    # Assuming ~/.sky/config.yaml exists and can be loaded:
-    sky_config.loaded()  # ==> True
+    # Assuming SKYPILOT_CONFIG=~/.sky/config.yaml and it can be loaded:
+    sky_config.exists()  # ==> True
 
     sky_config.get_nested(('a', 'nested'), None)    # ==> 1
     sky_config.get_nested(('a', 'nonexist'), None)  # ==> None
     sky_config.get_nested(('a',), None)             # ==> {'nested': 1}
 
-    # If ~/.sky/config.yaml doesn't exist or failed to be loaded:
-    sky_config.loaded()  # ==> False
+    # If no env var is set, any set path doesn't exist, or it can't be loaded:
+    sky_config.exists()  # ==> False
     sky_config.get_nested(('a', 'nested'), None)    # ==> None
     sky_config.get_nested(('a', 'nonexist'), None)  # ==> None
     sky_config.get_nested(('a',), None)             # ==> None
 """
 import copy
+import functools
 import os
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
 from sky import sky_logging
 from sky.utils import common_utils
 
-# Path to the local config file.
-CONFIG_PATH = os.path.expanduser('~/.sky/config.yaml')
-# Remote cluster path where the local config file will be synced to.
+# An env var holding the path to the local config file.
+SKYPILOT_CONFIG_ENV_VAR = 'SKYPILOT_CONFIG'
+
+# (Used for spot controller) Remote cluster path where the local config file
+# will be synced to.
 REMOTE_CONFIG_PATH = '~/.sky/config.yaml'  # Do not expanduser.
 
 logger = sky_logging.init_logger(__name__)
 
-# Load on import.
 
-# The loaded config.
-_dict = None
-if os.path.exists(CONFIG_PATH):
-    try:
-        _dict = common_utils.read_yaml(CONFIG_PATH)
-    except yaml.YAMLError as e:
-        logger.error(f'Error in loading config file ({CONFIG_PATH}):', e)
+@functools.lru_cache(maxsize=1)  # Read once and cache.
+def _get_config() -> Optional[Dict[str, Any]]:
+    """Reads the config pointed to by the SKYPILOT_CONFIG_ENV_VAR env var.
+
+    Returns None if the env var is not set, or if it points to a non-existent
+    file or a file that fails to be raed.
+    """
+    config_path = os.environ.get(SKYPILOT_CONFIG_ENV_VAR)
+    config = None
+    if config_path is None:
+        return None
+    config_path = os.path.expanduser(config_path)
+    if os.path.exists(config_path):
+        try:
+            config = common_utils.read_yaml(config_path)
+        except yaml.YAMLError as e:
+            logger.error(f'Error in loading config file ({config_path}):', e)
+    else:
+        logger.error(f'Config file ({config_path}) doesn\'t exist. No config '
+                     'values will be used.')
+    return config
 
 
-def _check_loaded_or_die():
-    """Checks loaded() is true; otherwise raises RuntimeError."""
-    global _dict
-    if _dict is None:
-        raise RuntimeError(
-            f'No user configs loaded. Check {CONFIG_PATH} exists and '
-            'can be loaded.')
+# Load on module import.
+_get_config()
 
 
-def loaded() -> bool:
-    """Returns if the user configurations are loaded."""
-    global _dict
-    return _dict is not None
+def exists() -> bool:
+    """Returns if the user configurations exist and are non-empty."""
+    return _get_config() is not None
 
 
 def get_nested(keys: Tuple[str], default_value: Any) -> Any:
@@ -89,10 +111,11 @@ def get_nested(keys: Tuple[str], default_value: Any) -> Any:
     If any key is not found, or any intermediate key does not point to a dict
     value, returns 'default_value'.
     """
-    global _dict
-    if _dict is None:
+    config = _get_config()
+    if config is None:
         return default_value
-    curr = _dict
+
+    curr = config
     for key in keys:
         if isinstance(curr, dict) and key in curr:
             curr = curr[key]
@@ -108,9 +131,10 @@ def pop_nested(keys: Tuple[str]) -> Dict[str, Any]:
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
-    _check_loaded_or_die()
-    global _dict
-    curr = copy.deepcopy(_dict)
+    config = _get_config()
+    if config is None:
+        return {}
+    curr = copy.deepcopy(config)
     to_return = curr
     prev = None
     for i, key in enumerate(keys):
