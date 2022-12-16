@@ -232,7 +232,7 @@ def test_image_id_dict_with_region():
 def test_image_id_dict_with_zone():
     name = _get_cluster_name()
     test = Test(
-        'image_id_dict_with_region',
+        'image_id_dict_with_zone',
         [
             # Use zone to filter image_id dict.
             f'sky launch -y -c {name} --zone us-west-2b examples/per_region_images.yaml && exit 1 || true',
