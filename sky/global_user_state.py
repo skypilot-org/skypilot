@@ -292,7 +292,7 @@ def set_owner_identity_for_cluster(cluster_name: str,
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
-                              (cluster_name,)).fetch_all()
+                              (cluster_name,)).fetchall()
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner) = row[:9]
