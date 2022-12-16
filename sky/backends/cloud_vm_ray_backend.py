@@ -2693,9 +2693,29 @@ class CloudVmRayBackend(backends.Backend):
                         f'gcloud compute tpus tpu-vm list --filter='
                         f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zone={zone} --format=value\\(name\\)')
-                    terminate_cmd = (
-                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        query_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+
+                    # Skip the termination command, if the TPU ID
+                    # query command fails.
+                    if returncode != 0:
+                        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
+                                         f'echo "{stdout}" && '
+                                         f'echo "{stderr}" >&2 && '
+                                         f'exit {returncode}')
+                    else:
+                        # Needs to create a list as GCP does not allow deleting
+                        # multiple TPU VMs at once.
+                        tpu_terminate_cmds = []
+                        for tpu_id in stdout.splitlines():
+                            tpu_terminate_cmds.append(
+                                'gcloud compute tpus tpu-vm delete '
+                                f'--zone={zone} --quiet {tpu_id}')
+                        terminate_cmd = ' && '.join(tpu_terminate_cmds)
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='
