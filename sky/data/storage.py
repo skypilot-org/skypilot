@@ -5,6 +5,7 @@ import subprocess
 import time
 import typing
 from typing import Any, Dict, Optional, Tuple, Type, Union, List
+from typing_extensions import TypeAlias
 import urllib.parse
 
 import colorama
@@ -28,9 +29,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
+Path: TypeAlias = str
+SourceType: TypeAlias = Union[Path, List[Path]]
 
 # Clouds with object storage implemented in this module. Azure Blob
 # Storage isn't supported yet (even though Azure is).
@@ -130,7 +132,7 @@ class AbstractStore:
         def __init__(self,
                      *,
                      name: str,
-                     source: Union[Path, List[Path], None],
+                     source: Optional[SourceType],
                      region: Optional[str] = None,
                      is_sky_managed: Optional[bool] = None):
             self.name = name
@@ -147,7 +149,7 @@ class AbstractStore:
 
     def __init__(self,
                  name: str,
-                 source: Union[Path, List[Path], None],
+                 source: Optional[SourceType],
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None):
         """Initialize AbstractStore
@@ -302,7 +304,7 @@ class Storage(object):
             self,
             *,
             storage_name: Optional[str],
-            source: Union[str, List[str], None],
+            source: Optional[SourceType],
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
@@ -329,7 +331,7 @@ class Storage(object):
 
     def __init__(self,
                  name: Optional[str] = None,
-                 source: Union[Path, List[Path], None] = None,
+                 source: Optional[SourceType] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
@@ -371,6 +373,8 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for sky storage delete.
         """
+        self.name = name
+        self.source = source
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
@@ -382,7 +386,8 @@ class Storage(object):
         self.force_delete = False
 
         # Validate and correct inputs if necessary
-        self.name, self.source = self._validate_storage_spec(name, source)
+        self._validate_storage_spec()
+        assert self.name is not None
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
@@ -443,8 +448,8 @@ class Storage(object):
 
     @staticmethod
     def _validate_source(
-            source: Union[str, List[str]], mode: StorageMode,
-            sync_on_reconstruction: bool) -> Tuple[Union[str, List[str]], bool]:
+            source: SourceType, mode: StorageMode,
+            sync_on_reconstruction: bool) -> Tuple[SourceType, bool]:
         """Validates the source path.
 
         Args:
@@ -539,25 +544,22 @@ class Storage(object):
                         f'Supported paths: local, s3://, gs://. Got: {source}')
         return source, is_local_source
 
-    def _validate_storage_spec(
-        self,
-        name: Optional[str],
-        source: Union[Path, List[Path], None],
-    ) -> Tuple[str, Union[Path, List[Path], None]]:
+
+    def _validate_storage_spec(self) -> None:
         """
         Validates the storage spec and updates local fields if necessary.
         """
-        if source is None:
+        if self.source is None:
             # If the mode is COPY, the source must be specified
             if self.mode == StorageMode.COPY:
                 # Check if a Storage object already exists in global_user_state
                 # (e.g. used as scratch previously). Such storage objects can be
                 # mounted in copy mode even though they have no source in the
                 # yaml spec (the name is the source).
-                handle = global_user_state.get_handle_from_storage_name(name)
+                handle = global_user_state.get_handle_from_storage_name(
+                    self.name)
                 if handle is not None:
-                    assert name is not None
-                    return name, source
+                    return
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSourceError(
@@ -567,32 +569,31 @@ class Storage(object):
                 # If source is not specified in COPY mode, the intent is to
                 # create a bucket and use it as scratch disk. Name must be
                 # specified to create bucket.
-                if not name:
+                if not self.name:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageSpecError(
                             'Storage source or storage name must be specified.')
                 else:
                     # Create bucket and mount
-                    return name, source
-        elif source is not None:
+                    return
+        elif self.source is not None:
             source, is_local_source = Storage._validate_source(
-                source, self.mode, self.sync_on_reconstruction)
-
-            if not name:
+                self.source, self.mode, self.sync_on_reconstruction)
+            if not self.name:
                 if is_local_source:
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.StorageNameError(
                             'Storage name must be specified if the source is '
                             'local.')
                 else:
-                    assert isinstance(source, str), source
+                    assert isinstance(source, str)
                     # Set name to source bucket name and continue
-                    name = urllib.parse.urlsplit(source).netloc
-                    return name, source
+                    self.name = urllib.parse.urlsplit(source).netloc
+                    return
             else:
                 if is_local_source:
                     # If name is specified and source is local, upload to bucket
-                    return name, source
+                    return
                 else:
                     # Both name and source should not be specified if the source
                     # is a URI. Name will be inferred from the URI.
