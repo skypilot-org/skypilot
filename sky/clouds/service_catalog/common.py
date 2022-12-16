@@ -96,23 +96,32 @@ def read_catalog(filename: str,
         if _need_update():
             url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
             update_frequency_str = ''
+            filename_str = f' ({filename})'
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
             with backend_utils.safe_console_status(
-                    f'Updating {cloud} catalog{update_frequency_str}'):
+                    f'Updating {cloud} catalog{filename_str}{update_frequency_str}'):
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
-                    logger.error(f'Failed to download {cloud} catalog:')
-                    with ux_utils.print_exception_no_traceback():
-                        raise e
-            # Save the catalog to a local file.
-            os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-            with open(catalog_path, 'w') as f:
-                f.write(r.text)
-            with open(meta_path + '.md5', 'w') as f:
-                f.write(hashlib.md5(r.text.encode()).hexdigest())
+                    ux_utils.console_newline()
+                    error_str = f'Failed to fetch {cloud} catalog{filename_str}. '
+                    if os.path.exists(catalog_path):
+                        logger.warn(f'{error_str}Using cached catalog files.')
+                        # Update catalog file modification time.
+                        os.utime(catalog_path, None)    # Sets to current time
+                    else:
+                        logger.error(f'{error_str}Please check your internet connection.')
+                        with ux_utils.print_exception_no_traceback():
+                            raise e
+                else:
+                    # Download successful, save the catalog to a local file.
+                    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+                    with open(catalog_path, 'w') as f:
+                        f.write(r.text)
+                    with open(meta_path + '.md5', 'w') as f:
+                        f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:
         df = pd.read_csv(catalog_path)
