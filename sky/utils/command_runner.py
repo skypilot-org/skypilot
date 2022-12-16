@@ -316,17 +316,15 @@ class SSHCommandRunner:
         # --filter
         rsync_command.append(RSYNC_FILTER_OPTION)
 
-        # --exclude-from
-        resolved_source = pathlib.Path(source).expanduser().resolve()
-        if (resolved_source / GIT_EXCLUDE).exists():
-            # Ensure file exists; otherwise, rsync will error out.
-            rsync_command.append(
-                RSYNC_EXCLUDE_OPTION.format(str(resolved_source / GIT_EXCLUDE)))
-
-        # rsync doesn't support '~' in a quoted target path. need to expand it.
-        full_source_str = str(resolved_source)
-        if resolved_source.is_dir():
-            full_source_str = os.path.join(full_source_str, '')
+        if up:
+            # The source is a local path, so we need to resolve it.
+            # --exclude-from
+            resolved_source = pathlib.Path(source).expanduser().resolve()
+            if (resolved_source / GIT_EXCLUDE).exists():
+                # Ensure file exists; otherwise, rsync will error out.
+                rsync_command.append(
+                    RSYNC_EXCLUDE_OPTION.format(
+                        str(resolved_source / GIT_EXCLUDE)))
 
         ssh_options = ' '.join(
             ssh_options_list(
@@ -336,15 +334,20 @@ class SSHCommandRunner:
             ))
         rsync_command.append(f'-e "ssh {ssh_options}"')
         # To support spaces in the path, we need to quote source and target.
+        # rsync doesn't support '~' in a quoted local path, but it is ok to
+        # have '~' in a quoted remote path.
         if up:
+            full_source_str = str(resolved_source)
+            if resolved_source.is_dir():
+                full_source_str = os.path.join(full_source_str, '')
             rsync_command.extend([
                 f'{full_source_str!r}',
                 f'{self.ssh_user}@{self.ip}:{target!r}',
             ])
         else:
             rsync_command.extend([
-                f'{self.ssh_user}@{self.ip}:{full_source_str!r}',
-                f'{target!r}',
+                f'{self.ssh_user}@{self.ip}:{source!r}',
+                f'{os.path.expanduser(target)!r}',
             ])
         command = ' '.join(rsync_command)
 

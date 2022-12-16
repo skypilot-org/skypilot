@@ -276,10 +276,6 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                                            launched_resources.region)
         return launch_time
 
-    def terminate_cluster(self, max_retry: int = 3) -> None:
-        super().terminate_cluster(max_retry)
-        self._launched_cloud_region = None
-
     def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
@@ -313,7 +309,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                     return launched_time
 
             # Step 2
-            logger.debug('Terminating unhealthy spot cluster.')
+            logger.debug('Terminating unhealthy spot cluster and '
+                         'reset cloud region.')
+            self._launched_cloud_region = None
             self.terminate_cluster()
 
             # Step 3

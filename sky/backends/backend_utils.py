@@ -789,6 +789,10 @@ def write_cluster_config(
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
+                # If the current code is run by controller, propagate the real
+                # calling user which should've been passed in as the
+                # SKYPILOT_USER env var (see spot-controller.yaml.j2).
+                'user': os.environ.get('SKYPILOT_USER', getpass.getuser()),
 
                 # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.
@@ -1264,34 +1268,58 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
                  f'\\(labels.ray-cluster-name={cluster_name}\\) '
                  f'--zone={zone} --format=value\\(name\\)')
-    if not get_internal_ips:
-        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                     '(networkEndpoints.accessConfig.externalIp)"')
-    else:
-        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                     '(networkEndpoints.ipAddress)"')
+    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
+                                                      '/dev/null',
+                                                      shell=True,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+    subprocess_utils.handle_returncode(
+        returncode,
+        query_cmd,
+        'Failed to run gcloud to get TPU VM IDs.',
+        stderr=stdout + stderr)
+    if len(stdout) == 0:
+        logger.debug('No TPU VMs found with cluster name '
+                     f'{cluster_name} in zone {zone}.')
+    if len(stdout.splitlines()) > 1:
+        # Rare case, this could mean resource leakage. Hint user.
+        logger.warning('Found more than one TPU VM/Pod with the same cluster '
+                       f'name {cluster_name} in zone {zone}.')
 
-    rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                 '/dev/null',
-                                                 shell=True,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
-    if rcode != 0:
-        failure_massage = ('Failed to run gcloud to get TPU VM Pod IPs.\n'
-                           '**** STDOUT ****\n'
-                           '{stdout}\n'
-                           '**** STDERR ****\n'
-                           '{stderr}\n'
-                           '**** CMD ****\n'
-                           '{tpuvm_cmd}')
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                failure_massage.format(stdout=stdout,
-                                       stderr=stderr,
-                                       tpuvm_cmd=tpuvm_cmd))
-    all_ips = re.findall(IP_ADDR_REGEX, stdout)
+    all_ips = []
+    for tpu_id in stdout.splitlines():
+        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
+                     f' --zone {zone} --format=json')
+        returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+                                                          '/dev/null',
+                                                          shell=True,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            tpuvm_cmd,
+            'Failed to run gcloud tpu-vm describe.',
+            stderr=stdout + stderr)
+
+        tpuvm_json = json.loads(stdout)
+        if tpuvm_json['state'] != 'READY':
+            # May be a leaked preempted resource.
+            logger.warning(f'TPU VM {tpu_id} is not in READY state. '
+                           'Could be a garbage resource. Skipping...')
+            continue
+
+        if not get_internal_ips:
+            ips = [
+                endpoint['accessConfig']['externalIp']
+                for endpoint in tpuvm_json['networkEndpoints']
+            ]
+        else:
+            ips = [
+                endpoint['ipAddress']
+                for endpoint in tpuvm_json['networkEndpoints']
+            ]
+        all_ips.extend(ips)
+
     return all_ips
 
 
