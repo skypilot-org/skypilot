@@ -850,6 +850,9 @@ class RetryingVmProvisioner(object):
                     elif cloud.is_same_cloud(clouds.Azure()):
                         region = config['provider']['location']
                         zones = None
+                    elif cloud.is_same_cloud(clouds.Lambda()):
+                        region = config['provider']['region']
+                        zones = None
                     elif cloud.is_same_cloud(clouds.Local()):
                         local_regions = clouds.Local.regions()
                         region = local_regions[0].name

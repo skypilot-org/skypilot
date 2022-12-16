@@ -1,4 +1,5 @@
 """Lambda."""
+import json
 import os
 import subprocess
 import typing
@@ -11,9 +12,9 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.aws that grant AWS access.
+# Minimum set of files under ~/.lambda that grant AWS access.
 _CREDENTIAL_FILES = [
-    'credentials',
+    'lambda_keys',
 ]
 
 
@@ -23,7 +24,19 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def regions(cls):
-        cls._regions = [clouds.Region('us-tx-1'), clouds.Region('us-az-1')]
+        cls._regions = [
+            clouds.Region('us-east-1'),
+            clouds.Region('us-west-2'),
+            clouds.Region('australia-southeast-1'),
+            clouds.Region('europe-central-1'),
+            clouds.Region('asia-south-1'),
+            clouds.Region('me-west-1'),
+            clouds.Region('europe-south-1'),
+            clouds.Region('asia-northeast-1'),
+            clouds.Region('asia-northeast-2'),
+            clouds.Region('us-west-1'),
+            clouds.Region('us-south-1'),
+        ]
         return cls._regions
 
     @classmethod
@@ -65,7 +78,7 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        return 'gpu.1x.rtx6000'
+        return 'gpu.1x.a100.sxm4'
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -76,6 +89,14 @@ class Lambda(clouds.Cloud):
             instance_type, clouds='lambda')
 
     @classmethod
+    def get_vcpus_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> float:
+        return service_catalog.get_vcpus_from_instance_type(instance_type,
+                                                            clouds='lambda')
+
+    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
@@ -84,8 +105,15 @@ class Lambda(clouds.Cloud):
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
         del zones
+        r = resources
+        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        if acc_dict is not None:
+            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
+        else:
+            custom_resources = None
         return {
             'instance_type': resources.instance_type,
+            'custom_resources': custom_resources,
             'region': region.name,
         }
 
@@ -133,7 +161,7 @@ class Lambda(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
-            assert os.path.isfile(os.path.expanduser('~/.lambda/credentials'))
+            assert os.path.isfile(os.path.expanduser('~/.lambda/lambda_keys'))
 
             # check installation of lambda tools
             # TODO: add dependency check

@@ -9,7 +9,7 @@ from sky.clouds import cloud
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-_df = common.read_catalog('lambda.csv')
+_df = common.read_catalog('lambda/lambda.csv')
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -38,6 +38,10 @@ def get_hourly_cost(instance_type: str,
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+
+
+def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
+    return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
 def get_accelerators_from_instance_type(

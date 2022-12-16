@@ -1,20 +1,18 @@
 import logging
+import time
 from threading import RLock
-
-from lambda_labs import Lambda, Metadata
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from sky.skylet.providers.lambda_labs.config import bootstrap_lambda
+from sky.skylet.providers.lambda_labs.lambda_utils import Lambda, Metadata
 
 VM_NAME_MAX_LEN = 64
-VM_NAME_UUID_LEN = 8
 
 logger = logging.getLogger(__name__)
 
 
 def synchronized(f):
-
     def wrapper(self, *args, **kwargs):
         self.lock.acquire()
         try:
@@ -28,7 +26,7 @@ def synchronized(f):
 class LambdaNodeProvider(NodeProvider):
     """Node Provider for Lambda Labs.
 
-    This provider assumes Lambda credentials are set by running ``lambda auth``.
+    This provider assumes Lambda credentials have already been set up.
 
     Nodes may be in one of three states: {pending, running, terminated}. Nodes
     appear immediately once started by ``create_node``, and transition
@@ -38,15 +36,12 @@ class LambdaNodeProvider(NodeProvider):
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
-        self.resource_group = self.provider_config['resource_group']
 
-        # Assumes `lambda auth` has already been run.
-        self.lambda_client = Lambda(cli=False)
-        # TODO: consider keeping this metadata in ~/.sky since this gets synced
-        # this is only used for tags
+        # Assumes lambda authentication has been set up.
+        self.lambda_client = Lambda()
+        # Only used for tags
         self.local_metadata = Metadata()
-
-        # cache node objects
+        # Cache node objects
         self.cached_nodes = {}
 
     @synchronized
@@ -63,49 +58,45 @@ class LambdaNodeProvider(NodeProvider):
         vms = self.lambda_client.ls().get('data', [])
         vms = [
             node for node in vms
-            if node['public_key']['name'] == self.resource_group
+            if node['name'] == self.cluster_name
         ]
         nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
 
     def _extract_metadata(self, vm):
-        metadata = {'id': vm['id'], 'status': vm['state'], 'tags': {}}
+        metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}
         instance_info = self.local_metadata[vm['id']]
         if instance_info is not None:
             metadata['tags'] = instance_info['tags']
-        ipv4 = vm['ipv4']
-        metadata['external_ip'] = ipv4
-        metadata['internal_ip'] = ipv4
-        metadata['is_terminated'] = vm['is_terminated']
+        ip = vm['ip']
+        metadata['external_ip'] = ip
+        metadata['internal_ip'] = ip
         return metadata
 
     def non_terminated_nodes(self, tag_filters):
         """Return a list of node ids filtered by the specified tags dict.
 
         This list must not include terminated nodes. For performance reasons,
-        providers are allowed to cache the result of a call to nodes() to
-        serve single-node queries (e.g. is_running(node_id)). This means that
-        nodes() must be called again to refresh results.
+        providers are allowed to cache the result of a call to
+        non_terminated_nodes() to serve single-node queries
+        (e.g. is_running(node_id)). This means that non_terminated_nodes() must
+        be called again to refresh results.
 
         Examples:
             >>> provider.non_terminated_nodes({TAG_RAY_NODE_KIND: "worker"})
             ["node-1", "node-2"]
         """
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
-        return [k for k, v in nodes.items() if not v['is_terminated']]
+        return [k for k, _ in nodes.items()]
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
-        # always get current status
-        node = self._get_node(node_id=node_id)
-        return node['status'] == 'running'
+        return self._get_node(node_id=node_id) is not None
 
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
-        # always get current status
-        node = self._get_node(node_id=node_id)
-        return node is None or node['is_terminated']
+        return self._get_node(node_id=node_id) is None
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
@@ -113,36 +104,15 @@ class LambdaNodeProvider(NodeProvider):
 
     def external_ip(self, node_id):
         """Returns the external ip of the given node."""
-        ip = (self._get_cached_node(node_id=node_id)['external_ip'] or
-              self._get_node(node_id=node_id)['external_ip'])
-        return ip
+        return self._get_cached_node(node_id=node_id)['external_ip']
 
     def internal_ip(self, node_id):
         """Returns the internal ip (Ray ip) of the given node."""
-        ip = (self._get_cached_node(node_id=node_id)['internal_ip'] or
-              self._get_node(node_id=node_id)['internal_ip'])
-        return ip
+        return self._get_cached_node(node_id=node_id)['internal_ip']
 
     def create_node(self, node_config, tags, count):
-        # create resource group if it doesn't exist
-        resource_group_exists = False
-        keys = self.lambda_client.keys()
-
-        for key in keys:
-            if key['name'] == self.resource_group:
-                resource_group_exists = True
-                lambda_key_id = key['id']
-                break
-        if not resource_group_exists:
-            public_key = node_config['lambda_parameters']['publicKey']
-            key_entry = self.lambda_client.key_add(public_key,
-                                                   name=self.resource_group)
-            lambda_key_id = key_entry['id']
-
-        node_config['lambda_parameters']['key_id'] = lambda_key_id
-
-        if count:
-            self._create_node(node_config, tags, count)
+        assert count == 1, count   # Only support 1-node clusters for now
+        self._create_node(node_config, tags, count)
 
     def _create_node(self, node_config, tags, count):
         """Creates a number of nodes within the namespace."""
@@ -155,20 +125,25 @@ class LambdaNodeProvider(NodeProvider):
 
         # create the node
         ttype = node_config['InstanceType']
-        key = node_config['lambda_parameters']['key_id']
         region = self.provider_config['region']
         vm_resp = self.lambda_client.up(instance_type=ttype,
-                                        key=key,
-                                        region=region)
-        vm_list = vm_resp.get('data', [])
-        vm_list = [
-            vm for vm in vm_list
-            if vm['public_key']['name'] == self.resource_group
-        ]
-        # TODO: make this logic cleaner and work for count > 1
+                                        region=region,
+                                        quantity=1,
+                                        name=self.cluster_name)
+        vm_list = vm_resp.get('data', []).get('instance_ids', [])
         assert len(vm_list) == 1, len(vm_list)
-        vm_id = vm_list[0]['id']
+        vm_id = vm_list[0]
         self.local_metadata[vm_id] = {'tags': config_tags}
+
+        # Wait for booting to finish
+        # TODO(ewzeng) For multi-node, would want to first launch all vms and make sure
+        # all nodes are booting before sleeping.
+        while True:
+            vms = self.lambda_client.ls().get('data', [])
+            for vm in vms:
+                if vm['id'] == vm_id and vm['status'] == 'active':
+                    return
+            time.sleep(10)
 
     @synchronized
     def set_node_tags(self, node_id, tags):
@@ -178,12 +153,9 @@ class LambdaNodeProvider(NodeProvider):
         self.local_metadata[node_id] = {"tags": node_tags}
 
     def terminate_node(self, node_id):
-        """Terminates the specified node. This will delete the VM and
-        associated resources (NIC, IP, Storage) for the specified node."""
-
+        """Terminates the specified node."""
         self.lambda_client.rm(node_id)
         self.local_metadata[node_id] = None
-        # TODO: delete the SSH key
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
