@@ -140,5 +140,5 @@ class CloudUserIdentityError(Exception):
 
 
 class ClusterOwnerIdentityMismatchError(Exception):
-    """The cluster owner identity does not match user identity."""
+    """The cluster's owner identity does not match the current user identity."""
     pass

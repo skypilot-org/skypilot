@@ -31,6 +31,7 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
+    # See: issue #1441 and PR #1509
     conn.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
@@ -275,13 +276,6 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_owner_identity_for_cluster(cluster_name: str) -> Optional[str]:
-    rows = _DB.cursor.execute('SELECT owner FROM clusters WHERE name=(?)',
-                              (cluster_name,))
-    for (owner,) in rows:
-        return owner
-
-
 def set_owner_identity_for_cluster(cluster_name: str,
                                    owner_identity: Optional[str]) -> None:
     if owner_identity is None:
@@ -298,9 +292,10 @@ def set_owner_identity_for_cluster(cluster_name: str,
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
-                              (cluster_name,))
-    for (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner) in rows:
+                              (cluster_name,)).fetch_all()
+    for row in rows:
+        (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down, owner) = row[:9]
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -317,10 +312,11 @@ def get_cluster_from_name(
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
-        'select * from clusters order by launched_at desc')
+        'select * from clusters order by launched_at desc').fetchall()
     records = []
-    for (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner) in rows:
+    for row in rows:
+        (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down, owner) = row[:9]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,

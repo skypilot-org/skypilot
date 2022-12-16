@@ -1171,7 +1171,11 @@ def get_node_ips(cluster_yaml: str,
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
-        ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        try:
+            ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        except exceptions.CommandError as e:
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.HEAD) from e
         if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
             raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
         return ips
@@ -1632,19 +1636,11 @@ _QUERY_STATUS_FUNCS = {
 }
 
 
-def get_cloud_user_identity_no_error(cloud: clouds.Cloud) -> Optional[str]:
-    try:
-        return cloud.get_current_user_identity()
-    except exceptions.CloudUserIdentityError as e:
-        logger.warning(
-            f'Failed to get the current user identity for {cloud}: {e}')
-
-
-def check_owner_identity(cluster_name: str):
+def check_owner_identity(cluster_name: str) -> None:
     """Check if the current user is the same as the user who created the cluster.
 
-    This should be called before any operation that will modify the cluster, or query
-    from the cloud provider.
+    This should be called before any operation that will modify the cluster
+    (i.e., provision, down, stop), or query from the cloud provider.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
@@ -1660,7 +1656,7 @@ def check_owner_identity(cluster_name: str):
         return
 
     cloud = handle.launched_resources.cloud
-    current_user_identity = get_cloud_user_identity_no_error(cloud)
+    current_user_identity = cloud.get_current_user_identity()
     owner_identity = record['owner']
     if current_user_identity is None:
         # Skip the check if the cloud does not support user identity,
@@ -1788,7 +1784,7 @@ def _update_cluster_status_no_lock(
 def _update_cluster_status(
         cluster_name: str,
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
-    """Update the cluster identity and status.
+    """Check/update owner identity and update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from cloud.
 
@@ -1799,6 +1795,12 @@ def _update_cluster_status(
     Returns:
       If the cluster is terminated or does not exist, return None.
       Otherwise returns the input record with status and ip potentially updated.
+
+    Raises:
+        sky.exceptions.ClusterOwnerIdentityMismatchError: the cluster's owner
+        identity mismatches the current cloud user.
+        sky.exceptions.ClusterStatusFetchingError: the cluster status cannot be
+        fetched from the cloud provider.
     """
     check_owner_identity(cluster_name)
 
@@ -1835,8 +1837,6 @@ def refresh_cluster_status_handle(
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         use_spot = handle.launched_resources.use_spot
         if (force_refresh or record['autostop'] >= 0 or use_spot):
-            # Refresh the status only when force_refresh is True or the cluster
-            # has autostopped turned on.
             record = _update_cluster_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -1927,7 +1927,7 @@ def get_clusters(
             _refresh_cluster, cluster_names)
 
     # Show information for removed clusters.
-    normal_updated_records = []
+    kept_records = []
     autodown_clusters, remaining_clusters, failed_clusters = [], [], []
     for i, record in enumerate(records):
         if updated_records[i] is None:
@@ -1940,9 +1940,9 @@ def get_clusters(
                 (cluster_names[i], updated_records[i]['error']))
             # Keep the original record if the status is unknown,
             # so that the user can still see the cluster.
-            normal_updated_records.append(record)
+            kept_records.append(record)
         else:
-            normal_updated_records.append(updated_records[i])
+            kept_records.append(updated_records[i])
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -1967,7 +1967,7 @@ def get_clusters(
             table.add_row([cluster_name, str(e)])
         logger.warning(table)
 
-    return normal_updated_records
+    return kept_records
 
 
 def get_backend_from_handle(

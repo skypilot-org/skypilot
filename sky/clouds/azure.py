@@ -273,7 +273,8 @@ class Azure(clouds.Cloud):
             _run_output('az --version')
         except subprocess.CalledProcessError:
             return False, (
-                'Azure CLI returned error. Run the following commands:'
+                # TODO(zhwu): Change the installation hint to from PyPI.
+                'Azure CLI returned error. Run the following commands in the SkyPilot codebase:'
                 '\n      $ pip install skypilot[azure]  # if installed from '
                 'PyPI'
                 '\n    Or:'
@@ -321,7 +322,7 @@ class Azure(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure user identity with unknown '
                     f'exception: {type(e)} {e}') from e
-        return f'{account_email}[subscription={self.get_project_id()}]'
+        return f'{account_email} [subscription_id={self.get_project_id()}]'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
