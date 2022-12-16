@@ -284,7 +284,7 @@ def test_stale_job_manual_restart():
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
-        'stale-job',
+        'stale-job-manual-restart',
         [
             f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
