@@ -245,9 +245,9 @@ def _get_accelerator(
 
 def get_accelerator_hourly_cost(accelerator: str,
                                 count: int,
+                                use_spot: bool = False,
                                 region: Optional[str] = None,
-                                zone: Optional[str] = None,
-                                use_spot: bool = False) -> float:
+                                zone: Optional[str] = None) -> float:
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
     if region is None:
