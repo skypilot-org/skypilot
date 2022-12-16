@@ -241,5 +241,18 @@ class Cloud:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
 
+    def need_cleanup_after_preemption(self,
+                                      resource: 'resources.Resources') -> bool:
+        """Returns whether a spot resource needs cleanup after preeemption.
+
+        In most cases, spot resources do not need cleanup after preemption,
+        as long as the cluster can be relaunched with the same name and tag,
+        no matter the preemption behavior is to terminate or stop the cluster.
+        The only exception by far is GCP's Spot TPU VM. We override this method
+        in gcp.py.
+        """
+        del resource
+        return False
+
     def __repr__(self):
         return self._REPR
