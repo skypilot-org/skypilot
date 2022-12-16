@@ -544,7 +544,6 @@ class Storage(object):
                         f'Supported paths: local, s3://, gs://. Got: {source}')
         return source, is_local_source
 
-
     def _validate_storage_spec(self) -> None:
         """
         Validates the storage spec and updates local fields if necessary.
