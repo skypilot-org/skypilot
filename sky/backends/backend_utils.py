@@ -1130,8 +1130,9 @@ def generate_cluster_name():
     # We clean up the username by making it all lowercase, removing any
     # non-alphanumeric characters (including hyphens) and removing any numbers
     # at the start of the username. e.g. 1SkY-PiLot2 becomes skypilot2.
-    cleaned_username = re.sub(r'^\d+', '', re.sub('[^a-z0-9]', '',
-                                                  getpass.getuser().lower()))
+    cleaned_username = re.sub(
+        r'^\d+', '', re.sub('[^a-z0-9]', '',
+                            getpass.getuser().lower()))
     return f'sky-{uuid.uuid4().hex[:4]}-{cleaned_username}'
 
 
