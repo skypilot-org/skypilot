@@ -96,19 +96,19 @@ def read_catalog(filename: str,
         if _need_update():
             url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
             update_frequency_str = ''
-            filename_str = f' ({filename})'
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with backend_utils.safe_console_status((f'Updating {cloud} catalog'
-                                                    f'{filename_str}'
-                                                    f'{update_frequency_str}')):
+            with backend_utils.safe_console_status((f'Updating {cloud} catalog:'
+                                                    f' {filename}'
+                                                    f'{update_frequency_str}')) as status:
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
                     ux_utils.console_newline()
-                    error_str = (f'Failed to fetch {cloud} catalog'
-                                 f'{filename_str}. ')
+                    status.stop()
+                    error_str = (f'Failed to fetch {cloud} catalog '
+                                 f'{filename}. ')
                     if os.path.exists(catalog_path):
                         logger.warning(
                             f'{error_str}Using cached catalog files.')
