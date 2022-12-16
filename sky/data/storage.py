@@ -3,7 +3,9 @@ import enum
 import os
 import subprocess
 import time
-from typing import Any, Dict, Optional, Tuple, Union, List
+import typing
+from typing import Any, Dict, Optional, Tuple, Type, Union, List
+from typing_extensions import TypeAlias
 import urllib.parse
 
 import colorama
@@ -21,11 +23,16 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    import boto3  # type: ignore
+    from google.cloud import storage  # type: ignore
+
 logger = sky_logging.init_logger(__name__)
 
-Path = str
 StorageHandle = Any
 StorageStatus = global_user_state.StorageStatus
+Path: TypeAlias = str
+SourceType: TypeAlias = Union[Path, List[Path]]
 
 # Clouds with object storage implemented in this module. Azure Blob
 # Storage isn't supported yet (even though Azure is).
@@ -125,7 +132,7 @@ class AbstractStore:
         def __init__(self,
                      *,
                      name: str,
-                     source: str,
+                     source: Optional[SourceType],
                      region: Optional[str] = None,
                      is_sky_managed: Optional[bool] = None):
             self.name = name
@@ -142,7 +149,7 @@ class AbstractStore:
 
     def __init__(self,
                  name: str,
-                 source: str,
+                 source: Optional[SourceType],
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None):
         """Initialize AbstractStore
@@ -228,18 +235,7 @@ class AbstractStore:
         Args:
           local_path: Local path on user's device
         """
-        assert local_path is not None
-        local_path = os.path.expanduser(local_path)
-        iterator = self._remote_filepath_iterator()
-        for remote_path in iterator:
-            remote_path = next(iterator)
-            if remote_path[-1] == '/':
-                continue
-            path = os.path.join(local_path, remote_path)
-            if not os.path.exists(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
-            logger.info(f'Downloading {remote_path} to {path}')
-            self._download_file(remote_path, path)
+        raise NotImplementedError
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on Store
@@ -308,7 +304,7 @@ class Storage(object):
             self,
             *,
             storage_name: Optional[str],
-            source: Optional[str],
+            source: Optional[SourceType],
             sky_stores: Optional[Dict[StoreType,
                                       AbstractStore.StoreMetadata]] = None):
             assert storage_name is not None or source is not None
@@ -335,11 +331,11 @@ class Storage(object):
 
     def __init__(self,
                  name: Optional[str] = None,
-                 source: Union[Path, List[Path], None] = None,
+                 source: Optional[SourceType] = None,
                  stores: Optional[Dict[StoreType, AbstractStore]] = None,
                  persistent: Optional[bool] = True,
                  mode: StorageMode = StorageMode.MOUNT,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: bool = True) -> None:
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -391,14 +387,16 @@ class Storage(object):
 
         # Validate and correct inputs if necessary
         self._validate_storage_spec()
+        assert self.name is not None
 
         # Sky optimizer either adds a storage object instance or selects
         # from existing ones
         self.stores = {} if stores is None else stores
 
         # Logic to rebuild Storage if it is in global user state
-        self.handle = global_user_state.get_handle_from_storage_name(self.name)
-        if self.handle:
+        handle = global_user_state.get_handle_from_storage_name(self.name)
+        if handle is not None:
+            self.handle = handle
             # Reconstruct the Storage object from the global_user_state
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
@@ -433,7 +431,7 @@ class Storage(object):
             sky_managed_stores = {
                 t: s.get_metadata()
                 for t, s in self.stores.items()
-                if s.is_sky_managed()
+                if s.is_sky_managed
             }
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
@@ -449,8 +447,9 @@ class Storage(object):
                         self.add_store(StoreType.GCS)
 
     @staticmethod
-    def _validate_source(source: str, mode: StorageMode,
-                         sync_on_reconstruction: bool) -> Tuple[str, bool]:
+    def _validate_source(
+            source: SourceType, mode: StorageMode,
+            sync_on_reconstruction: bool) -> Tuple[SourceType, bool]:
         """Validates the source path.
 
         Args:
@@ -579,7 +578,6 @@ class Storage(object):
         elif self.source is not None:
             source, is_local_source = Storage._validate_source(
                 self.source, self.mode, self.sync_on_reconstruction)
-
             if not self.name:
                 if is_local_source:
                     with ux_utils.print_exception_no_traceback():
@@ -587,6 +585,7 @@ class Storage(object):
                             'Storage name must be specified if the source is '
                             'local.')
                 else:
+                    assert isinstance(source, str)
                     # Set name to source bucket name and continue
                     self.name = urllib.parse.urlsplit(source).netloc
                     return
@@ -621,6 +620,7 @@ class Storage(object):
             logger.info(f'Storage type {store_type} already exists.')
             return self.stores[store_type]
 
+        store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:
             store_cls = S3Store
         elif store_type == StoreType.GCS:
@@ -630,6 +630,7 @@ class Storage(object):
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
 
+        assert self.name is not None, self.name
         # Initialize store object and get/create bucket
         try:
             store = store_cls(name=self.name, source=self.source)
@@ -693,7 +694,8 @@ class Storage(object):
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
-                delete = all(s.is_sky_managed is False for s in self.stores)
+                delete = all(
+                    s.is_sky_managed is False for s in self.stores.values())
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
@@ -720,7 +722,19 @@ class Storage(object):
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
+
+        def warn_for_git_dir(source: str):
+            if os.path.isdir(os.path.join(source, '.git')):
+                logger.warning(f'\'.git\' directory under \'{self.source}\' '
+                               'is excluded during sync.')
+
         try:
+            if self.source is not None:
+                if isinstance(self.source, str):
+                    warn_for_git_dir(self.source)
+                else:
+                    for source in self.source:
+                        warn_for_git_dir(source)
             store.upload()
         except exceptions.StorageUploadError:
             logger.error(f'Could not upload {self.source} to store '
@@ -735,7 +749,7 @@ class Storage(object):
             global_user_state.set_storage_status(self.name, StorageStatus.READY)
 
     @classmethod
-    def from_yaml_config(cls, config: Dict[str, str]) -> 'Storage':
+    def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         backend_utils.validate_schema(config, schemas.get_storage_schema(),
                                       'Invalid storage YAML: ')
 
@@ -770,15 +784,15 @@ class Storage(object):
     def to_yaml_config(self) -> Dict[str, str]:
         config = dict()
 
-        def add_if_not_none(key, value):
+        def add_if_not_none(key: str, value: Optional[Any]):
             if value is not None:
                 config[key] = value
 
-        name = self.name
-        if (self.source is not None and isinstance(self.source, str) and
-                data_utils.is_cloud_store_url(self.source)):
+        name = None
+        if (self.source is None or not isinstance(self.source, str) or
+                not data_utils.is_cloud_store_url(self.source)):
             # Remove name if source is a cloud store URL
-            name = None
+            name = self.name
         add_if_not_none('name', name)
         add_if_not_none('source', self.source)
 
@@ -805,8 +819,8 @@ class S3Store(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-east-2',
                  is_sky_managed: Optional[bool] = None):
-        self.client = None
-        self.bucket = None
+        self.client: 'boto3.client.Client'
+        self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed)
 
     def _validate(self):
@@ -906,9 +920,11 @@ class S3Store(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            sync_command = ('aws s3 sync --no-follow-symlinks '
-                            f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+            # we exclude .git directory from the sync
+            sync_command = (
+                'aws s3 sync --no-follow-symlinks --exclude ".git/*" '
+                f'{src_dir_path} '
+                f's3://{self.name}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -930,6 +946,7 @@ class S3Store(AbstractStore):
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_s3(self) -> None:
+        assert isinstance(self.source, str), self.source
         if self.source.startswith('gs://'):
             data_transfer.gcs_to_s3(self.name, self.name)
 
@@ -1075,8 +1092,8 @@ class GcsStore(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-central1',
                  is_sky_managed: Optional[bool] = None):
-        self.client = None
-        self.bucket = None
+        self.client: 'storage.Client'
+        self.bucket: StorageHandle
         super().__init__(name, source, region, is_sky_managed)
 
     def _validate(self):
@@ -1168,7 +1185,7 @@ class GcsStore(AbstractStore):
         if len(source_path_list) > 1:
             source_message = f'{len(source_path_list)} paths'
         else:
-            source_message = source_path_list
+            source_message = source_path_list[0]
 
         # If the source_path list contains a directory, then gsutil cp -n
         # copies the dir as is to the root of the bucket. To copy the
@@ -1219,7 +1236,8 @@ class GcsStore(AbstractStore):
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
-            sync_command = (f'gsutil -m rsync -r {src_dir_path} '
+            # we exclude .git directory from the sync
+            sync_command = (f'gsutil -m rsync -r -x \'.git/*\' {src_dir_path} '
                             f'gs://{self.name}/{dest_dir_name}')
             return sync_command
 
@@ -1242,7 +1260,7 @@ class GcsStore(AbstractStore):
                 max_concurrent_uploads=_MAX_CONCURRENT_UPLOADS)
 
     def _transfer_to_gcs(self) -> None:
-        if self.source.startswith('s3://'):
+        if isinstance(self.source, str) and self.source.startswith('s3://'):
             data_transfer.s3_to_gcs(self.name, self.name)
 
     def _get_bucket(self) -> Tuple[StorageHandle, bool]:
