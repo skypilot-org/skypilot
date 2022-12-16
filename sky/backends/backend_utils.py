@@ -1781,7 +1781,7 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_status(
+def _update_cluster_identity_and_status(
         cluster_name: str,
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
     """Check/update owner identity and update the cluster status.
@@ -1837,7 +1837,7 @@ def refresh_cluster_status_handle(
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         use_spot = handle.launched_resources.use_spot
         if (force_refresh or record['autostop'] >= 0 or use_spot):
-            record = _update_cluster_status(
+            record = _update_cluster_identity_and_status(
                 cluster_name,
                 acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
             if record is None:
@@ -1913,7 +1913,7 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _update_cluster_status(
+            record = _update_cluster_identity_and_status(
                 cluster_name, acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
