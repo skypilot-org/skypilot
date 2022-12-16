@@ -476,7 +476,7 @@ class GCP(clouds.Cloud):
                     'auth list --filter=status:ACTIVE '
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
-        return f'{account}[project={self.get_project_id()}]'
+        return f'{account} [project_id={self.get_project_id()}]'
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
