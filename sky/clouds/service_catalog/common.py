@@ -99,20 +99,25 @@ def read_catalog(filename: str,
             filename_str = f' ({filename})'
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
-            with backend_utils.safe_console_status(
-                    f'Updating {cloud} catalog{filename_str}{update_frequency_str}'):
+            with backend_utils.safe_console_status((f'Updating {cloud} catalog'
+                                                    f'{filename_str}'
+                                                    f'{update_frequency_str}')):
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
                     ux_utils.console_newline()
-                    error_str = f'Failed to fetch {cloud} catalog{filename_str}. '
+                    error_str = (f'Failed to fetch {cloud} catalog'
+                                 f'{filename_str}. ')
                     if os.path.exists(catalog_path):
-                        logger.warn(f'{error_str}Using cached catalog files.')
+                        logger.warning(
+                            f'{error_str}Using cached catalog files.')
                         # Update catalog file modification time.
-                        os.utime(catalog_path, None)    # Sets to current time
+                        os.utime(catalog_path, None)  # Sets to current time
                     else:
-                        logger.error(f'{error_str}Please check your internet connection.')
+                        logger.error(
+                            f'{error_str}Please check your internet connection.'
+                        )
                         with ux_utils.print_exception_no_traceback():
                             raise e
                 else:

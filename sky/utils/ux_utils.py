@@ -4,7 +4,9 @@ import os
 import sys
 
 import rich.console as rich_console
+
 console = rich_console.Console()
+
 
 def console_newline():
     """Print a newline to the console using rich.
@@ -12,6 +14,7 @@ def console_newline():
     Useful when catching exceptions inside console.status()
     """
     console.print()
+
 
 @contextlib.contextmanager
 def print_exception_no_traceback():
