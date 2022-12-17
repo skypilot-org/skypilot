@@ -29,6 +29,9 @@ def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure does not support zones.')
     return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
                                                      region, zone)
 
@@ -39,6 +42,9 @@ def get_hourly_cost(instance_type: str,
                     zone: Optional[str] = None) -> float:
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure does not support zones.')
     return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
                                        zone)
 
@@ -62,6 +68,9 @@ def get_instance_type_for_accelerator(
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
