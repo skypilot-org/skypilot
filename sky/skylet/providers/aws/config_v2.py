@@ -270,7 +270,7 @@ def _configure_iam_role(config):
         # SkyPilot: let the workers use the same role as the head node, so that they
         # can access the same S3 buckets.
         for node_type in config["available_node_types"].values():
-            node_type["node_config"]["IamInstanceProfile"] = {"Arn": profile.arn}
+            node_type["node_config"]["IamInstanceProfile"] = head_node_config['IamInstanceProfile']
         return config
     _set_config_info(head_instance_profile_src="default")
 

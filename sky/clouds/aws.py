@@ -16,10 +16,10 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-# No need to upload the credentials file to AWS node, since we have
-# enabled the sky-service-v1 IAM role for all the nodes, i.e. they can
-# access ec2, s3, etc.
-# We Should still upload the credentials file to the VM, when the VM
+# We don't need to upload the credentials file to AWS node, since we
+# have enabled the sky-service-v1 IAM role for all the nodes, i.e.
+# they can access ec2, s3, etc.
+# We should still upload the credentials file to the VM, when the VM
 # is not running on AWS (access s3 or spot controller managing
 # instances).
 # TODO(zhwu): For VMs on other clouds, we should find a way to not
@@ -339,7 +339,7 @@ class AWS(clouds.Cloud):
         # `aws configure list` does not guarantee this file exists.
         if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
             hints = (
-                'AWS static credentials are not set. SSO configuration might be used. '
+                'AWS static credentials are not set. AWS SSO might be used. '
                 'It will work if you use AWS only, but will cause problems for multiple '
                 'clouds. To set up static credentials, try: aws configure')
 
