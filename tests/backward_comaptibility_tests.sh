@@ -35,7 +35,7 @@ if [ "$start_from" -le 1 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
 which sky
-sky launch -y -c ${CLUSTER_NAME} examples/minimal.yaml || true
+sky launch -y -c ${CLUSTER_NAME} examples/minimal.yaml
 
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
@@ -54,7 +54,7 @@ fi
 if [ "$start_from" -le 2 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch -y -c ${CLUSTER_NAME}-2 examples/minimal.yaml || true
+sky launch -y -c ${CLUSTER_NAME}-2 examples/minimal.yaml
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
@@ -68,7 +68,7 @@ fi
 if [ "$start_from" -le 3 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch -y -c ${CLUSTER_NAME}-3 examples/minimal.yaml || true
+sky launch -y -c ${CLUSTER_NAME}-3 examples/minimal.yaml
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky autostop -y -i0 ${CLUSTER_NAME}-3
@@ -81,7 +81,7 @@ fi
 if [ "$start_from" -le 4 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch -y -c ${CLUSTER_NAME}-4 examples/minimal.yaml || true
+sky launch -y -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-4
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
@@ -97,7 +97,7 @@ fi
 if [ "$start_form" -le 5 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch -y -c ${CLUSTER_NAME}-5 examples/minimal.yaml || true
+sky launch -y -c ${CLUSTER_NAME}-5 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-5
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
@@ -115,7 +115,7 @@ fi
 if [ "$start_from" -le 6 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky launch -y -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml || true
+sky launch -y -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
 sky stop -y ${CLUSTER_NAME}-6
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
