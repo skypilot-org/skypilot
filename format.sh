@@ -24,6 +24,7 @@ builtin cd "$ROOT" || exit 1
 YAPF_VERSION=$(yapf --version | awk '{print $2}')
 PYLINT_VERSION=$(pylint --version | head -n 1 | awk '{print $2}')
 PYLINT_QUOTES_VERSION=$(pip list | grep pylint-quotes | awk '{print $2}')
+MYPY_VERSION=$(mypy --version | awk '{print $2}')
 
 # # params: tool name, tool version, required version
 tool_version_check() {
@@ -33,9 +34,10 @@ tool_version_check() {
     fi
 }
 
-tool_version_check "yapf" $YAPF_VERSION "0.32.0"
-tool_version_check "pylint" $PYLINT_VERSION "2.8.2"
-tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "0.2.3"
+tool_version_check "yapf" $YAPF_VERSION "$(grep yapf requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "pylint" $PYLINT_VERSION "$(grep "pylint==" requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "pylint-quotes" $PYLINT_QUOTES_VERSION "$(grep "pylint-quotes==" requirements-dev.txt | cut -d'=' -f3)"
+tool_version_check "mypy" "$MYPY_VERSION" "$(grep mypy requirements-dev.txt | cut -d'=' -f3)"
 
 YAPF_FLAGS=(
     '--recursive'
@@ -86,6 +88,12 @@ else
    # Format only the files that changed in last commit.
    format_changed
 fi
+
+# Run mypy
+# TODO(zhwu): When more of the codebase is typed properly, the mypy flags
+# should be set to do a more stringent check.
+echo 'SkyPilot mypy:'
+mypy @tests/mypy_files.txt
 
 # Run Pylint
 echo 'Sky Pylint:'
