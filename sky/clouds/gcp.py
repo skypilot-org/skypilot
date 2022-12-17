@@ -128,7 +128,8 @@ class GCP(clouds.Cloud):
                               zone: Optional[str]) -> Set[clouds.Region]:
         if accelerators is None:
             if instance_type is None:
-                # Fall back to default regions
+                # Fall back to the default regions.
+                # TODO: Get the regions from the service catalog.
                 regions = cls.regions()
             else:
                 regions = service_catalog.get_region_zones_for_instance_type(
