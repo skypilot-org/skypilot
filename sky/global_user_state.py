@@ -129,6 +129,10 @@ def add_or_update_cluster(cluster_name: str,
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
+        # All the fields need to exist here, even if they don't need
+        # be changed, as the INSERT OR REPLACE statement will replace
+        # the field of the existing row with the default value if not
+        # specified.
         '(name, launched_at, handle, last_use, status, '
         'autostop, to_down, metadata, owner) '
         'VALUES ('
@@ -300,6 +304,9 @@ def get_cluster_from_name(
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
                               (cluster_name,)).fetchall()
     for row in rows:
+        # Explicitly specify the number of fields to unpack, so that
+        # we can add new fields to the database in the future without
+        # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner) = row[:9]
         record = {

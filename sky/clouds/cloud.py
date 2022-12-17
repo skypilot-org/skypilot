@@ -194,9 +194,17 @@ class Cloud:
 
         The user "identity" is associated with each SkyPilot cluster they
         creates. This is used in protecting cluster operations, such as
-        provision, teardown and refresh status, in a multi-identity
+        provision, teardown and status refreshing, in a multi-identity
         scenario, where the same user/device can switch between different
-        cloud identities.
+        cloud identities. We check that the user identity matches before:
+            - Provisioning/starting a cluster
+            - Stopping/tearing down a cluster
+            - Refreshing the status of a cluster
+
+        Design choice: we allow the operations that can correctly work with
+        a different user identity, as a user should have full control over
+        all their clusters (no matter which identity it belongs to), e.g.,
+        submitting jobs, viewing logs, auto-stopping, etc.
 
         The choice of what constitutes an identity is up to each cloud's
         implementation. In general, to suffice for the above purposes,
@@ -208,10 +216,11 @@ class Cloud:
             - AWS: unique aws:user_id
             - GCP: email address + project ID
             - Azure: email address + subscription ID
-
+            
         Returns:
             None if the cloud does not have a concept of user identity
             (access protection will be disabled for these clusters);
+            otherwise the currently active user identity.
         Raises:
             exceptions.CloudUserIdentityError: If the user identity cannot be
                 retrieved.
