@@ -140,7 +140,9 @@ class GCP(clouds.Cloud):
             acc_count = list(accelerators.values())[0]
             acc_regions = service_catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
-            if instance_type == 'TPU-VM':
+            if instance_type is None:
+                regions = acc_regions
+            elif instance_type == 'TPU-VM':
                 regions = acc_regions
             else:
                 vm_regions = service_catalog.get_region_zones_for_instance_type(
