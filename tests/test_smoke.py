@@ -262,6 +262,24 @@ def test_image_id_dict_with_zone():
     run_one_test(test)
 
 
+def test_image_no_conda():
+    name = _get_cluster_name()
+    test = Test(
+        'image_no_conda',
+        [
+            # Use image id dict.
+            f'sky launch -y -c {name} examples/smoke_tests/no_conda_ami.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky stop {name} -y',
+            f'sky start {name} -y',
+            f'sky exec {name} examples/smoke_tests/no_conda_ami.yaml',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 def test_stale_job():
     name = _get_cluster_name()
     test = Test(
