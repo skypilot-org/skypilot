@@ -696,7 +696,7 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        if zones == region.zones:
+        if set(zones) == set(region.zones):
             # The underlying ray autoscaler / boto3 will try all zones of a
             # region at once.
             logger.warning(f'Got error(s) in all zones of {region.name}:')
