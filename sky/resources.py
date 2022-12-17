@@ -371,7 +371,7 @@ class Resources:
             if not self._cloud.accelerator_in_region_or_zone(
                     acc, acc_count, self.region, self.zone):
                 error_str = (f'Accelerator "{acc}" is not available in '
-                             '"{}" region/zone.')
+                             '"{}".')
                 if self.zone:
                     error_str = error_str.format(self.zone)
                 else:
