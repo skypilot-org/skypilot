@@ -216,7 +216,7 @@ class Cloud:
             - AWS: unique aws:user_id
             - GCP: email address + project ID
             - Azure: email address + subscription ID
-            
+
         Returns:
             None if the cloud does not have a concept of user identity
             (access protection will be disabled for these clusters);
