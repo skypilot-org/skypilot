@@ -1659,8 +1659,7 @@ def check_owner_identity(cluster_name: str) -> None:
     current_user_identity = cloud.get_current_user_identity()
     owner_identity = record['owner']
     if current_user_identity is None:
-        # Skip the check if the cloud does not support user identity,
-        # or we fail to get the user identity.
+        # Skip the check if the cloud does not support user identity.
         return
     # The user identity can be None, if the cluster is created by an older
     # version of SkyPilot. In that case, we set the user identity to the
