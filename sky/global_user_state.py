@@ -156,10 +156,9 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old metadata value if it exists, otherwise set it to
         # default {}.
         'COALESCE('
-        '(SELECT metadata FROM clusters WHERE name=?), "{}")'
-        ')',
-        # Keep the old metadata value if it exists, otherwise set it to
-        # default {}.
+        '(SELECT metadata FROM clusters WHERE name=?), "{}"),'
+        # Keep the old owner value if it exists, otherwise set it to
+        # default null.
         'COALESCE('
         '(SELECT owner FROM clusters WHERE name=?), null)'
         ')',
