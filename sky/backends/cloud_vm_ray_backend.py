@@ -606,7 +606,7 @@ class RetryingVmProvisioner(object):
                         # This skip is only correct if we implement "first
                         # retry the region/zone of an existing cluster with the
                         # same name" correctly.
-                        for r, _ in clouds.GCP.region_zones_provision_loop():
+                        for r in clouds.GCP.regions_with_offering():
                             self._blocked_regions.add(r.name)
                     else:
                         # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
