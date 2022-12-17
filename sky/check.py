@@ -43,7 +43,7 @@ def check(quiet: bool = False) -> None:
              'To change this, configure cloud credentials, '
              'and run ' + click.style('sky check', bold=True) + '.'
              '\n' + click.style(
-                 'If any problem happen, please file an issue at '
+                 'If any problems remain, please file an issue at '
                  'https://github.com/skypilot-org/skypilot/issues/new',
                  dim=True))
 

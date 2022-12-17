@@ -1057,8 +1057,7 @@ class RetryingVmProvisioner(object):
                                                     cluster_handle=handle,
                                                     ready=False)
             cloud = handle.launched_resources.cloud
-            cloud_user_id = backend_utils.get_cloud_user_identity_no_error(
-                cloud)
+            cloud_user_id = cloud.get_current_user_identity()
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_id)
 
@@ -2704,9 +2703,29 @@ class CloudVmRayBackend(backends.Backend):
                         f'gcloud compute tpus tpu-vm list --filter='
                         f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zone={zone} --format=value\\(name\\)')
-                    terminate_cmd = (
-                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        query_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+
+                    # Skip the termination command, if the TPU ID
+                    # query command fails.
+                    if returncode != 0:
+                        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
+                                         f'echo "{stdout}" && '
+                                         f'echo "{stderr}" >&2 && '
+                                         f'exit {returncode}')
+                    else:
+                        # Needs to create a list as GCP does not allow deleting
+                        # multiple TPU VMs at once.
+                        tpu_terminate_cmds = []
+                        for tpu_id in stdout.splitlines():
+                            tpu_terminate_cmds.append(
+                                'gcloud compute tpus tpu-vm delete '
+                                f'--zone={zone} --quiet {tpu_id}')
+                        terminate_cmd = ' && '.join(tpu_terminate_cmds)
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='

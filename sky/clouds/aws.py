@@ -324,6 +324,7 @@ class AWS(clouds.Cloud):
         except subprocess.CalledProcessError:
             return False, (
                 'AWS CLI is not installed properly.'
+                # TODO(zhwu): Change the installation hint to from PyPI.
                 ' Run the following commands in the SkyPilot codebase:'
                 '\n     $ pip install .[aws]'
                 '\n   Credentials may also need to be set. ' +
@@ -352,7 +353,7 @@ class AWS(clouds.Cloud):
             # 'Arn' is the full path to the user, which can be reused when
             # the user is deleted and recreated.
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
-            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html # pylint: disable=line-too-long
+            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
             user_id = sts.get_caller_identity()['UserId']
         except aws.exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
