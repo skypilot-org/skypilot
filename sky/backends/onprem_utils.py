@@ -178,12 +178,37 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
         ips, *ssh_credentials)
     sky_ray_version = constants.SKY_REMOTE_RAY_VERSION
 
+    def _version_compare(cur_version: str, min_version: str) -> bool:
+        """Returns true if current version exceeds minimum version."""
+        cur_ver_lst = cur_version.split('.')
+        min_ver_lst = min_version.split('.')
+        cur_ver_lst = [int(i) for i in cur_ver_lst]
+        min_ver_lst = [int(i) for i in min_ver_lst]
+        n = len(cur_ver_lst)
+        m = len(min_ver_lst)
+        if n > m:
+            for i in range(m, n):
+                min_ver_lst.append(0)
+        elif m > n:
+            for i in range(n, m):
+                cur_ver_lst.append(0)
+        for i in range(len(cur_ver_lst)):
+            if cur_ver_lst[i] > min_ver_lst[i]:
+                return True
+        return False
+
     def _install_and_check_dependencies(
             runner: command_runner.SSHCommandRunner) -> None:
         # Checks for python3 installation.
-        backend_utils.run_command_and_handle_ssh_failure(
+        python_version = backend_utils.run_command_and_handle_ssh_failure(
             runner, ('python3 --version'),
             failure_message=f'Python3 is not installed on {runner.ip}.')
+        python_version = python_version.split(' ')[-1].strip()
+        min_python_version = '3.6'
+        if not _version_compare(python_version, min_python_version):
+            raise ValueError(
+                f'Python {python_version} on {runner.ip} is less than '
+                f'minimum requirement: Python {min_python_version}.')
 
         # Checks for pip3 installation.
         backend_utils.run_command_and_handle_ssh_failure(
@@ -191,10 +216,15 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
             failure_message=f'Pip3 is not installed on {runner.ip}.')
 
         # If Ray does not exist, installs Ray.
-        backend_utils.run_command_and_handle_ssh_failure(
+        ray_version = backend_utils.run_command_and_handle_ssh_failure(
             runner, (f'ray --version || '
                      f'(pip3 install ray[default]=={sky_ray_version})'),
             failure_message=f'Ray is not installed on {runner.ip}.')
+        ray_version = ray_version.split(' ')[-1].strip()
+        min_ray_version = '1.9.0'
+        if not _version_compare(ray_version, min_ray_version):
+            raise ValueError(f'Ray {ray_version} on {runner.ip} is less than '
+                             f'minimum requirement: Ray {min_ray_version}.')
 
         # If Ray exists, check Ray version. If the version does not match
         # raise an error.
