@@ -217,7 +217,8 @@ def get_hourly_cost_impl(
         price_str = 'SpotPrice'
     else:
         price_str = 'Price'
-        # For on-demand instances, the price is the same across all zones.
+        # For AWS/Azure/GCP on-demand instances, the price is the same across
+        # all the zones in the same region.
         assert region is None or len(set(df[price_str])) == 1, df
 
     cheapest_idx = df[price_str].idxmin()
