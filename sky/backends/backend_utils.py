@@ -1150,7 +1150,6 @@ def get_cleaned_username() -> str:
     return username
 
 
-
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
     """Returns the ip of the head node from yaml file."""
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)

@@ -30,7 +30,6 @@ each other.
 import copy
 import datetime
 import functools
-import getpass
 import os
 import shlex
 import subprocess
