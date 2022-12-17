@@ -129,7 +129,7 @@ def add_or_update_cluster(cluster_name: str,
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, metadata) '
+        'autostop, to_down, metadata, owner) '
         'VALUES ('
         # name
         '?, '
@@ -157,6 +157,11 @@ def add_or_update_cluster(cluster_name: str,
         'COALESCE('
         '(SELECT metadata FROM clusters WHERE name=?), "{}")'
         ')',
+        # Keep the old metadata value if it exists, otherwise set it to
+        # default {}.
+        'COALESCE('
+        '(SELECT owner FROM clusters WHERE name=?), null)'
+        ')',
         (
             # name
             cluster_name,
@@ -177,6 +182,8 @@ def add_or_update_cluster(cluster_name: str,
             cluster_name,
             ClusterStatus.STOPPED.value,
             # metadata
+            cluster_name,
+            # owner
             cluster_name,
         ))
     _DB.conn.commit()
