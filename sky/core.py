@@ -687,7 +687,9 @@ def spot_cancel(name: Optional[str] = None,
     _, handle = spot.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
-        raise exceptions.ClusterNotUpError('All jobs finished.')
+        # The error message is already printed in spot.is_spot_controller_up.
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError()
 
     job_id_str = ','.join(map(str, job_ids))
     if sum([len(job_ids) > 0, name is not None, all]) != 1:
