@@ -41,7 +41,6 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
-from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -1874,10 +1873,13 @@ def refresh_cluster_status_handle(
                 raise
     return record['status'], record['handle']
 
-def check_cluster_available(cluster_name: str,
-                             operation: str,
-                             *,
-                             expected_backend: Optional[Type[backends.Backend]] = None) -> backends.Backend.ResourceHandle:
+
+def check_cluster_available(
+    cluster_name: str,
+    operation: str,
+    *,
+    expected_backend: Optional[Type[backends.Backend]] = None
+) -> backends.Backend.ResourceHandle:
     """Check if the cluster is available.
 
     Raises:
@@ -1886,8 +1888,7 @@ def check_cluster_available(cluster_name: str,
           CloudVmRayBackend
     """
     try:
-        cluster_status, handle = refresh_cluster_status_handle(
-            cluster_name)
+        cluster_status, handle = refresh_cluster_status_handle(cluster_name)
     except (exceptions.ClusterOwnerIdentityMismatchError,
             exceptions.CloudUserIdentityError,
             exceptions.ClusterStatusFetchingError) as e:
@@ -1909,7 +1910,8 @@ def check_cluster_available(cluster_name: str,
                 f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
                 f'exist... skipped.{colorama.Style.RESET_ALL}')
     backend = get_backend_from_handle(handle)
-    if expected_backend is not None and not isinstance(backend, expected_backend):
+    if expected_backend is not None and not isinstance(backend,
+                                                       expected_backend):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} cluster '
