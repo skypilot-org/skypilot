@@ -15,7 +15,6 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
-from sky.backends import backend_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 from sky.utils import log_utils
@@ -826,7 +825,6 @@ def _fill_in_launchable_resources(
     try_fix_with_sky_check: bool = True,
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
-    backend_utils.check_public_cloud_enabled()
     enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(resources_lib.Resources)

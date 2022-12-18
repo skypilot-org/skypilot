@@ -683,7 +683,8 @@ def _launch_with_confirm(
     if maybe_status is None:
         # Show the optimize log before the prompt if the cluster does not exist.
         try:
-            backend_utils.check_public_cloud_enabled()
+            if not is_local_cloud:
+                backend_utils.check_public_cloud_enabled()
         except RuntimeError as e:
             # Catch the exception where the public cloud is not enabled, and
             # only print the error message without the error type.
