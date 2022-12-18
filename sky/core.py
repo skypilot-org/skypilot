@@ -332,24 +332,27 @@ def _check_cluster_available(cluster_name: str,
                 f'exist... skipped.{colorama.Style.RESET_ALL}')
     backend = backend_utils.get_backend_from_handle(handle)
     if not isinstance(backend, backends.CloudVmRayBackend):
-        raise exceptions.NotSupportedError(
-            f'{colorama.Fore.YELLOW}{operation} cluster '
-            f'{cluster_name!r} (status: {cluster_status.value})... skipped'
-            f'{colorama.Style.RESET_ALL}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}{operation} cluster '
+                f'{cluster_name!r} (status: {cluster_status.value})... skipped'
+                f'{colorama.Style.RESET_ALL}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         if onprem_utils.check_if_local_cloud(cluster_name):
             raise exceptions.ClusterNotUpError(
                 constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
                     cluster_name))
-        raise exceptions.ClusterNotUpError(
-            f'{colorama.Fore.YELLOW}{operation} cluster {cluster_name!r} '
-            f'(status: {cluster_status.value})... skipped.'
-            f'{colorama.Style.RESET_ALL}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}{operation} cluster {cluster_name!r} '
+                f'(status: {cluster_status.value})... skipped.'
+                f'{colorama.Style.RESET_ALL}')
 
     if handle.head_ip is None:
-        raise exceptions.ClusterNotUpError(
-            f'Cluster {cluster_name!r} has been stopped or not properly set up.'
-            ' Please re-launch it with `sky start`.')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster_name!r} has been stopped or not properly set up.'
+                ' Please re-launch it with `sky start`.')
     return handle
 
 
