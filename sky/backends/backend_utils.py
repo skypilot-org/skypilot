@@ -1644,7 +1644,9 @@ def check_owner_identity(cluster_name: str) -> None:
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-            same as the user who created the cluster.
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if failed to get the activated user
+          identity.
     """
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
         return
@@ -1801,9 +1803,11 @@ def _update_cluster_identity_and_status(
 
     Raises:
         sky.exceptions.ClusterOwnerIdentityMismatchError: the cluster's owner
-        identity mismatches the current cloud user.
+          identity mismatches the current cloud user.
+        sky.exceptions.CloudUserIdentityError: if failed to get the activated user
+          identity.
         sky.exceptions.ClusterStatusFetchingError: the cluster status cannot be
-        fetched from the cloud provider.
+          fetched from the cloud provider.
     """
     check_owner_identity(cluster_name)
 
@@ -1830,8 +1834,19 @@ def refresh_cluster_status_handle(
     *,
     force_refresh: bool = False,
     acquire_per_cluster_status_lock: bool = True,
+    suppress_error: bool = False
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
+    """Refresh the cluster status and return the status and handle.
+
+    Raises:
+        sky.exceptions.ClusterOwnerIdentityMismatchError: the cluster's owner
+          identity mismatches the current cloud user.
+        sky.exceptions.CloudUserIdentityError: if failed to get the activated user
+          identity.
+        sky.exceptions.ClusterStatusFetchingError: the cluster status cannot be
+          fetched from the cloud provider.
+    """
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None, None
@@ -1840,11 +1855,22 @@ def refresh_cluster_status_handle(
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         use_spot = handle.launched_resources.use_spot
         if (force_refresh or record['autostop'] >= 0 or use_spot):
-            record = _update_cluster_identity_and_status(
-                cluster_name,
-                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
-            if record is None:
-                return None, None
+            try:
+                record = _update_cluster_identity_and_status(
+                    cluster_name,
+                    acquire_per_cluster_status_lock=
+                    acquire_per_cluster_status_lock)
+                if record is None:
+                    return None, None
+            except (exceptions.ClusterOwnerIdentityMismatchError,
+                    exceptions.CloudUserIdentityError,
+                    exceptions.ClusterStatusFetchingError) as e:
+                if suppress_error:
+                    logger.debug(
+                        f'Failed to refresh cluster {cluster_name!r} due to {e}'
+                    )
+                    return None, None
+                raise
     return record['status'], record['handle']
 
 
