@@ -309,6 +309,7 @@ def get_cluster_from_name(
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner) = row[:9]
+        # TODO: use namedtuple instead of dict
         record = {
             'name': name,
             'launched_at': launched_at,

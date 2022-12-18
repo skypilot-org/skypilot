@@ -1664,18 +1664,19 @@ def check_owner_identity(cluster_name: str) -> None:
     # The user identity can be None, if the cluster is created by an older
     # version of SkyPilot. In that case, we set the user identity to the
     # current one.
-    # NOTE: a user upgrades SkyPilot and switches to a new cloud identity
-    # immediately without `sky status --refresh` first, can cause a leakage
-    # of the existing cluster.
+    # NOTE: a user who upgrades SkyPilot and switches to a new cloud identity
+    # immediately without `sky status --refresh` first, will cause a leakage
+    # of the existing cluster. We deem this an acceptable tradeoff mainly
+    # because multi-identity is not common (at least at the moment).
     if owner_identity is None:
         global_user_state.set_owner_identity_for_cluster(
             cluster_name, current_user_identity)
     elif owner_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
-                f'The cluster {cluster_name!r} (on {cloud}) is created by the account '
-                f'{owner_identity!r}, but the activated one is {current_user_identity!r}.'
-            )
+                f'Cluster {cluster_name!r} ({cloud}) is owned by account '
+                f'{owner_identity!r}, but the currently activated account '
+                f'is {current_user_identity!r}.')
 
 
 def _get_cluster_status_via_cloud_cli(
