@@ -319,9 +319,9 @@ def _check_cluster_available(cluster_name: str,
         # can still be done by only using ssh, but the ssh can hang if the
         # cluster is not up (e.g., autostopped).
         logger.warning(
-            'Failed to refresh the cluster status, it is not fatal, but the '
-            'operator might hang if the cluster is not up.\n'
-            f'  Detailed reason: {e}')
+            f'Failed to refresh the status for cluster {cluster_name!r}, it is '
+            'not fatal, but the operator might hang if the cluster is not up.\n'
+            f'Detailed reason: {e}')
         record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_status, handle = record['status'], record['handle']
 
@@ -351,8 +351,8 @@ def _check_cluster_available(cluster_name: str,
     if handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
-                f'Cluster {cluster_name!r} has been stopped or not properly set up.'
-                ' Please re-launch it with `sky start`.')
+                f'Cluster {cluster_name!r} has been stopped or not properly '
+                'set up. Please re-launch it with `sky start`.')
     return handle
 
 
