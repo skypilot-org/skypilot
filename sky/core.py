@@ -300,64 +300,6 @@ def down(cluster_name: str, purge: bool = False) -> None:
     backend.teardown(handle, terminate=True, purge=purge)
 
 
-def _check_cluster_available(cluster_name: str,
-                             operation: str) -> backends.Backend.ResourceHandle:
-    """Check if the cluster is available.
-
-    Raises:
-        exceptions.ClusterNotUpError: if the cluster is not UP.
-        exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend
-    """
-    try:
-        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-            cluster_name)
-    except (exceptions.ClusterOwnerIdentityMismatchError,
-            exceptions.CloudUserIdentityError,
-            exceptions.ClusterStatusFetchingError) as e:
-        # Failed to refresh the cluster status is not fatal error as the callers
-        # can still be done by only using ssh, but the ssh can hang if the
-        # cluster is not up (e.g., autostopped).
-        ux_utils.console_newline()
-        logger.warning(
-            f'Failed to refresh the cluster status, it is not fatal, but '
-            f'{operation} cluster {cluster_name!r} might hang if the cluster '
-            'is not up.\n'
-            f'Detailed reason: {e}')
-        record = global_user_state.get_cluster_from_name(cluster_name)
-        cluster_status, handle = record['status'], record['handle']
-
-    if handle is None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(
-                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist... skipped.{colorama.Style.RESET_ALL}')
-    backend = backend_utils.get_backend_from_handle(handle)
-    if not isinstance(backend, backends.CloudVmRayBackend):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}{operation} cluster '
-                f'{cluster_name!r} (status: {cluster_status.value})... skipped'
-                f'{colorama.Style.RESET_ALL}')
-    if cluster_status != global_user_state.ClusterStatus.UP:
-        if onprem_utils.check_if_local_cloud(cluster_name):
-            raise exceptions.ClusterNotUpError(
-                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
-                    cluster_name))
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(
-                f'{colorama.Fore.YELLOW}{operation} cluster {cluster_name!r} '
-                f'(status: {cluster_status.value})... skipped.'
-                f'{colorama.Style.RESET_ALL}')
-
-    if handle.head_ip is None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(
-                f'Cluster {cluster_name!r} has been stopped or not properly '
-                'set up. Please re-launch it with `sky start`.')
-    return handle
-
-
 @usage_lib.entrypoint
 def autostop(
         cluster_name: str,
@@ -415,7 +357,10 @@ def autostop(
             f'{operation} sky reserved cluster {cluster_name!r} '
             f'is not supported.')
     try:
-        handle = _check_cluster_available(cluster_name, operation)
+        handle = backend_utils.check_cluster_available(
+            cluster_name,
+            operation,
+            expected_backend=backends.CloudVmRayBackend)
     except exceptions.ClusterNotUpError as e:
         with ux_utils.print_exception_no_traceback():
             e.message += (
@@ -480,7 +425,10 @@ def queue(cluster_name: str,
         username = None
     code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
 
-    handle = _check_cluster_available(cluster_name, 'getting the job queue')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        'getting the job queue',
+        expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
     returncode, jobs_payload, stderr = backend.run_on_head(handle,
@@ -520,7 +468,10 @@ def cancel(cluster_name: str,
         cluster_name, operation_str='Cancelling jobs')
 
     # Check the status of the cluster.
-    handle = _check_cluster_available(cluster_name, 'cancelling jobs')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        'cancelling jobs',
+        expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
@@ -552,7 +503,10 @@ def tail_logs(cluster_name: str,
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     # Check the status of the cluster.
-    handle = _check_cluster_available(cluster_name, 'tailing logs')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        'tailing logs',
+        expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
     job_str = f'job {job_id}'
@@ -581,7 +535,10 @@ def download_logs(
         Dict[str, str]: a mapping of job_id to local log path.
     """
     # Check the status of the cluster.
-    handle = _check_cluster_available(cluster_name, 'downloading logs')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        'downloading logs',
+        expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
     if job_ids is not None and len(job_ids) == 0:
@@ -613,7 +570,10 @@ def job_status(
         {None: None}.
     """
     # Check the status of the cluster.
-    handle = _check_cluster_available(cluster_name, 'getting job status')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        'getting job status',
+        expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
     if job_ids is not None and len(job_ids) == 0:

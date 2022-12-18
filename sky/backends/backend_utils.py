@@ -14,7 +14,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Type
 import uuid
 
 import colorama
@@ -41,6 +41,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
+from sky.backends import cloud_vm_ray_backend
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
@@ -1872,6 +1873,65 @@ def refresh_cluster_status_handle(
                     return None, None
                 raise
     return record['status'], record['handle']
+
+def check_cluster_available(cluster_name: str,
+                             operation: str,
+                             *,
+                             expected_backend: Optional[Type[backends.Backend]] = None) -> backends.Backend.ResourceHandle:
+    """Check if the cluster is available.
+
+    Raises:
+        exceptions.ClusterNotUpError: if the cluster is not UP.
+        exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend
+    """
+    try:
+        cluster_status, handle = refresh_cluster_status_handle(
+            cluster_name)
+    except (exceptions.ClusterOwnerIdentityMismatchError,
+            exceptions.CloudUserIdentityError,
+            exceptions.ClusterStatusFetchingError) as e:
+        # Failed to refresh the cluster status is not fatal error as the callers
+        # can still be done by only using ssh, but the ssh can hang if the
+        # cluster is not up (e.g., autostopped).
+        ux_utils.console_newline()
+        logger.warning(
+            f'Failed to refresh the cluster status, it is not fatal, but '
+            f'{operation} cluster {cluster_name!r} might hang if the cluster '
+            'is not up.\n'
+            f'Detailed reason: {e}')
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        cluster_status, handle = record['status'], record['handle']
+
+    if handle is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
+                f'exist... skipped.{colorama.Style.RESET_ALL}')
+    backend = get_backend_from_handle(handle)
+    if expected_backend is not None and not isinstance(backend, expected_backend):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}{operation} cluster '
+                f'{cluster_name!r} (status: {cluster_status.value})... skipped'
+                f'{colorama.Style.RESET_ALL}')
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        if onprem_utils.check_if_local_cloud(cluster_name):
+            raise exceptions.ClusterNotUpError(
+                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
+                    cluster_name))
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}{operation} cluster {cluster_name!r} '
+                f'(status: {cluster_status.value})... skipped.'
+                f'{colorama.Style.RESET_ALL}')
+
+    if handle.head_ip is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster_name!r} has been stopped or not properly '
+                'set up. Please re-launch it with `sky start`.')
+    return handle
 
 
 class CloudFilter(enum.Enum):
