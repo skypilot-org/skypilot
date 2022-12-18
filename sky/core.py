@@ -394,9 +394,23 @@ def autostop(
 
 def _check_cluster_available(cluster_name: str,
                              operation: str) -> backends.Backend.ResourceHandle:
-    """Check if the cluster is available."""
-    cluster_status, handle = backend_utils.refresh_cluster_status_handle(
-        cluster_name)
+    """Check if the cluster is available.
+
+    Raises:
+        exceptions.ClusterNotUpError: if the cluster is not UP.
+        exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend
+    """
+    try:
+        cluster_status, handle = backend_utils.refresh_cluster_status_handle(
+            cluster_name)
+    except exceptions.ClusterOwnerIdentityMismatchError as e:
+        # Identity mismatch is not a fatal error as the callers can still
+        # be done by only using ssh, but the ssh can hang if the cluster is
+        # not up (e.g., autostopped).
+        logger.warning(
+            'Failed to refresh the cluster status, the operator might hang '
+            f'if the cluster is not up: {e}')
     if handle is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
