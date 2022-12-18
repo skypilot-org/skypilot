@@ -57,6 +57,6 @@ def session():
 
 @import_package
 def botocore_exceptions():
-    """Client exception."""
+    """AWS botocore exception."""
     from botocore import exceptions
     return exceptions

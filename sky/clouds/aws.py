@@ -33,6 +33,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
+# TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_AMI_GB = 45
 
 
@@ -154,15 +155,15 @@ class AWS(clouds.Cloud):
             image_info = image_info['Images'][0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
-        except aws.botocore.exceptions.NoCredentialsError:
+        except aws.botocore_exceptions().NoCredentialsError:
             # Fallback to default image size if no credentials are available.
-            # The credentials issue will be handled when actually provisioning
-            # the instance.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
             return DEFAULT_AMI_GB
         except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Image {image_id!r} does not found '
-                                 f'in AWS region {region}') from None
+                raise ValueError(f'Image {image_id!r} not found in '
+                                 f'AWS region {region}') from None
         return image_size
 
     @classmethod

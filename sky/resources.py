@@ -441,7 +441,9 @@ class Resources:
                     raise ValueError(
                         f'Image {image_id!r} is {image_size}GB, which is '
                         f'larger than the specified disk_size: {self.disk_size}'
-                        ' GB. Please specify a larger disk_size.')
+                        ' GB. Please specify a larger disk_size to use this '
+                        'image.'
+                    )
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

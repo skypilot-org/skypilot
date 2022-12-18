@@ -9,12 +9,15 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from google import auth
 
 from sky import clouds
+from sky import sky_logging
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+
+logger = sky_logging.init_logger(__name__)
 
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
@@ -52,6 +55,7 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
 
+# TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
 
@@ -203,13 +207,19 @@ class GCP(clouds.Cloud):
             return DEFAULT_GCP_IMAGE_GB
         try:
             image_attrs = image_id.split('/')
+            if len(image_attrs) == 1:
+                raise ValueError(f'Image {image_id!r} not found in GCP.')
             project = image_attrs[1]
             image_name = image_attrs[-1]
             image_infos = compute.images().get(project=project,
                                                image=image_name).execute()
             return float(image_infos['diskSizeGb'])
         except gcp.http_error_exception() as e:
-            if e.resp.status == 404 and 'was not found' in e.reason:
+            if e.resp.status == 403:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Not able to access the image '
+                                     f'{image_id!r}') from None
+            if e.resp.status == 404:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Image {image_id!r} not found in '
                                      'GCP.') from None
