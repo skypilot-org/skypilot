@@ -350,27 +350,15 @@ def autostop(
     option_str = 'down' if down else 'stop'
     if is_cancel:
         option_str = '{stop,down}'
-    operation = f'{verb} auto{option_str} on'
+    operation = f'{verb} auto{option_str}'
     if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
         raise exceptions.NotSupportedError(
             f'{operation} sky reserved cluster {cluster_name!r} '
             f'is not supported.')
-    try:
-        handle = backend_utils.check_cluster_available(
-            cluster_name,
-            operation,
-            expected_backend=backends.CloudVmRayBackend)
-    except exceptions.ClusterNotUpError as e:
-        with ux_utils.print_exception_no_traceback():
-            e.message += (
-                f'\n  auto{option_str} can only be set/unset for '
-                f'{global_user_state.ClusterStatus.UP.value} clusters.')
-            raise e from None
-    except exceptions.NotSupportedError as e:
-        with ux_utils.print_exception_no_traceback():
-            e.message += (f'\n  auto{option_str} is only supported by backend: '
-                          f'{backends.CloudVmRayBackend.NAME}')
-            raise e from None
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation=operation,
+        expected_backend=backends.CloudVmRayBackend)
 
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
@@ -426,7 +414,7 @@ def queue(cluster_name: str,
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        'getting the job queue',
+        operation='getting the job queue',
         expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -469,7 +457,7 @@ def cancel(cluster_name: str,
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        'cancelling jobs',
+        operation='cancelling jobs',
         expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -504,7 +492,7 @@ def tail_logs(cluster_name: str,
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        'tailing logs',
+        operation='tailing logs',
         expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -536,7 +524,7 @@ def download_logs(
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        'downloading logs',
+        operation='downloading logs',
         expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 
@@ -571,7 +559,7 @@ def job_status(
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        'getting job status',
+        operation='getting job status',
         expected_backend=backends.CloudVmRayBackend)
     backend = backend_utils.get_backend_from_handle(handle)
 

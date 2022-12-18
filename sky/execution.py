@@ -437,8 +437,8 @@ def exec(  # pylint: disable=redefined-builtin
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
-    handle = backend_utils.check_cluster_available(cluster_name,
-                                                   'executing task on')
+    handle = backend_utils.check_cluster_available(
+        cluster_name, operation='executing tasks on')
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,

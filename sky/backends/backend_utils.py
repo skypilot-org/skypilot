@@ -1645,7 +1645,7 @@ def check_owner_identity(cluster_name: str) -> None:
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
           same as the user who created the cluster.
-        sky.exceptions.CloudUserIdentityError: if failed to get the activated user
+        exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
     if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
@@ -1802,11 +1802,11 @@ def _update_cluster_identity_and_status(
       Otherwise returns the input record with status and ip potentially updated.
 
     Raises:
-        sky.exceptions.ClusterOwnerIdentityMismatchError: the cluster's owner
-          identity mismatches the current cloud user.
-        sky.exceptions.CloudUserIdentityError: if failed to get the activated user
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
-        sky.exceptions.ClusterStatusFetchingError: the cluster status cannot be
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
     check_owner_identity(cluster_name)
@@ -1840,11 +1840,11 @@ def refresh_cluster_status_handle(
     """Refresh the cluster status and return the status and handle.
 
     Raises:
-        sky.exceptions.ClusterOwnerIdentityMismatchError: the cluster's owner
-          identity mismatches the current cloud user.
-        sky.exceptions.CloudUserIdentityError: if failed to get the activated user
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
-        sky.exceptions.ClusterStatusFetchingError: the cluster status cannot be
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
     record = global_user_state.get_cluster_from_name(cluster_name)
@@ -1876,16 +1876,17 @@ def refresh_cluster_status_handle(
 
 def check_cluster_available(
     cluster_name: str,
-    operation: str,
     *,
+    operation: str,
     expected_backend: Optional[Type[backends.Backend]] = None
 ) -> backends.Backend.ResourceHandle:
     """Check if the cluster is available.
 
     Raises:
+        ValueError: if the cluster does not exist.
         exceptions.ClusterNotUpError: if the cluster is not UP.
         exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend
+          CloudVmRayBackend.
     """
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
@@ -1897,25 +1898,26 @@ def check_cluster_available(
         # cluster is not up (e.g., autostopped).
         ux_utils.console_newline()
         logger.warning(
-            f'Failed to refresh the cluster status, it is not fatal, but '
-            f'{operation} cluster {cluster_name!r} might hang if the cluster '
-            'is not up.\n'
+            f'Failed to refresh the status for cluster {cluster_name!r}. It is not fatal, but '
+            f'{operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
         record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_status, handle = record['status'], record['handle']
 
     if handle is None:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.ClusterNotUpError(
+            raise ValueError(
                 f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
-                f'exist... skipped.{colorama.Style.RESET_ALL}')
+                f'exist.{colorama.Style.RESET_ALL}')
     backend = get_backend_from_handle(handle)
     if expected_backend is not None and not isinstance(backend,
                                                        expected_backend):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}{operation} cluster '
-                f'{cluster_name!r} (status: {cluster_status.value})... skipped'
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
+                f'{cluster_name!r}.\n'
+                f'  {operation.capitalize()} is only supported by backend: '
+                f'{expected_backend.__name__}.'
                 f'{colorama.Style.RESET_ALL}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         if onprem_utils.check_if_local_cloud(cluster_name):
@@ -1924,8 +1926,10 @@ def check_cluster_available(
                     cluster_name))
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
-                f'{colorama.Fore.YELLOW}{operation} cluster {cluster_name!r} '
-                f'(status: {cluster_status.value})... skipped.'
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster {cluster_name!r} (status:'
+                f' {cluster_status.value}).\n'
+                f'  {operation.capitalize()} is only allowed for '
+                f'{global_user_state.ClusterStatus.UP.value} clusters.'
                 f'{colorama.Style.RESET_ALL}')
 
     if handle.head_ip is None:

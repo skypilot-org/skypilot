@@ -513,6 +513,19 @@ def is_spot_controller_up(
     stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
+    """Check if the spot controller is up.
+
+    It can be used to check the actual controller status (since the autostop is
+    set for the controller) before the spot commands interact with the
+    controller.
+
+    Returns:
+        controller_status: The status of the spot controller. If it fails during
+          refreshing the status, it will be the cached status. None if the
+          controller does not exist.
+        handle: The ResourceHandle of the spot controller. None if the
+          controller is not UP or does not exist.
+    """
     try:
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
             SPOT_CONTROLLER_NAME, force_refresh=True)
@@ -521,8 +534,8 @@ def is_spot_controller_up(
             exceptions.ClusterStatusFetchingError) as e:
         logger.warning(
             f'Failed to get the status of the spot controller. '
-            'It is not fatal, but spot commands may hang, when '
-            'the controller is not up, or have inaccurate statement.\n'
+            'It is not fatal, but spot commands/calls may hang or make '
+            'inaccurate statement, when the controller is not up.\n'
             f'Details: {e}')
         record = global_user_state.get_cluster_from_name(SPOT_CONTROLLER_NAME)
         controller_status, handle = None, None
@@ -530,7 +543,7 @@ def is_spot_controller_up(
             controller_status, handle = record['status'], record['handle']
 
     if controller_status is None:
-        print('No managed spot job has been run.')
+        print('No managed spot jobs are found.')
     elif controller_status != global_user_state.ClusterStatus.UP:
         msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
                f'is {controller_status.value}.')
