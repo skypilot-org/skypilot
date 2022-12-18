@@ -507,3 +507,37 @@ def load_job_table_cache() -> Tuple[str, str]:
         return None
     with cache_file.open('r') as f:
         return json.load(f)
+
+
+def is_spot_controller_up(
+    stopped_message: str,
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
+    try:
+        controller_status, handle = backend_utils.refresh_cluster_status_handle(
+            SPOT_CONTROLLER_NAME, force_refresh=True)
+    except (exceptions.CloudUserIdentityError,
+            exceptions.ClusterOwnerIdentityMismatchError,
+            exceptions.ClusterStatusFetchingError) as e:
+        logger.warning(
+            f'Failed to get the status of the spot controller. '
+            'It is not fatal, but spot commands may hang, when '
+            'the controller is not up, or have inaccurate statement.\n'
+            f'Details: {e}')
+        record = global_user_state.get_cluster_from_name(SPOT_CONTROLLER_NAME)
+        controller_status, handle = None, None
+        if record is not None:
+            controller_status, handle = record['status'], record['handle']
+
+    if controller_status is None:
+        print('No managed spot job has been run.')
+    elif controller_status != global_user_state.ClusterStatus.UP:
+        msg = (f'Spot controller {SPOT_CONTROLLER_NAME} '
+               f'is {controller_status.value}.')
+        if controller_status == global_user_state.ClusterStatus.STOPPED:
+            msg += f'\n{stopped_message}'
+        if controller_status == global_user_state.ClusterStatus.INIT:
+            msg += '\nPlease wait for the controller to be ready.'
+        print(msg)
+        handle = None
+    return controller_status, handle

@@ -633,26 +633,6 @@ def job_status(
 # =======================
 
 
-def _is_spot_controller_up(
-    stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        spot.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if controller_status is None:
-        print('No managed spot job has been run.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
-        msg = (f'Spot controller {spot.SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        print(msg)
-        handle = None
-    return controller_status, handle
-
-
 @usage_lib.entrypoint
 def spot_status(refresh: bool) -> List[Dict[str, Any]]:
     """[Deprecated] (alias of spot_queue) Get statuses of managed spot jobs."""
@@ -692,7 +672,7 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
     stop_msg = ''
     if not refresh:
         stop_msg = 'To view the latest job table: sky spot queue --refresh'
-    controller_status, handle = _is_spot_controller_up(stop_msg)
+    controller_status, handle = spot.is_spot_controller_up(stop_msg)
 
     if controller_status is None:
         return []
@@ -745,7 +725,7 @@ def spot_cancel(name: Optional[str] = None,
         RuntimeError: failed to cancel the job.
     """
     job_ids = [] if job_ids is None else job_ids
-    _, handle = _is_spot_controller_up(
+    _, handle = spot.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None or handle.head_ip is None:
         raise exceptions.ClusterNotUpError('All jobs finished.')
@@ -798,7 +778,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
         sky.exceptions.ClusterNotUpError: the spot controller is not up.
     """
     # TODO(zhwu): Automatically restart the spot controller
-    controller_status, handle = _is_spot_controller_up(
+    controller_status, handle = spot.is_spot_controller_up(
         'Please restart the spot controller with '
         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
     if handle is None or handle.head_ip is None:
