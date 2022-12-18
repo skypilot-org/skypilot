@@ -15,7 +15,6 @@ import textwrap
 import time
 import typing
 from typing import Dict, List, Optional, Tuple, Union
-import uuid
 
 import colorama
 import filelock
@@ -2331,7 +2330,10 @@ class CloudVmRayBackend(backends.Backend):
         with tempfile.NamedTemporaryFile('w', prefix='sky_local_app_') as fp:
             fp.write(ray_command)
             fp.flush()
-            remote_run_file = f'/tmp/sky_local_job_{uuid.uuid4().hex[:8]}'
+            run_file = os.path.basename(fp.name)
+            remote_run_file = f'/tmp/sky_local/{run_file}'
+            # Ensures remote_run_file directory is created.
+            runner.run(f'mkdir -p {os.path.dirname(remote_run_file)}')
             # We choose to sync code + exec, so that Ray job submission API will
             # work for the multitenant case.
             runner.rsync(source=fp.name,
