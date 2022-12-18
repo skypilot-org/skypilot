@@ -318,9 +318,11 @@ def _check_cluster_available(cluster_name: str,
         # Failed to refresh the cluster status is not fatal error as the callers
         # can still be done by only using ssh, but the ssh can hang if the
         # cluster is not up (e.g., autostopped).
+        ux_utils.console_newline()
         logger.warning(
-            f'Failed to refresh the status for cluster {cluster_name!r}, it is '
-            'not fatal, but the operator might hang if the cluster is not up.\n'
+            f'Failed to refresh the cluster status, it is not fatal, but '
+            f'{operation} cluster {cluster_name!r} might hang if the cluster '
+            'is not up.\n'
             f'Detailed reason: {e}')
         record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_status, handle = record['status'], record['handle']
