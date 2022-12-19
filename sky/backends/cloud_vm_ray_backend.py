@@ -796,14 +796,23 @@ class RetryingVmProvisioner(object):
 
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
-        head_node_launch_requested = any(
-            line.startswith('<1/1> Setting up head node')
+        # Determining whether head node launch *may* have been requested based
+        # on outputs is tricky. We are conservative here by choosing an "early
+        # enough" output line in the following:
+        # https://github.com/ray-project/ray/blob/03b6bc7b5a305877501110ec04710a9c57011479/python/ray/autoscaler/_private/commands.py#L704-L737  # pylint: disable=line-too-long
+        # This is okay, because we mainly want to use the return value of this
+        # func to skip cleaning up never-launched clusters that encountered VPC
+        # errors; their launch should not have printed any such outputs.
+        head_node_launch_may_have_been_requested = any(
+            line.startswith('Acquiring an up-to-date head node')
             for line in stdout_splits + stderr_splits)
+        # If head node request has definitely not been sent (this happens when
+        # there are errors during node provider "bootstrapping", e.g.,
+        # VPC-not-found errors), then definitely no nodes are launched.
+        definitely_no_nodes_launched = (
+            not head_node_launch_may_have_been_requested)
 
-        # If head node request has not been sent (this happens when there are
-        # errors during node provider "bootstrapping", e.g., VPC-not-found
-        # errors), then definitely no nodes are launched.
-        return not head_node_launch_requested
+        return definitely_no_nodes_launched
 
     def _yield_region_zones(self, to_provision: resources_lib.Resources,
                             cluster_name: str, cluster_exists: bool):
