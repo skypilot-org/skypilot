@@ -906,6 +906,22 @@ def test_spot_recovery():
     run_one_test(test)
 
 
+def test_spot_recovery_default():
+    """Test managed spot recovery for default spot launch."""
+    name = _get_cluster_name()
+    test = Test(
+        'managed-spot-recovery-default',
+        [
+            f'sky spot launch -n {name} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            'sleep 360',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 def test_spot_recovery_multi_node():
     """Test managed spot recovery."""
     name = _get_cluster_name()
