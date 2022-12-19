@@ -1764,7 +1764,9 @@ def _update_cluster_status_no_lock(
             backend = backends.CloudVmRayBackend()
             backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to reset autostop. Due to {type(e)}: {e}')
+            logger.debug(
+                f'Failed to reset autostop. Due to {common_utils.class_fullname(e.__class__)}: {e}'
+            )
         global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                      -1,
                                                      to_down=False)

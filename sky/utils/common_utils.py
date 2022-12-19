@@ -291,3 +291,15 @@ def decode_payload(payload_str: str) -> Any:
     payload_str = matched[0]
     payload = json.loads(payload_str)
     return payload
+
+
+def class_fullname(cls):
+    """Get the full name of a class.
+
+    Args:
+        cls: The class to get the full name.
+
+    Returns:
+        The full name of the class.
+    """
+    return f'{cls.__module__}.{cls.__name__}'

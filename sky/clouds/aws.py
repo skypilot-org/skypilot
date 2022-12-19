@@ -12,6 +12,7 @@ from sky.adaptors import aws
 from sky import clouds
 from sky import exceptions
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -377,7 +378,9 @@ class AWS(clouds.Cloud):
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    f'Failed to get AWS user: {e} (Type: {type(e)}).') from None
+                    f'Failed to get AWS user.\n'
+                    f'Details: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                ) from None
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

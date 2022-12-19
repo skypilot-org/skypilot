@@ -9,6 +9,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 from sky import clouds
 from sky import exceptions
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -467,8 +468,10 @@ class GCP(clouds.Cloud):
         except subprocess.CalledProcessError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'Failed to get GCP user identity with unknown '
-                    f'exception: {type(e)} {e}') from e
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    f'Details: [{common_utils.class_fullname(e.__class__)}] {e}'
+                ) from e
         if not account:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
