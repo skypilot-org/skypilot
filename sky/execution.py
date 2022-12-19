@@ -438,7 +438,9 @@ def exec(  # pylint: disable=redefined-builtin
                                                   operation_str='sky.exec')
 
     handle = backend_utils.check_cluster_available(
-        cluster_name, operation='executing tasks on')
+        cluster_name,
+        operation='executing tasks on',
+        check_cloud_vm_ray_backend=False)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,

@@ -2808,27 +2808,6 @@ def admin_deploy(clusterspec_yaml: str):
                 fg='green')
 
 
-# Managed Spot CLIs
-def _is_spot_controller_up(
-    stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if controller_status is None:
-        click.echo('No managed spot job has been run.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
-        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        click.echo(msg)
-        handle = None
-    return controller_status, handle
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Commands for managed spot jobs."""

@@ -14,7 +14,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -1878,7 +1878,7 @@ def check_cluster_available(
     cluster_name: str,
     *,
     operation: str,
-    expected_backend: Optional[Type[backends.Backend]] = None
+    check_cloud_vm_ray_backend: bool = True,
 ) -> backends.Backend.ResourceHandle:
     """Check if the cluster is available.
 
@@ -1910,14 +1910,13 @@ def check_cluster_available(
                 f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
                 f'exist.{colorama.Style.RESET_ALL}')
     backend = get_backend_from_handle(handle)
-    if expected_backend is not None and not isinstance(backend,
-                                                       expected_backend):
+    if check_cloud_vm_ray_backend and not isinstance(
+            backend, backends.CloudVmRayBackend):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
-                f'{cluster_name!r}.\n'
-                f'  {operation.capitalize()} is only supported by backend: '
-                f'{expected_backend.__name__}.'
+                f'{cluster_name!r}. It is only supported by backend: '
+                f'{backends.CloudVmRayBackend.NAME}.'
                 f'{colorama.Style.RESET_ALL}')
     if cluster_status != global_user_state.ClusterStatus.UP:
         if onprem_utils.check_if_local_cloud(cluster_name):
@@ -1926,9 +1925,8 @@ def check_cluster_available(
                     cluster_name))
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
-                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster {cluster_name!r} (status:'
-                f' {cluster_status.value}).\n'
-                f'  {operation.capitalize()} is only allowed for '
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
+                f'{cluster_name!r} (status: {cluster_status.value}). It is only allowed for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
                 f'{colorama.Style.RESET_ALL}')
 

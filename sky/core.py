@@ -358,7 +358,7 @@ def autostop(
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation=operation,
-        expected_backend=backends.CloudVmRayBackend)
+    )
 
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
@@ -415,7 +415,7 @@ def queue(cluster_name: str,
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='getting the job queue',
-        expected_backend=backends.CloudVmRayBackend)
+    )
     backend = backend_utils.get_backend_from_handle(handle)
 
     returncode, jobs_payload, stderr = backend.run_on_head(handle,
@@ -458,7 +458,7 @@ def cancel(cluster_name: str,
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='cancelling jobs',
-        expected_backend=backends.CloudVmRayBackend)
+    )
     backend = backend_utils.get_backend_from_handle(handle)
 
     if all:
@@ -493,7 +493,7 @@ def tail_logs(cluster_name: str,
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='tailing logs',
-        expected_backend=backends.CloudVmRayBackend)
+    )
     backend = backend_utils.get_backend_from_handle(handle)
 
     job_str = f'job {job_id}'
@@ -525,7 +525,7 @@ def download_logs(
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='downloading logs',
-        expected_backend=backends.CloudVmRayBackend)
+    )
     backend = backend_utils.get_backend_from_handle(handle)
 
     if job_ids is not None and len(job_ids) == 0:
@@ -560,7 +560,7 @@ def job_status(
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='getting job status',
-        expected_backend=backends.CloudVmRayBackend)
+    )
     backend = backend_utils.get_backend_from_handle(handle)
 
     if job_ids is not None and len(job_ids) == 0:
