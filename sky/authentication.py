@@ -21,6 +21,7 @@ from sky.adaptors import gcp
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient
 
 logger = sky_logging.init_logger(__name__)
 
@@ -303,6 +304,16 @@ def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def setup_lambda_authentication(config):
     get_or_generate_keys()
+
+    # Ensure ssh key is registered with Lambda Labs
+    lambda_client = LambdaClient()
+    if lambda_client.ssh_key_name is None:
+        public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
+        with open(public_key_path, 'r') as f:
+            public_key = f.read()
+        name = f'{common_utils.get_user_hash()}-sky-key'
+        lambda_client.set_ssh_key(name, public_key)
+
     # Need to use ~ relative path because Ray uses the same
     # path for finding the public key path on both local and head node.
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH

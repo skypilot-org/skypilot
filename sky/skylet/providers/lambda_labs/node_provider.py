@@ -5,7 +5,7 @@ from threading import RLock
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from sky.skylet.providers.lambda_labs.config import bootstrap_lambda
-from sky.skylet.providers.lambda_labs.lambda_utils import Lambda, Metadata
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, Metadata
 
 VM_NAME_MAX_LEN = 64
 
@@ -38,7 +38,7 @@ class LambdaNodeProvider(NodeProvider):
         self.lock = RLock()
 
         # Assumes lambda authentication has been set up.
-        self.lambda_client = Lambda()
+        self.lambda_client = LambdaClient()
         # Only used for tags
         self.local_metadata = Metadata()
         # Cache node objects

@@ -55,22 +55,21 @@ def raise_lambda_error(response, error_status_codes):
         raise LambdaError('Unexpected error.')
 
 
-class Lambda:
+class LambdaClient:
     """Wrapper functions for Lambda Labs API."""
 
     def __init__(self):
-        credentials = os.path.expanduser(CREDENTIALS_PATH)
-        assert os.path.exists(credentials), 'Credentials not found'
-        with open(credentials, 'r') as f:
+        self.credentials = os.path.expanduser(CREDENTIALS_PATH)
+        assert os.path.exists(self.credentials), 'Credentials not found'
+        with open(self.credentials, 'r') as f:
             lines = [line.strip() for line in f.readlines() if '=' in line]
             self._credentials = {
                 line.split('=')[0]: line.split('=')[1]
                 for line in lines
             }
         self.api_key = self._credentials['api_key']
-        self.ssh_key_name = self._credentials['ssh_key_name']
+        self.ssh_key_name = self._credentials.get('ssh_key_name', None)
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
-
 
     def up(self,
            instance_type='gpu_1x_a100_sxm4',
@@ -79,6 +78,7 @@ class Lambda:
            name=''):
         """Start a new instance."""
         assert instance_type=='gpu_1x_a100_sxm4', instance_type
+        assert self.ssh_key_name is not None
         data = json.dumps({
                     'region_name': region,
                     'instance_type_name': instance_type,
@@ -112,3 +112,18 @@ class Lambda:
         response = requests.get(f'{API_ENDPOINT}/instances', headers=self.headers)
         raise_lambda_error(response, [400, 401, 403, 404])
         return response.json()
+
+    def set_ssh_key(self, name, pub_key):
+        """Set ssh key."""
+        data = json.dumps({
+            'name': name,
+            'public_key': pub_key
+        })
+        response = requests.post(f'{API_ENDPOINT}/ssh-keys',
+                                 data=data,
+                                 headers=self.headers)
+        raise_lambda_error(response, [400, 401, 403])
+        self.ssh_key_name = name
+        with open(self.credentials, 'w') as f:
+            f.write(f'api_key={self.api_key}\n')
+            f.write(f'ssh_key_name={self.ssh_key_name}\n')

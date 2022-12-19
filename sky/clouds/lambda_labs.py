@@ -1,12 +1,11 @@
 """Lambda."""
 import json
-import os
-import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, LambdaError
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -161,17 +160,14 @@ class Lambda(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
-            assert os.path.isfile(os.path.expanduser('~/.lambda/lambda_keys'))
-
-            # check installation of lambda tools
-            # TODO: add dependency check
-            # _run_output('lambda -h')
-        except (AssertionError, subprocess.CalledProcessError,
-                FileNotFoundError, KeyError, ImportError):
-            # See also: https://stackoverflow.com/a/53307505/1165051
-            return False, ('Lambda Labs credentials are not set. '
-                           'Run the following command:\n    '
-                           '  $ lambda auth\n    ')
+            LambdaClient().ls()
+        except (AssertionError, LambdaError):
+            return False, ('Failed to access Lambda Labs with credentials. '
+                           'To configure credentials, go to:\n    '
+                           '  https://cloud.lambdalabs.com/api-keys\n    '
+                           'to generate API key and add the line\n    '
+                           '  api_key=[YOUR API KEY]\n    '
+                           'to ~/.lambda/lambda_keys')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
