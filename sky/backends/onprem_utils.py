@@ -199,16 +199,10 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
             failure_message=f'Pip3 is not installed on {runner.ip}.')
 
         # If Ray does not exist, installs Ray.
-        ray_version = backend_utils.run_command_and_handle_ssh_failure(
-            runner, (f'ray --version || '
+        backend_utils.run_command_and_handle_ssh_failure(
+            runner, ('ray --version || '
                      f'(pip3 install ray[default]=={sky_ray_version})'),
             failure_message=f'Ray is not installed on {runner.ip}.')
-        ray_version = ray_version.split(' ')[-1].strip()
-        ray_version = version.Version(ray_version)
-        min_ray_version = version.Version('1.9.0')
-        if ray_version < min_ray_version:
-            raise ValueError(f'Ray {ray_version} on {runner.ip} is less than '
-                             f'the minimum requirement: Ray {min_ray_version}.')
 
         # If Ray exists, check Ray version. If the version does not match
         # raise an error.
