@@ -2337,7 +2337,10 @@ class CloudVmRayBackend(backends.Backend):
             fp.write(ray_command)
             fp.flush()
             run_file = os.path.basename(fp.name)
-            remote_run_file = f'/tmp/{run_file}'
+            remote_run_file = f'/tmp/sky_local/{run_file}'
+            # Ensures remote_run_file directory is created.
+            runner.run(f'mkdir -p {os.path.dirname(remote_run_file)}',
+                       stream_logs=False)
             # We choose to sync code + exec, so that Ray job submission API will
             # work for the multitenant case.
             runner.rsync(source=fp.name,
