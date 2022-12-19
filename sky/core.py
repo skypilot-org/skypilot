@@ -339,11 +339,14 @@ def autostop(
           rather than autostop (restartable).
 
     Raises:
-        ValueError: the specified cluster does not exist.
-        sky.exceptions.NotSupportedError: if the specified cluster is a TPU VM
-          Pod cluster, or the managed spot controller, or was launched using a
-          non-default backend.
-        sky.exceptions.ClusterNotUpError: the cluster is not UP.
+        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend or the cluster is TPU VM Pod.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     is_cancel = idle_minutes < 0
     verb = 'Cancelling' if is_cancel else 'Scheduling'
@@ -402,13 +405,15 @@ def queue(cluster_name: str,
             }
         ]
     raises:
-        RuntimeError: if failed to get the job queue.
-        sky.exceptions.ClusterNotUpError: the cluster is not up.
-        sky.exceptions.NotSupportedError: the feature is not supported.
-        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
-        sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
+        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+        RuntimeError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
     username = getpass.getuser()
@@ -445,9 +450,16 @@ def cancel(cluster_name: str,
     Please refer to the sky.cli.cancel for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterNotUpError: the cluster is not up.
-        sky.exceptions.NotSupportedError: the feature is not supported.
+        ValueError: arguments are invalid or the cluster is not supported or the cluster
+          does not exist.
+        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     job_ids = [] if job_ids is None else job_ids
     if len(job_ids) == 0 and not all:
@@ -489,9 +501,15 @@ def tail_logs(cluster_name: str,
     Please refer to the sky.cli.tail_logs for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported.
-        sky.exceptions.ClusterNotUpError: the cluster is not up.
-        sky.exceptions.NotSupportedError: the feature is not supported.
+        ValueError: arguments are invalid or the cluster is not supported or the cluster
+          does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
@@ -524,6 +542,15 @@ def download_logs(
         job_ids: (List[str]) job ids.
     Returns:
         Dict[str, str]: a mapping of job_id to local log path.
+    Raises:
+        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
@@ -559,6 +586,15 @@ def job_status(
         statuses. The status will be None if the job does not exist.
         If job_ids is None and there is no job on the cluster, it will return
         {None: None}.
+    Raises:
+        ValueError: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(

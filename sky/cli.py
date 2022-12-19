@@ -1481,10 +1481,10 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             if isinstance(e, exceptions.NotSupportedError):
                 unsupported_clusters.append(cluster)
-            click.echo(
-                f'{colorama.Fore.YELLOW}Failed to get the job queue for '
-                f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
-                f'  Details: [{common_utils.class_fullname(e.__class__)}] {e}')
+            click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
+                       f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
+                       f'  {common_utils.class_fullname(e.__class__)}: '
+                       f'{common_utils.remove_color(str(e))}')
             continue
         job_table = job_lib.format_job_queue(job_table)
         click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
