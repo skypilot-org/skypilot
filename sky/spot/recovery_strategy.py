@@ -49,8 +49,6 @@ class StrategyExecutor:
         self.backend = backend
         self.retry_until_up = retry_until_up
 
-        self.launched_resources = None
-
     def __init_subclass__(cls, name: str, default: bool = False):
         SPOT_STRATEGIES[name] = cls
         if default:
@@ -155,9 +153,6 @@ class StrategyExecutor:
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
                            detach_run=True)
-                handle = global_user_state.get_handle_from_cluster_name(
-                    self.cluster_name)
-                self.launched_resources = handle.launched_resources
                 logger.info('Spot cluster launched.')
             except exceptions.InvalidClusterNameError as e:
                 # The cluster name is too long.

@@ -145,13 +145,14 @@ class SpotController:
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
 
-            resources = self._strategy_executor.launched_resources
-            if (resources is not None and
-                    resources.need_cleanup_after_preemption()):
-                # Some spot resource (e.g., Spot TPU VM) may need to be
-                # cleaned up after preemption.
-                logger.info('Cleaning up the preempted spot cluster...')
-                self._strategy_executor.terminate_cluster()
+            if handle is not None:
+                resources = handle.launched_resources
+                assert resources is not None, handle
+                if resources.need_cleanup_after_preemption():
+                    # Some spot resource (e.g., Spot TPU VM) may need to be
+                    # cleaned up after preemption.
+                    logger.info('Cleaning up the preempted spot cluster...')
+                    self._strategy_executor.terminate_cluster()
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.

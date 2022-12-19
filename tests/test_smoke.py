@@ -906,11 +906,11 @@ def test_spot_recovery():
     run_one_test(test)
 
 
-def test_spot_recovery_default():
-    """Test managed spot recovery for default spot launch."""
+def test_spot_recovery_default_resources():
+    """Test managed spot recovery for default resources."""
     name = _get_cluster_name()
     test = Test(
-        'managed-spot-recovery-default',
+        'managed-spot-recovery-default-resources',
         [
             f'sky spot launch -n {name} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             'sleep 360',

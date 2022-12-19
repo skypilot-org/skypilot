@@ -262,9 +262,7 @@ class Resources:
 
     def need_cleanup_after_preemption(self) -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""
-        if self.cloud is None:
-            logger.info('self.cloud is None, assuming no cleanup is needed.')
-            return False
+        assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption(self)
 
     def _set_region_zone(self, region: Optional[str],
