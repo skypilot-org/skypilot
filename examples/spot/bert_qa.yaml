@@ -5,7 +5,7 @@ resources:
 
 # Assume your working directory is under `~/transformers`.
 # To make this example work, please run the following command:
-# git clone https://github.com/huggingface/transformers.git ~/transformers
+# git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.18.0
 workdir: ~/transformers
 
 file_mounts:
@@ -17,7 +17,6 @@ setup: |
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
 
-    git checkout v4.18.0
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113

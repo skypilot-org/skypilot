@@ -30,7 +30,6 @@ each other.
 import copy
 import datetime
 import functools
-import getpass
 import os
 import shlex
 import subprocess
@@ -606,7 +605,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{getpass.getuser()}'
+    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -2828,7 +2827,7 @@ def _is_spot_controller_up(
 
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
-    """Managed spot instances related commands."""
+    """Commands for managed spot jobs."""
     pass
 
 

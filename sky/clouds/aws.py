@@ -10,7 +10,9 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
@@ -29,6 +31,10 @@ def _run_output(cmd):
                           stderr=subprocess.PIPE,
                           stdout=subprocess.PIPE)
     return proc.stdout.decode('ascii')
+
+
+# TODO(zhwu): Move the default AMI size to the catalog instead.
+DEFAULT_AMI_GB = 45
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -114,27 +120,51 @@ class AWS(clouds.Cloud):
             f'{region_name}. Try setting a valid image_id.')
 
     @classmethod
-    def _get_image_id(cls, region_name: str, instance_type: str,
-                      image_id: Optional[Dict[str, str]]) -> str:
-        if image_id is not None:
-            if None in image_id:
-                image_id = image_id[None]
-            else:
-                assert region_name in image_id, image_id
-                image_id = image_id[region_name]
-            if image_id.startswith('skypilot:'):
-                image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                                 region_name,
-                                                                 clouds='aws')
-                if image_id is None:
-                    # Raise ResourcesUnavailableError to make sure the failover
-                    # in CloudVMRayBackend will be correctly triggered.
-                    # TODO(zhwu): This is a information leakage to the cloud
-                    # implementor, we need to find a better way to handle this.
-                    raise exceptions.ResourcesUnavailableError(
-                        f'No image found for region {region_name}')
-            return image_id
-        return cls.get_default_ami(region_name, instance_type)
+    def _get_image_id(
+        cls,
+        image_id: Optional[Dict[str, str]],
+        region_name: str,
+    ) -> str:
+        if image_id is None:
+            return None
+        if None in image_id:
+            image_id = image_id[None]
+        else:
+            assert region_name in image_id, image_id
+            image_id = image_id[region_name]
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             region_name,
+                                                             clouds='aws')
+            if image_id is None:
+                # Raise ResourcesUnavailableError to make sure the failover
+                # in CloudVMRayBackend will be correctly triggered.
+                # TODO(zhwu): This is a information leakage to the cloud
+                # implementor, we need to find a better way to handle this.
+                raise exceptions.ResourcesUnavailableError(
+                    f'No image found for region {region_name}')
+        return image_id
+
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_AMI_GB
+        assert region is not None, (image_id, region)
+        client = aws.client('ec2', region_name=region)
+        try:
+            image_info = client.describe_images(ImageIds=[image_id])
+            image_info = image_info['Images'][0]
+            image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
+                'VolumeSize']
+        except aws.botocore_exceptions().NoCredentialsError:
+            # Fallback to default image size if no credentials are available.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
+            return DEFAULT_AMI_GB
+        except aws.botocore_exceptions().ClientError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Image {image_id!r} not found in '
+                                 f'AWS region {region}') from None
+        return image_size
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -234,7 +264,9 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(region_name, r.instance_type, r.image_id)
+        image_id = self._get_image_id(r.image_id, region_name)
+        if image_id is None:
+            image_id = self.get_default_ami(region_name, r.instance_type)
 
         return {
             'instance_type': r.instance_type,

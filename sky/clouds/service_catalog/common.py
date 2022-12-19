@@ -99,20 +99,35 @@ def read_catalog(filename: str,
             if pull_frequency_hours is not None:
                 update_frequency_str = f' (every {pull_frequency_hours} hours)'
             with backend_utils.safe_console_status(
-                    f'Updating {cloud} catalog{update_frequency_str}'):
+                (f'Updating {cloud} catalog: '
+                 f'{filename}'
+                 f'{update_frequency_str}')) as status:
                 try:
                     r = requests.get(url)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
-                    logger.error(f'Failed to download {cloud} catalog:')
-                    with ux_utils.print_exception_no_traceback():
-                        raise e
-            # Save the catalog to a local file.
-            os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
-            with open(catalog_path, 'w') as f:
-                f.write(r.text)
-            with open(meta_path + '.md5', 'w') as f:
-                f.write(hashlib.md5(r.text.encode()).hexdigest())
+                    ux_utils.console_newline()
+                    status.stop()
+                    error_str = (f'Failed to fetch {cloud} catalog '
+                                 f'{filename}. ')
+                    if os.path.exists(catalog_path):
+                        logger.warning(
+                            f'{error_str}Using cached catalog files.')
+                        # Update catalog file modification time.
+                        os.utime(catalog_path, None)  # Sets to current time
+                    else:
+                        logger.error(
+                            f'{error_str}Please check your internet connection.'
+                        )
+                        with ux_utils.print_exception_no_traceback():
+                            raise e
+                else:
+                    # Download successful, save the catalog to a local file.
+                    os.makedirs(os.path.dirname(catalog_path), exist_ok=True)
+                    with open(catalog_path, 'w') as f:
+                        f.write(r.text)
+                    with open(meta_path + '.md5', 'w') as f:
+                        f.write(hashlib.md5(r.text.encode()).hexdigest())
 
     try:
         df = pd.read_csv(catalog_path)
@@ -330,7 +345,12 @@ def get_region_zones(df: pd.DataFrame,
                      use_spot: bool) -> List[cloud_lib.Region]:
     """Returns a list of regions/zones from a dataframe."""
     price_str = 'SpotPrice' if use_spot else 'Price'
-    df = df.dropna(subset=[price_str]).sort_values(price_str)
+    sort_keys = [price_str, 'Region']
+    if 'AvailabilityZone' in df.columns:
+        sort_keys.append('AvailabilityZone')
+    # If NaN appears in any of the sort keys, drop the row, as that means
+    # errors in the data.
+    df = df.dropna(subset=sort_keys).sort_values(sort_keys)
     regions = [cloud_lib.Region(region) for region in df['Region'].unique()]
     if 'AvailabilityZone' in df.columns:
         zones_in_region = df.groupby('Region')['AvailabilityZone'].apply(

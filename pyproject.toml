@@ -16,3 +16,8 @@ env = [
     "SKYPILOT_DEBUG=1",
     "SKYPILOT_DISABLE_USAGE_COLLECTION=1"
 ]
+
+[tool.mypy]
+python_version = "3.8"
+follow_imports = "skip"
+ignore_missing_imports = true

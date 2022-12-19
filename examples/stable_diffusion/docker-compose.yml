@@ -1,0 +1,21 @@
+version: '3.9'
+
+services:
+  model:
+    image: berkeleyskypilot/stable-diffusion
+    restart: on-failure
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./cache:/cache
+      - ./output:/output
+      - ./models:/models
+    environment:
+      - CLI_ARGS=--extra-models-cpu --optimized-turbo
+    deploy:
+      resources:
+        reservations:
+          devices:
+              - driver: nvidia
+                device_ids: ['0']
+                capabilities: [gpu]

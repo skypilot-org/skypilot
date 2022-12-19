@@ -633,12 +633,18 @@ class RetryingVmProvisioner(object):
                 else:
                     assert False, error
         elif len(httperror_str) >= 1:
-            # Parse HttpError for unauthorized regions. Example:
-            # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
-            # Details: "Location us-east1-d is not found or access is
-            # unauthorized.">
             logger.info(f'Got {httperror_str[0]}')
-            self._blocked_zones.add(zone.name)
+            if ('Requested disk size cannot be smaller than the image size'
+                    in httperror_str[0]):
+                logger.info('Skipping all regions due to disk size issue.')
+                for r, _ in clouds.GCP.region_zones_provision_loop():
+                    self._blocked_regions.add(r.name)
+            else:
+                # Parse HttpError for unauthorized regions. Example:
+                # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
+                # Details: "Location us-east1-d is not found or access is
+                # unauthorized.">
+                self._blocked_zones.add(zone.name)
         else:
             # No such structured error response found.
             assert not exception_str, stderr
@@ -887,8 +893,8 @@ class RetryingVmProvisioner(object):
             if cluster_status == global_user_state.ClusterStatus.STOPPED:
                 message = (
                     'Failed to acquire resources to restart the stopped '
-                    f'cluster {cluster_name} on {region}. Please retry again '
-                    'later.')
+                    f'cluster {cluster_name} in {region.name}. Please retry '
+                    'again later.')
 
                 # Reset to STOPPED (rather than keeping it at INIT), because
                 # (1) the cluster is not up (2) it ensures future `sky start`
@@ -1004,6 +1010,10 @@ class RetryingVmProvisioner(object):
         # Get previous cluster status
         prev_cluster_status = backend_utils.refresh_cluster_status_handle(
             cluster_name, acquire_per_cluster_status_lock=False)[0]
+        is_prev_cluster_healthy = prev_cluster_status in [
+            global_user_state.ClusterStatus.STOPPED,
+            global_user_state.ClusterStatus.UP
+        ]
 
         self._clear_blocklist()
         for region, zones in self._yield_region_zones(to_provision,
@@ -1013,18 +1023,23 @@ class RetryingVmProvisioner(object):
                 continue
             zone_str = ','.join(
                 z.name for z in zones) if zones is not None else 'all zones'
-            config_dict = backend_utils.write_cluster_config(
-                to_provision,
-                num_nodes,
-                _get_cluster_config_template(to_provision.cloud),
-                cluster_name,
-                self._local_wheel_path,
-                self._wheel_hash,
-                region=region,
-                zones=zones,
-                dryrun=dryrun,
-                keep_launch_fields_in_existing_config=prev_cluster_status
-                is not None)
+            try:
+                config_dict = backend_utils.write_cluster_config(
+                    to_provision,
+                    num_nodes,
+                    _get_cluster_config_template(to_provision.cloud),
+                    cluster_name,
+                    self._local_wheel_path,
+                    self._wheel_hash,
+                    region=region,
+                    zones=zones,
+                    dryrun=dryrun,
+                    keep_launch_fields_in_existing_config=cluster_exists)
+            except exceptions.ResourcesUnavailableError as e:
+                # Failed due to catalog issue, e.g. image not found.
+                logger.info(
+                    f'Failed to find catalog in region {region.name}: {e}')
+                continue
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']
@@ -1104,10 +1119,7 @@ class RetryingVmProvisioner(object):
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            need_terminate = prev_cluster_status not in [
-                global_user_state.ClusterStatus.STOPPED,
-                global_user_state.ClusterStatus.UP
-            ]
+            need_terminate = not is_prev_cluster_healthy
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
                 self._update_blocklist_on_error(to_provision.cloud, region,
@@ -1145,7 +1157,10 @@ class RetryingVmProvisioner(object):
         message = ('Failed to acquire resources in all regions/zones of '
                    f'{to_provision.cloud}. '
                    'Try changing resource requirements or use another cloud.')
-        raise exceptions.ResourcesUnavailableError(message)
+        # Do not failover to other clouds if the cluster was previously
+        # UP or STOPPED, since the user can have some data on the cluster.
+        raise exceptions.ResourcesUnavailableError(
+            message, no_failover=is_prev_cluster_healthy)
 
     def _tpu_pod_setup(self, cluster_yaml: str,
                        cluster_handle: 'backends.Backend.ResourceHandle'):
@@ -2283,7 +2298,7 @@ class CloudVmRayBackend(backends.Backend):
                             '\nTo cancel the job:\t\t'
                             f'{backend_utils.BOLD}sky spot cancel {job_id}'
                             f'{backend_utils.RESET_BOLD}'
-                            '\nTo stream the logs:\t\t'
+                            '\nTo stream job logs:\t\t'
                             f'{backend_utils.BOLD}sky spot logs {job_id}'
                             f'{backend_utils.RESET_BOLD}'
                             f'\nTo stream controller logs:\t'
@@ -2298,7 +2313,7 @@ class CloudVmRayBackend(backends.Backend):
                             '\nTo cancel the job:\t'
                             f'{backend_utils.BOLD}sky cancel {name} {job_id}'
                             f'{backend_utils.RESET_BOLD}'
-                            '\nTo stream the logs:\t'
+                            '\nTo stream job logs:\t'
                             f'{backend_utils.BOLD}sky logs {name} {job_id}'
                             f'{backend_utils.RESET_BOLD}'
                             '\nTo view the job queue:\t'
@@ -2680,16 +2695,33 @@ class CloudVmRayBackend(backends.Backend):
                     # check if gcloud includes TPU VM API
                     backend_utils.check_gcp_cli_include_tpu_vm()
 
-                    # Excluding preempted VMs is safe as they are already
-                    # terminated and do not charge.
                     query_cmd = (
                         f'gcloud compute tpus tpu-vm list --filter='
-                        f'"(labels.ray-cluster-name={cluster_name} AND '
-                        f'state!=PREEMPTED)" '
+                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
                         f'--zone={zone} --format=value\\(name\\)')
-                    terminate_cmd = (
-                        f'gcloud compute tpus tpu-vm delete --zone={zone}'
-                        f' --quiet $({query_cmd})')
+                    returncode, stdout, stderr = log_lib.run_with_log(
+                        query_cmd,
+                        log_abs_path,
+                        shell=True,
+                        stream_logs=False,
+                        require_outputs=True)
+
+                    # Skip the termination command, if the TPU ID
+                    # query command fails.
+                    if returncode != 0:
+                        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
+                                         f'echo "{stdout}" && '
+                                         f'echo "{stderr}" >&2 && '
+                                         f'exit {returncode}')
+                    else:
+                        # Needs to create a list as GCP does not allow deleting
+                        # multiple TPU VMs at once.
+                        tpu_terminate_cmds = []
+                        for tpu_id in stdout.splitlines():
+                            tpu_terminate_cmds.append(
+                                'gcloud compute tpus tpu-vm delete '
+                                f'--zone={zone} --quiet {tpu_id}')
+                        terminate_cmd = ' && '.join(tpu_terminate_cmds)
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='

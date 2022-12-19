@@ -196,6 +196,14 @@ class Cloud:
         """
         raise NotImplementedError
 
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        """Check the image size from the cloud.
+
+        Returns: the image size in GB.
+        Raises: ValueError if the image cannot be found.
+        """
+        raise NotImplementedError
+
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
@@ -213,6 +221,19 @@ class Cloud:
                                       zone: Optional[str] = None) -> bool:
         """Returns whether the accelerator is valid in the region or zone."""
         raise NotImplementedError
+
+    def need_cleanup_after_preemption(self,
+                                      resource: 'resources.Resources') -> bool:
+        """Returns whether a spot resource needs cleanup after preeemption.
+
+        In most cases, spot resources do not need cleanup after preemption,
+        as long as the cluster can be relaunched with the same name and tag,
+        no matter the preemption behavior is to terminate or stop the cluster.
+        The only exception by far is GCP's Spot TPU VM. We override this method
+        in gcp.py.
+        """
+        del resource
+        return False
 
     def __repr__(self):
         return self._REPR
