@@ -374,11 +374,15 @@ def set_storage_handle(storage_name: str, handle: 'Storage.StorageMetadata'):
         raise ValueError(f'Storage{storage_name} not found.')
 
 
-def get_handle_from_storage_name(storage_name: str):
-    assert storage_name is not None, 'storage_name cannot be None'
+def get_handle_from_storage_name(
+        storage_name: Optional[str]) -> Optional['Storage.StorageMetadata']:
+    if storage_name is None:
+        return None
     rows = _DB.cursor.execute('SELECT handle FROM storage WHERE name=(?)',
                               (storage_name,))
     for (handle,) in rows:
+        if handle is None:
+            return None
         return pickle.loads(handle)
 
 
