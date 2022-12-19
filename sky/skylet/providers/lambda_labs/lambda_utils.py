@@ -13,6 +13,10 @@ LOCAL_METADATA_PATH = '~/.lambda/metadata'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 here = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
 
+class LambdaError(Exception):
+    __module__ = 'builtins'
+
+
 class Metadata:
     """Local metadata for a Lambda Labs instance."""
 
@@ -32,6 +36,25 @@ class Metadata:
             json.dump(self._metadata, f)
 
 
+def raise_lambda_error(response, error_status_codes):
+    """Raise LambdaError if appropriate.
+
+    response: Lambda Labs API response
+    error_status_codes: if response.status_code is in error_status_codes, then
+                        an error has occurred but response.json still exists
+    """
+    if response.status_code == 200:
+        return
+    if response.status_code in error_status_codes:
+        resp_json = response.json()
+        code = resp_json['error']['code']
+        message = resp_json['error']['message']
+        raise LambdaError(f'{code}: {message}')
+    else:
+        # Error, but no json
+        raise LambdaError('Unexpected error.')
+
+
 class Lambda:
     """Wrapper functions for Lambda Labs API."""
 
@@ -47,6 +70,7 @@ class Lambda:
         self.api_key = self._credentials['api_key']
         self.ssh_key_name = self._credentials['ssh_key_name']
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
+
 
     def up(self,
            instance_type='gpu_1x_a100_sxm4',
@@ -67,11 +91,7 @@ class Lambda:
         response = requests.post(f'{API_ENDPOINT}/instance-operations/launch',
                                  data=data,
                                  headers=self.headers)
-        if response.status_code != 200:
-            print(response.status_code)
-            if response.status_code in {400, 401, 403, 404, 500}:
-                print(json.dumps(response.json(), indent=2))
-            assert False
+        raise_lambda_error(response, [400, 401, 403, 404, 500])
         return response.json()
 
     def rm(self, *instance_ids):
@@ -84,16 +104,11 @@ class Lambda:
         response = requests.post(f'{API_ENDPOINT}/instance-operations/terminate',
                                  data=data,
                                  headers=self.headers)
-        if response.status_code != 200:
-            assert False
+        raise_lambda_error(response, [400, 401, 403, 404, 500])
         return response.json()
 
     def ls(self):
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances', headers=self.headers)
-        if response.status_code != 200:
-            print(response.status_code)
-            if response.status_code in {400, 401, 403, 404}:
-                print(json.dumps(response.json(), indent=2))
-            assert False
+        raise_lambda_error(response, [400, 401, 403, 404])
         return response.json()

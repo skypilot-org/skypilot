@@ -740,7 +740,6 @@ class RetryingVmProvisioner(object):
 
     def _update_blocklist_on_lambda_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
-        # The underlying ray autoscaler will try all zones of a region at once.
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
