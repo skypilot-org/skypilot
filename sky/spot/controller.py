@@ -145,6 +145,7 @@ class SpotController:
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
 
+            # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources
                 assert resources is not None, handle
