@@ -1639,9 +1639,6 @@ _QUERY_STATUS_FUNCS = {
 def check_owner_identity(cluster_name: str) -> None:
     """Check if the current user is the same as the user who created the cluster.
 
-    This should be called before any operation that will modify the cluster
-    (i.e., provision, down, stop), or query from the cloud provider.
-
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
           same as the user who created the cluster.
@@ -1834,6 +1831,10 @@ def refresh_cluster_status_handle(
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     """Refresh the cluster status and return the status and handle.
+
+    This function will also check the owner identity of the cluster, and raise
+    exceptions if the current user is not the same as the user who created the
+    cluster.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
