@@ -470,8 +470,8 @@ class GCP(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get GCP user identity with unknown '
                     f'exception.\n'
-                    f'Details: [{common_utils.class_fullname(e.__class__)}] {e}'
-                ) from e
+                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
+                    f'{e}') from e
         if not account:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(

@@ -9,6 +9,7 @@ from sky import clouds
 from sky import exceptions
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -321,7 +322,9 @@ class Azure(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure user identity with unknown '
-                    f'exception: {type(e)} {e}') from e
+                    f'exception.\n'
+                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
+                    f'{e}') from e
         return f'{account_email} [subscription_id={self.get_project_id()}]'
 
     @classmethod

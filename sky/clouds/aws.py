@@ -379,7 +379,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'
-                    f'Details: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] {e}.'
                 ) from None
         return user_id
 
