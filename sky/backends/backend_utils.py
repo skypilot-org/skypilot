@@ -1131,8 +1131,7 @@ def generate_cluster_name():
 
 
 def get_cleaned_username() -> str:
-    """
-    Cleans the current username to be used as a cluster name.
+    """Cleans the current username to be used as part of a cluster name.
 
     Clean up includes:
      1. Making all characters lowercase
@@ -1141,6 +1140,9 @@ def get_cleaned_username() -> str:
      4. Removing any hyphens at the end of the username
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2.
+    
+    Returns:
+      A cleaned username that will pass the regex in check_cluster_name_is_valid().
     """
     username = getpass.getuser()
     username = username.lower()
