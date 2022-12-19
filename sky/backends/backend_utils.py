@@ -1899,8 +1899,8 @@ def check_cluster_available(
         # can still be done by only using ssh, but the ssh can hang if the
         # cluster is not up (e.g., autostopped).
 
-        # We do not catch the exception for cloud identity checking for now, so that
-        # to disable all the operators on the cluster created by another user identity.
+        # We do not catch the exception for cloud identity checking for now, in order
+        # to disable all operations on clusters created by another user identity.
         # That will make the design simpler and easier to understand, but it might be
         # useful to allow the user to use operations that only involve ssh (e.g., sky
         # exec, sky logs, etc) even if the user is not the owner of the cluster.
