@@ -377,8 +377,7 @@ class AWS(clouds.Cloud):
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'Failed to get AWS user identity with unknown '
-                    f'exception: {type(e)} {e}.') from e
+                    f'Failed to get AWS user: {e} (Type: {type(e)}).') from None
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
