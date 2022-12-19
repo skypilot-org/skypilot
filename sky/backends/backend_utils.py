@@ -1140,7 +1140,7 @@ def get_cleaned_username() -> str:
      4. Removing any hyphens at the end of the username
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2.
-    
+
     Returns:
       A cleaned username that will pass the regex in check_cluster_name_is_valid().
     """
