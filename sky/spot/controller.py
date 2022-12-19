@@ -121,8 +121,8 @@ class SpotController:
                     # The multi-node job is still running, continue monitoring.
                     continue
                 elif job_status in [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-                    ]:
+                        job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
+                ]:
                     # The user code has probably crashed, fail immediately.
                     end_time = spot_utils.get_job_timestamp(self._backend,
                                                             self._cluster_name,
