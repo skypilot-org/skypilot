@@ -2,7 +2,7 @@ resources:
   cloud: aws
   instance_type: g4dn.xlarge
   region: us-west-2
-  image_id: ami-0fe5af21074ad2a10  # Deep learning AMI with CUDA 11.6
+  image_id: ami-0fe5af21074ad2a10  # Deep learning AMI with CUDA 11.6 without conda installed
 
 run: |
   nvidia-smi
