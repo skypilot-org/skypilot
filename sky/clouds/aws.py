@@ -49,9 +49,9 @@ class AWS(clouds.Cloud):
     )
 
     _SSO_CREDENTIAL_HELP_STR = (
-        'Run the following commands:'
-        '\n      $ awsv2 configure sso'
-        '\n      $ awsv2 sso login --profile <profile_name>'
+        'Run the following commands (must use aws v2 CLI):'
+        '\n      $ aws configure sso'
+        '\n      $ aws sso login --profile <profile_name>'
         '\n    For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
     )
