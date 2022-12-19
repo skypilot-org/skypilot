@@ -77,7 +77,7 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 .. note::
 
-  If you are using multiple GCP projects, you can set the project to use with :code:`gcloud config configurations activate <project_name>` (See `GCP docs <https://cloud.google.com/sdk/docs/configurations#activating_a_configuration>`_).
+  If you are using multiple GCP projects, list all the configs by :code:`gcloud config configurations list` and activate one by :code:`gcloud config configurations activate <config_name>` (See `GCP docs <https://cloud.google.com/sdk/docs/configurations#activating_a_configuration>`_).
 
 **Azure**
 
