@@ -1786,10 +1786,10 @@ def _update_cluster_status_no_lock(
     return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _update_cluster_identity_and_status(
+def _update_cluster_status(
         cluster_name: str,
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
-    """Check/update owner identity and update the cluster status.
+    """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from cloud.
 
@@ -1802,15 +1802,9 @@ def _update_cluster_identity_and_status(
       Otherwise returns the input record with status and ip potentially updated.
 
     Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-          same as the user who created the cluster.
-        exceptions.CloudUserIdentityError: if we fail to get the current user
-          identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
-    check_owner_identity(cluster_name)
-
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
 
@@ -1850,16 +1844,19 @@ def refresh_cluster_status_handle(
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
         return None, None
+    check_owner_identity(cluster_name)
 
     handle = record['handle']
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         use_spot = handle.launched_resources.use_spot
-        if (force_refresh or record['autostop'] >= 0 or use_spot):
+        has_autostop = (
+            record['status'] != global_user_state.ClusterStatus.STOPPED and
+            record['autostop'] >= 0)
+        if force_refresh or has_autostop or use_spot:
             try:
-                record = _update_cluster_identity_and_status(
-                    cluster_name,
-                    acquire_per_cluster_status_lock=
-                    acquire_per_cluster_status_lock)
+                record = _update_cluster_status(cluster_name,
+                                                acquire_per_cluster_status_lock=
+                                                acquire_per_cluster_status_lock)
                 if record is None:
                     return None, None
             except (exceptions.ClusterOwnerIdentityMismatchError,
@@ -1887,15 +1884,23 @@ def check_cluster_available(
         exceptions.ClusterNotUpError: if the cluster is not UP.
         exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     try:
         cluster_status, handle = refresh_cluster_status_handle(cluster_name)
-    except (exceptions.ClusterOwnerIdentityMismatchError,
-            exceptions.CloudUserIdentityError,
-            exceptions.ClusterStatusFetchingError) as e:
+    except exceptions.ClusterStatusFetchingError as e:
         # Failed to refresh the cluster status is not fatal error as the callers
         # can still be done by only using ssh, but the ssh can hang if the
         # cluster is not up (e.g., autostopped).
+
+        # We do not catch the exception for cloud identity checking for now, so that
+        # to disable all the operators on the cluster created by another user identity.
+        # That will make the design simpler and easier to understand, but it might be
+        # useful to allow the user to use operations that only involve ssh (e.g., sky
+        # exec, sky logs, etc) even if the user is not the owner of the cluster.
         ux_utils.console_newline()
         logger.warning(
             f'Failed to refresh the status for cluster {cluster_name!r}. It is not fatal, but '
@@ -2006,7 +2011,7 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _update_cluster_identity_and_status(
+            record = _update_cluster_status(
                 cluster_name, acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:

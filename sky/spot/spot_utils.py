@@ -525,13 +525,20 @@ def is_spot_controller_up(
           controller does not exist.
         handle: The ResourceHandle of the spot controller. None if the
           controller is not UP or does not exist.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not
+          the same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
     """
     try:
         controller_status, handle = backend_utils.refresh_cluster_status_handle(
             SPOT_CONTROLLER_NAME, force_refresh=True)
-    except (exceptions.CloudUserIdentityError,
-            exceptions.ClusterOwnerIdentityMismatchError,
-            exceptions.ClusterStatusFetchingError) as e:
+    except exceptions.ClusterStatusFetchingError as e:
+        # We do not catch the exceptions related to the cluster owner identity
+        # mismatch, please refer to the comment in
+        # `backend_utils.check_cluster_available`.
         logger.warning(
             f'Failed to get the status of the spot controller. '
             'It is not fatal, but spot commands/calls may hang or make '

@@ -405,6 +405,10 @@ def queue(cluster_name: str,
         RuntimeError: if failed to get the job queue.
         sky.exceptions.ClusterNotUpError: the cluster is not up.
         sky.exceptions.NotSupportedError: the feature is not supported.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+          user identity.
     """
     all_jobs = not skip_finished
     username = getpass.getuser()

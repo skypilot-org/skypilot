@@ -1476,11 +1476,11 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except exceptions.NotSupportedError as e:
-            unsupported_clusters.append(cluster)
-            click.echo(str(e))
-            continue
-        except (RuntimeError, exceptions.ClusterNotUpError) as e:
+        except (RuntimeError, exceptions.NotSupportedError,
+                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            if isinstance(e, exceptions.NotSupportedError):
+                unsupported_clusters.append(cluster)
             click.echo(str(e))
             continue
         job_table = job_lib.format_job_queue(job_table)
