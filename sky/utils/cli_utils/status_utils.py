@@ -54,7 +54,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         StatusColumn('STATUS', _get_status),
         StatusColumn('AUTOSTOP', _get_autostop),
         StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
-        StatusColumn('COST (est.)', _get_total_cost),
+        StatusColumn('COST (est.)', _get_total_cost, show_by_default=False),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
@@ -90,6 +90,50 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
     else:
         click.echo('No existing clusters.')
     return pending_autostop
+
+
+def show_report_table(cluster_records: List[Dict[str, Any]],
+                      show_all: bool,
+                      reserved_group_name: Optional[str] = None) -> int:
+    """Compute cluster table values and display for cost report.
+    """
+    # TODO(zhwu): Update the information for autostop clusters.
+
+    status_columns = [
+        StatusColumn('NAME', _get_name),
+        StatusColumn('RESOURCES',
+                     _get_resources_for_cost_report,
+                     trunc_length=70 if not show_all else 0),
+        StatusColumn('COST (est.)', _get_total_cost, show_by_default=True),
+    ]
+
+    columns = []
+    for status_column in status_columns:
+        if status_column.show_by_default or show_all:
+            columns.append(status_column.name)
+    cluster_table = log_utils.create_table(columns)
+
+    for record in cluster_records:
+        row = []
+        for status_column in status_columns:
+            if status_column.show_by_default or show_all:
+                row.append(status_column.calc(record))
+        cluster_table.add_row(row)
+
+    if cluster_records:
+        if reserved_group_name is not None:
+            autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                       f'{reserved_group_name}{colorama.Style.RESET_ALL}'
+                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{autostop_minutes}min)'
+                       f'{colorama.Style.RESET_ALL}')
+        else:
+            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                       f'{colorama.Style.RESET_ALL}')
+        click.echo(cluster_table)
+    else:
+        click.echo('No existing clusters.')
 
 
 def show_local_status_table(local_clusters: List[str]):
@@ -211,6 +255,17 @@ def _get_resources(cluster_status):
                              f'{launched_resource_str}')
     else:
         raise ValueError(f'Unknown handle type {type(handle)} encountered.')
+    return resources_str
+
+
+def _get_resources_for_cost_report(cluster_status):
+    launched_nodes = cluster_status['num_nodes']
+    launched_resources = cluster_status['resources']
+
+    launched_resource_str = str(launched_resources)
+    resources_str = (f'{launched_nodes}x '
+                     f'{launched_resource_str}')
+
     return resources_str
 
 

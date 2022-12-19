@@ -64,6 +64,17 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
     return cluster_records
 
 
+@usage_lib.entrypoint
+def report() -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Get all cluster cost reports, including those that have been downed.
+        Returns:
+        A list of dicts, with each dict containing the information of a
+        cluster.
+    """
+    return backend_utils.get_clusters_for_cost_report()
+
+
 def _start(
         cluster_name: str,
         idle_minutes_to_autostop: Optional[int] = None,

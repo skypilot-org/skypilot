@@ -1289,13 +1289,6 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     '(down)', e.g. '1m (down)', the cluster will be autodowned, rather than
     autostopped.
 
-    The estimated cost column indicates the price for the cluster based on the
-    type of resources being used and the duration of use up until the call
-    to status. This means if the cluster is UP, successive calls to status
-    will show increasing price. The estimated cost is calculated based on
-    the local cache of the cluster status, and may not be accurate for
-    the cluster with autostop/use_spot set or terminated/stopped
-    on the cloud console.
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []
@@ -1327,6 +1320,40 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                    f'{colorama.Style.BRIGHT}sky status --refresh'
                    f'{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
+
+
+@cli.command()
+@usage_lib.entrypoint
+def report():  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show cost reports for each cluster.
+
+    The following fields for each cluster are recorded: cluster name, time
+    resources, launched time, duration that cluster was up,
+    hourly price and total cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until the call
+    to status. This means if the cluster is UP, successive calls to status
+    will show increasing price. The estimated cost is calculated based on
+    the local cache of the cluster status, and may not be accurate for
+    the cluster with autostop/use_spot set or terminated/stopped
+    on the cloud console.
+    """
+
+    cluster_records = core.report()
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
+
+    status_utils.show_report_table(nonreserved_cluster_records, all)
 
 
 @cli.command()
@@ -2118,7 +2145,7 @@ def _down_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
-                message += f'\n {core.get_cost_on_stop(name)}'
+                # message += f'\n {core.get_cost_on_stop(name)}'
 
         progress.stop()
         click.echo(message)

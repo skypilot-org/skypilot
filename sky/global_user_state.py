@@ -451,6 +451,34 @@ def get_clusters() -> List[Dict[str, Any]]:
     return records
 
 
+def get_clusters_from_history() -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT * from cluster_history').fetchall()
+
+    records = []
+
+    for (
+            cluster_hash,
+            name,
+            num_nodes,
+            _,
+            launched_resources,
+            usage_intervals,
+    ) in rows:
+        # TODO: use namedtuple instead of dict
+
+        record = {
+            'name': name,
+            'num_nodes': num_nodes,
+            'resources': pickle.loads(launched_resources),
+            'cluster_hash': cluster_hash,
+            'usage_intervals': pickle.loads(usage_intervals),
+            'cost': get_cost_for_cluster_for_report(cluster_hash),
+        }
+
+        records.append(record)
+    return records
+
+
 def get_cluster_names_start_with(starts_with: str) -> List[str]:
     rows = _DB.cursor.execute('SELECT name FROM clusters WHERE name LIKE (?)',
                               (f'{starts_with}%',))
@@ -569,10 +597,17 @@ def get_storage() -> List[Dict[str, Any]]:
 def get_cost_for_cluster(cluster_name: str,) -> float:
 
     cluster_hash = _get_cluster_hash(cluster_name)
+    print(cluster_name)
 
     if cluster_hash is None:
         return 0
 
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+
+    return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
+
+
+def get_cost_for_cluster_for_report(cluster_hash: str,) -> float:
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     return get_cost_for_usage_intervals(cluster_hash, usage_intervals)

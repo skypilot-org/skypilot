@@ -1835,6 +1835,27 @@ def get_clusters(
     return updated_records
 
 
+def get_clusters_for_cost_report() -> List[Dict[str, Any]]:
+    """Returns a list of cached cluster records.
+
+    Combs through the database (in ~/.sky/state.db) to get a list of records
+    corresponding to launched clusters.
+
+    Args:
+        include_reserved: Whether to include reserved clusters, e.g. spot
+            controller.
+        refresh: Whether to refresh the status of the clusters. (Refreshing will
+            set the status to STOPPED if the cluster cannot be pinged.)
+        cloud_filter: Sets which clouds to filer through from the global user
+            state. Supports three values, 'all' for all clouds, 'public' for
+            public clouds only, and 'local' for only local clouds.
+
+    Returns:
+        A list of cluster records.
+    """
+    return global_user_state.get_clusters_from_history()
+
+
 def get_backend_from_handle(
         handle: backends.Backend.ResourceHandle) -> backends.Backend:
     """Gets a Backend object corresponding to a handle.
