@@ -1768,7 +1768,7 @@ class CloudVmRayBackend(backends.Backend):
             self.stable_internal_external_ips = stable_internal_external_ips
 
         def internal_ips(self,
-                         max_attempts: int = 1,
+                         max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
                          use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
@@ -1777,7 +1777,7 @@ class CloudVmRayBackend(backends.Backend):
             return None
 
         def external_ips(self,
-                         max_attempts: int = 1,
+                         max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
                          use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
