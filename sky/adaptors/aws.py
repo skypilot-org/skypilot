@@ -68,7 +68,7 @@ def client(service_name: str, **kwargs):
 
 
 @import_package
-def exceptions():
-    """Client exception."""
-    from botocore import exceptions as _exceptions
-    return _exceptions
+def botocore_exceptions():
+    """AWS botocore exception."""
+    from botocore import exceptions
+    return exceptions

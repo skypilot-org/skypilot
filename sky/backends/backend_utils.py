@@ -1129,7 +1129,29 @@ def check_local_gpus() -> bool:
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+    return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
+
+
+def get_cleaned_username() -> str:
+    """Cleans the current username to be used as part of a cluster name.
+
+    Clean up includes:
+     1. Making all characters lowercase
+     2. Removing any non-alphanumeric characters (excluding hyphens)
+     3. Removing any numbers and/or hyphens at the start of the username.
+     4. Removing any hyphens at the end of the username
+
+    e.g. 1SkY-PiLot2- becomes sky-pilot2.
+
+    Returns:
+      A cleaned username that will pass the regex in check_cluster_name_is_valid().
+    """
+    username = getpass.getuser()
+    username = username.lower()
+    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'^[0-9-]+', '', username)
+    username = re.sub(r'-$', '', username)
+    return username
 
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:

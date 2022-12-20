@@ -234,6 +234,14 @@ class Cloud:
         """
         raise NotImplementedError
 
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        """Check the image size from the cloud.
+
+        Returns: the image size in GB.
+        Raises: ValueError if the image cannot be found.
+        """
+        raise NotImplementedError
+
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
         raise NotImplementedError
