@@ -178,7 +178,7 @@ class AutostopEvent(SkyletEvent):
                 self.arg_dict.update(kwargs)
 
             command_runner.SSHOptions.__init__ = monkey_patch_init
-            sdk.create_or_update_cluster(self._ray_yaml_path, no_restart=True)
+            sdk.create_or_update_cluster(self._ray_yaml_path, restart_only=True)
 
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
