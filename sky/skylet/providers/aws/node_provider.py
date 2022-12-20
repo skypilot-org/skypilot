@@ -666,11 +666,13 @@ class AWSNodeProvider(NodeProvider):
 
 class AWSNodeProviderV2(AWSNodeProvider):
     # The new version of the AWS node provider uses a new IAM role
-    # with different permissions for the head node and worker nodes,
-    # so as to support AWS SSO login system (see #1489).
+    # with different permissions against original ray-autoscaler-v1
+    # for both the head node and worker nodes to support AWS SSO login
+    # system (see #1489).
     # We did not overwrite the original AWSNodeProvider class to avoid
     # breaking existing clusters. Otherwise, the existing clusters will
-    # have a new launch_hash and will be restarted.
+    # have a new launch_hash and will have new node(s) launched, causing
+    # the existing nodes to leak.
     @staticmethod
     def bootstrap_config(cluster_config):
         return bootstrap_aws(cluster_config, skypilot_iam_role=True)

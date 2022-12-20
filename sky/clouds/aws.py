@@ -366,8 +366,6 @@ class AWS(clouds.Cloud):
             return False, str(e)
 
         hints = None
-        # This file is required for multiple clouds because it will be synced to remote VMs
-        # for `aws` to access private storage buckets.
         # `aws configure list` does not guarantee this file exists.
         if self._is_sso_identity():
             hints = (
@@ -449,14 +447,22 @@ class AWS(clouds.Cloud):
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # Do not upload the credential file if the user is using SSO, as
-        # the credential file can from a different account, and will cause
-        # autopstop/autodown/spot controller misbehave.
+        # ~/.aws/credentials is required for users using multiple clouds.
+        # If this file does not exist, users can launch on AWS via AWS SSO and assign
+        # IAM role to the cluster.
+        # However, if users launch clusters in a non-AWS cloud, those clusters do not
+        # understand AWS IAM role so will not be able to access private AWS EC2 resources
+        # and S3 buckets.
+
+        # The file should not be uploaded if the user is using SSO, as
+        # the credential file can be from a different account, and will
+        # make autopstop/autodown/spot controller misbehave.
+        if self._is_sso_identity():
+            return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
             for filename in _CREDENTIAL_FILES
-            if (os.path.exists(os.path.expanduser(f'~/.aws/{filename}')) and
-                not self._is_sso_identity())
+            if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
     def instance_type_exists(self, instance_type):

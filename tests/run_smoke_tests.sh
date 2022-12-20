@@ -7,6 +7,11 @@
 #   # Re-run a failed test
 #   bash tests/run_smoke_tests.sh test_azure_start_stop
 #
+#   # Run slow tests
+#   bash tests/run_smoke_tests.sh --runslow
+#   
+#   # Run SSO tests
+#   bash tests/run_smoke_tests.sh --sso
 
 test=${1:-""}
 if [ -z "$test" ]
