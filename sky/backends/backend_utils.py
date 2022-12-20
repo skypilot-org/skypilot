@@ -1819,9 +1819,15 @@ def _update_cluster_status(
     design of the cluster status and transition, please refer to the
     sky/design_docs/cluster_status.md
 
+    Args:
+        cluster_name: The name of the cluster.
+        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
+            before updating the status.
+        need_owner_identity_check: Whether to check the owner identity before updating
+
     Returns:
       If the cluster is terminated or does not exist, return None.
-      Otherwise returns the input record with status and ip potentially updated.
+      Otherwise returns the input record with status and handle potentially updated.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
@@ -1857,7 +1863,6 @@ def refresh_cluster_status_handle(
     *,
     force_refresh: bool = False,
     acquire_per_cluster_status_lock: bool = True,
-    suppress_error: bool = False
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
     """Refresh the cluster status and return the status and handle.
@@ -1865,6 +1870,16 @@ def refresh_cluster_status_handle(
     This function will also check the owner identity of the cluster, and raise
     exceptions if the current user is not the same as the user who created the
     cluster.
+
+    Args:
+        cluster_name: The name of the cluster.
+        force_refresh: refresh the cluster status as long as the cluster exists.
+        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
+            before updating the status.
+
+    Returns:
+        If the cluster is terminated or does not exist, return None, None.
+        Otherwise returns the cluster status and handle.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
@@ -1886,22 +1901,12 @@ def refresh_cluster_status_handle(
             record['status'] != global_user_state.ClusterStatus.STOPPED and
             record['autostop'] >= 0)
         if force_refresh or has_autostop or use_spot:
-            try:
-                record = _update_cluster_status(cluster_name,
-                                                acquire_per_cluster_status_lock=
-                                                acquire_per_cluster_status_lock,
-                                                need_owner_identity_check=False)
-                if record is None:
-                    return None, None
-            except (exceptions.ClusterOwnerIdentityMismatchError,
-                    exceptions.CloudUserIdentityError,
-                    exceptions.ClusterStatusFetchingError) as e:
-                if suppress_error:
-                    logger.debug(
-                        f'Failed to refresh cluster {cluster_name!r} due to {e}'
-                    )
-                    return None, None
-                raise
+            record = _update_cluster_status(
+                cluster_name,
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock,
+                need_owner_identity_check=False)
+            if record is None:
+                return None, None
     return record['status'], record['handle']
 
 
