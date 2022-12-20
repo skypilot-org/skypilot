@@ -675,9 +675,11 @@ class RetryingVmProvisioner(object):
             s.strip()
             for s in stdout_splits + stderr_splits
             # 'An error occurred': boto3 errors
-            # 'ERROR_NO_NODES_LAUNCHED': skypilot's changes to the AWS node
-            #    provider; for errors prior to provisioning like VPC setup.
-            if 'An error occurred' in s or 'ERROR_NO_NODES_LAUNCHED: ' in s
+            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': skypilot's changes to the AWS
+            #    node provider; for errors prior to provisioning like VPC
+            #    setup.
+            if 'An error occurred' in s or
+            'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' in s
         ]
         # Need to handle boto3 printing error but its retry succeeded:
         #   error occurred (Unsupported) .. not supported in your requested
@@ -2824,12 +2826,12 @@ class CloudVmRayBackend(backends.Backend):
             #   ignore it and do cleanup locally. TODO(wei-lin): refactor error
             #   handling mechanism.
             #
-            # 'ERROR_NO_NODES_LAUNCHED': this indicates nodes are never
-            #   launched and the errors are related to pre-launch
+            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': this indicates nodes are
+            #   never launched and the errors are related to pre-launch
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
             elif ('TPU must be specified.' not in stderr and
-                  'ERROR_NO_NODES_LAUNCHED: ' not in stderr):
+                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
