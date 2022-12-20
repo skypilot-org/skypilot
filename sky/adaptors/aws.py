@@ -2,7 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 
-from functools import wraps
+import functools
 
 boto3 = None
 botocore = None
@@ -10,7 +10,7 @@ botocore = None
 
 def import_package(func):
 
-    @wraps(func)
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         global boto3, botocore
         if boto3 is None or botocore is None:
@@ -27,17 +27,16 @@ def import_package(func):
     return wrapper
 
 
+@functools.lru_cache()
 @import_package
-def client(service_name: str, **kwargs):
-    """Create an AWS client of a certain service.
-
-    Args:
-        service_name: AWS service name (e.g., 's3', 'ec2').
-        kwargs: Other options.
-    """
-    return boto3.client(service_name, **kwargs)
+def session():
+    """Create an AWS session."""
+    # functools.lru_cache() is used to cache the session object
+    # for each thread.
+    return boto3.session.Session()
 
 
+@functools.lru_cache()
 @import_package
 def resource(resource_name: str, **kwargs):
     """Create an AWS resource.
@@ -46,13 +45,26 @@ def resource(resource_name: str, **kwargs):
         resource_name: AWS resource name (e.g., 's3').
         kwargs: Other options.
     """
-    return boto3.resource(resource_name, **kwargs)
+    # Need to use the resource retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.resource() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+    return session().resource(resource_name, **kwargs)
 
 
-@import_package
-def session():
-    """Create an AWS session."""
-    return boto3.Session()
+@functools.lru_cache()
+def client(service_name: str, **kwargs):
+    """Create an AWS client of a certain service.
+
+    Args:
+        service_name: AWS service name (e.g., 's3', 'ec2').
+        kwargs: Other options.
+    """
+    # Need to use the client retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.client() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+    return session().client(service_name, **kwargs)
 
 
 @import_package

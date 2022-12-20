@@ -132,3 +132,13 @@ class SpotUserCancelledError(Exception):
 class InvalidClusterNameError(Exception):
     """Raised when the cluster name is invalid."""
     pass
+
+
+class CloudUserIdentityError(Exception):
+    """Raised when the cloud identity is invalid."""
+    pass
+
+
+class ClusterOwnerIdentityMismatchError(Exception):
+    """The cluster's owner identity does not match the current user identity."""
+    pass
