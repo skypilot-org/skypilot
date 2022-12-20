@@ -1,1 +1,5 @@
-sky/data/storage.py
+sky/data
+sky/utils
+sky/clouds
+--exclude
+sky/clouds/service_catalog

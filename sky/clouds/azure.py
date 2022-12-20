@@ -141,7 +141,7 @@ class Azure(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
 
@@ -180,15 +180,13 @@ class Azure(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
 
         region_name = region.name
-        # Azure does not support specific zones.
-        zones = []
 
         r = resources
         assert not r.use_spot, \
@@ -208,7 +206,8 @@ class Azure(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
-            'zones': zones,
+            # Azure does not support specific zones.
+            'zones': '',
             **image_config
         }
 

@@ -58,7 +58,7 @@ USEFUL_COLUMNS = [
 # regions.
 PRICING_TABLE_URL_FMT = 'https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/{region}/index.csv'  # pylint: disable=line-too-long
 
-regions_enabled: Set[str] = None
+regions_enabled: Optional[Set[str]] = None
 
 
 def get_enabled_regions() -> Set[str]:
