@@ -10,7 +10,10 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.utils import common_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
@@ -29,12 +32,30 @@ _CREDENTIAL_FILES = [
 ]
 
 
+DEFAULT_AMI_GB = 45
+
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
+
+    _STATIC_CREDENTIAL_HELP_STR = (
+        'Run the following commands:'
+        '\n      $ pip install boto3'
+        '\n      $ aws configure'
+        '\n    For more info: '
+        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
+    )
+
+    _SSO_CREDENTIAL_HELP_STR = (
+        'Run the following commands (must use aws v2 CLI):'
+        '\n      $ aws configure sso'
+        '\n      $ aws sso login --profile <profile_name>'
+        '\n    For more info: '
+        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
+    )
 
     #### Regions/Zones ####
 
@@ -112,27 +133,51 @@ class AWS(clouds.Cloud):
             f'{region_name}. Try setting a valid image_id.')
 
     @classmethod
-    def _get_image_id(cls, region_name: str, instance_type: str,
-                      image_id: Optional[Dict[str, str]]) -> str:
-        if image_id is not None:
-            if None in image_id:
-                image_id = image_id[None]
-            else:
-                assert region_name in image_id, image_id
-                image_id = image_id[region_name]
-            if image_id.startswith('skypilot:'):
-                image_id = service_catalog.get_image_id_from_tag(image_id,
-                                                                 region_name,
-                                                                 clouds='aws')
-                if image_id is None:
-                    # Raise ResourcesUnavailableError to make sure the failover
-                    # in CloudVMRayBackend will be correctly triggered.
-                    # TODO(zhwu): This is a information leakage to the cloud
-                    # implementor, we need to find a better way to handle this.
-                    raise exceptions.ResourcesUnavailableError(
-                        f'No image found for region {region_name}')
-            return image_id
-        return cls.get_default_ami(region_name, instance_type)
+    def _get_image_id(
+        cls,
+        image_id: Optional[Dict[str, str]],
+        region_name: str,
+    ) -> str:
+        if image_id is None:
+            return None
+        if None in image_id:
+            image_id = image_id[None]
+        else:
+            assert region_name in image_id, image_id
+            image_id = image_id[region_name]
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             region_name,
+                                                             clouds='aws')
+            if image_id is None:
+                # Raise ResourcesUnavailableError to make sure the failover
+                # in CloudVMRayBackend will be correctly triggered.
+                # TODO(zhwu): This is a information leakage to the cloud
+                # implementor, we need to find a better way to handle this.
+                raise exceptions.ResourcesUnavailableError(
+                    f'No image found for region {region_name}')
+        return image_id
+
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_AMI_GB
+        assert region is not None, (image_id, region)
+        client = aws.client('ec2', region_name=region)
+        try:
+            image_info = client.describe_images(ImageIds=[image_id])
+            image_info = image_info['Images'][0]
+            image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
+                'VolumeSize']
+        except aws.botocore_exceptions().NoCredentialsError:
+            # Fallback to default image size if no credentials are available.
+            # The credentials issue will be caught when actually provisioning
+            # the instance and appropriate errors will be raised there.
+            return DEFAULT_AMI_GB
+        except aws.botocore_exceptions().ClientError:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Image {image_id!r} not found in '
+                                 f'AWS region {region}') from None
+        return image_size
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
@@ -232,7 +277,9 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(region_name, r.instance_type, r.image_id)
+        image_id = self._get_image_id(r.image_id, region_name)
+        if image_id is None:
+            image_id = self.get_default_ami(region_name, r.instance_type)
 
         return {
             'instance_type': r.instance_type,
@@ -285,19 +332,13 @@ class AWS(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
+            # pylint: disable=top-level-import-outside-toplevel,unused-import
             import boto3
             import botocore
         except ImportError:
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
         prefix = '    '
-        help_str = (
-            ' Run the following commands:'
-            f'\n{prefix}  $ pip install boto3'
-            f'\n{prefix}  $ aws configure'
-            f'\n{prefix}For more info: '
-            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
-        )
 
         # Checks if the AWS CLI is installed properly
         proc = subprocess.run('aws configure list',
@@ -306,7 +347,7 @@ class AWS(clouds.Cloud):
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            additional_help = f'\n{prefix}Credentials may also need to be set.' + help_str
+            additional_help = f'\n{prefix}Credentials may also need to be set.' + self._STATIC_CREDENTIAL_HELP_STR
             if 'SSO' in proc.stderr.decode().split():
                 additional_help = (
                     f'\n{prefix}You are using SSO account, please update the awscli package with:'
@@ -321,17 +362,10 @@ class AWS(clouds.Cloud):
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
-        sts = boto3.client('sts')
         try:
-            sts.get_caller_identity()
-        except botocore.exceptions.NoCredentialsError:
-            return False, 'AWS credentials are not set.' + help_str
-        except botocore.exceptions.ClientError:
-            return False, (
-                'Failed to access AWS services with credentials stored in ~/.aws/credentials.'
-                ' Make sure that the access and secret keys are correct.'
-                ' To reconfigure the credentials, ' + help_str[1].lower() +
-                help_str[2:])
+            self.get_current_user_identity()
+        except exceptions.CloudUserIdentityError as e:
+            return False, str(e)
 
         hints = None
         # This file is required for multiple clouds because it will be synced to remote VMs
@@ -356,6 +390,47 @@ class AWS(clouds.Cloud):
         if proc.returncode != 0:
             return False
         return 'sso' in proc.stdout.decode().split()
+
+    def get_current_user_identity(self) -> Optional[str]:
+        """Returns the identity of the user on this cloud."""
+        try:
+            sts = aws.client('sts')
+            # The caller identity contains 3 fields: UserId, AccountId, Arn.
+            # 'UserId' is unique across all AWS entity, which looks like
+            # "AROADBQP57FF2AEXAMPLE:role-session-name"
+            # 'AccountId' can be shared by multiple users under the same
+            # organization
+            # 'Arn' is the full path to the user, which can be reused when
+            # the user is deleted and recreated.
+            # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
+            # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
+            user_id = sts.get_caller_identity()['UserId']
+        except aws.botocore_exceptions().NoCredentialsError:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'AWS credentials are not set. {self._STATIC_CREDENTIAL_HELP_STR}'
+                ) from None
+        except aws.botocore_exceptions().ClientError:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to access AWS services with credentials. '
+                    'Make sure that the access and secret keys are correct.'
+                    f' {self._STATIC_CREDENTIAL_HELP_STR}') from None
+        except aws.botocore_exceptions().TokenRetrievalError:
+            # This is raised when the access token is expired, which mainly
+            # happens when the user is using temporary credentials or SSO
+            # login.
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'AWS access token is expired.'
+                    f' {self._SSO_CREDENTIAL_HELP_STR}') from None
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get AWS user.\n'
+                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                ) from None
+        return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         # Do not upload the credential file if the user is using SSO, as

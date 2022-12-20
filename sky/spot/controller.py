@@ -145,12 +145,15 @@ class SpotController:
                             'cluster is healthy. Try to recover the job '
                             '(the cluster will not be restarted).')
 
-            resources = list(self._task.resources)[0]
-            if resources.need_cleanup_after_preemption():
-                # Some spot resource (e.g., Spot TPU VM) may need to be
-                # cleaned up after preemption.
-                logger.info('Cleaning up the preempted spot cluster...')
-                self._strategy_executor.terminate_cluster()
+            # When the handle is None, the cluster should be cleaned up already.
+            if handle is not None:
+                resources = handle.launched_resources
+                assert resources is not None, handle
+                if resources.need_cleanup_after_preemption():
+                    # Some spot resource (e.g., Spot TPU VM) may need to be
+                    # cleaned up after preemption.
+                    logger.info('Cleaning up the preempted spot cluster...')
+                    self._strategy_executor.terminate_cluster()
 
             # Try to recover the spot jobs, when the cluster is preempted
             # or the job status is failed to be fetched.
@@ -168,14 +171,15 @@ class SpotController:
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
-            logger.error(f'Resources unavailable: {colorama.Fore.RED}{e}'
-                         f'{colorama.Style.RESET_ALL}')
+            logger.error(f'{common_utils.class_fullname(e.__class__)}: '
+                         f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
-            logger.error(f'Unexpected error occurred: {type(e).__name__}: {e}')
+            logger.error('Unexpected error occurred: '
+                         f'{common_utils.class_fullname(e.__class__)}: {e}')
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)
