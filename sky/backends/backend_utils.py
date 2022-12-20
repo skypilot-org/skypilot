@@ -46,7 +46,6 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
-from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
