@@ -1695,8 +1695,8 @@ def check_owner_identity(cluster_name: str) -> None:
     elif owner_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
-                f'Cluster {cluster_name!r} ({cloud}) is owned by account '
-                f'{owner_identity!r}, but the currently activated account '
+                f'{cluster_name!r} ({cloud}) is owned by '
+                f'{owner_identity!r}, but the activated account '
                 f'is {current_user_identity!r}.')
 
 
@@ -2117,11 +2117,8 @@ def get_clusters(
         plural = 's' if len(failed_clusters) > 1 else ''
         logger.warning(f'{yellow}Failed to refresh status for '
                        f'{len(failed_clusters)} cluster{plural}:{reset}')
-        table = log_utils.create_table(['Cluster', 'Error'])
         for cluster_name, e in failed_clusters:
-            table.add_row([cluster_name, str(e)])
-        logger.warning(table)
-
+            logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
     return kept_records
 
 
