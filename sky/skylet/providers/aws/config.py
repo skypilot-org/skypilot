@@ -505,12 +505,14 @@ def _usable_subnet_ids(
                     # Reason: the first two checks alone are not enough. For
                     # example, the VPC creation helper from AWS will create a
                     # "public" and a "private" subnet per AZ. However, the
-                    # "public" subnet has map_public_ip_on_launch set to False
-                    # as well. This means we could've launched in that subnet,
-                    # which will cause connectivity issues due to how route
-                    # tables/gateways are set up for that subnet. The "public"
-                    # subnets are NOT intended to host data plane VMs, while
-                    # the "private" subnets are.
+                    # created "public" subnet by default has
+                    # map_public_ip_on_launch set to False as well. This means
+                    # we could've launched in that subnet, which will make any
+                    # instances not able to send outbound traffic to the
+                    # Internet, due to the way route tables/gateways are set up
+                    # for that public subnet. The "public" subnets are NOT
+                    # intended to host data plane VMs, while the "private"
+                    # subnets are.
                     #
                     # An alternative to the subnet name hack is to ensure
                     # there's a route (dest=0.0.0.0/0, target=nat-*) in the
