@@ -2053,7 +2053,8 @@ def get_clusters(
             record = _update_cluster_status(
                 cluster_name, acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
-                exceptions.ClusterOwnerIdentityMismatchError) as e:
+                exceptions.ClusterOwnerIdentityMismatchError,
+                exceptions.ClusterStatusFetchingError) as e:
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record
