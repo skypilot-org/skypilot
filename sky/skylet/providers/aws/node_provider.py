@@ -18,6 +18,7 @@ from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
     CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
     CLOUDWATCH_AGENT_INSTALLED_TAG,
 )
+from sky.skylet.providers.aws.config import bootstrap_aws
 from sky.skylet.providers.aws.utils import (
     boto_exception_handler,
     resource_cache,
@@ -592,7 +593,6 @@ class AWSNodeProvider(NodeProvider):
 
     @staticmethod
     def bootstrap_config(cluster_config):
-        from sky.skylet.providers.aws.config import bootstrap_aws
         return bootstrap_aws(cluster_config)
 
     @staticmethod
@@ -673,5 +673,4 @@ class AWSNodeProviderV2(AWSNodeProvider):
     # have a new launch_hash and will be restarted.
     @staticmethod
     def bootstrap_config(cluster_config):
-        from sky.skylet.providers.aws.config_v2 import bootstrap_aws
-        return bootstrap_aws(cluster_config)
+        return bootstrap_aws(cluster_config, skypilot_iam_role=True)
