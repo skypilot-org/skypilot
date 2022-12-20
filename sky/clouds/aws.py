@@ -8,7 +8,6 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-from sky.adaptors import aws
 from sky import clouds
 from sky import exceptions
 from sky.adaptors import aws
@@ -387,18 +386,18 @@ class AWS(clouds.Cloud):
             # Refer to https://docs.aws.amazon.com/cli/latest/reference/sts/get-caller-identity.html # pylint: disable=line-too-long
             # and https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_variables.html#principaltable # pylint: disable=line-too-long
             user_id = sts.get_caller_identity()['UserId']
-        except aws.exceptions().NoCredentialsError:
+        except aws.botocore_exceptions().NoCredentialsError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'AWS credentials are not set. {self._STATIC_CREDENTIAL_HELP_STR}'
                 ) from None
-        except aws.exceptions().ClientError:
+        except aws.botocore_exceptions().ClientError:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
                     f' {self._STATIC_CREDENTIAL_HELP_STR}') from None
-        except aws.exceptions().TokenRetrievalError:
+        except aws.botocore_exceptions().TokenRetrievalError:
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
             # login.
