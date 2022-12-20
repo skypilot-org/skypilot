@@ -1192,13 +1192,14 @@ def _query_head_ip_with_retries(cluster_yaml: str,
                 stderr=subprocess.DEVNULL).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
             if len(head_ip) > 1:
-                logger.warn('Detected more than 1 IP from the output of '
-                            'the `ray get-head-ip` command. This could '
-                            'happen if there is extra output from it, '
-                            'which should be inspected below.\nProceeding with '
-                            f'the last detected IP ({head_ip[-1]}) as head IP.'
-                            f'\n== Output ==\n{out}'
-                            f'\n== Output ends ==')
+                logger.warning(
+                    'Detected more than 1 IP from the output of '
+                    'the `ray get-head-ip` command. This could '
+                    'happen if there is extra output from it, '
+                    'which should be inspected below.\nProceeding with '
+                    f'the last detected IP ({head_ip[-1]}) as head IP.'
+                    f'\n== Output ==\n{out}'
+                    f'\n== Output ends ==')
                 head_ip = head_ip[-1:]
             assert 1 == len(head_ip), (out, head_ip)
             head_ip = head_ip[0]
