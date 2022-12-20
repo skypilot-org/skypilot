@@ -944,7 +944,7 @@ def wait_until_ray_cluster_ready(
     # that `ray exec` fails to connect to the head node after some workers
     # launched especially for Azure.
     try:
-        head_ip = query_head_ip_with_retries(
+        head_ip = _query_head_ip_with_retries(
             cluster_config_file, max_attempts=WAIT_HEAD_NODE_IP_MAX_ATTEMPTS)
     except RuntimeError as e:
         logger.error(e)
@@ -1175,8 +1175,13 @@ def get_cleaned_username() -> str:
     return username
 
 
-def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
-    """Returns the ip of the head node from yaml file."""
+def _query_head_ip_with_retries(cluster_yaml: str,
+                                max_attempts: int = 1) -> str:
+    """Returns the IP of the head node by querying the cloud.
+
+    Raises:
+      RuntimeError: if we failed to get the head IP.
+    """
     backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
     for i in range(max_attempts):
         try:
@@ -1186,7 +1191,16 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
-            assert 1 == len(head_ip), out
+            if len(head_ip) > 1:
+                logger.warn('Detected more than 1 IP from the output of '
+                            'the `ray get-head-ip` command. This could '
+                            'happen if there is extra output from it, '
+                            'which should be inspected below.\nProceeding with '
+                            f'the last detected IP ({head_ip[-1]}) as head IP.'
+                            f'\n== Output ==\n{out}'
+                            f'\n== Output ends ==')
+                head_ip = head_ip[-1:]
+            assert 1 == len(head_ip), (out, head_ip)
             head_ip = head_ip[0]
             break
         except subprocess.CalledProcessError as e:
@@ -1231,8 +1245,8 @@ def get_node_ips(cluster_yaml: str,
     # happens.
     check_network_connection()
     try:
-        head_ip = query_head_ip_with_retries(cluster_yaml,
-                                             max_attempts=head_ip_max_attempts)
+        head_ip = _query_head_ip_with_retries(cluster_yaml,
+                                              max_attempts=head_ip_max_attempts)
     except RuntimeError as e:
         raise exceptions.FetchIPError(
             exceptions.FetchIPError.Reason.HEAD) from e
@@ -1362,7 +1376,7 @@ def get_head_ip(
                     ' the cluster status is UP (`sky status`).')
         head_ip = handle.head_ip
     else:
-        head_ip = query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
+        head_ip = _query_head_ip_with_retries(handle.cluster_yaml, max_attempts)
     return head_ip
 
 
