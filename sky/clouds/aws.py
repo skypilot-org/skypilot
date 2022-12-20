@@ -99,7 +99,7 @@ class AWS(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
@@ -138,28 +138,28 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_image_id(
         cls,
-        image_id: Optional[Dict[str, str]],
+        image_id: Optional[Dict[Optional[str], str]],
         region_name: str,
-    ) -> str:
+    ) -> Optional[str]:
         if image_id is None:
             return None
         if None in image_id:
-            image_id = image_id[None]
+            image_id_str = image_id[None]
         else:
             assert region_name in image_id, image_id
-            image_id = image_id[region_name]
-        if image_id.startswith('skypilot:'):
-            image_id = service_catalog.get_image_id_from_tag(image_id,
+            image_id_str = image_id[region_name]
+        if image_id_str.startswith('skypilot:'):
+            image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
                                                              region_name,
                                                              clouds='aws')
-            if image_id is None:
+            if image_id_str is None:
                 # Raise ResourcesUnavailableError to make sure the failover
                 # in CloudVMRayBackend will be correctly triggered.
                 # TODO(zhwu): This is a information leakage to the cloud
                 # implementor, we need to find a better way to handle this.
                 raise exceptions.ResourcesUnavailableError(
                     f'No image found for region {region_name}')
-        return image_id
+        return image_id_str
 
     def get_image_size(self, image_id: str, region: Optional[str]) -> float:
         if image_id.startswith('skypilot:'):
@@ -259,7 +259,7 @@ class AWS(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -270,7 +270,7 @@ class AWS(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
 
         region_name = region.name
-        zones = [zone.name for zone in zones]
+        zone_names = [zone.name for zone in zones]
 
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
@@ -289,13 +289,13 @@ class AWS(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
-            'zones': ','.join(zones),
+            'zones': ','.join(zone_names),
             'image_id': image_id,
         }
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        fuzzy_candidate_list = []
+        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).

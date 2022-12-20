@@ -134,7 +134,7 @@ class GCP(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
         if accelerators is None:
@@ -237,7 +237,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -248,7 +248,7 @@ class GCP(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
 
         region_name = region.name
-        zones = [zones[0].name]
+        zone_name = zones[0].name
 
         # gcloud compute images list \
         # --project deeplearning-platform-release \
@@ -263,7 +263,7 @@ class GCP(clouds.Cloud):
         resources_vars = {
             'instance_type': r.instance_type,
             'region': region_name,
-            'zones': ','.join(zones),
+            'zones': zone_name,
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
@@ -382,7 +382,7 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth
+            from google import auth # type: ignore
             # Check google-api-python-client installation.
             import googleapiclient
 
@@ -546,7 +546,8 @@ class GCP(clouds.Cloud):
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
-        from google import auth  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from google import auth # type: ignore
         _, project_id = auth.default()
         return project_id
 
