@@ -1,7 +1,7 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
 import time
 import typing
-from typing import Optional
+from typing import Optional, Tuple
 
 import sky
 from sky import exceptions
@@ -61,9 +61,9 @@ class StrategyExecutor:
     def make(cls, cluster_name: str, backend: 'backends.Backend',
              task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
-        resources = task.resources
-        assert len(resources) == 1, 'Only one resource is supported.'
-        resources: 'sky.Resources' = list(resources)[0]
+        task_resources = task.resources
+        assert len(task_resources) == 1, 'Only one resource is supported.'
+        resources: 'sky.Resources' = list(task_resources)[0]
 
         spot_recovery = resources.spot_recovery
         assert spot_recovery is not None, (
@@ -118,6 +118,8 @@ class StrategyExecutor:
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
+        if handle is None:
+            return
         try:
             self.backend.cancel_jobs(handle, jobs=None)
         except Exception as e:  # pylint: disable=broad-except
@@ -262,7 +264,8 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # first retry in the same cloud/region. (Inside recover() we may not
         # rely on cluster handle, as it can be None if the cluster is
         # preempted.)
-        self._launched_cloud_region = None
+        self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
+                                                    'sky.clouds.Region']] = None
 
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         launch_time = super()._launch(max_retry, raise_on_failure)
