@@ -188,7 +188,7 @@ def get_vm_price_table(url: str) -> pd.DataFrame:
         except ValueError:
             price_match = re.search(pattern, price_str)
             if price_match is None:
-                raise ValueError(f'Cannot parse price: {price_str}')
+                raise ValueError(f'Cannot parse price: {price_str}') from None
             price = float(price_match.group(1))
         return price
 
@@ -386,7 +386,7 @@ def get_gpu_price_table(url) -> pd.DataFrame:
         except ValueError:
             price_match = re.search(pattern, price_str)
             if price_match is None:
-                raise ValueError(f'Cannot parse price: {price_str}')
+                raise ValueError(f'Cannot parse price: {price_str}') from None
             price = float(price_match.group(1))
         return price
 

@@ -127,7 +127,7 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
 def _is_power_of_two(x: int) -> bool:
     """Returns true if x is a power of two."""
     # https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2
-    return bool(x and not (x & (x - 1)))
+    return bool(x and not x & (x - 1))
 
 
 def _closest_power_of_two(x: int) -> int:
