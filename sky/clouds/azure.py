@@ -169,7 +169,7 @@ class Azure(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='azure')
 

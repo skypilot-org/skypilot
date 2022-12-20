@@ -5,7 +5,7 @@ import argparse
 import datetime
 import os
 import subprocess
-from typing import Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -66,8 +66,8 @@ def get_enabled_regions() -> Set[str]:
     global regions_enabled
     if regions_enabled is None:
         aws_client = aws.client('ec2', region_name='us-east-1')
-        regions_enabled = aws_client.describe_regions()['Regions']
-        regions_enabled = {r['RegionName'] for r in regions_enabled}
+        user_cloud_regions = aws_client.describe_regions()['Regions']
+        regions_enabled = {r['RegionName'] for r in user_cloud_regions}
         regions_enabled = regions_enabled.intersection(set(ALL_REGIONS))
     return regions_enabled
 
@@ -138,7 +138,7 @@ def _get_spot_pricing_table(region: str) -> pd.DataFrame:
     paginator = client.get_paginator('describe_spot_price_history')
     response_iterator = paginator.paginate(ProductDescriptions=['Linux/UNIX'],
                                            StartTime=datetime.datetime.utcnow())
-    ret = []
+    ret: List[Dict[str, str]] = []
     for response in response_iterator:
         # response['SpotPriceHistory'] is a list of dicts, each dict is like:
         # {
@@ -171,7 +171,7 @@ def _get_instance_types_df(region: str) -> Union[str, pd.DataFrame]:
         ])
         print(f'{region} Processing dataframes')
 
-        def get_acc_info(row) -> Tuple[str, float]:
+        def get_acc_info(row) -> Tuple[Optional[str], float]:
             accelerator = None
             for col, info_key in [('GpuInfo', 'Gpus'),
                                   ('InferenceAcceleratorInfo', 'Accelerators'),
@@ -268,27 +268,30 @@ _GPU_TO_IMAGE_DATE = {
 _UBUNTU_VERSION = ['18.04', '20.04']
 
 
-def _get_image_id(region: str, ubuntu_version: str, creation_date: str) -> str:
+def _get_image_id(region: str, ubuntu_version: str,
+                  creation_date: str) -> Optional[str]:
     try:
-        image_id = subprocess.check_output(f"""\
+        image = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
                 --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu {ubuntu_version}) {creation_date}"' \\
                     'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
             """,
-                                           shell=True)
+                                        shell=True)
     except subprocess.CalledProcessError as e:
         print(f'Failed {region}, {ubuntu_version}, {creation_date}. '
               'Trying next date.')
         print(f'{type(e)}: {e}')
         image_id = None
     else:
-        image_id = image_id.decode('utf-8').strip()
+        assert image is not None
+        image_id = image.decode('utf-8').strip()
     return image_id
 
 
 @ray.remote
-def _get_image_row(region: str, ubuntu_version: str,
-                   cpu_or_gpu: str) -> Tuple[str, str, str, str, str, str]:
+def _get_image_row(
+        region: str, ubuntu_version: str,
+        cpu_or_gpu: str) -> Tuple[str, str, str, str, Optional[str], str]:
     print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     date = None
@@ -331,7 +334,7 @@ def fetch_availability_zone_mappings() -> pd.DataFrame:
         use1-az1          us-east-1b
         use1-az2          us-east-1a
     """
-    regions = get_enabled_regions()
+    regions = list(get_enabled_regions())
     az_mappings = [_get_availability_zones.remote(r) for r in regions]
     az_mappings = ray.get(az_mappings)
     missing_regions = {

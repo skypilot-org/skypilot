@@ -2,7 +2,7 @@
 import collections
 import importlib
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.constants import (
     HOSTED_CATALOG_DIR_URL,
@@ -18,11 +18,12 @@ CloudFilter = Optional[Union[List[str], str]]
 _ALL_CLOUDS = ('aws', 'azure', 'gcp')
 
 
-def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
+def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
         clouds = list(_ALL_CLOUDS)
     single = isinstance(clouds, str)
     if single:
+        assert isinstance(clouds, str)
         clouds = [clouds]
 
     results = []
@@ -61,7 +62,8 @@ def list_accelerators(
                                   name_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
-    ret = collections.defaultdict(list)
+    ret: Dict[str,
+              List['common.InstanceTypeInfo']] = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
             ret[gpu] += items
@@ -82,12 +84,13 @@ def list_accelerator_counts(
                                   name_filter)
     if not isinstance(results, list):
         results = [results]
-    ret = collections.defaultdict(set)
+    accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)
     for result in results:
         for gpu, items in result.items():
             for item in items:
-                ret[gpu].add(item.accelerator_count)
-    for gpu, counts in ret.items():
+                accelerator_counts[gpu].add(item.accelerator_count)
+    ret: Dict[str, List[int]] = {}
+    for gpu, counts in accelerator_counts.items():
         ret[gpu] = sorted(counts)
     return ret
 
@@ -245,7 +248,7 @@ def get_image_id_from_tag(tag: str,
 
 def is_image_tag_valid(tag: str,
                        region: Optional[str],
-                       clouds: CloudFilter = None) -> None:
+                       clouds: CloudFilter = None) -> bool:
     """Validates the image tag."""
     return _map_clouds_catalog(clouds, 'is_image_tag_valid', tag, region)
 

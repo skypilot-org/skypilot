@@ -134,7 +134,7 @@ class GCP(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # GCP provisioner currently takes 1 zone per request.
         if accelerators is None:
@@ -374,7 +374,7 @@ class GCP(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 

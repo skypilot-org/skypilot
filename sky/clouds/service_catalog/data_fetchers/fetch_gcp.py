@@ -83,14 +83,16 @@ def get_iframe_sources(url: str) -> List[str]:
     return tree.xpath('//iframe/@src')
 
 
-def get_regions(doc: str) -> Dict[str, str]:
+def get_regions(doc: 'html.HtmlElement') -> Dict[str, str]:
     # Get the dictionary of regions.
     # E.g., 'kr': 'asia-northeast3'
-    regions = doc.xpath('//md-option')
-    regions = {
-        region.attrib['value']: re.search(r'\((.*?)\)', region.text).group(1)
-        for region in regions
-    }
+    region_info = doc.xpath('//md-option')
+    regions = dict()
+    for region in region_info:
+        region_fullname = re.search(r'\((.*?)\)', region.text)
+        if region_fullname is None:
+            raise ValueError(f'Invalid region name: {region.text}')
+        regions[region.attrib['value']] = region_fullname.group(1)
     return regions
 
 
@@ -180,11 +182,14 @@ def get_vm_price_table(url: str) -> pd.DataFrame:
 
     def parse_price(price_str: str) -> float:
         if NOT_AVAILABLE_STR in price_str:
-            return None
+            return float('nan')
         try:
             price = float(price_str[1:])
         except ValueError:
-            price = float(re.search(pattern, price_str).group(1))
+            price_match = re.search(pattern, price_str)
+            if price_match is None:
+                raise ValueError(f'Cannot parse price: {price_str}')
+            price = float(price_match.group(1))
         return price
 
     # Parse the prices.
@@ -324,7 +329,6 @@ def get_gpu_price_table(url) -> pd.DataFrame:
 
     # Create the dataframe.
     table = []
-    row_span = []
     for region, full_name in regions.items():
         i = 0
         while i < len(rows):
@@ -376,11 +380,14 @@ def get_gpu_price_table(url) -> pd.DataFrame:
 
     def parse_price(price_str: str) -> float:
         if NOT_AVAILABLE_STR in price_str:
-            return None
+            return float('nan')
         try:
             price = float(price_str[1:])
         except ValueError:
-            price = float(re.search(pattern, price_str).group(1))
+            price_match = re.search(pattern, price_str)
+            if price_match is None:
+                raise ValueError(f'Cannot parse price: {price_str}')
+            price = float(price_match.group(1))
         return price
 
     df['Price'] = df['Price'].apply(parse_price)
