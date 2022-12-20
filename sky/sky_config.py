@@ -80,9 +80,9 @@ def _try_load_config() -> None:
         config_path = config_path_via_env_var
     else:
         config_path = CONFIG_PATH
-    logger.debug(f'Using config path: {config_path}')
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
+        logger.debug(f'Using config path: {config_path}')
         try:
             _dict = common_utils.read_yaml(config_path)
             logger.debug(f'Config loaded: {_dict}')
