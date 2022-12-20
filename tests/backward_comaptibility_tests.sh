@@ -1,5 +1,5 @@
 # This script is used to test backward compatibility of skypilot.
-# To run this script, you need to remove the skypilot and ray in the base
+# To run this script, you need to uninstall the skypilot and ray in the base
 # conda environment, and run it in the base conda environment.
 
 #!/bin/bash
