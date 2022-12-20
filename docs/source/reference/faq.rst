@@ -79,7 +79,7 @@ To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky
 What are the required IAM permissons on GCP for SkyPilot?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To use SkyPilot, your GCP account needs to be granted the following IAM permissions.
+To use SkyPilot, your GCP account needs to be granted the following IAM roles.
 
 .. code-block:: yaml
 
@@ -90,7 +90,7 @@ To use SkyPilot, your GCP account needs to be granted the following IAM permissi
   roles/serviceusage.serviceUsageConsumer
   roles/storage.admin
 
-If you want to use TPUs, an additional permission
+If you want to use TPUs, an additional role
 
 .. code-block:: yaml
 
