@@ -53,8 +53,6 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
         StatusColumn('ZONE', _get_zone, show_by_default=False),
         StatusColumn('STATUS', _get_status),
         StatusColumn('AUTOSTOP', _get_autostop),
-        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=False),
-        StatusColumn('COST (est.)', _get_total_cost, show_by_default=False),
         StatusColumn('COMMAND',
                      _get_command,
                      trunc_length=_COMMAND_TRUNC_LENGTH if not show_all else 0),
@@ -96,15 +94,20 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
                       show_all: bool,
                       reserved_group_name: Optional[str] = None) -> int:
     """Compute cluster table values and display for cost report.
+
+    Returns:
+        Number of pending auto{stop,down} clusters.
     """
     # TODO(zhwu): Update the information for autostop clusters.
 
     status_columns = [
         StatusColumn('NAME', _get_name),
+        StatusColumn('LAUNCHED', _get_launched),
+        StatusColumn('DURATION (hours)', _get_duration),
         StatusColumn('RESOURCES',
                      _get_resources_for_cost_report,
                      trunc_length=70 if not show_all else 0),
-        StatusColumn('COST (est.)', _get_total_cost, show_by_default=True),
+        StatusColumn('COST (est.)', get_cost_report, show_by_default=True),
     ]
 
     columns = []
@@ -113,6 +116,7 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
+    pending_autostop = 0
     for record in cluster_records:
         row = []
         for status_column in status_columns:
@@ -134,6 +138,7 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
         click.echo(cluster_table)
     else:
         click.echo('No existing clusters.')
+    return pending_autostop
 
 
 def show_local_status_table(local_clusters: List[str]):
@@ -240,6 +245,8 @@ _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
 _get_status = (lambda cluster_status: cluster_status['status'].value)
 _get_command = (lambda cluster_status: cluster_status['last_use'])
+_get_duration = (
+    lambda cluster_status: round(cluster_status['total_time'] / 3600, 2))
 
 
 def _get_resources(cluster_status):
@@ -291,21 +298,18 @@ def _get_autostop(cluster_status):
     return autostop_str
 
 
-def _get_price(cluster_status):
-    handle = cluster_status['handle']
-    hourly_cost = (handle.launched_resources.get_cost(3600) *
-                   handle.launched_nodes)
-    price_str = f'$ {hourly_cost:.3f}'
-    return price_str
+def get_cost_report(cluster_status: str,) -> float:
 
+    duration = cluster_status['total_time']
+    launched_nodes = cluster_status['num_nodes']
+    launched_resources = cluster_status['resources']
 
-def _get_total_cost(cluster_status):
-    cost = cluster_status['cost']
+    cost = (launched_resources.get_cost(duration) * launched_nodes)
+
     if not cost:
         return '-'
 
-    cost_str = f'${cost:.3f}'
-    return cost_str
+    return f'${cost:.3f}'
 
 
 def _is_pending_autostop(cluster_status):

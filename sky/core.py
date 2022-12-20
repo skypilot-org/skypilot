@@ -68,11 +68,24 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
 def report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
+
+        The following fields for each cluster are recorded: cluster name,
+        resources, launched time, duration that cluster was up,
+        and total cost.
+
+        The estimated cost column indicates price for the cluster based on the
+        type of resources being used and the duration of use up until the call
+        to status. This means if the cluster is UP, successive calls to report
+        will show increasing price. The estimated cost is calculated based on
+        the local cache of the cluster status, and may not be accurate for
+        the cluster with autostop/use_spot set or terminated/stopped
+        on the cloud console.
+
         Returns:
-        A list of dicts, with each dict containing the information of a
+        A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    return backend_utils.get_clusters_for_cost_report()
+    return global_user_state.get_clusters_from_history()
 
 
 def _start(
@@ -247,13 +260,6 @@ def down(cluster_name: str, purge: bool = False) -> None:
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend = backend_utils.get_backend_from_handle(handle)
     backend.teardown(handle, terminate=True, purge=purge)
-
-
-def get_cost_on_stop(cluster_name: str) -> str:
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    cluster_cost = global_user_state.get_cost_for_cluster(handle.cluster_name)
-
-    return f'Est. cost of cluster {handle.cluster_name}: ${cluster_cost:.2f}'
 
 
 @usage_lib.entrypoint

@@ -1323,18 +1323,24 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
 @usage_lib.entrypoint
-def report():  # pylint: disable=redefined-builtin
+def report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show cost reports for each cluster.
 
-    The following fields for each cluster are recorded: cluster name, time
+    The following fields for each cluster are recorded: cluster name,
     resources, launched time, duration that cluster was up,
-    hourly price and total cost.
+    and total cost.
 
     The estimated cost column indicates the price for the cluster based on the
     type of resources being used and the duration of use up until the call
-    to status. This means if the cluster is UP, successive calls to status
+    to status. This means if the cluster is UP, successive calls to report
     will show increasing price. The estimated cost is calculated based on
     the local cache of the cluster status, and may not be accurate for
     the cluster with autostop/use_spot set or terminated/stopped
@@ -1353,7 +1359,37 @@ def report():  # pylint: disable=redefined-builtin
         else:
             nonreserved_cluster_records.append(cluster_record)
 
-    status_utils.show_report_table(nonreserved_cluster_records, all)
+    num_pending_autostop = 0
+    num_pending_autostop += status_utils.show_report_table(
+        nonreserved_cluster_records, all)
+
+    if num_pending_autostop > 0:
+        plural = ' has'
+        if num_pending_autostop > 1:
+            plural = 's have'
+        click.echo('\n'
+                   f'{num_pending_autostop} cluster{plural} '
+                   'auto{stop,down} scheduled. Refresh statuses with: '
+                   f'{colorama.Style.BRIGHT}sky status --refresh'
+                   f'{colorama.Style.RESET_ALL}')
+
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        num_pending_autostop += status_utils.show_status_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
+        if num_pending_autostop > 0:
+            plural = ' has'
+        if num_pending_autostop > 1:
+            plural = 's have'
+        click.echo('\n'
+                   f'{num_pending_autostop} cluster{plural} '
+                   'auto{stop,down} scheduled. Refresh statuses with: '
+                   f'{colorama.Style.BRIGHT}sky status --refresh'
+                   f'{colorama.Style.RESET_ALL}')
+
+    local_clusters = onprem_utils.check_and_get_local_clusters(
+        suppress_error=True)
+
+    status_utils.show_local_status_table(local_clusters)
 
 
 @cli.command()
@@ -2145,7 +2181,6 @@ def _down_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
-                # message += f'\n {core.get_cost_on_stop(name)}'
 
         progress.stop()
         click.echo(message)

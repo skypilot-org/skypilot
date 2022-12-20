@@ -149,7 +149,8 @@ def add_or_update_cluster(
     # when the cluster failover through multiple regions (one entry per region).
     # It can be more inaccurate for the multi-node cluster
     # as the failover can have the nodes partially UP.
-    cluster_hash = _get_cluster_hash(cluster_name) or str(uuid.uuid4())
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name) or str(
+        uuid.uuid4())
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     # first time a cluster is being launched
@@ -259,7 +260,7 @@ def update_last_use(cluster_name: str):
 
 def remove_cluster(cluster_name: str, terminate: bool):
     """Removes cluster_name mapping."""
-    cluster_hash = _get_cluster_hash(cluster_name)
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name)
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     # usage_intervals is not None and not empty
@@ -363,6 +364,25 @@ def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
         return pickle.loads(usage_intervals)
 
 
+def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+    return usage_intervals[0][0]
+
+
+def _get_cluster_total_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+
+    total_duration = 0
+    for i, (start_time, end_time) in enumerate(usage_intervals):
+        # duration from latest start time to time of query
+        if end_time is None:
+            assert i == len(usage_intervals) - 1, i
+            end_time = int(time.time())
+        start_time, end_time = int(start_time), int(end_time)
+        total_duration += end_time - start_time
+    return total_duration
+
+
 def _set_cluster_usage_intervals(cluster_hash: str,
                                  usage_intervals: Dict[str, Any]) -> None:
     _DB.cursor.execute(
@@ -378,7 +398,7 @@ def _set_cluster_usage_intervals(cluster_hash: str,
         raise ValueError(f'Cluster hash {cluster_hash} not found.')
 
 
-def _get_cluster_hash(cluster_name: str) -> Optional[str]:
+def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     rows = _DB.cursor.execute(
         'SELECT cluster_hash FROM clusters WHERE name=(?)', (cluster_name,))
     for (cluster_hash,) in rows:
@@ -419,7 +439,6 @@ def get_cluster_from_name(
             'to_down': bool(to_down),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
-            'cost': get_cost_for_cluster(name),
         }
         return record
 
@@ -444,7 +463,6 @@ def get_clusters() -> List[Dict[str, Any]]:
             'to_down': bool(to_down),
             'metadata': json.loads(metadata),
             'cluster_hash': cluster_hash,
-            'cost': get_cost_for_cluster(name),
         }
 
         records.append(record)
@@ -468,11 +486,12 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
 
         record = {
             'name': name,
+            'launched_at': _get_cluster_launch_time(cluster_hash),
+            'total_time': _get_cluster_total_time(cluster_hash),
             'num_nodes': num_nodes,
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
-            'cost': get_cost_for_cluster_for_report(cluster_hash),
         }
 
         records.append(record)
@@ -592,45 +611,3 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': StorageStatus[status],
         })
     return records
-
-
-def get_cost_for_cluster(cluster_name: str,) -> float:
-
-    cluster_hash = _get_cluster_hash(cluster_name)
-    print(cluster_name)
-
-    if cluster_hash is None:
-        return 0
-
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
-
-    return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
-
-
-def get_cost_for_cluster_for_report(cluster_hash: str,) -> float:
-    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
-
-    return get_cost_for_usage_intervals(cluster_hash, usage_intervals)
-
-
-def get_cost_for_usage_intervals(
-    cluster_hash: str,
-    usage_intervals: List[Tuple[int, int]],
-) -> float:
-
-    total_duration = 0
-
-    for i, (start_time, end_time) in enumerate(usage_intervals):
-        # duration from latest start time to time of query
-        if end_time is None:
-            assert i == len(usage_intervals) - 1, i
-            end_time = int(time.time())
-        start_time, end_time = int(start_time), int(end_time)
-        total_duration += end_time - start_time
-
-    num_nodes, resources = get_launched_resources_from_cluster_hash(
-        cluster_hash)
-
-    cost = (resources.get_cost(total_duration) * num_nodes)
-
-    return cost
