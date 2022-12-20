@@ -1829,8 +1829,7 @@ def _update_cluster_status(
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-          fetched from the cloud provider.
-        
+          fetched from the cloud provider.        
     """
     if need_owner_identity_check:
         check_owner_identity(cluster_name)
