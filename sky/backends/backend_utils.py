@@ -1809,7 +1809,8 @@ def _update_cluster_status_no_lock(
 
 def _update_cluster_status(
         cluster_name: str,
-        acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
+        acquire_per_cluster_status_lock: bool,
+        need_owner_identity_check: bool = True) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
     The cluster status is updated by checking ray cluster and real status from cloud.
@@ -1823,9 +1824,16 @@ def _update_cluster_status(
       Otherwise returns the input record with status and ip potentially updated.
 
     Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
+    if need_owner_identity_check:
+        check_owner_identity(cluster_name)
+
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
 
@@ -1881,7 +1889,8 @@ def refresh_cluster_status_handle(
             try:
                 record = _update_cluster_status(cluster_name,
                                                 acquire_per_cluster_status_lock=
-                                                acquire_per_cluster_status_lock)
+                                                acquire_per_cluster_status_lock,
+                                                need_owner_identity_check=False)
                 if record is None:
                     return None, None
             except (exceptions.ClusterOwnerIdentityMismatchError,
