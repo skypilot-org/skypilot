@@ -379,7 +379,7 @@ class SSHConfigHelper(object):
               StrictHostKeyChecking no
               Port 22
               {proxy}
-            """)
+            """.rstrip())
         return codegen
 
     @classmethod
