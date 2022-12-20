@@ -271,6 +271,24 @@ def test_image_id_dict_with_zone():
     run_one_test(test)
 
 
+def test_image_no_conda():
+    name = _get_cluster_name()
+    test = Test(
+        'image_no_conda',
+        [
+            # Use image id dict.
+            f'sky launch -y -c {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky stop {name} -y',
+            f'sky start {name} -y',
+            f'sky exec {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 def test_stale_job():
     name = _get_cluster_name()
     test = Test(
@@ -899,6 +917,22 @@ def test_spot_recovery():
             'sleep 200',
             f's=$(sky spot queue); printf "%s\n" "$s"; echo; echo; printf "%s\n" "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_spot_recovery_default_resources():
+    """Test managed spot recovery for default resources."""
+    name = _get_cluster_name()
+    test = Test(
+        'managed-spot-recovery-default-resources',
+        [
+            f'sky spot launch -n {name} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            'sleep 360',
+            f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
         f'sky spot cancel -y -n {name}',
         timeout=20 * 60,
