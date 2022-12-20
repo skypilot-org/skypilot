@@ -150,8 +150,8 @@ class AWS(clouds.Cloud):
             image_id_str = image_id[region_name]
         if image_id_str.startswith('skypilot:'):
             image_id_str = service_catalog.get_image_id_from_tag(image_id_str,
-                                                             region_name,
-                                                             clouds='aws')
+                                                                 region_name,
+                                                                 clouds='aws')
             if image_id_str is None:
                 # Raise ResourcesUnavailableError to make sure the failover
                 # in CloudVMRayBackend will be correctly triggered.

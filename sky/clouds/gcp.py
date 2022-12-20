@@ -382,7 +382,7 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth # type: ignore
+            from google import auth  # type: ignore
             # Check google-api-python-client installation.
             import googleapiclient
 
@@ -547,7 +547,7 @@ class GCP(clouds.Cloud):
         if dryrun:
             return 'dryrun-project-id'
         # pylint: disable=import-outside-toplevel
-        from google import auth # type: ignore
+        from google import auth  # type: ignore
         _, project_id = auth.default()
         return project_id
 
