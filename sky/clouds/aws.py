@@ -31,8 +31,8 @@ _CREDENTIAL_FILES = [
     'credentials',
 ]
 
-
 DEFAULT_AMI_GB = 45
+
 
 @clouds.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
@@ -41,11 +41,12 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
 
+    _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        '\n      $ pip install boto3'
-        '\n      $ aws configure'
-        '\n    For more info: '
+        f'\n{_INDENT_PREFIX}  $ pip install boto3'
+        f'\n{_INDENT_PREFIX}  $ aws configure'
+        f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
@@ -56,6 +57,8 @@ class AWS(clouds.Cloud):
         '\n    For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
     )
+
+    _MAX_AWSCLI_MAJOR_VERSION = 1
 
     #### Regions/Zones ####
 
@@ -338,27 +341,22 @@ class AWS(clouds.Cloud):
         except ImportError:
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
-        prefix = '    '
 
         # Checks if the AWS CLI is installed properly
-        proc = subprocess.run('aws configure list',
+        proc = subprocess.run('aws --version',
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
         if proc.returncode != 0:
-            additional_help = f'\n{prefix}Credentials may also need to be set.' + self._STATIC_CREDENTIAL_HELP_STR
-            if 'SSO' in proc.stderr.decode().split():
-                additional_help = (
-                    f'\n{prefix}You are using SSO account, please update the awscli package with:'
-                    f'\n{prefix}  $ pip install awscli>=1.27.10 boto3')
             return False, (
                 'AWS CLI is not installed properly. '
                 'Run the following commands under sky folder:'
                 # TODO(zhwu): after we publish sky to PyPI,
                 # change this to `pip install sky[aws]`
-                f'\n{prefix}  $ pip install .[aws]'
-                f'{additional_help}')
+                f'\n{self._INDENT_PREFIX}  $ pip install .[aws]'
+                f'{self._INDENT_PREFIX}Credentials may also need to be set. '
+                f'{self._STATIC_CREDENTIAL_HELP_STR}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
@@ -371,11 +369,12 @@ class AWS(clouds.Cloud):
         # This file is required for multiple clouds because it will be synced to remote VMs
         # for `aws` to access private storage buckets.
         # `aws configure list` does not guarantee this file exists.
-        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
+        if self._is_sso_identity():
             hints = (
-                'AWS static credentials are not set. AWS SSO might be used. '
-                'It will work if you use AWS only, but will cause problems for multiple '
-                'clouds. To set up static credentials, try: aws configure')
+                'AWS SSO is set. '
+                'It will work if you use AWS only, but will cause problems if you want to '
+                'use multiple clouds. To set up static credentials, try: aws configure'
+            )
 
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
@@ -416,6 +415,23 @@ class AWS(clouds.Cloud):
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
                     f' {self._STATIC_CREDENTIAL_HELP_STR}') from None
+        except aws.botocore_exceptions().InvalidConfigError as e:
+            import awscli
+            from packaging import version
+            awscli_version = version.parse(awscli.__version__)
+            if (awscli_version < version.parse('1.27.10') and
+                    'configured to use SSO' in str(e)):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'awscli is too old to use SSO. Run the following command to upgrade:'
+                        f'\n{self._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
+                        f'\n{self._INDENT_PREFIX}SSO may need to re-login. {self._SSO_CREDENTIAL_HELP_STR}'
+                    ) from None
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Invalid AWS configuration.\n'
+                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                ) from None
         except aws.botocore_exceptions().TokenRetrievalError:
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
