@@ -50,22 +50,48 @@ import yaml
 from sky import sky_logging
 from sky.utils import common_utils
 
+# The config path is discovered in this order:
+#
+# (1) (Used internally) If env var {ENV_VAR_SKYPILOT_CONFIG} exists, use its
+#     path;
+# (2) If file {CONFIG_PATH} exists, use this file.
+#
+# If the path discovered by (1) fails to load, we do not attempt to go to step
+# 2 in the list.
+
+# (Used internally) An env var holding the path to the local config file. This
+# is only used by spot controller tasks to ensure recoveries of the same job
+# use the same config file.
+ENV_VAR_SKYPILOT_CONFIG = 'SKYPILOT_CONFIG'
+
 # Path to the local config file.
-CONFIG_PATH = os.path.expanduser('~/.sky/config.yaml')
-# Remote cluster path where the local config file will be synced to.
-REMOTE_CONFIG_PATH = '~/.sky/config.yaml'  # Do not expanduser.
+CONFIG_PATH = '~/.sky/config.yaml'
 
 logger = sky_logging.init_logger(__name__)
 
-# Load on import.
-
 # The loaded config.
 _dict = None
-if os.path.exists(CONFIG_PATH):
-    try:
-        _dict = common_utils.read_yaml(CONFIG_PATH)
-    except yaml.YAMLError as e:
-        logger.error(f'Error in loading config file ({CONFIG_PATH}):', e)
+
+
+def _try_load_config() -> None:
+    global _dict
+    config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    if config_path_via_env_var is not None:
+        config_path = config_path_via_env_var
+    else:
+        config_path = CONFIG_PATH
+    logger.debug(f'Using config path: {config_path}')
+    config_path = os.path.expanduser(config_path)
+    if os.path.exists(config_path):
+        try:
+            _dict = common_utils.read_yaml(config_path)
+            logger.debug(f'Config loaded: {_dict}')
+        except yaml.YAMLError as e:
+            logger.error(f'Error in loading config file ({config_path}):', e)
+
+
+# Load on import.
+_try_load_config()
 
 
 def _check_loaded_or_die():

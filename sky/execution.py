@@ -538,12 +538,18 @@ def spot_launch(
             # Pop any proxy command, because the controller would've been
             # launched behind the proxy, and in general any nodes we launch may
             # not have or need the proxy setup.
+            #
+            # This file will be uploaded to the controller node and will be
+            # used throughout the spot job's recovery attempts (i.e., if it
+            # relaunches due to preemption, we make sure the same config is
+            # used).
             config_dict = sky_config.pop_nested(('auth', 'ssh_proxy_command'))
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
                     'user_config_path': tmpfile.name,
-                    'remote_user_config_path': sky_config.REMOTE_CONFIG_PATH,
+                    'env_var_skypilot_config':
+                        sky_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
         yaml_path = backend_utils.fill_template(
