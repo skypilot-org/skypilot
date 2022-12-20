@@ -43,16 +43,20 @@ def raise_lambda_error(response, error_status_codes):
     error_status_codes: if response.status_code is in error_status_codes, then
                         an error has occurred but response.json still exists
     """
-    if response.status_code == 200:
+    status_code = response.status_code
+    if status_code == 200:
         return
-    if response.status_code in error_status_codes:
+    if status_code in error_status_codes:
         resp_json = response.json()
         code = resp_json['error']['code']
         message = resp_json['error']['message']
         raise LambdaError(f'{code}: {message}')
+    elif status_code == 429:
+        # https://docs.lambdalabs.com/cloud/rate-limiting/
+        raise LambdaError('Your API requests are being rate limited.')
     else:
         # Error, but no json
-        raise LambdaError('Unexpected error.')
+        raise LambdaError(f'Unexpected error. Status code: {status_code}')
 
 
 class LambdaClient:
@@ -79,6 +83,21 @@ class LambdaClient:
         """Start a new instance."""
         assert instance_type=='gpu_1x_a100_sxm4', instance_type
         assert self.ssh_key_name is not None
+
+        # Optimization:
+        # Most API requests are rate limited at ~1 request every second but
+        # launch requests are rate limited at ~1 request every 10 seconds.
+        # So don't use launch requests to check availability.
+        # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
+        available_regions = self.ls_catalog()['data'][instance_type]\
+                ['regions_with_capacity_available']
+        available_regions = [reg['name'] for reg in available_regions]
+        if region not in available_regions:
+            raise LambdaError(('instance-operations/launch/'
+                               'insufficient-capacity: Not enough capacity '
+                               'to fulfill launch request.'))
+
+        # Try to launch instance
         data = json.dumps({
                     'region_name': region,
                     'instance_type_name': instance_type,
@@ -127,3 +146,10 @@ class LambdaClient:
         with open(self.credentials, 'w') as f:
             f.write(f'api_key={self.api_key}\n')
             f.write(f'ssh_key_name={self.ssh_key_name}\n')
+
+    def ls_catalog(self):
+        """List offered instances and their availability."""
+        response = requests.get(f'{API_ENDPOINT}/instance-types',
+                                headers=self.headers)
+        raise_lambda_error(response, [400, 401, 403])
+        return response.json()
