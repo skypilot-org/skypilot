@@ -14,43 +14,20 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='run slow tests')
-    parser.addoption('--sso',
-                     action='store_true',
-                     default=False,
-                     help='run tests that require SSO')
-
-
-@pytest.fixture
-def sso(request):
-    return request.config.getoption('--sso')
-
-
-@pytest.fixture
-def instance_type_restriction(request) -> str:
-    if request.config.getoption('--sso'):
-        return '--instance-type t3.micro'
-    return ''
 
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
-    config.addinivalue_line('markers',
-                            'nosso: mark test as not running under SSO')
 
 
 def pytest_collection_modifyitems(config, items):
-    if not config.getoption('--runslow'):
-        # --runslow not given in cli: skip slow tests
-        skip_slow = pytest.mark.skip(reason='need --runslow option to run')
-        for item in items:
-            if 'slow' in item.keywords:
-                item.add_marker(skip_slow)
-    if config.getoption('--sso'):
-        # --sso given in cli: skip costly tests
-        skip_costly = pytest.mark.skip(reason='skip costly tests under SSO')
-        for item in items:
-            if 'costly' in item.keywords:
-                item.add_marker(skip_costly)
+    if config.getoption('--runslow'):
+        # --runslow given in cli: do not skip slow tests
+        return
+    skip_slow = pytest.mark.skip(reason='need --runslow option to run')
+    for item in items:
+        if 'slow' in item.keywords:
+            item.add_marker(skip_slow)
 
 
 def pytest_sessionstart(session):

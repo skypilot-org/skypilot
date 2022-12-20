@@ -19,7 +19,7 @@ then
     test_spec=tests/test_smoke.py
 elif [[ "$test" == "--*" ]]
 then
-    [[ "$test" == "--runslow" ]] || [[ "$test" == "--sso" ]] || echo "Unknown option: $test"
+    [[ "$test" == "--runslow" ]] || echo "Unknown option: $test"
     test_spec="$test tests/test_smoke.py"
 else
     test_spec=tests/test_smoke.py::"${test}"

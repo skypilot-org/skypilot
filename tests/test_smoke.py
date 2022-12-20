@@ -134,15 +134,15 @@ def test_example_app():
 
 
 # ---------- A minimal task ----------
-def test_minimal(instance_type_restriction: str):
+def test_minimal():
     name = _get_cluster_name()
     test = Test(
         'minimal',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -c {name} {instance_type_restriction} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
-            f'sky launch -y {instance_type_restriction} -c {name} examples/minimal.yaml',
+            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -157,12 +157,12 @@ def test_minimal(instance_type_restriction: str):
 
 
 # ---------- Test region ----------
-def test_region(instance_type_restriction: str):
+def test_region():
     name = _get_cluster_name()
     test = Test(
         'region',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} --region us-west-2 examples/minimal.yaml',
+            f'sky launch -y -c {name} --region us-west-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
@@ -173,12 +173,12 @@ def test_region(instance_type_restriction: str):
 
 
 # ---------- Test zone ----------
-def test_zone(instance_type_restriction: str):
+def test_zone():
     name = _get_cluster_name()
     test = Test(
         'zone',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} examples/minimal.yaml --zone us-west-2b',
+            f'sky launch -y -c {name} examples/minimal.yaml --zone us-west-2b',
             f'sky exec {name} examples/minimal.yaml --zone us-west-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
@@ -188,13 +188,13 @@ def test_zone(instance_type_restriction: str):
     run_one_test(test)
 
 
-def test_image_id_dict(instance_type_restriction: str):
+def test_image_id_dict():
     name = _get_cluster_name()
     test = Test(
         'image_id_dict',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} {instance_type_restriction} examples/per_region_images.yaml',
+            f'sky launch -y -c {name} examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 1 --status',
@@ -206,17 +206,17 @@ def test_image_id_dict(instance_type_restriction: str):
     run_one_test(test)
 
 
-def test_image_id_dict_with_region(instance_type_restriction: str):
+def test_image_id_dict_with_region():
     name = _get_cluster_name()
     test = Test(
         'image_id_dict_with_region',
         [
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} {instance_type_restriction} --region us-west-2 examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} {instance_type_restriction} --region us-west-1 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --region us-west-1 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
-            f'sky launch -c {name} {instance_type_restriction} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
             f'sky logs {name} 1 --status',
@@ -238,17 +238,17 @@ def test_image_id_dict_with_region(instance_type_restriction: str):
     run_one_test(test)
 
 
-def test_image_id_dict_with_zone(instance_type_restriction: str):
+def test_image_id_dict_with_zone():
     name = _get_cluster_name()
     test = Test(
         'image_id_dict_with_region',
         [
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --zone us-west-2b {instance_type_restriction} examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --zone us-west-2b examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} {instance_type_restriction} --zone us-west-1a examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --zone us-west-1a examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
-            f'sky launch -y -c {name} {instance_type_restriction} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             # Fail due to image id mismatch.
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
@@ -307,13 +307,13 @@ def test_stale_job():
     run_one_test(test)
 
 
-def test_stale_job_manual_restart(instance_type_restriction: str):
+def test_stale_job_manual_restart():
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
         'stale-job',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} --cloud aws --region {region} "echo hi"',
+            f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             f'id=`aws ec2 describe-instances --region {region} --filters '
@@ -323,7 +323,7 @@ def test_stale_job_manual_restart(instance_type_restriction: str):
             f'aws ec2 stop-instances --region {region} '
             '--instance-ids $id',
             'sleep 40',
-            f'sky launch -c {name} {instance_type_restriction} -y "echo hi"',
+            f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
@@ -336,12 +336,12 @@ def test_stale_job_manual_restart(instance_type_restriction: str):
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
-def test_env_check(instance_type_restriction: str):
+def test_env_check():
     name = _get_cluster_name()
     test = Test(
         'env_check',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} --detach-setup examples/env_check.yaml',
+            f'sky launch -y -c {name} --detach-setup examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -350,7 +350,7 @@ def test_env_check(instance_type_restriction: str):
 
 
 # ---------- file_mounts ----------
-def test_file_mounts(instance_type_restriction: str):
+def test_file_mounts():
     name = _get_cluster_name()
     test_commands = [
         *storage_setup_commands,
@@ -398,13 +398,13 @@ def test_storage_mounts():
 
 
 # ---------- CLI logs ----------
-def test_logs(instance_type_restriction: str):
+def test_logs():
     name = _get_cluster_name()
     timestamp = time.time()
     test = Test(
         'cli_logs',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} --num-nodes 2 "echo {timestamp} 1"',
+            f'sky launch -y -c {name} --num-nodes 2 "echo {timestamp} 1"',
             f'sky exec {name} "echo {timestamp} 2"',
             f'sky exec {name} "echo {timestamp} 3"',
             f'sky exec {name} "echo {timestamp} 4"',
@@ -420,7 +420,6 @@ def test_logs(instance_type_restriction: str):
 
 
 # ---------- Job Queue. ----------
-@pytest.mark.costly
 def test_job_queue():
     name = _get_cluster_name()
     test = Test(
@@ -447,7 +446,6 @@ def test_job_queue():
     run_one_test(test)
 
 
-@pytest.mark.costly
 def test_n_node_job_queue():
     name = _get_cluster_name()
     test = Test(
@@ -484,7 +482,6 @@ def test_n_node_job_queue():
     run_one_test(test)
 
 
-@pytest.mark.costly
 def test_large_job_queue():
     name = _get_cluster_name()
     test = Test(
@@ -504,7 +501,6 @@ def test_large_job_queue():
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
-@pytest.mark.costly
 def test_multi_echo():
     name = _get_cluster_name()
     test = Test(
@@ -525,7 +521,6 @@ def test_multi_echo():
 
 
 # ---------- Task: 1 node training. ----------
-@pytest.mark.costly
 def test_huggingface():
     name = _get_cluster_name()
     test = Test(
@@ -542,7 +537,6 @@ def test_huggingface():
 
 
 # ---------- TPU. ----------
-@pytest.mark.costly
 def test_tpu():
     name = _get_cluster_name()
     test = Test(
@@ -560,7 +554,6 @@ def test_tpu():
 
 
 # ---------- TPU VM. ----------
-@pytest.mark.costly
 def test_tpu_vm():
     name = _get_cluster_name()
     test = Test(
@@ -585,7 +578,6 @@ def test_tpu_vm():
 
 
 # ---------- TPU VM Pod. ----------
-@pytest.mark.costly
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
@@ -602,12 +594,12 @@ def test_tpu_vm_pod():
 
 
 # ---------- Simple apps. ----------
-def test_multi_hostname(instance_type_restriction: str):
+def test_multi_hostname():
     name = _get_cluster_name()
     test = Test(
         'multi_hostname',
         [
-            f'sky launch -y -c {name} {instance_type_restriction} examples/multi_hostname.yaml',
+            f'sky launch -y -c {name} examples/multi_hostname.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/multi_hostname.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
@@ -618,7 +610,6 @@ def test_multi_hostname(instance_type_restriction: str):
 
 
 # ---------- Task: n=2 nodes with setups. ----------
-@pytest.mark.costly
 def test_distributed_tf():
     name = _get_cluster_name()
     test = Test(
@@ -635,7 +626,6 @@ def test_distributed_tf():
 
 
 # ---------- Testing GCP start and stop instances ----------
-@pytest.mark.costly
 def test_gcp_start_stop():
     name = _get_cluster_name()
     test = Test(
@@ -659,7 +649,6 @@ def test_gcp_start_stop():
 
 
 # ---------- Testing Azure start and stop instances ----------
-@pytest.mark.costly
 def test_azure_start_stop():
     name = _get_cluster_name()
     test = Test(
@@ -682,12 +671,12 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
-def test_autostop(instance_type_restriction: str):
+def test_autostop():
     name = _get_cluster_name()
     test = Test(
         'autostop',
         [
-            f'sky launch -y -d -c {name} {instance_type_restriction} --num-nodes 2 examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop -y {name} -i 1',
 
             # Ensure autostop is set.
@@ -737,12 +726,12 @@ def test_autostop(instance_type_restriction: str):
 
 
 # ---------- Testing Autodowning ----------
-def test_autodown(instance_type_restriction: str):
+def test_autodown():
     name = _get_cluster_name()
     test = Test(
         'autodown',
         [
-            f'sky launch -y -d -c {name} {instance_type_restriction} --num-nodes 2 --cloud aws examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --num-nodes 2 --cloud aws examples/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
@@ -752,14 +741,14 @@ def test_autodown(instance_type_restriction: str):
             # Ensure the cluster is terminated.
             'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {instance_type_restriction} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud aws examples/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 240',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {instance_type_restriction} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 240',
             # Ensure the cluster is still UP.
@@ -793,7 +782,6 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
 
 
 # ---------- Testing `sky cancel` on AWS ----------
-@pytest.mark.costly
 def test_cancel_aws():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'aws')
@@ -801,7 +789,6 @@ def test_cancel_aws():
 
 
 # ---------- Testing `sky cancel` on Azure ----------
-@pytest.mark.costly
 def test_cancel_azure():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'azure', timeout=30 * 60)
@@ -809,7 +796,6 @@ def test_cancel_azure():
 
 
 # ---------- Testing `sky cancel` on GCP ----------
-@pytest.mark.costly
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
@@ -817,7 +803,6 @@ def test_cancel_gcp():
 
 
 # ---------- Testing `sky cancel` ----------
-@pytest.mark.costly
 def test_cancel_pytorch():
     name = _get_cluster_name()
     test = Test(
@@ -841,13 +826,13 @@ def test_cancel_pytorch():
 
 
 # ---------- Testing use-spot option ----------
-def test_use_spot(instance_type_restriction: str):
+def test_use_spot():
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} {instance_type_restriction} examples/minimal.yaml --use-spot -y',
+            f'sky launch -c {name} examples/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
@@ -858,7 +843,7 @@ def test_use_spot(instance_type_restriction: str):
 
 
 # ---------- Testing managed spot ----------
-def test_spot(instance_type_restriction: str):
+def test_spot():
     """Test the spot yaml."""
     name = _get_cluster_name()
     cancel_command = (
@@ -866,8 +851,8 @@ def test_spot(instance_type_restriction: str):
     test = Test(
         'managed-spot',
         [
-            f'sky spot launch -n {name}-1 {instance_type_restriction} examples/managed_spot.yaml -y -d',
-            f'sky spot launch -n {name}-2 {instance_type_restriction} examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
             'sleep 5',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
@@ -911,14 +896,14 @@ def test_spot_gcp():
 
 
 # ---------- Testing managed spot recovery ----------
-def test_spot_recovery(instance_type_restriction: str):
+def test_spot_recovery():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
         'managed-spot-recovery',
         [
-            f'sky spot launch --cloud aws --region {region} {instance_type_restriction} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 360',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -956,14 +941,14 @@ def test_spot_recovery_default_resources():
     run_one_test(test)
 
 
-def test_spot_recovery_multi_node(instance_type_restriction: str):
+def test_spot_recovery_multi_node():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
         'managed-spot-recovery-multi',
         [
-            f'sky spot launch --cloud aws --region {region} {instance_type_restriction} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -986,14 +971,14 @@ def test_spot_recovery_multi_node(instance_type_restriction: str):
     run_one_test(test)
 
 
-def test_spot_cancellation(instance_type_restriction: str):
+def test_spot_cancellation():
     name = _get_cluster_name()
     region = 'us-east-2'
     test = Test(
         'managed-spot-cancellation',
         [
             # Test cancellation during spot cluster being launched.
-            f'sky spot launch --cloud aws --region {region} {instance_type_restriction} -n {name} "sleep 1000"  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "STARTING"',
             f'sky spot cancel -y -n {name}',
@@ -1006,7 +991,7 @@ def test_spot_cancellation(instance_type_restriction: str):
              '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky spot launch --cloud aws --region {region} {instance_type_restriction} -n {name}-2 tests/test_yamls/long_setup.yaml  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
@@ -1018,7 +1003,7 @@ def test_spot_cancellation(instance_type_restriction: str):
              '--output text) && printf "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancellation during spot job is recovering.
-            f'sky spot launch --cloud aws --region {region} {instance_type_restriction} -n {name}-3 "sleep 1000"  -y -d',
+            f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
             f's=$(sky spot queue); printf "$s"; echo; echo; printf "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
@@ -1045,7 +1030,7 @@ def test_spot_cancellation(instance_type_restriction: str):
 
 
 # ---------- Testing storage for managed spot ----------
-def test_spot_storage(instance_type_restriction: str):
+def test_spot_storage():
     """Test storage with managed spot"""
     name = _get_cluster_name()
     yaml_str = pathlib.Path(
@@ -1059,7 +1044,8 @@ def test_spot_storage(instance_type_restriction: str):
         test = Test(
             'managed-spot-storage',
             [
-                f'sky spot launch {instance_type_restriction} -n {name} {file_path} -y',
+                *storage_setup_commands,
+                f'sky spot launch -n {name} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
                 f'sky spot queue | grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
@@ -1070,7 +1056,6 @@ def test_spot_storage(instance_type_restriction: str):
 
 
 # ---------- Testing spot TPU ----------
-@pytest.mark.costly
 def test_spot_tpu():
     """Test managed spot on TPU."""
     name = _get_cluster_name()
@@ -1089,13 +1074,13 @@ def test_spot_tpu():
 
 
 # ---------- Testing env ----------
-def test_inline_env(instance_type_restriction: str):
+def test_inline_env():
     """Test env"""
     name = _get_cluster_name()
     test = Test(
         'test-inline-env',
         [
-            f'sky launch -c {name} {instance_type_restriction} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 1 --status',
             f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
@@ -1106,13 +1091,13 @@ def test_inline_env(instance_type_restriction: str):
 
 
 # ---------- Testing env for spot ----------
-def test_inline_spot_env(instance_type_restriction: str):
+def test_inline_spot_env():
     """Test env"""
     name = _get_cluster_name()
     test = Test(
         'test-inline-spot-env',
         [
-            f'sky spot launch {instance_type_restriction} -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             'sleep 20',
             f's=$(sky spot queue) && printf "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
         ],
@@ -1122,13 +1107,13 @@ def test_inline_spot_env(instance_type_restriction: str):
 
 
 # ---------- Testing custom image ----------
-def test_custom_image(instance_type_restriction: str):
+def test_custom_image():
     """Test custom image"""
     name = _get_cluster_name()
     test = Test(
         'test-custom-image',
         [
-            f'sky launch -c {name} {instance_type_restriction} --retry-until-up -y examples/custom_image.yaml',
+            f'sky launch -c {name} --retry-until-up -y examples/custom_image.yaml',
             f'sky logs {name} 1 --status',
         ],
         f'sky down -y {name}',
