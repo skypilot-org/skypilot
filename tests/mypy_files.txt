@@ -1,5 +1,3 @@
 sky/data
 sky/utils
-sky/clouds
---exclude
-sky/clouds/service_catalog
+sky/clouds --exclude sky/clouds/service_catalog

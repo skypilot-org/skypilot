@@ -31,4 +31,4 @@ jobs:
         pip install mypy==$(grep mypy requirements-dev.txt | cut -d'=' -f3)
     - name: Running mypy
       run: |
-        mypy @tests/mypy_files.txt
+        mypy $(cat tests/mypy_files.txt)
