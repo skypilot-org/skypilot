@@ -270,7 +270,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
-            assert spot_status is not None 
+            assert spot_status is not None
             status_display.stop()
             returncode = backend.tail_logs(handle,
                                            job_id=None,
