@@ -9,7 +9,7 @@ Fore = colorama.Fore
 Style = colorama.Style
 
 CREDENTIALS_PATH = '~/.lambda/lambda_keys'
-LOCAL_METADATA_PATH = '~/.lambda/metadata'
+LOCAL_METADATA_PATH_PREFIX = '~/.lambda/metadata'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 here = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
 
@@ -20,8 +20,10 @@ class LambdaError(Exception):
 class Metadata:
     """Local metadata for a Lambda Labs instance."""
 
-    def __init__(self):
-        self._metadata_path = os.path.expanduser(LOCAL_METADATA_PATH)
+    def __init__(self, cluster_name):
+        # per cluster metadata file to avoid basic race conditions
+        self._metadata_path = os.path.expanduser(
+                f'{LOCAL_METADATA_PATH_PREFIX}-{cluster_name}')
         self._metadata = {}
         if os.path.exists(self._metadata_path):
             with open(self._metadata_path, 'r') as f:
@@ -31,7 +33,15 @@ class Metadata:
         return self._metadata.get(instance_id)
 
     def __setitem__(self, instance_id, value):
-        self._metadata[instance_id] = value
+        if value is None:
+            if instance_id in self._metadata:
+                self._metadata.pop(instance_id) # del entry
+            if len(self._metadata) == 0 and \
+                    os.path.exists(self._metadata_path):
+                os.remove(self._metadata_path)
+                return
+        else:
+            self._metadata[instance_id] = value
         with open(self._metadata_path, 'w') as f:
             json.dump(self._metadata, f)
 

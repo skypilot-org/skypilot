@@ -4,10 +4,7 @@ from threading import RLock
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
-from sky.skylet.providers.lambda_labs.config import bootstrap_lambda
 from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, Metadata
-
-VM_NAME_MAX_LEN = 64
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +37,7 @@ class LambdaNodeProvider(NodeProvider):
         # Assumes lambda authentication has been set up.
         self.lambda_client = LambdaClient()
         # Only used for tags
-        self.local_metadata = Metadata()
+        self.local_metadata = Metadata(cluster_name)
         # Cache node objects
         self.cached_nodes = {}
 
@@ -136,8 +133,7 @@ class LambdaNodeProvider(NodeProvider):
         self.local_metadata[vm_id] = {'tags': config_tags}
 
         # Wait for booting to finish
-        # TODO(ewzeng) For multi-node, would want to first launch all vms and make sure
-        # all nodes are booting before sleeping.
+        # TODO(ewzeng): For multi-node, launch all vms first and then wait.
         while True:
             vms = self.lambda_client.ls().get('data', [])
             for vm in vms:
@@ -165,7 +161,3 @@ class LambdaNodeProvider(NodeProvider):
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)
-
-    @staticmethod
-    def bootstrap_config(cluster_config):
-        return bootstrap_lambda(cluster_config)
