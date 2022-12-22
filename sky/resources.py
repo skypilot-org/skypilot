@@ -74,11 +74,6 @@ class Resources:
             self._spot_recovery = spot_recovery.upper()
 
         if disk_size is not None:
-            if disk_size < 50:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'OS disk size must be larger than 50GB. Got: '
-                        f'{disk_size}.')
             if round(disk_size) != disk_size:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -262,6 +257,7 @@ class Resources:
 
     def need_cleanup_after_preemption(self) -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""
+        assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption(self)
 
     def _set_region_zone(self, region: Optional[str],
@@ -454,6 +450,19 @@ class Resources:
                     raise ValueError(
                         'image_id is only supported for AWS in a specific '
                         'region, please explicitly specify the region.')
+
+        # Validate the image exists and the size is smaller than the disk size.
+        for region, image_id in self._image_id.items():
+            # Check the image exists and get the image size.
+            # It will raise ValueError if the image does not exist.
+            image_size = self.cloud.get_image_size(image_id, region)
+            if image_size > self.disk_size:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Image {image_id!r} is {image_size}GB, which is '
+                        f'larger than the specified disk_size: {self.disk_size}'
+                        ' GB. Please specify a larger disk_size to use this '
+                        'image.')
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""

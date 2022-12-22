@@ -902,6 +902,7 @@ def _fill_in_launchable_resources(
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
             if try_fix_with_sky_check:
+                # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
                 return _fill_in_launchable_resources(
                     task, blocked_launchable_resources, False)

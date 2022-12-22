@@ -6,19 +6,25 @@ import time
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
-from google import auth
-
 from sky import clouds
+from sky import exceptions
+from sky import sky_logging
+from sky.adaptors import gcp
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
 
+logger = sky_logging.init_logger(__name__)
+
 DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
+# TODO(wei-lin): config_default may not be the config in use.
+# See: https://github.com/skypilot-org/skypilot/pull/1539
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # Do not place the backup under the gcloud config directory, as ray
 # autoscaler can overwrite that directory on the remote nodes.
@@ -50,6 +56,9 @@ GCLOUD_INSTALLATION_COMMAND = f'pushd /tmp &>/dev/null && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }} && \
     {{ cp {GCP_CONFIG_SKY_BACKUP_PATH} {GCP_CONFIG_PATH} > /dev/null 2>&1 || true; }} && \
     popd &>/dev/null'
+
+# TODO(zhwu): Move the default AMI size to the catalog instead.
+DEFAULT_GCP_IMAGE_GB = 50
 
 
 def _run_output(cmd):
@@ -239,6 +248,37 @@ class GCP(clouds.Cloud):
     def is_same_cloud(self, other):
         return isinstance(other, GCP)
 
+    def get_image_size(self, image_id: str, region: Optional[str]) -> float:
+        del region  # unused
+        if image_id.startswith('skypilot:'):
+            return DEFAULT_GCP_IMAGE_GB
+        try:
+            compute = gcp.build('compute',
+                                'v1',
+                                credentials=None,
+                                cache_discovery=False)
+        except gcp.credential_error_exception() as e:
+            return DEFAULT_GCP_IMAGE_GB
+        try:
+            image_attrs = image_id.split('/')
+            if len(image_attrs) == 1:
+                raise ValueError(f'Image {image_id!r} not found in GCP.')
+            project = image_attrs[1]
+            image_name = image_attrs[-1]
+            image_infos = compute.images().get(project=project,
+                                               image=image_name).execute()
+            return float(image_infos['diskSizeGb'])
+        except gcp.http_error_exception() as e:
+            if e.resp.status == 403:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Not able to access the image '
+                                     f'{image_id!r}') from None
+            if e.resp.status == 404:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Image {image_id!r} not found in '
+                                     'GCP.') from None
+            raise
+
     @classmethod
     def get_default_instance_type(cls) -> str:
         # 8 vCpus, 52 GB RAM.  First-gen general purpose.
@@ -399,6 +439,11 @@ class GCP(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
+            # pylint: disable=import-outside-toplevel,unused-import
+            from google import auth
+            # Check google-api-python-client installation.
+            import googleapiclient
+
             # These files are required because they will be synced to remote
             # VMs for `gsutil` to access private storage buckets.
             # `auth.default()` does not guarantee these files exist.
@@ -406,20 +451,19 @@ class GCP(clouds.Cloud):
                     '~/.config/gcloud/access_tokens.db',
                     '~/.config/gcloud/credentials.db'
             ]:
-                assert os.path.isfile(os.path.expanduser(file))
-            # Check if application default credentials are set.
-            self.get_project_id()
-            # Calling `auth.default()` ensures the GCP client library works,
-            # which is used by Ray Autoscaler to launch VMs.
-            auth.default()
-            # Check google-api-python-client installation.
-            # pylint: disable=import-outside-toplevel,unused-import
-            import googleapiclient
-
+                if not os.path.isfile(os.path.expanduser(file)):
+                    raise FileNotFoundError(file)
             # Check the installation of google-cloud-sdk.
             _run_output('gcloud --version')
-        except (AssertionError, auth.exceptions.DefaultCredentialsError,
-                subprocess.CalledProcessError, FileNotFoundError, KeyError,
+
+            # Check if application default credentials are set.
+            project_id = self.get_project_id()
+
+            # Check if the user is activated.
+            self.get_current_user_identity()
+        except (auth.exceptions.DefaultCredentialsError,
+                subprocess.CalledProcessError,
+                exceptions.CloudUserIdentityError, FileNotFoundError,
                 ImportError):
             # See also: https://stackoverflow.com/a/53307505/1165051
             return False, (
@@ -438,7 +482,6 @@ class GCP(clouds.Cloud):
             )
 
         # Check APIs.
-        project_id = self.get_project_id()
         apis = (
             ('compute', 'Compute Engine'),
             ('cloudresourcemanager', 'Cloud Resource Manager'),
@@ -513,6 +556,27 @@ class GCP(clouds.Cloud):
         credentials[GCP_CONFIG_SKY_BACKUP_PATH] = GCP_CONFIG_SKY_BACKUP_PATH
         return credentials
 
+    def get_current_user_identity(self) -> Optional[str]:
+        """Returns the email address + project id of the active user."""
+        try:
+            account = _run_output('gcloud auth list --filter=status:ACTIVE '
+                                  '--format="value(account)"')
+        except subprocess.CalledProcessError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
+                    f'{e}') from e
+        if not account:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'No GCP account is activated. Try running `gcloud '
+                    'auth list --filter=status:ACTIVE '
+                    '--format="value(account)"` and ensure it correctly '
+                    'returns the current user.')
+        return f'{account} [project_id={self.get_project_id()}]'
+
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
 
@@ -538,27 +602,10 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
-        # TODO(zhwu): change the project id fetching with the following command
-        # `gcloud info --format='value(config.project)'`
         if dryrun:
             return 'dryrun-project-id'
-        if 'GOOGLE_APPLICATION_CREDENTIALS' in os.environ:
-            gcp_credential_path = os.environ['GOOGLE_APPLICATION_CREDENTIALS']
-        else:
-            gcp_credential_path = DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
-        if not os.path.exists(gcp_credential_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    f'No GCP credentials found at '
-                    f'{gcp_credential_path}. Please set the '
-                    f'GOOGLE_APPLICATION_CREDENTIALS '
-                    f'environment variable to point to '
-                    f'the path of your credentials file.')
-
-        with open(gcp_credential_path, 'r') as fp:
-            gcp_credentials = json.load(fp)
-        project_id = gcp_credentials.get('quota_project_id',
-                                         None) or gcp_credentials['project_id']
+        from google import auth  # pylint: disable=import-outside-toplevel
+        _, project_id = auth.default()
         return project_id
 
     @staticmethod
