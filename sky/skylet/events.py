@@ -11,8 +11,10 @@ import traceback
 import psutil
 import yaml
 
+from sky import provision
 from sky import sky_logging
 from sky.backends import backend_utils, cloud_vm_ray_backend
+from sky.provision import utils as provision_utils
 from sky.skylet import autostop_lib, job_lib
 from sky.spot import spot_utils
 from sky.utils import common_utils
@@ -127,6 +129,14 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):
+        metadata = provision_utils.get_metadata_in_cluster()
+        if metadata is not None and metadata['cloud'] == 'AWS':
+            if autostop_config.down:
+                provision.terminate_instances_with_self(metadata['cloud'])
+            else:
+                provision.stop_instances_with_self(metadata['cloud'])
+            return
+
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             autostop_lib.set_autostopping_started()

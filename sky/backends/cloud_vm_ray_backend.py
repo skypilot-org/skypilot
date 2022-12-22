@@ -36,8 +36,10 @@ from sky import task as task_lib
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.backends import backend_utils
+from sky.backends import cloud_vm_backend
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
+from sky.provision import utils as provision_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1240,6 +1242,54 @@ class RetryingVmProvisioner(object):
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
+            if isinstance(to_provision.cloud, clouds.AWS):
+                assert to_provision.region == region.name, (to_provision,
+                                                            region)
+                cluster_name = handle.cluster_name
+                num_nodes = handle.launched_nodes
+                provision_metadata = cloud_vm_backend.bulk_provision(
+                    to_provision.cloud,
+                    region,
+                    zones,
+                    cluster_name,
+                    num_nodes=num_nodes,
+                    cluster_yaml=handle.cluster_yaml,
+                    is_prev_cluster_healthy=is_prev_cluster_healthy,
+                    log_dir=self.log_dir)
+                # We ship the cluster handle to reuse some configurations.
+                # TODO(suquark): In the future, we should gradually use the
+                #  handle (which includes latest cluster launch results)
+                #  instead of other fields.
+
+                # NOTE: We handle the logic of '_ensure_cluster_ray_started'
+                # in '_post_provision_setup()'.
+                if provision_metadata is not None:
+                    resources_vars = (
+                        to_provision.cloud.make_deploy_resources_variables(
+                            to_provision, region, zones))
+                    config_dict['provision_metadata'] = provision_metadata
+                    config_dict['resources_vars'] = resources_vars
+                    config_dict['handle'] = handle
+                    return config_dict
+
+                # NOTE: We try to cleanup the cluster even if the previous
+                # cluster does not exist. Also we are fast at
+                # cleaning up clusters now if there are not existing nodes.
+                CloudVmRayBackend().post_teardown_cleanup(
+                    handle, terminate=not is_prev_cluster_healthy)
+                # TODO(suquark): other clouds may have different zone
+                #  blocking strategy. See '_update_blocklist_on_error'
+                #  for details.
+                if zones is None:
+                    self._blocked_resources.add(to_provision.copy(zone=None))
+                    continue
+                for zone in zones:
+                    self._blocked_resources.add(
+                        to_provision.copy(zone=zone.name))
+                continue
+                # NOTE: The code below in the loop should not be reachable
+                # with the new provisioner.
+
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
                 logger.info(
@@ -1403,6 +1453,7 @@ class RetryingVmProvisioner(object):
             worker_ips=all_ips[1:],
             extra_setup_cmds=worker_start_ray_commands)
 
+    # TODO(suquark): Deprecate this method in future PRs.
     @timeline.event
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
@@ -2253,6 +2304,40 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             failover_history=e.failover_history) from None
             if dryrun:
                 return None
+
+            # We pass handle in the config dict for the new provisioner
+            if 'provision_metadata' in config_dict:
+                handle = config_dict['handle']
+                provision_metadata = config_dict['provision_metadata']
+                resources_vars = config_dict['resources_vars']
+
+                cluster_metadata = cloud_vm_backend.post_provision_setup(
+                    repr(handle.launched_resources.cloud),
+                    cluster_name,
+                    handle.cluster_yaml,
+                    local_wheel_path=local_wheel_path,
+                    wheel_hash=wheel_hash,
+                    provision_metadata=provision_metadata,
+                    custom_resource=resources_vars.get('custom_resources'),
+                    log_dir=self.log_dir)
+
+                # update launched resources
+                handle.launched_resources = (handle.launched_resources.copy(
+                    region=provision_metadata.region,
+                    zone=provision_metadata.zone))
+                ip_list = cluster_metadata.get_feasible_ips()
+                if cluster_metadata.has_public_ips():
+                    ip_tuples = cluster_metadata.ip_tuples()
+                else:
+                    # This is a strange trick that our handle uses now.
+                    ip_tuples = list(zip(ip_list, ip_list))
+                handle.stable_internal_external_ips = ip_tuples
+
+                self._update_after_cluster_provisioned(handle, task,
+                                                       prev_cluster_status,
+                                                       ip_list, lock_path)
+                return handle
+
             cluster_config_file = config_dict['ray']
 
             handle = self.ResourceHandle(
@@ -3001,6 +3086,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
+
+        if isinstance(cloud, clouds.AWS):
+            region = config['provider']['region']
+            cloud_vm_backend.teardown_cluster(repr(cloud), region, cluster_name,
+                                              terminate)
+            if post_teardown_cleanup:
+                return self.post_teardown_cleanup(handle, terminate, purge)
+            else:
+                return True
+
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
@@ -3176,6 +3271,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                          terminate=terminate)
 
         if terminate:
+            # This function could be directly called from status refresh,
+            # where we need to cleanup the cluster profile.
+            provision_utils.remove_cluster_profile(handle.cluster_name)
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None

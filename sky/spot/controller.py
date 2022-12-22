@@ -1,6 +1,7 @@
 """Controller: handles the life cycle of a managed spot cluster (job)."""
 import argparse
 import multiprocessing
+import os
 import pathlib
 import signal
 import time
@@ -248,16 +249,6 @@ class SpotController:
 
 def _run_controller(job_id: int, task_yaml: str, retry_until_up: bool):
     """Runs the controller in a remote process for interruption."""
-
-    # Override the SIGTERM handler to gracefully terminate the controller.
-    def handle_interupt(signum, frame):
-        """Handle the interrupt signal."""
-        # Need to raise KeyboardInterrupt to avoid the exception being caught by
-        # the strategy executor.
-        raise KeyboardInterrupt()
-
-    signal.signal(signal.SIGTERM, handle_interupt)
-
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
     spot_controller = SpotController(job_id, task_yaml, retry_until_up)
@@ -297,8 +288,11 @@ def _handle_signal(job_id):
 def start(job_id, task_yaml, retry_until_up):
     """Start the controller."""
     controller_process = None
+    current_start_method = multiprocessing.get_start_method()
+
     try:
         _handle_signal(job_id)
+        multiprocessing.set_start_method('spawn', force=True)
         controller_process = multiprocessing.Process(target=_run_controller,
                                                      args=(job_id, task_yaml,
                                                            retry_until_up))
@@ -312,9 +306,10 @@ def start(job_id, task_yaml, retry_until_up):
             logger.info('Sending SIGTERM to controller process '
                         f'{controller_process.pid}')
             # This will raise KeyboardInterrupt in the task.
-            # Using SIGTERM instead of SIGINT, as the SIGINT is weirdly ignored
-            # by the controller process when it is started inside a ray job.
-            controller_process.terminate()
+            os.kill(controller_process.pid, signal.SIGINT)
+    finally:
+        multiprocessing.set_start_method(current_start_method, force=True)
+
     if controller_process is not None:
         controller_process.join()
 

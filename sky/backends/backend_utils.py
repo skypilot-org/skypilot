@@ -36,6 +36,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import provision
 from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
@@ -68,6 +69,7 @@ SKY_RAY_YAML_REMOTE_PATH = '~/.sky/sky_ray.yml'
 IP_ADDR_REGEX = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
 SKY_REMOTE_PATH = '~/.sky/wheels'
 SKY_USER_FILE_PATH = '~/.sky/generated'
+SKY_REMOTE_METADATA_PATH = '~/.sky/metadata.json'
 
 BOLD = '\033[1m'
 RESET_BOLD = '\033[0m'
@@ -1286,6 +1288,19 @@ def _query_head_ip_with_retries(cluster_yaml: str,
     return head_ip
 
 
+def _query_cluster_ips(cloud_name: str, region: str, cluster_name: str,
+                       expected_num_nodes: int,
+                       get_internal_ips: bool) -> List[str]:
+    metadata = provision.get_cluster_metadata(cloud_name, region, cluster_name)
+    if len(metadata.instances) < expected_num_nodes:
+        # Simulate the case when Ray head node is not up.
+        raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+    if get_internal_ips:
+        return [pair[0] for pair in metadata.ip_tuples()]
+    # For compatibility: if there are no public IPs, then use private IPs.
+    return metadata.get_feasible_ips()
+
+
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
@@ -1300,6 +1315,10 @@ def get_node_ips(cluster_yaml: str,
     # won't work and we need to query the node IPs with gcloud as
     # implmented in _get_tpu_vm_pod_ips.
     ray_config = common_utils.read_yaml(cluster_yaml)
+    if ray_config['provider']['module'].startswith('sky.skylet.providers.aws'):
+        return _query_cluster_ips('aws', ray_config['provider']['region'],
+                                  ray_config['cluster_name'],
+                                  expected_num_nodes, get_internal_ips)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
         assert expected_num_nodes == 1, (
@@ -1780,6 +1799,9 @@ def _update_cluster_status_no_lock(
             if returncode:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
+        # TODO(suquark): we should handle multi-node clusters properly.
+        #  They may be not be ready even if we have their IPs.
+        #  We should check if cache file for file mounts etc exists.
         # If we get node ips correctly, the cluster is UP. It is safe to
         # set the status to UP, as the `handle.external_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
@@ -1794,6 +1816,7 @@ def _update_cluster_status_no_lock(
         logger.debug('Refreshing status: Failed to get IPs from cluster '
                      f'{cluster_name!r}, trying to fetch from provider.')
     # For all code below, ray fails to get IPs for the cluster.
+    # TODO(suquark): replace this with the new provisioner later
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
 
     if len(node_statuses) > handle.launched_nodes:

@@ -21,6 +21,7 @@ RSYNC_EXCLUDE_OPTION: str
 def ssh_options_list(ssh_private_key: Optional[str],
                      ssh_control_name: Optional[str],
                      *,
+                     ssh_proxy_command: Optional[str] = None,
                      timeout: int = ...) -> List[str]:
     ...
 
