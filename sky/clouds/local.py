@@ -157,3 +157,4 @@ class Local(clouds.Cloud):
         if region is None or region != Local.LOCAL_REGION.name:
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
+        return region, zone
