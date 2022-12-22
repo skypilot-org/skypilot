@@ -2557,7 +2557,9 @@ def check():
     '--region',
     required=False,
     type=str,
-    help=('The region to use for the query. If not specified, the default '),
+    help=
+    ('The region to use for the query. If not specified, shows accelerators from all regions. '
+    ),
 )
 @usage_lib.entrypoint
 def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
@@ -2579,7 +2581,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
     regions for both on-demand and spot instances.
     """
     # validation for the --region flag
-    if region and (not cloud):
+    if region and not cloud:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
     service_catalog.validate_region_zone(region, None, clouds=cloud)

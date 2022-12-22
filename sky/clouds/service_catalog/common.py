@@ -148,7 +148,7 @@ def validate_region_zone_impl(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
-    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
@@ -156,6 +156,10 @@ def validate_region_zone_impl(
             candidate_strs = ', '.join(candidate_loc)
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
+
+    def _get_all_supported_regions_str() -> str:
+        all_regions: List[str] = sorted(df['Region'].unique().tolist())
+        return f"List of supported regions: {', '.join(all_regions)!r}"
 
     validated_region, validated_zone = region, zone
 
@@ -165,7 +169,12 @@ def validate_region_zone_impl(
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                error_msg += _get_candidate_str(region, df['Region'].unique())
+                candidate_strs = _get_candidate_str(region,
+                                                    df['Region'].unique())
+                if not candidate_strs:
+                    error_msg += _get_all_supported_regions_str()
+                    raise ValueError(error_msg)
+                error_msg += candidate_strs
                 raise ValueError(error_msg)
 
     if zone is not None:
