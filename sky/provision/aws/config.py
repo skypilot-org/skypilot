@@ -1,0 +1,511 @@
+import copy
+import itertools
+import json
+import logging
+import textwrap
+
+import time
+from distutils import version
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import botocore
+
+import boto3
+from botocore import config as boto_config
+
+from ray.autoscaler._private.cli_logger import cf, cli_logger
+
+from sky import authentication
+from sky.provision.aws import utils
+
+# Terraform EC2 instance for reference:
+# https://registry.terraform.io/modules/terraform-aws-modules/ec2-instance/aws/latest
+
+logger = logging.getLogger(__name__)
+
+RAY = 'ray-autoscaler'
+DEFAULT_RAY_INSTANCE_PROFILE = RAY + '-v1'
+DEFAULT_RAY_IAM_ROLE = RAY + '-v1'
+SECURITY_GROUP_TEMPLATE = RAY + '-{}'
+BOTO_MAX_RETRIES = 12
+
+# todo: cli_logger should handle this assert properly
+# this should probably also happens somewhere else
+assert version.StrictVersion(boto3.__version__) >= version.StrictVersion(
+    '1.4.8'), 'Boto3 version >= 1.4.8 required, try `pip install -U boto3`'
+
+# Suppress excessive connection dropped logs from boto
+logging.getLogger('botocore').setLevel(logging.WARNING)
+
+
+def bootstrap_aws(config):
+    # create a copy of the input config to modify
+    config = copy.deepcopy(config)
+
+    node_cfg = config['node_config']
+
+    # If NetworkInterfaces are provided, extract the necessary fields for the
+    # config stages below.
+    if 'NetworkInterfaces' in node_cfg:
+        subnet_ids, security_group_ids = _configure_subnets_and_groups_from_network_interfaces(
+            node_cfg)
+    else:
+        subnet_ids = node_cfg.get('SubnetIds')
+        security_group_ids = node_cfg.get('SecurityGroupIds')
+
+    # The head node needs to have an IAM role that allows it to create further
+    # EC2 instances.
+    if 'IamInstanceProfile' not in node_cfg:
+        iam = _resource('iam', config)
+        node_cfg['IamInstanceProfile'] = _configure_iam_role(iam)
+
+    # Configure SSH access, using an existing key pair if possible.
+    node_cfg['UserData'] = _configure_ssh_keypair(config['auth']['ssh_user'])
+
+    ec2 = _resource('ec2', config)
+
+    if subnet_ids is not None:
+        vpc_id = _validate_subnet(ec2, subnet_ids, security_group_ids)
+    else:
+        # Pick a reasonable subnet if not specified by the user.
+        subnet_ids, vpc_id = _create_subnet(
+            ec2,
+            security_group_ids,
+            availability_zone=config['provider'].get('availability_zone'),
+            use_internal_ips=config['provider'].get('use_internal_ips', False))
+
+    # Cluster workers should be in a security group that permits traffic within
+    # the group, and also SSH access from outside.
+    if security_group_ids is None:
+        # Generate the name of the security group we're looking for...
+        security_group_config = config['provider'].get('security_group', {})
+        expected_sg_name = security_group_config.get(
+            'GroupName', SECURITY_GROUP_TEMPLATE.format(config['cluster_name']))
+        # The extended IP rules specified by the user
+        extended_ip_rules = security_group_config.get('IpPermissions', [])
+        if extended_ip_rules is None:
+            extended_ip_rules = []
+        security_group_ids = _configure_security_group(ec2, vpc_id,
+                                                       expected_sg_name,
+                                                       extended_ip_rules)
+
+    # store updated subnet and security group configs in node config
+    node_cfg['SubnetIds'] = subnet_ids
+    node_cfg['SecurityGroupIds'] = security_group_ids
+
+    # Provide helpful message for missing ImageId for node configuration.
+    # NOTE(skypilot): skypilot uses the default AMIs in aws.py.
+    node_ami = config['node_config'].get('ImageId')
+    if not node_ami:
+        cli_logger.abort(
+            f'No ImageId found in the node_config. '
+            'ImageId will need to be set manually in your cluster config.')
+
+    return config
+
+
+def _configure_ssh_keypair(ssh_user: str) -> str:
+    """Configure SSH access for AWS, using an existing key pair if possible"""
+    _, public_key_path = authentication.get_or_generate_keys()
+    with open(public_key_path, 'r') as f:
+        public_key = f.read()
+    # Use cloud init in UserData to set up the authorized_keys to get
+    # around the number of keys limit and permission issues with
+    # ec2.describe_key_pairs.
+    # https://aws.amazon.com/premiumsupport/knowledge-center/ec2-user-account-cloud-init-user-data/
+    return textwrap.dedent(f"""\
+        #cloud-config
+        users:
+        - name: {ssh_user}
+          ssh-authorized-keys:
+            - {public_key}
+        """)
+
+
+def _configure_iam_role(iam):
+
+    def _get_instance_profile(profile_name):
+        profile = iam.InstanceProfile(profile_name)
+        try:
+            profile.load()
+            return profile
+        except botocore.exceptions.ClientError as exc:
+            if exc.response.get('Error', {}).get('Code') == 'NoSuchEntity':
+                return None
+            else:
+                utils.handle_boto_error(
+                    exc,
+                    'Failed to fetch IAM instance profile data for {} from AWS.',
+                    cf.bold(profile_name),
+                )
+                raise exc
+
+    def _get_role(role_name):
+        role = iam.Role(role_name)
+        try:
+            role.load()
+            return role
+        except botocore.exceptions.ClientError as exc:
+            if exc.response.get('Error', {}).get('Code') == 'NoSuchEntity':
+                return None
+            else:
+                utils.handle_boto_error(
+                    exc,
+                    'Failed to fetch IAM role data for {} from AWS.',
+                    cf.bold(role_name),
+                )
+                raise exc
+
+    instance_profile_name = DEFAULT_RAY_INSTANCE_PROFILE
+    profile = _get_instance_profile(instance_profile_name)
+
+    if profile is None:
+        cli_logger.verbose(
+            'Creating new IAM instance profile {} for use as the default.',
+            cf.bold(instance_profile_name),
+        )
+        iam.meta.client.create_instance_profile(
+            InstanceProfileName=instance_profile_name)
+        profile = _get_instance_profile(instance_profile_name)
+        time.sleep(15)  # wait for propagation
+
+    cli_logger.doassert(profile is not None,
+                        'Failed to create instance profile.')  # todo: err msg
+    assert profile is not None, 'Failed to create instance profile'
+
+    if not profile.roles:
+        role_name = DEFAULT_RAY_IAM_ROLE
+        role = _get_role(DEFAULT_RAY_IAM_ROLE)
+        if role is None:
+            cli_logger.verbose(
+                'Creating new IAM role {} for use as the default instance role.',
+                cf.bold(role_name),
+            )
+            policy_doc = {
+                'Statement': [{
+                    'Effect': 'Allow',
+                    'Principal': {
+                        'Service': 'ec2.amazonaws.com'
+                    },
+                    'Action': 'sts:AssumeRole',
+                }]
+            }
+            attach_policy_arns = [
+                'arn:aws:iam::aws:policy/AmazonEC2FullAccess',
+                'arn:aws:iam::aws:policy/AmazonS3FullAccess',
+            ]
+
+            iam.create_role(RoleName=role_name,
+                            AssumeRolePolicyDocument=json.dumps(policy_doc))
+            role = _get_role(role_name)
+            cli_logger.doassert(role is not None,
+                                'Failed to create role.')  # todo: err msg
+
+            assert role is not None, 'Failed to create role'
+
+            for policy_arn in attach_policy_arns:
+                role.attach_policy(PolicyArn=policy_arn)
+
+        profile.add_role(RoleName=role.name)
+        time.sleep(15)  # wait for propagation
+    return {'Arn': profile.arn}
+
+
+def _usable_subnet_ids(
+    user_specified_subnets: Optional[List[Any]],
+    all_subnets: List[Any],
+    azs: Optional[str],
+    vpc_id_of_sg: Optional[str],
+    use_internal_ips: bool,
+) -> Tuple[List[str], str]:
+    """Prunes subnets down to those that meet the following criteria.
+
+    Subnets must be:
+    * 'Available' according to AWS.
+    * Public, unless `use_internal_ips` is specified.
+    * In one of the AZs, if AZs are provided.
+    * In the given VPC, if a VPC is specified for Security Groups.
+
+    Returns:
+        List[str]: Subnets that are usable.
+        str: VPC ID of the first subnet.
+    """
+
+    def _are_user_subnets_pruned(current_subnets: List[Any]) -> bool:
+        return user_specified_subnets is not None and len(
+            current_subnets) != len(user_specified_subnets)
+
+    def _get_pruned_subnets(current_subnets: List[Any]) -> Set[str]:
+        current_subnet_ids = {s.subnet_id for s in current_subnets}
+        user_specified_subnet_ids = {
+            s.subnet_id for s in user_specified_subnets
+        }
+        return user_specified_subnet_ids - current_subnet_ids
+
+    try:
+        candidate_subnets = (user_specified_subnets if user_specified_subnets
+                             is not None else all_subnets)
+        if vpc_id_of_sg:
+            candidate_subnets = [
+                s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
+            ]
+        subnets = sorted(
+            (s for s in candidate_subnets if s.state == 'available' and
+             (use_internal_ips or s.map_public_ip_on_launch)),
+            reverse=True,  # sort from Z-A
+            key=lambda subnet: subnet.availability_zone,
+        )
+    except botocore.exceptions.ClientError as exc:
+        utils.handle_boto_error(exc,
+                                'Failed to fetch available subnets from AWS.')
+        raise exc
+
+    if not subnets:
+        cli_logger.abort(
+            f'No usable subnets found, try '
+            'manually creating an instance in your specified region to '
+            'populate the list of subnets and trying this again.\n'
+            'Note that the subnet must map public IPs '
+            'on instance launch unless you set `use_internal_ips: true` in '
+            'the `provider` config.')
+    elif _are_user_subnets_pruned(subnets):
+        cli_logger.abort(f'The specified subnets are not '
+                         f'usable: {_get_pruned_subnets(subnets)}')
+
+    if azs is not None:
+        azs = [az.strip() for az in azs.split(',')]
+        subnets = [
+            s for az in azs  # Iterate over AZs first to maintain the ordering
+            for s in subnets if s.availability_zone == az
+        ]
+        if not subnets:
+            cli_logger.abort(
+                f'No usable subnets matching availability zone {azs} found. '
+                f'\nChoose a different '
+                'availability zone or try manually creating an instance in '
+                'your specified region to populate the list of subnets and '
+                'trying this again.')
+        elif _are_user_subnets_pruned(subnets):
+            cli_logger.abort(
+                f'MISMATCH between specified subnets and Availability Zones! '
+                'The following Availability Zones were specified in the '
+                f'`provider section`: {azs}.\n The following subnets '
+                f'have no matching availability zone: '
+                f'{list(_get_pruned_subnets(subnets))}.')
+
+    # Use subnets in only one VPC, so that _configure_security_groups only
+    # needs to create a security group in this one VPC. Otherwise, we'd need
+    # to set up security groups in all of the user's VPCs and set up networking
+    # rules to allow traffic between these groups.
+    # See https://github.com/ray-project/ray/pull/14868.
+    first_subnet_vpc_id = subnets[0].vpc_id
+    subnets = [s.subnet_id for s in subnets if s.vpc_id == subnets[0].vpc_id]
+    if _are_user_subnets_pruned(subnets):
+        subnet_vpcs = {s.subnet_id: s.vpc_id for s in user_specified_subnets}
+        cli_logger.abort(
+            f'Subnets specified in more than one VPC! '
+            f'Please ensure that all subnets share the same VPC and retry your '
+            'request. Subnet VPCs: {}',
+            subnet_vpcs,
+        )
+    return subnets, first_subnet_vpc_id
+
+
+def _vpc_id_from_security_group_ids(ec2, sg_ids: List[str]):
+    # sort security group IDs to support deterministic unit test stubbing
+    sg_ids = sorted(set(sg_ids))
+    filters = [{'Name': 'group-id', 'Values': sg_ids}]
+    security_groups = ec2.security_groups.filter(Filters=filters)
+    vpc_ids = [sg.vpc_id for sg in security_groups]
+    vpc_ids = list(set(vpc_ids))
+
+    multiple_vpc_msg = ('All security groups specified in the cluster config '
+                        'should belong to the same VPC.')
+    cli_logger.doassert(len(vpc_ids) <= 1, multiple_vpc_msg)
+    assert len(vpc_ids) <= 1, multiple_vpc_msg
+
+    no_sg_msg = ('Failed to detect a security group with id equal to any of '
+                 'the configured SecurityGroupIds.')
+    cli_logger.doassert(len(vpc_ids) > 0, no_sg_msg)
+    assert len(vpc_ids) > 0, no_sg_msg
+
+    return vpc_ids[0]
+
+
+def _validate_subnet(ec2, subnet_ids: List[str], security_group_ids: List[str]):
+    if security_group_ids:
+        _vpc_id_from_security_group_ids(ec2, security_group_ids)
+    subnet_ids = tuple(subnet_ids)
+    subnets = list(
+        ec2.subnets.filter(Filters=[{
+            'Name': 'subnet-id',
+            'Values': list(subnet_ids)
+        }]))
+
+    # TODO: better error message
+    cli_logger.doassert(
+        len(subnets) == len(subnet_ids), 'Not all subnet IDs found: {}',
+        subnet_ids)
+    assert len(subnets) == len(subnet_ids), 'Subnet ID not found: {}'.format(
+        subnet_ids)
+    return subnets[0].vpc_id
+
+
+def _create_subnet(ec2, security_group_ids: List[str], availability_zone: str,
+                   use_internal_ips: bool):
+    if security_group_ids:
+        vpc_id_of_sg = _vpc_id_from_security_group_ids(ec2, security_group_ids)
+    else:
+        vpc_id_of_sg = None
+
+    all_subnets = list(ec2.subnets.all())
+    subnet_ids, vpc_id = _usable_subnet_ids(
+        None,
+        all_subnets,
+        azs=availability_zone,
+        vpc_id_of_sg=vpc_id_of_sg,
+        use_internal_ips=use_internal_ips,
+    )
+    return subnet_ids, vpc_id
+
+
+def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
+                              extended_ip_rules: List) -> List[str]:
+    security_group = _get_or_create_vpc_security_group(ec2, vpc_id,
+                                                       expected_sg_name)
+    sg_ids = [security_group.id]
+    inbound_rules = [
+        # intra-cluster rules
+        {
+            'FromPort': -1,
+            'ToPort': -1,
+            'IpProtocol': '-1',
+            'UserIdGroupPairs': [{
+                'GroupId': i
+            } for i in sg_ids],
+        },
+        # SSH rules
+        {
+            'FromPort': 22,
+            'ToPort': 22,
+            'IpProtocol': 'tcp',
+            'IpRanges': [{
+                'CidrIp': '0.0.0.0/0'
+            }],
+        },
+        *extended_ip_rules,
+    ]
+    # upsert the default security group
+    if not security_group.ip_permissions:
+        # If users specify security groups, we should not change the rules
+        # of these security groups. Here we change it because it is the default
+        # security group for SkyPilot.
+        security_group.authorize_ingress(IpPermissions=inbound_rules)
+
+    return sg_ids
+
+
+def _get_or_create_vpc_security_group(ec2, vpc_id: str, expected_sg_name: str):
+    # Figure out which security groups with this name exist for each VPC...
+    vpc_to_existing_sg = {
+        sg.vpc_id: sg for sg in _get_security_groups_from_vpc_ids(
+            ec2,
+            [vpc_id],
+            [expected_sg_name],
+        )
+    }
+
+    if vpc_id in vpc_to_existing_sg:
+        return vpc_to_existing_sg[vpc_id]
+
+    # create a new security group
+    ec2.meta.client.create_security_group(
+        Description='Auto-created security group for Ray workers',
+        GroupName=expected_sg_name,
+        VpcId=vpc_id,
+    )
+    security_group = _get_security_groups_from_vpc_ids(ec2, [vpc_id],
+                                                       [expected_sg_name])
+    security_group = security_group[0] if security_group else None
+
+    cli_logger.doassert(security_group,
+                        'Failed to create security group')  # err msg
+
+    cli_logger.verbose(
+        'Created new security group {}',
+        cf.bold(security_group.group_name),
+        _tags=dict(id=security_group.id),
+    )
+    cli_logger.doassert(security_group,
+                        'Failed to create security group')  # err msg
+    assert security_group, 'Failed to create security group'
+    return security_group
+
+
+def _get_security_groups_from_vpc_ids(ec2, vpc_ids, group_names):
+    unique_vpc_ids = list(set(vpc_ids))
+    unique_group_names = set(group_names)
+
+    existing_groups = list(
+        ec2.security_groups.filter(Filters=[{
+            'Name': 'vpc-id',
+            'Values': unique_vpc_ids
+        }]))
+    filtered_groups = [
+        sg for sg in existing_groups if sg.group_name in unique_group_names
+    ]
+    return filtered_groups
+
+
+def _configure_subnets_and_groups_from_network_interfaces(
+        node_cfg: Dict[str, Any]):
+    """
+    Copies all network interface subnet and security group IDs into their
+    parent node config.
+
+    Args:
+        node_cfg (Dict[str, Any]): node config to bootstrap
+    Raises:
+        ValueError: If [1] subnet and security group IDs exist at both the
+        node config and network interface levels, [2] any network interface
+        doesn't have a subnet defined, or [3] any network interface doesn't
+        have a security group defined.
+    """
+    net_ifs = node_cfg['NetworkInterfaces']
+    # If NetworkInterfaces are defined, SubnetId and SecurityGroupIds
+    # can't be specified in the same node type config.
+    conflict_keys = ['SubnetId', 'SubnetIds', 'SecurityGroupIds']
+    if any(conflict in node_cfg for conflict in conflict_keys):
+        raise ValueError(
+            'If NetworkInterfaces are defined, subnets and security groups '
+            'must ONLY be given in each NetworkInterface.')
+
+    subnets = [ni.get('SubnetId', "") for ni in net_ifs]
+    if not all(subnets):
+        raise ValueError(
+            'NetworkInterfaces are defined but at least one is missing a '
+            'subnet. Please ensure all interfaces have a subnet assigned.')
+    security_groups = [ni.get('Groups', []) for ni in net_ifs]
+    if not all(security_groups):
+        raise ValueError(
+            'NetworkInterfaces are defined but at least one is missing a '
+            'security group. Please ensure all interfaces have a security '
+            'group assigned.')
+
+    return subnets, list(itertools.chain(*security_groups))
+
+
+def _resource(name, config):
+    region = config['provider']['region']
+    extras = config['provider'].get('aws_credentials', {})
+    cli_logger.verbose('Creating AWS resource `{}` in `{}`', cf.bold(name),
+                       cf.bold(region))
+    extras.setdefault(
+        'config',
+        boto_config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}),
+    )
+    return boto3.resource(
+        name,
+        region,
+        **extras,
+    )
