@@ -6,9 +6,10 @@ providers supported by SkyPilot need to follow.
 import functools
 import importlib
 import inspect
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from sky import status_lib
+from sky.provision import common
 
 
 def _route_to_cloud_impl(func):
@@ -34,9 +35,6 @@ def _route_to_cloud_impl(func):
 
 # pylint: disable=unused-argument
 
-# TODO(suquark): Bring all other functions here from the
-
-
 @_route_to_cloud_impl
 def query_instances(
     provider_name: str,
@@ -51,6 +49,30 @@ def query_instances(
     A None status means the instance is marked as "terminated"
     or "terminating".
     """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def bootstrap(provider_name: str, region: str, cluster_name: str,
+              config: common.InstanceConfig) -> common.InstanceConfig:
+    """Bootstrap configurations for a cluster.
+
+    This function sets up ancillary resources for an instance
+    in the specified cluster with the provided configuration,
+    and returns an InstanceConfig object with updated configuration.
+
+    These ancillary resources could include security policies, network
+    configurations etc. These resources tend to be free or very cheap,
+    but it takes time to set them up from scratch. So we generally
+    caching or reusing them when possible.
+    """
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def start_instances(provider_name: str, region: str, cluster_name: str,
+                    config: common.InstanceConfig) -> common.ProvisionMetadata:
+    """Start instances with bootstrapped configuration."""
     raise NotImplementedError
 
 
@@ -83,4 +105,17 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Delete any opened ports."""
+
+
+@_route_to_cloud_impl
+def wait_instances(provider_name: str, region: str, cluster_name: str,
+                   state: str) -> None:
+    """Wait instances until they ends up in the given state."""
+    raise NotImplementedError
+
+
+@_route_to_cloud_impl
+def get_cluster_metadata(provider_name: str, region: str,
+                         cluster_name: str) -> common.ClusterMetadata:
+    """Get the metadata of instances in a cluster."""
     raise NotImplementedError
