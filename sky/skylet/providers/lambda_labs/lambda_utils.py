@@ -9,7 +9,7 @@ Fore = colorama.Fore
 Style = colorama.Style
 
 CREDENTIALS_PATH = '~/.lambda/lambda_keys'
-LOCAL_METADATA_PATH_PREFIX = '~/.lambda/metadata'
+LOCAL_METADATA_PATH_PREFIX = '~/.lambda-metadata'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 here = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
 

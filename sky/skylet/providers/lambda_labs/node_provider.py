@@ -1,12 +1,24 @@
 import logging
+import os
 import time
 from threading import RLock
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, Metadata
+from sky.utils import command_runner
 
 logger = logging.getLogger(__name__)
+
+
+def _send_tags_file(ip, cluster_name):
+    # TODO(ewzeng): remove hardcoded paths
+    if not os.path.exists(os.path.expanduser('~/.ssh/sky-key')):
+        # On remote node
+        return
+    path = os.path.expanduser(f'~/.lambda-metadata-{cluster_name}')
+    runner = command_runner.SSHCommandRunner(ip, 'ubuntu', '~/.ssh/sky-key')
+    runner.rsync(path, f'/home/ubuntu/.lambda-metadata-{cluster_name}', up=True)
 
 
 def synchronized(f):
@@ -23,7 +35,7 @@ def synchronized(f):
 class LambdaNodeProvider(NodeProvider):
     """Node Provider for Lambda Labs.
 
-    This provider assumes Lambda credentials have already been set up.
+    Lambda credentials must be set up.
 
     Nodes may be in one of three states: {pending, running, terminated}. Nodes
     appear immediately once started by ``create_node``, and transition
@@ -33,8 +45,6 @@ class LambdaNodeProvider(NodeProvider):
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
-
-        # Assumes lambda authentication has been set up.
         self.lambda_client = LambdaClient()
         # Only used for tags
         self.local_metadata = Metadata(cluster_name)
@@ -138,15 +148,24 @@ class LambdaNodeProvider(NodeProvider):
             vms = self.lambda_client.ls().get('data', [])
             for vm in vms:
                 if vm['id'] == vm_id and vm['status'] == 'active':
+                    # Hack: send a copy of metadata file to nodes. This is
+                    # because autodown runs `ray up` and `ray down` in
+                    # the head node.
+                    # TODO(ewzeng): remove when Lambda Labs adds tag support.
+                    _send_tags_file(vm['ip'], self.cluster_name)
                     return
             time.sleep(10)
 
     @synchronized
     def set_node_tags(self, node_id, tags):
         """Sets the tag values (string dict) for the specified node."""
-        node_tags = self._get_cached_node(node_id)['tags']
-        node_tags.update(tags)
-        self.local_metadata[node_id] = {"tags": node_tags}
+        node = self._get_cached_node(node_id)
+        node['tags'].update(tags)
+        self.local_metadata[node_id] = {'tags': node['tags']}
+
+        # TODO(ewzeng): only send to head node when multinode
+        # Remove when Lambda Labs adds tag support
+        _send_tags_file(node['external_ip'], self.cluster_name)
 
     def terminate_node(self, node_id):
         """Terminates the specified node."""

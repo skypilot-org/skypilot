@@ -43,6 +43,7 @@ from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -1653,10 +1654,27 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
+def _query_status_lambda(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'booting': global_user_state.ClusterStatus.INIT,
+        'active': global_user_state.ClusterStatus.UP,
+    }
+    # TODO(ewzeng): filter by hash_filter_string to be safe
+    vms = LambdaClient().ls().get('data', [])
+    for node in vms:
+        if node['name'] == cluster:
+            return [status_map[node['status']]]
+    return []
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
+    'Lambda': _query_status_lambda,
 }
 
 

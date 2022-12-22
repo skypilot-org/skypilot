@@ -11,7 +11,7 @@ if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.lambda that grant AWS access.
+# Minimum set of files under ~/.lambda that grant Lambda Labs access.
 _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
