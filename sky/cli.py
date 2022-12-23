@@ -710,6 +710,13 @@ def _launch_with_confirm(
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
+    # Lambda Labs does not support autostop.
+    if task.resources and not down and idle_minutes_to_autostop is not None:
+        for resource in task.resources:
+            if resource.cloud.is_same_cloud(sky.Lambda()):
+                raise exceptions.NotSupportedError(
+                    ('Lambda Labs does not support stopping instances.'))
+
     if node_type is not None:
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',

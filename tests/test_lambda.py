@@ -245,6 +245,26 @@ def test_autodown():
     run_one_test(test)
 
 
+# ---------- Testing `sky cancel` ----------
+def test_cancel_lambda():
+    """Test env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-cancel-lambda',
+        [
+            f'sky launch -y -c {name} --cloud lambda --gpus A100 examples/minimal.yaml',
+            f'sky exec {name} -n {name}-1 -d --cloud lambda --gpus A100 "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
+            'sleep 20',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky cancel {name} 2',
+            f'sleep 5',
+            f'sky queue {name} | grep {name}-1 | grep CANCELLED',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Testing env ----------
 def test_inline_env():
     """Test env"""
