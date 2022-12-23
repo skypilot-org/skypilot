@@ -91,7 +91,7 @@ and storage mounting:
       # *** Copying files from S3 ***
       #
       # This re-uses a predefined bucket (public bucket used here, but can be
-      # private) and copies it's contents directly to /datasets-s3.
+      # private) and copies its contents directly to /datasets-s3.
       /datasets-s3: s3://enriched-topical-chat
 
       # *** Copying files from GCS ***
