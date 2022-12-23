@@ -1,17 +1,11 @@
 """Lambda Labs helper functions."""
 import os
 import json
-import pathlib
-import colorama
 import requests
 
-Fore = colorama.Fore
-Style = colorama.Style
-
 CREDENTIALS_PATH = '~/.lambda/lambda_keys'
-LOCAL_METADATA_PATH_PREFIX = '~/.lambda-metadata'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
-here = pathlib.Path(os.path.abspath(os.path.dirname(__file__)))
+
 
 class LambdaError(Exception):
     __module__ = 'builtins'
@@ -20,10 +14,10 @@ class LambdaError(Exception):
 class Metadata:
     """Local metadata for a Lambda Labs instance."""
 
-    def __init__(self, cluster_name):
+    def __init__(self, path_prefix, cluster_name):
         # per cluster metadata file to avoid basic race conditions
         self._metadata_path = os.path.expanduser(
-                f'{LOCAL_METADATA_PATH_PREFIX}-{cluster_name}')
+                f'{path_prefix}-{cluster_name}')
         self._metadata = {}
         if os.path.exists(self._metadata_path):
             with open(self._metadata_path, 'r') as f:

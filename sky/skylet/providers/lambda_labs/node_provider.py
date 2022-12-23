@@ -5,20 +5,28 @@ from threading import RLock
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+from sky.authentication import PRIVATE_SSH_KEY_PATH
 from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, Metadata
 from sky.utils import command_runner
+
+REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
+LOCAL_TAG_PATH_PREFIX = '~/.lambda/metadata'
 
 logger = logging.getLogger(__name__)
 
 
+def _on_local():
+    return os.path.exists(os.path.expanduser(PRIVATE_SSH_KEY_PATH))
+
+
 def _send_tags_file(ip, cluster_name):
-    # TODO(ewzeng): remove hardcoded paths
-    if not os.path.exists(os.path.expanduser('~/.ssh/sky-key')):
-        # On remote node
+    if not _on_local():
         return
-    path = os.path.expanduser(f'~/.lambda-metadata-{cluster_name}')
-    runner = command_runner.SSHCommandRunner(ip, 'ubuntu', '~/.ssh/sky-key')
-    runner.rsync(path, f'/home/ubuntu/.lambda-metadata-{cluster_name}', up=True)
+
+    # Local
+    path = os.path.expanduser(f'{LOCAL_TAG_PATH_PREFIX}-{cluster_name}')
+    runner = command_runner.SSHCommandRunner(ip, 'ubuntu', PRIVATE_SSH_KEY_PATH)
+    runner.rsync(path, f'{REMOTE_TAG_PATH_PREFIX}-{cluster_name}', up=True)
 
 
 def synchronized(f):
@@ -47,7 +55,10 @@ class LambdaNodeProvider(NodeProvider):
         self.lock = RLock()
         self.lambda_client = LambdaClient()
         # Only used for tags
-        self.local_metadata = Metadata(cluster_name)
+        if _on_local():
+            self.metadata = Metadata(LOCAL_TAG_PATH_PREFIX, cluster_name)
+        else:
+            self.metadata = Metadata(REMOTE_TAG_PATH_PREFIX, cluster_name)
         # Cache node objects
         self.cached_nodes = {}
 
@@ -55,7 +66,7 @@ class LambdaNodeProvider(NodeProvider):
     def _get_filtered_nodes(self, tag_filters):
 
         def match_tags(vm):
-            vm_info = self.local_metadata[vm['id']]
+            vm_info = self.metadata[vm['id']]
             tags = {} if vm_info is None else vm_info['tags']
             for k, v in tag_filters.items():
                 if tags.get(k) != v:
@@ -73,7 +84,7 @@ class LambdaNodeProvider(NodeProvider):
 
     def _extract_metadata(self, vm):
         metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}
-        instance_info = self.local_metadata[vm['id']]
+        instance_info = self.metadata[vm['id']]
         if instance_info is not None:
             metadata['tags'] = instance_info['tags']
         ip = vm['ip']
@@ -140,7 +151,7 @@ class LambdaNodeProvider(NodeProvider):
         vm_list = vm_resp.get('data', []).get('instance_ids', [])
         assert len(vm_list) == 1, len(vm_list)
         vm_id = vm_list[0]
-        self.local_metadata[vm_id] = {'tags': config_tags}
+        self.metadata[vm_id] = {'tags': config_tags}
 
         # Wait for booting to finish
         # TODO(ewzeng): For multi-node, launch all vms first and then wait.
@@ -148,9 +159,9 @@ class LambdaNodeProvider(NodeProvider):
             vms = self.lambda_client.ls().get('data', [])
             for vm in vms:
                 if vm['id'] == vm_id and vm['status'] == 'active':
-                    # Hack: send a copy of metadata file to nodes. This is
-                    # because autodown runs `ray up` and `ray down` in
-                    # the head node.
+                    # Hack: send a copy of metadata file to the head node.
+                    # This is because autodown runs `ray up` and `ray down`
+                    # there.
                     # TODO(ewzeng): remove when Lambda Labs adds tag support.
                     _send_tags_file(vm['ip'], self.cluster_name)
                     return
@@ -161,16 +172,16 @@ class LambdaNodeProvider(NodeProvider):
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_cached_node(node_id)
         node['tags'].update(tags)
-        self.local_metadata[node_id] = {'tags': node['tags']}
+        self.metadata[node_id] = {'tags': node['tags']}
 
-        # TODO(ewzeng): only send to head node when multinode
-        # Remove when Lambda Labs adds tag support
+        # TODO(ewzeng): only send to head node when multi-node.
+        # Remove when Lambda Labs adds tag support.
         _send_tags_file(node['external_ip'], self.cluster_name)
 
     def terminate_node(self, node_id):
         """Terminates the specified node."""
         self.lambda_client.rm(node_id)
-        self.local_metadata[node_id] = None
+        self.metadata[node_id] = None
 
     def _get_node(self, node_id):
         self._get_filtered_nodes({})  # Side effect: updates cache
