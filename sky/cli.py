@@ -2651,7 +2651,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
         yield 'the host VM\'s cost is not included.\n\n'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = log_utils.create_table([
+            accelerator_table_headers = [
                 'GPU',
                 'QTY',
                 'CLOUD',
@@ -2660,8 +2660,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
                 'HOST_MEMORY',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
-                'REGION',
-            ])
+            ]
+            if not show_all:
+                accelerator_table_headers.append("REGION")
+            accelerator_table = log_utils.create_table(
+                accelerator_table_headers)
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
@@ -2680,11 +2683,19 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
                 spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                     item.spot_price) else '-'
                 region_str = item.region if not pd.isna(item.region) else '-'
-                accelerator_table.add_row([
-                    item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, cpu_str, mem_str, price_str,
-                    spot_price_str, region_str
-                ])
+                accelerator_table_vals = [
+                    item.accelerator_name,
+                    item.accelerator_count,
+                    item.cloud,
+                    instance_type_str,
+                    cpu_str,
+                    mem_str,
+                    price_str,
+                    spot_price_str,
+                ]
+                if not show_all:
+                    accelerator_table_vals.append(region_str)
+                accelerator_table.add_row(accelerator_table_vals)
 
             if i != 0:
                 yield '\n\n'

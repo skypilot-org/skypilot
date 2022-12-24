@@ -174,7 +174,7 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(df['Region'].unique().tolist())
-        return f"List of supported regions: {', '.join(all_regions)!r}"
+        return f"\nList of supported regions: {', '.join(all_regions)!r}"
 
     validated_region, validated_zone = region, zone
 
