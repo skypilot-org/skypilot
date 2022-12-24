@@ -19,7 +19,7 @@ def instance_type_exists(instance_type: str) -> bool:
 def validate_region_zone(region: Optional[str], zone: Optional[str]):
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Azure does not support zones.')
+            raise ValueError('Lambda Labs does not support zones.')
     return common.validate_region_zone_impl(_df, region, zone)
 
 
@@ -35,8 +35,7 @@ def get_hourly_cost(instance_type: str,
                     region: Optional[str] = None,
                     use_spot: bool = False) -> float:
     """Returns the cost, or the cheapest cost among all zones for spot."""
-    # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
-    assert not use_spot, 'Current Azure subscription does not support spot.'
+    assert not use_spot, 'Lambda Labs does not support spot.'
     return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
 
 
@@ -70,6 +69,6 @@ def list_accelerators(gpus_only: bool,
                       name_filter: Optional[str],
                       case_sensitive: bool = True
                      ) -> Dict[str, List[common.InstanceTypeInfo]]:
-    """Returns all instance types in Azure offering GPUs."""
+    """Returns all instance types in Lambda offering GPUs."""
     return common.list_accelerators_impl('Lambda', _df, gpus_only, name_filter,
                                          case_sensitive)

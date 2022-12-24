@@ -25,6 +25,9 @@ _smoke_test_hash = hashlib.md5(
 # smoke test.
 test_id = str(uuid.uuid4())[-2:]
 
+# We have credits for gpu_1x_a100_sxm4
+LAMBDA_TYPE = '--cloud lambda --gpus A100 --instance-type gpu_1x_a100_sxm4'
+
 
 class Test(NamedTuple):
     name: str
@@ -117,9 +120,9 @@ def test_minimal():
     test = Test(
         'minimal',
         [
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 examples/minimal.yaml',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 examples/minimal.yaml',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Ensure the raylet process has the correct file descriptor limit.
@@ -137,8 +140,8 @@ def test_region():
     test = Test(
         'region',
         [
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 --region us-west-2 examples/minimal.yaml',
-            f'sky exec {name} --cloud lambda --gpus A100 examples/minimal.yaml',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} --region us-west-2 examples/minimal.yaml',
+            f'sky exec {name} {LAMBDA_TYPE} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
         ],
@@ -158,7 +161,7 @@ def test_file_mounts():
             'touch ~/tmp-workdir/tmp\ file',
             'touch ~/tmp-workdir/foo',
             'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 --num-nodes 1 examples/using_file_mounts.yaml',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         [
@@ -177,7 +180,7 @@ def test_job_queue():
     test = Test(
         'job_queue',
         [
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 examples/job_queue/cluster.yaml',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/job_queue/cluster.yaml',
             f'sky exec {name} -n {name}-1 --cloud lambda --gpus A100:0.5 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-2 --cloud lambda --gpus A100:0.5 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-3 --cloud lambda --gpus A100:0.5 -d examples/job_queue/job.yaml',
@@ -200,9 +203,9 @@ def test_huggingface():
     test = Test(
         'huggingface_glue_imdb_app',
         [
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 examples/huggingface_glue_imdb_app.yaml',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} --cloud lambda --gpus A100 examples/huggingface_glue_imdb_app.yaml',
+            f'sky exec {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -216,7 +219,7 @@ def test_autodown():
     test = Test(
         'autodown',
         [
-            f'sky launch -y -d -c {name} --cloud lambda examples/minimal.yaml',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
@@ -226,14 +229,14 @@ def test_autodown():
             # Ensure the cluster is terminated.
             'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud lambda --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down examples/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} --cloud lambda examples/minimal.yaml',
+            f'sky exec {name} {LAMBDA_TYPE} examples/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 240',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud lambda --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down examples/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 240',
             # Ensure the cluster is still UP.
@@ -252,8 +255,8 @@ def test_cancel_lambda():
     test = Test(
         'test-cancel-lambda',
         [
-            f'sky launch -y -c {name} --cloud lambda --gpus A100 examples/minimal.yaml',
-            f'sky exec {name} -n {name}-1 -d --cloud lambda --gpus A100 "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky exec {name} -n {name}-1 -d {LAMBDA_TYPE} "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
             'sleep 20',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky cancel {name} 2',
@@ -272,7 +275,7 @@ def test_inline_env():
     test = Test(
         'test-inline-env',
         [
-            f'sky launch -c {name} -y --cloud lambda --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky launch -c {name} -y {LAMBDA_TYPE} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 1 --status',
             f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',

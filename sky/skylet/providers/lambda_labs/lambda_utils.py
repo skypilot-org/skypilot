@@ -81,7 +81,7 @@ class LambdaClient:
 
     def up(self,
            instance_type='gpu_1x_a100_sxm4',
-           region='us-tx-1',
+           region='us-east-1',
            quantity=1,
            name=''):
         """Start a new instance."""
