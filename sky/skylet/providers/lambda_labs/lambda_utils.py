@@ -85,7 +85,6 @@ class LambdaClient:
            quantity=1,
            name=''):
         """Start a new instance."""
-        assert instance_type=='gpu_1x_a100_sxm4', instance_type
         assert self.ssh_key_name is not None
 
         # Optimization:

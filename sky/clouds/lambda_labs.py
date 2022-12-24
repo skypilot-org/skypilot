@@ -77,7 +77,7 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        return 'gpu.1x.a100.sxm4'
+        return 'gpu_1x_a100_sxm4'
 
     @classmethod
     def get_accelerators_from_instance_type(

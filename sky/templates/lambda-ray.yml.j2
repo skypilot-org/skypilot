@@ -19,7 +19,7 @@ available_node_types:
   ray_head_default:
     resources: {}
     node_config:
-      InstanceType: gpu_1x_a100_sxm4 # TODO(ewzeng) remove hardcode
+      InstanceType: {{instance_type}}
 {% if num_nodes > 1 %}
   ray_worker_default:
     min_workers: {{num_nodes - 1}}

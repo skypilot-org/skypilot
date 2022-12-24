@@ -558,8 +558,8 @@ class RetryingVmProvisioner(object):
     def _in_blocklist(self, cloud, region, zones):
         if region.name in self._blocked_regions:
             return True
-        # We do not keep track of zones in Azure and Local,
-        # as both clouds do not have zones.
+        # We do not keep track of zones in Azure, Lambda, and Local,
+        # as these clouds do not have zones.
         if isinstance(cloud, (clouds.Azure, clouds.Local, clouds.Lambda)):
             return False
         assert zones, (cloud, region, zones)
