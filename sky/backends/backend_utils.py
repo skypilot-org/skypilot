@@ -1574,7 +1574,7 @@ def _query_status_gcp(
             'STOPPED': global_user_state.ClusterStatus.STOPPED,
             'PREEMPTED': None,
         }
-        check_gcp_cli_include_tpu_vm()
+        tpu_utils.check_gcp_cli_include_tpu_vm()
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
@@ -1605,13 +1605,18 @@ def _query_status_gcp(
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
     if use_tpu_vm and len(status_list) == 0:
-        backend = backends.CloudVmRayBackend()
-        handle = global_user_state.get_handle_from_cluster_name(cluster)
-        backend.teardown_no_lock(handle,
-                                 terminate=True,
-                                 purge=False,
-                                 post_teardown_cleanup=False)
-
+        logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
+        # Do not use CloudVMRayBackend.teardown_no_lock, as that will
+        # cause inifinite recursion by calling cluster status refresh
+        # again.
+        terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(cluster, zone)
+        returncode, stdout, stderr = log_lib.run_with_log(terminate_cmd,
+                                                          None,
+                                                          shell=True,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
+        subprocess_utils.handle_returncode(returncode, terminate_cmd,
+                                           stdout + stderr)
     return status_list
 
 
@@ -2225,41 +2230,6 @@ def check_cluster_name_not_reserved(
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
             raise ValueError(msg)
-
-
-def check_gcp_cli_include_tpu_vm() -> None:
-    # TPU VM API available with gcloud version >= 382.0.0
-    version_cmd = 'gcloud version --format=json'
-    rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
-                                                 '/dev/null',
-                                                 shell=True,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
-
-    if rcode != 0:
-        failure_massage = ('Failed to run "gcloud version".\n'
-                           '**** STDOUT ****\n'
-                           '{stdout}\n'
-                           '**** STDERR ****\n'
-                           '{stderr}')
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                failure_massage.format(stdout=stdout, stderr=stderr))
-
-    sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
-
-    if sdk_ver is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Failed to get Google Cloud SDK version from'
-                               f' "gcloud version": {stdout}')
-    else:
-        major_ver = sdk_ver.split('.')[0]
-        major_ver = int(major_ver)
-        if major_ver < 382:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Google Cloud SDK version must be >= 382.0.0 to use'
-                    ' TPU VM APIs, check "gcloud version" for details.')
 
 
 # Handle ctrl-c

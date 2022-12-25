@@ -550,6 +550,10 @@ class GCP(clouds.Cloud):
             return 'dryrun-project-id'
         from google import auth  # pylint: disable=import-outside-toplevel
         _, project_id = auth.default()
+        if project_id is None:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to get GCP project id. Please make sure you have '
+                'run: gcloud init')
         return project_id
 
     @staticmethod
