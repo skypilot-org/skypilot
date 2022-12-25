@@ -268,8 +268,8 @@ _GPU_TO_IMAGE_DATE = {
 _UBUNTU_VERSION = ['18.04', '20.04']
 
 
-def _get_image_id(region: str, ubuntu_version: str,
-                  creation_date: str) -> Optional[str]:
+def _fetch_image_id(region: str, ubuntu_version: str,
+                    creation_date: str) -> Optional[str]:
     try:
         image = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
@@ -296,7 +296,7 @@ def _get_image_row(
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     date = None
     for date in creation_date:
-        image_id = _get_image_id(region, ubuntu_version, date)
+        image_id = _fetch_image_id(region, ubuntu_version, date)
         if image_id:
             break
     else:

@@ -116,7 +116,7 @@ class AWS(clouds.Cloud):
             yield region, region.zones
 
     @classmethod
-    def get_default_ami(cls, region_name: str, instance_type: str) -> str:
+    def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
         image_id = service_catalog.get_image_id_from_tag(
             'skypilot:gpu-ubuntu-2004', region_name, clouds='aws')
@@ -141,9 +141,10 @@ class AWS(clouds.Cloud):
         cls,
         image_id: Optional[Dict[Optional[str], str]],
         region_name: str,
-    ) -> Optional[str]:
+        instance_type: str,
+    ) -> str:
         if image_id is None:
-            return None
+            return cls._get_default_ami(region_name, instance_type)
         if None in image_id:
             image_id_str = image_id[None]
         else:
@@ -281,9 +282,7 @@ class AWS(clouds.Cloud):
         else:
             custom_resources = None
 
-        image_id = self._get_image_id(r.image_id, region_name)
-        if image_id is None:
-            image_id = self.get_default_ami(region_name, r.instance_type)
+        image_id = self._get_image_id(r.image_id, region_name, r.instance_type)
 
         return {
             'instance_type': r.instance_type,

@@ -23,8 +23,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
         clouds = list(_ALL_CLOUDS)
     single = isinstance(clouds, str)
     if single:
-        assert isinstance(clouds, str)
-        clouds = [clouds]
+        clouds = [clouds]  # type: ignore
 
     results = []
     for cloud in clouds:

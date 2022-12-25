@@ -27,7 +27,6 @@ US_REGIONS = [
 ]
 
 
-# To enable all the regions, uncomment the following line.
 def get_regions() -> List[str]:
     """Get all available regions."""
     proc = subprocess.run(
