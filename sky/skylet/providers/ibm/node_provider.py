@@ -22,12 +22,15 @@ import re
 import socket
 import threading
 import time
+import os
+from pprint import pprint
 from pathlib import Path
 from uuid import uuid4
 
 from ibm_cloud_sdk_core import ApiException
 from ibm_cloud_sdk_core.authenticators import IAMAuthenticator
 from ibm_vpc import VpcV1
+from typing import Any, Dict, List, Optional
 
 from ray.autoscaler._private.cli_logger import cli_logger
 from ray.autoscaler._private.util import hash_runtime_conf
@@ -40,22 +43,24 @@ from ray.autoscaler.tags import (
     TAG_RAY_NODE_NAME,
 )
 
+LOGS_FOLDER = "/tmp/connector_logs/"   # this node_provider's logs location. 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 INSTANCE_NAME_UUID_LEN = 8
 INSTANCE_NAME_MAX_LEN = 64
-PENDING_TIMEOUT = 120  #  a node of this age that isn't running, will be removed from the cluster.    
+PENDING_TIMEOUT = 3600  #  a node of this age that isn't running, will be removed from the cluster.    
 PROFILE_NAME_DEFAULT = "cx2-2x4"
 VOLUME_TIER_NAME_DEFAULT = "general-purpose"
 RAY_RECYCLABLE = "ray-recyclable"  # identifies resources created by this package. these resources are deleted alongside the node.  
-VPC_TAGS = ".ray-vpc-tags"
+VPC_TAGS = ".sky-vpc-tags"
 
 
 def _get_vpc_client(endpoint, authenticator):
     """
     Creates an IBM VPC python-sdk instance
     """
-    ibm_vpc_client = VpcV1(authenticator=authenticator)
+    ibm_vpc_client = VpcV1(version = '2022-06-30', authenticator=authenticator)
     ibm_vpc_client.set_service_url(endpoint + "/v1")
 
     return ibm_vpc_client
@@ -85,15 +90,15 @@ class IBMVPCNodeProvider(NodeProvider):
         def decorated_func(*args, **kwargs):
             name = func.__name__
             logger.debug(
-                f"Enter {name} from {inspect.stack()[0][3]} "
+                f"\n\nEnter {name} from {inspect.stack()[0][3]} "
                 f"{inspect.stack()[1][3]} {inspect.stack()[2][3]} with args: "
-                f"{args} and kwargs {kwargs}"
+                f"entered with args:\n{pprint(args)} and kwargs {pprint(kwargs)}"
             )
             try:
                 result = func(*args, **kwargs)
                 logger.debug(
                     f"Leave {name} from {inspect.stack()[1][3]} with result "
-                    f"{result}, entered with args: {args}"
+                    f"Func Result:{pprint(result)}\n\n"
                 )
             except Exception:
                 cli_logger.error(f"Error in {name}")
@@ -138,7 +143,7 @@ class IBMVPCNodeProvider(NodeProvider):
                     "instances"
                 ]
                 if node:
-                    logger.debug(f"{name} is node {node} in vpc")
+                    logger.debug(f"{name} is node in vpc")
 
                     ray_bootstrap_config = Path.home() / "ray_bootstrap_config.yaml"  # reads the cluster's config file (an initialized defaults.yaml)
                     config = json.loads(ray_bootstrap_config.read_text())
@@ -168,9 +173,10 @@ class IBMVPCNodeProvider(NodeProvider):
 
         """
         NodeProvider.__init__(self, provider_config, cluster_name)
+        _configure_logger()
 
         self.lock = threading.RLock()
-        self.endpoint = self.provider_config["endpoint"]
+        self.endpoint = f"https://{self.provider_config['region']}.iaas.cloud.ibm.com"
         self.iam_api_key = self.provider_config["iam_api_key"]
         self.iam_endpoint = self.provider_config.get("iam_endpoint")
 
@@ -248,8 +254,8 @@ class IBMVPCNodeProvider(NodeProvider):
 
         return nodes
 
-    @log_in_out
-    def non_terminated_nodes(self, tag_filters):
+    
+    def non_terminated_nodes(self, tag_filters)-> List[str]:
         """ 
         returns list of ids of non terminated nodes, matching the specified tags. updates the nodes cache.
         IMPORTANT: this function is called periodically by ray, a fact utilized to refresh the cache (self.cached_nodes).
@@ -282,7 +288,7 @@ class IBMVPCNodeProvider(NodeProvider):
             with self.lock:
                 if node["id"] in self.pending_nodes:
                     if node["status"] != "running":
-                        pending_time = self.pending_nodes[node["id"]] - time.time()
+                        pending_time = time.time() - self.pending_nodes[node["id"]]
                         logger.debug(f"{node['id']} is pending for {pending_time}")
                         if pending_time > PENDING_TIMEOUT:
                             logger.error(
@@ -319,25 +325,28 @@ class IBMVPCNodeProvider(NodeProvider):
 
         return [node["id"] for node in res_nodes]
 
-    @log_in_out
-    def is_running(self, node_id):
+    
+    def is_running(self, node_id)-> bool:
         """returns whether a node is in status running"""
         with self.lock:
             node = self._get_cached_node(node_id)
+            logger.debug(f"""node: {node_id} is_running? {node["status"] == "running"}""")
             return node["status"] == "running"
 
-    @log_in_out
-    def is_terminated(self, node_id):
+    
+    def is_terminated(self, node_id)-> bool:
         """returns True if a node is either not recorded or not in any valid status."""
         with self.lock:
             try:
                 node = self._get_cached_node(node_id)
+                logger.debug(f"""node: {node_id} is_terminated? {node["status"] not in ["running", "starting", "pending"]}""")
                 return node["status"] not in ["running", "starting", "pending"]
             except Exception:
+                logger.debug(f"""node: {node_id} is_terminated? TRUE""")
                 return True
 
-    @log_in_out
-    def node_tags(self, node_id):
+    
+    def node_tags(self, node_id)-> Dict[str, str]:
         """returns tags of specified node id """
 
         with self.lock:
@@ -359,9 +368,8 @@ class IBMVPCNodeProvider(NodeProvider):
                 return fip[0]["address"]
         else:
             return self.internal_ip(node_id)
-
-    @log_in_out
-    def external_ip(self, node_id):
+  
+    def external_ip(self, node_id)-> str:
         """returns head node's public ip. 
         if use_hybrid_ips==true in cluster's config file, returns the ip address of a node based on its 'Kind'."""
 
@@ -374,28 +382,22 @@ class IBMVPCNodeProvider(NodeProvider):
             if fip:
                 return fip[0]["address"]
 
-    @log_in_out
-    def internal_ip(self, node_id):
+    def internal_ip(self, node_id)-> str:
         """returns the worker's node private ip address"""
         node = self._get_cached_node(node_id)
 
         try:
-            primary_ip = node["network_interfaces"][0].get(
-                "primary_ip"
-            )
+            primary_ip = node["network_interfaces"][0].get("primary_ip")['address']
             if primary_ip is None:
                 node = self._get_node(node_id)
         except Exception:
             node = self._get_node(node_id)
 
-        logger.debug(f"in internal_ip, returning ip for node {node}")
+        return node["network_interfaces"][0].get("primary_ip")['address']
 
-        return node["network_interfaces"][0].get("primary_ip")
-
-    @log_in_out
-    def set_node_tags(self, node_id, tags):
+    def set_node_tags(self, node_id, tags) -> None:
         """
-        updates local (file) tags cache. updates in memory cache if node_id and tags are specified 
+        updates local (file) tags cache. also updates in memory cache if node_id and tags are specified. 
         Args:
             node_id(str): id of the node provided by the cloud provider at creation.
             tags(dict): specified conditions by which nodes will be filtered.
@@ -465,10 +467,11 @@ class IBMVPCNodeProvider(NodeProvider):
         instance_prototype["vpc"] = {"id": base_config["vpc_id"]}
         instance_prototype["image"] = {"id": base_config["image_id"]}
 
-        instance_prototype["zone"] = {"name": self.provider_config["zone_name"]}
+        instance_prototype["zone"] = {"name": self.provider_config["availability_zone"]}
         instance_prototype["boot_volume_attachment"] = boot_volume_attachment
         instance_prototype["primary_network_interface"] = primary_network_interface
 
+        
         try:
             with self.lock:
                 resp = self.ibm_vpc_client.create_instance(instance_prototype)
@@ -481,10 +484,8 @@ class IBMVPCNodeProvider(NodeProvider):
                 )
             else:
                 cli_logger.error(
-                    "Create VM instance {} failed with status code {}".format(
-                        name, str(e.code)
-                    )
-                )
+                    "Create VM instance {} failed with status code {}.\nFailed instance prototype:\n".format(name, str(e.code)))
+                pprint(instance_prototype)
             raise e
 
         logger.info("VM instance {} created successfully ".format(name))
@@ -506,7 +507,7 @@ class IBMVPCNodeProvider(NodeProvider):
         logger.info("Creating floating IP {}".format(floating_ip_name))
         floating_ip_prototype = {}
         floating_ip_prototype["name"] = floating_ip_name
-        floating_ip_prototype["zone"] = {"name": self.provider_config["zone_name"]}
+        floating_ip_prototype["zone"] = {"name": self.provider_config["availability_zone"]}
         floating_ip_prototype["resource_group"] = {
             "id": base_config["resource_group_id"]
         }
@@ -573,16 +574,24 @@ class IBMVPCNodeProvider(NodeProvider):
     def _create_node(self, base_config, tags):
         """
         returns dict {instance_id:instance_data} of newly created node. updates tags cache.
+        creates a node in the following format: ray-{cluster_name}-{node_type}-{uuid}
         
         Args:
             base_config(dict): specific node relevant data. node type segment of the cluster's config file, e.g. ray_head_default.
             tags(dict): set of conditions nodes will be filtered by.
         """
-
+        
         name_tag = tags[TAG_RAY_NODE_NAME]
-        assert (
-            len(name_tag) <= (INSTANCE_NAME_MAX_LEN - INSTANCE_NAME_UUID_LEN - 1)
-        ) and re.match("^[a-z0-9-:-]*$", name_tag), (name_tag, len(name_tag))
+        if len(name_tag) > INSTANCE_NAME_MAX_LEN - INSTANCE_NAME_UUID_LEN - 1:
+            logger.error(f"node name: {name_tag} is longer then {INSTANCE_NAME_MAX_LEN - INSTANCE_NAME_UUID_LEN - 1} characters")
+            raise Exception("Invalid node name: length check failed")
+
+        pattern = re.compile("^([a-z]|[a-z][-a-z0-9]*[a-z0-9])$")  # IBM VPC VSI pattern requirement  
+        res = pattern.match(name_tag)
+        
+        if not res:
+            logger.error(f"node name {name_tag} doesn't match the naming pattern `[a-z]|[a-z][-a-z0-9]*[a-z0-9]` for IBM VPC instance ")
+            raise Exception("Invalid node name: pattern check for IBM VPC instance failed")
 
         # append instance name with uuid
         name = "{name_tag}-{uuid}".format(
@@ -607,7 +616,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
         return {instance["id"]: instance}
 
-    @log_in_out
+    # @log_in_out
     def create_node(self, base_config, tags, count) -> None:
         """
         returns dict of {instance_id:instance_data} of nodes. creates 'count' number of nodes.
@@ -620,7 +629,7 @@ class IBMVPCNodeProvider(NodeProvider):
             count(int): number of nodes to create. 
 
         """
-
+        logger.debug(f"""create_node: count: {count}\ntags: {pprint(tags)}\nbase_config:{pprint(base_config)}\n """)
         stopped_nodes_dict = {}
         futures = []
 
@@ -710,8 +719,7 @@ class IBMVPCNodeProvider(NodeProvider):
             else:
                 raise e
 
-    @log_in_out
-    def terminate_nodes(self, node_ids):
+    def terminate_nodes(self, node_ids)-> Optional[Dict[str, Any]]:
 
         if not node_ids:
             return
@@ -724,9 +732,9 @@ class IBMVPCNodeProvider(NodeProvider):
 
         for future in cf.as_completed(futures):
             future.result()
-
+            
     @log_in_out
-    def terminate_node(self, node_id):
+    def terminate_node(self, node_id)-> Optional[Dict[str, Any]]:
         """Deletes the VM instance and the associated volume. 
         if cache_stopped_nodes==true in the cluster config file, nodes are stopped instead. """
 
@@ -775,5 +783,30 @@ class IBMVPCNodeProvider(NodeProvider):
         return self._get_node(node_id)
 
     @staticmethod
-    def bootstrap_config(cluster_config):
+    def bootstrap_config(cluster_config)-> Dict[str, Any]:
         return cluster_config
+
+def _configure_logger():
+    """
+    Configures the logger of this module for console output and file output
+    logs of level DEBUG and higher will be directed to file under LOGS_FOLDER.
+    logs of level INFO and higher will be directed to console output. 
+        This level can be modified via setting an environment variable LOGLEVEL.
+    """
+
+    if not os.path.exists(LOGS_FOLDER):
+        os.mkdir(LOGS_FOLDER)
+    logs_path =  LOGS_FOLDER + time.strftime("%Y-%m-%d--%H-%M-%S")
+
+    file_formatter   = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+
+    file_handler = logging.FileHandler(logs_path)
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.DEBUG)
+
+    console_output_handler = logging.StreamHandler()
+    console_output_handler.setFormatter(file_formatter)
+    console_output_handler.setLevel(logging.INFO)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_output_handler)    
