@@ -1694,7 +1694,7 @@ def check_owner_identity(cluster_name: str) -> None:
     elif owner_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
-                f'{cluster_name!r} ({cloud}) is owned by '
+                f'{cluster_name!r} ({cloud}) is owned by account '
                 f'{owner_identity!r}, but the activated account '
                 f'is {current_user_identity!r}.')
 
@@ -1824,8 +1824,8 @@ def _update_cluster_status(
         need_owner_identity_check: Whether to check the owner identity before updating
 
     Returns:
-    If the cluster is terminated or does not exist, return None.
-    Otherwise returns the input record with status and handle potentially updated.
+        If the cluster is terminated or does not exist, return None.
+        Otherwise returns the input record with status and handle potentially updated.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
@@ -1852,13 +1852,13 @@ def _update_cluster_status(
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def refresh_cluster_record(
+def _refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh: bool = False,
         acquire_per_cluster_status_lock: bool = True
 ) -> Optional[Dict[str, Any]]:
-    """Refresh the cluster record.
+    """Refresh the cluster, and return the possibly updated record.
 
     This function will also check the owner identity of the cluster, and raise
     exceptions if the current user is not the same as the user who created the
@@ -1909,13 +1909,13 @@ def refresh_cluster_status_handle(
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
-    """Refresh the cluster status and return the status and handle.
+    """Refresh the cluster, and return the possibly updated status and handle.
 
     This is a wrapper of refresh_cluster_record, which returns the status and
     handle of the cluster.
     Please refer to the docstring of refresh_cluster_record for the details.
     """
-    record = refresh_cluster_record(
+    record = _refresh_cluster_record(
         cluster_name,
         force_refresh=force_refresh,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -2064,7 +2064,7 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = refresh_cluster_record(
+            record = _refresh_cluster_record(
                 cluster_name,
                 force_refresh=True,
                 acquire_per_cluster_status_lock=True)
