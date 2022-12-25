@@ -1,6 +1,7 @@
 """DAGs: user applications to be run."""
 import pprint
 import threading
+from typing import List
 
 
 class Dag:
@@ -69,7 +70,7 @@ class Dag:
 class _DagContext(threading.local):
     """A thread-local stack of Dags."""
     _current_dag = None
-    _previous_dags = []
+    _previous_dags: List['Dag'] = []
 
     def push_dag(self, dag):
         if self._current_dag is not None:

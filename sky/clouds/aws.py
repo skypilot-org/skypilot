@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -258,9 +258,9 @@ class AWS(clouds.Cloud):
                                                             clouds='aws')
 
     def make_deploy_resources_variables(
-            self, resources: 'resources_lib.Resources',
-            region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+        self, resources: 'resources_lib.Resources',
+        region: Optional['clouds.Region'], zones: Optional[List['clouds.Zone']]
+    ) -> Dict[str, Optional[Union[str, bool]]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')

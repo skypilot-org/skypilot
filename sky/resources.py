@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -177,7 +177,7 @@ class Resources:
         return self._disk_size
 
     @property
-    def image_id(self) -> Optional[Dict[str, str]]:
+    def image_id(self) -> Optional[Dict[Optional[str], str]]:
         return self._image_id
 
     def _set_accelerators(
@@ -635,7 +635,7 @@ class Resources:
         return True
 
     @classmethod
-    def from_yaml_config(cls, config: Optional[Dict[str, str]]) -> 'Resources':
+    def from_yaml_config(cls, config: Optional[Dict[str, Any]]) -> 'Resources':
         if config is None:
             return Resources()
 

@@ -1,3 +1,4 @@
 sky/data
 sky/utils
 sky/clouds
+sky/resources.py
