@@ -1294,7 +1294,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
                      f' --zone {zone} --format=json')
         returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                          '/dev/null',
+                                                          os.devnull,
                                                           shell=True,
                                                           stream_logs=False,
                                                           require_outputs=True)
@@ -1306,9 +1306,11 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
-            # May be a leaked preempted resource.
+            # May be a leaked preempted resource, or terminated by user in the
+            # console.
+            ux_utils.console_newline()
             logger.warning(f'TPU VM {tpu_id} is not in READY state. '
-                           'Could be a garbage resource. Skipping...')
+                           'Skipping...')
             continue
 
         if not get_internal_ips:
@@ -1572,6 +1574,7 @@ def _query_status_gcp(
             # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
             'STOPPING': global_user_state.ClusterStatus.STOPPED,
             'STOPPED': global_user_state.ClusterStatus.STOPPED,
+            'DELETING': None,
             'PREEMPTED': None,
         }
         tpu_utils.check_gcp_cli_include_tpu_vm()
@@ -1611,7 +1614,7 @@ def _query_status_gcp(
         # again.
         terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(cluster, zone)
         returncode, stdout, stderr = log_lib.run_with_log(terminate_cmd,
-                                                          None,
+                                                          os.devnull,
                                                           shell=True,
                                                           stream_logs=False,
                                                           require_outputs=True)

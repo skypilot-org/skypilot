@@ -1,5 +1,6 @@
 """Utility functions for TPUs."""
 import json
+import os
 from typing import Optional
 
 from packaging import version
@@ -42,7 +43,7 @@ def check_gcp_cli_include_tpu_vm() -> None:
     # TPU VM API available with gcloud version >= 382.0.0
     version_cmd = 'gcloud version --format=json'
     rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
-                                                 '/dev/null',
+                                                 os.devnull,
                                                  shell=True,
                                                  stream_logs=False,
                                                  require_outputs=True)
@@ -74,7 +75,7 @@ def check_gcp_cli_include_tpu_vm() -> None:
 
 def terminate_tpu_vm_cluster_cmd(cluster_name: str,
                                  zone: str,
-                                 log_path: Optional[str] = None) -> str:
+                                 log_path: str = os.devnull) -> str:
     check_gcp_cli_include_tpu_vm()
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
                  f'\\(labels.ray-cluster-name={cluster_name}\\) '
