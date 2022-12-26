@@ -9,6 +9,7 @@ import sys
 import textwrap
 import time
 from typing import Any, Dict, Tuple
+import uuid
 
 import colorama
 from cryptography.hazmat.primitives import serialization
@@ -17,7 +18,7 @@ from cryptography.hazmat.backends import default_backend
 
 from sky import clouds
 from sky import sky_logging
-from sky.adaptors import gcp
+from sky.adaptors import gcp, ibm
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -336,31 +337,42 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_ibm_authentication(config): # TODO IBM-TODO
-    def _is_pair(private_key_path, public_key_path):
-        try:
-            public_key_data = open(private_key_path, "r")
-            public_key_data = public_key_data[public_key_data.index(' ') + 1 : public_key_data.rindex(' ')]
-            private_from_public = subprocess.getoutput([f"ssh-keygen -y -f {public_key_path} | cut -d' ' -f 2"])
-        except Exception as e:
-            logger.error("Failed ssh keys comparison.\n", e)
-            return False
-        return public_key_data == private_from_public
+    """ registers keys if they do not exist in sky folder and updates config file.
+    
+    keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub' 
+    """
+    import ibm_cloud_sdk_core
 
-    config = copy.deepcopy(config)
-    private_key_path = config['auth'].get('ssh_private_key', None)
-    if private_key_path is None:
-        private_key_path = PRIVATE_SSH_KEY_PATH
-        config['auth']['ssh_private_key'] = private_key_path
+    def _get_unique_key_name():
+        SUFFIX_LEN = 10
+        return f"skypilot-key-{str(uuid.uuid4())[:SUFFIX_LEN]}"
 
-    private_key_path = os.path.expanduser(private_key_path)
-    public_key_path = get_public_key_path(private_key_path)
+    client = ibm.client(region=config['provider']['region'])
+    resource_group_id = config['available_node_types']['ray_head_default']['node_config']['resource_group_id']
+    
+    private_key_path, public_key_path = get_or_generate_keys()
+    with open(os.path.abspath(os.path.expanduser(public_key_path)), 'r') as file:
+        ssh_key_data = file.read()
+    try:    
+        res = client.create_key(public_key=ssh_key_data, name=_get_unique_key_name(), resource_group={
+                                            "id": resource_group_id}, type='rsa').get_result()
+        vpc_key_id = res['id']
+        logger.debug(f"Created new key: {res['name']}")   
 
-    # if keys were valid we would get their data, otherwise, the keys will also be stored in PRIVATE_SSH_KEY_PATH
-    get_or_generate_keys(private_key_path, public_key_path)
+    except ibm_cloud_sdk_core.ApiException as e:
+        if "Key with fingerprint already exists" in e.message:
+            for key in client.list_keys().result['keys']:
+                if ssh_key_data in key['public_key'] or key['public_key'] in ssh_key_data:
+                    vpc_key_id = key['id']
+                    logger.debug(f"Reusing key: {key['name']}, as it matches public key value.")
+                    break
+        elif "Key with name already exists" in e.message:
+            raise Exception("a key with chosen name already registered in the specified region")                                      
+        else:
+            raise Exception("Failed to register a key")   
 
-    if not _is_pair(private_key_path,public_key_path):
-        private_key_path = PRIVATE_SSH_KEY_PATH
-        config['auth']['ssh_private_key'] = private_key_path
-        get_or_generate_keys(private_key_path, public_key_path)
-
+    config['auth']['ssh_private_key'] = private_key_path
+    config['auth'].update({'ssh_public_key':public_key_path}) 
+    for node_type in config['available_node_types']:
+        config['available_node_types'][node_type]['node_config']['key_id'] = vpc_key_id 
     return config
