@@ -58,14 +58,16 @@ class Local(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str,
-                                     use_spot: bool) -> float:
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool,
+                                     region: Optional[str],
+                                     zone: Optional[str]) -> float:
         # On-prem machines on Sky are assumed free
         # (minus electricity/utility bills).
         return 0.0
 
-    def accelerators_to_hourly_cost(self, accelerators,
-                                    use_spot: bool) -> float:
+    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool,
+                                    region: Optional[str],
+                                    zone: Optional[str]) -> float:
         # Hourly cost of accelerators is 0 for local cloud.
         return 0.0
 

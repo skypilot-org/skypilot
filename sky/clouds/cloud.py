@@ -62,6 +62,27 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[Region]:
+        """Returns the regions that offer the specified resources.
+
+        The order of the regions follow the order of the regions returned by
+        service_catalog/common.py#get_region_zones().
+        When region or zone is not None, the returned value will be limited to
+        the specified region/zone.
+
+        Returns:
+            A set of `Region`s that have the offerings for the specified
+            resources.
+            For each `Region` in the set, `region.zones` is the list of `Zone`s
+            which have the offerings. For the clouds that do not expose `Zone`s,
+            `region.zones` is an empty list.
+        """
+        raise NotImplementedError
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
@@ -103,12 +124,15 @@ class Cloud:
 
     #### Normal methods ####
 
-    # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool,
+                                     region: Optional[str],
+                                     zone: Optional[str]) -> float:
         """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators: Dict[str, int],
+                                    use_spot: bool, region: Optional[str],
+                                    zone: Optional[str]) -> float:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
