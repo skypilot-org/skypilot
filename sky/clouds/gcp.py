@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -237,7 +237,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[Any]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -260,7 +260,7 @@ class GCP(clouds.Cloud):
 
         r = resources
         # Find GPU spec, if any.
-        resources_vars = {
+        resources_vars: Dict[str, Optional[Any]] = {
             'instance_type': r.instance_type,
             'region': region_name,
             'zones': zone_name,
@@ -553,7 +553,8 @@ class GCP(clouds.Cloud):
 
     @staticmethod
     def check_host_accelerator_compatibility(
-            instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
+            instance_type: str, accelerators: Optional[Dict[str,
+                                                            float]]) -> None:
         service_catalog.check_host_accelerator_compatibility(
             instance_type, accelerators, 'gcp')
 

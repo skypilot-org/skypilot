@@ -317,7 +317,7 @@ def get_region_zones_for_accelerators(
 
 
 def check_host_accelerator_compatibility(
-        instance_type: str, accelerators: Optional[Dict[str, int]]) -> None:
+        instance_type: str, accelerators: Optional[Dict[str, float]]) -> None:
     """Check if the instance type is compatible with the accelerators.
 
     This function ensures that TPUs and GPUs except A100 are attached to N1,

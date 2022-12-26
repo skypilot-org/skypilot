@@ -156,7 +156,7 @@ def get_accelerators_from_instance_type(
 
 def get_instance_type_for_accelerator(
     acc_name: str,
-    acc_count: int,
+    acc_count: float,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
@@ -192,7 +192,8 @@ def get_region_zones_for_accelerators(
 
 
 def check_host_accelerator_compatibility(instance_type: str,
-                                         accelerators: Optional[Dict[str, int]],
+                                         accelerators: Optional[Dict[str,
+                                                                     float]],
                                          clouds: CloudFilter = None) -> None:
     """GCP only: Check if host VM type is compatible with the accelerators.
 

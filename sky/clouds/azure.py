@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -178,9 +178,10 @@ class Azure(clouds.Cloud):
         return None
 
     def make_deploy_resources_variables(
-        self, resources: 'resources.Resources',
-        region: Optional['clouds.Region'], zones: Optional[List['clouds.Zone']]
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+            self, resources: 'resources.Resources',
+            region: Optional['clouds.Region'],
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[Any]]:
+        assert resources.is_launchable(), resources
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -192,6 +193,7 @@ class Azure(clouds.Cloud):
         assert not r.use_spot, \
             'Our subscription offer ID does not support spot instances.'
         # r.accelerators is cleared but .instance_type encodes the info.
+        assert r.instance_type is not None, r
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))

@@ -50,14 +50,14 @@ class Resources:
         self,
         cloud: Optional[clouds.Cloud] = None,
         instance_type: Optional[str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
-        accelerator_args: Optional[Dict[str, str]] = None,
+        accelerators: Union[None, str, Dict[str, float]] = None,
+        accelerator_args: Optional[Dict[str, Union[str, bool]]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
-        image_id: Union[Dict[str, str], str, None] = None,
+        image_id: Optional[Union[Dict[Optional[str], str], str]] = None,
     ):
         self._version = self._VERSION
         self._cloud = cloud
@@ -82,11 +82,13 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        self._image_id = image_id
+        self._image_id: Optional[Dict[Optional[str], str]] = None
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id}
         elif isinstance(image_id, dict) and None in image_id:
             self._image_id = {self._region: image_id[None]}
+        else:
+            self._image_id = image_id
 
         self._set_accelerators(accelerators, accelerator_args)
 
@@ -126,23 +128,23 @@ class Resources:
                 f'{accelerators}{accelerator_args}{image_id}{disk_size})')
 
     @property
-    def cloud(self):
+    def cloud(self) -> Optional[clouds.Cloud]:
         return self._cloud
 
     @property
-    def region(self):
+    def region(self) -> Optional[str]:
         return self._region
 
     @property
-    def zone(self):
+    def zone(self) -> Optional[str]:
         return self._zone
 
     @property
-    def instance_type(self):
+    def instance_type(self) -> Optional[str]:
         return self._instance_type
 
     @property
-    def accelerators(self) -> Optional[Dict[str, int]]:
+    def accelerators(self) -> Optional[Dict[str, float]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
@@ -152,8 +154,10 @@ class Resources:
         if self._accelerators is not None:
             return self._accelerators
         if self.cloud is not None and self._instance_type is not None:
-            return self.cloud.get_accelerators_from_instance_type(
+            accs = self.cloud.get_accelerators_from_instance_type(
                 self._instance_type)
+            if accs is not None:
+                return {k: float(v) for k, v in accs.items()}
         return None
 
     @property
@@ -182,7 +186,7 @@ class Resources:
 
     def _set_accelerators(
         self,
-        accelerators: Union[None, str, Dict[str, int]],
+        accelerators: Union[None, str, Dict[str, float]],
         accelerator_args: Optional[Dict[str, str]],
     ) -> None:
         """Sets accelerators.
@@ -227,8 +231,7 @@ class Resources:
             if 'tpu' in acc.lower():
                 if self.cloud is None:
                     self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                assert isinstance(self.cloud, clouds.GCP), 'Cloud must be GCP.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', False)
@@ -257,7 +260,7 @@ class Resources:
 
     def need_cleanup_after_preemption(self) -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""
-        assert self.is_launchable(), self
+        assert self.is_launchable() and self.cloud is not None, self
         return self.cloud.need_cleanup_after_preemption(self)
 
     def _set_region_zone(self, region: Optional[str],
@@ -642,7 +645,7 @@ class Resources:
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
 
-        resources_fields = dict()
+        resources_fields: Dict[str, Any] = dict()
         if config.get('cloud') is not None:
             resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
                 config.pop('cloud'))

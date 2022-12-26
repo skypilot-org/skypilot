@@ -1,7 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Type
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
@@ -127,7 +127,7 @@ class Cloud:
         resources: 'resources.Resources',
         region: Optional['Region'],
         zones: Optional[List['Zone']],
-    ) -> Dict[str, Optional[str]]:
+    ) -> Dict[str, Optional[Any]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
