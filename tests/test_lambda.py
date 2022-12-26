@@ -150,7 +150,7 @@ def test_region():
     run_one_test(test)
 
 
-# ---------- file_mounts ----------
+# ---------- File mounts ----------
 def test_file_mounts():
     name = _get_cluster_name()
     test = Test(
@@ -170,6 +170,28 @@ def test_file_mounts():
             'rm -r ~/tmp-workdir',
         ],
         timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
+# ---------- CLI logs ----------
+def test_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'cli_logs',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
     )
     run_one_test(test)
 
@@ -214,6 +236,7 @@ def test_huggingface():
 
 
 # ---------- Testing Autodowning ----------
+@pytest.mark.slow
 def test_autodown():
     name = _get_cluster_name()
     test = Test(

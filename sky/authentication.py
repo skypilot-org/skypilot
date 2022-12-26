@@ -302,7 +302,7 @@ def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def setup_lambda_authentication(config):
+def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
 
     # Ensure ssh key is registered with Lambda Labs
