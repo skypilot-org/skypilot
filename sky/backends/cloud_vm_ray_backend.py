@@ -1174,6 +1174,7 @@ class RetryingVmProvisioner(object):
                 f'Failed to acquire resources in {to_provision.zone}. '
                 'Try changing resource requirements or use another zone.')
         elif to_provision.region is not None:
+            # For public clouds, provision.region is always set.
             message = ('Failed to acquire resources in all zones in '
                        f'{to_provision.region}. Try changing resource '
                        'requirements or use another region.')
