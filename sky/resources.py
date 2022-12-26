@@ -363,6 +363,9 @@ class Resources:
 
         # Validate whether accelerator is available in specified region/zone.
         acc, acc_count = list(acc_requested.items())[0]
+        # Fractional accelerators are temporarily bumped up to 1.
+        if acc_count > 0 and acc_count < 1:
+            acc_count = 1
         if self.region is not None or self.zone is not None:
             if not self._cloud.accelerator_in_region_or_zone(
                     acc, acc_count, self.region, self.zone):
