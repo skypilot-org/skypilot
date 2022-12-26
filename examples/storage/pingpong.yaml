@@ -3,7 +3,7 @@
 # This program implements coordination between processes using a shared file
 # system they can access. Each process reads data from <process-id>.txt, prints
 # it, and writes to <process-id + 1>.txt. This creates a synchronization between
-# processes where process i continues only after process i-1 has written it's
+# processes where process i continues only after process i-1 has written its
 # output.
 #
 # Usage:
