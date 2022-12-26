@@ -42,10 +42,10 @@ from ray.autoscaler.tags import (
     TAG_RAY_NODE_KIND,
     TAG_RAY_NODE_NAME,
 )
+from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
+from sky.skylet.providers.ibm.utils import get_logger
 
-LOGS_FOLDER = "/tmp/connector_logs/"   # this node_provider's logs location. 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger = get_logger()
 
 INSTANCE_NAME_UUID_LEN = 8
 INSTANCE_NAME_MAX_LEN = 64
@@ -54,7 +54,8 @@ PROFILE_NAME_DEFAULT = "cx2-2x4"
 VOLUME_TIER_NAME_DEFAULT = "general-purpose"
 RAY_RECYCLABLE = "ray-recyclable"  # identifies resources created by this package. these resources are deleted alongside the node.  
 VPC_TAGS = ".sky-vpc-tags"
-
+RAY_CACHE_SEGMENT = 'ray'
+VPC_CACHE_SEGMENT = 'vpc' 
 
 def _get_vpc_client(endpoint, authenticator):
     """
@@ -117,7 +118,7 @@ class IBMVPCNodeProvider(NodeProvider):
         # local tags cache exists from former runs 
         if self.tags_file.is_file():
             all_tags = json.loads(self.tags_file.read_text())
-            tags = all_tags.get(self.cluster_name, {})
+            tags = all_tags.get(self.cluster_name, {}).get(RAY_CACHE_SEGMENT,{})
 
             # filters instances that were deleted since the last time the head node was up
             for instance_id, instance_tags in tags.items():
@@ -173,16 +174,23 @@ class IBMVPCNodeProvider(NodeProvider):
 
         """
         NodeProvider.__init__(self, provider_config, cluster_name)
-        _configure_logger()
 
         self.lock = threading.RLock()
-        self.endpoint = f"https://{self.provider_config['region']}.iaas.cloud.ibm.com"
-        self.iam_api_key = self.provider_config["iam_api_key"]
-        self.iam_endpoint = self.provider_config.get("iam_endpoint")
-
+        self.iam_api_key = provider_config["iam_api_key"]
+        self.resource_group_id = provider_config["resource_group_id"]
+        self.iam_endpoint = provider_config.get("iam_endpoint")
+        self.region = provider_config['region']
+        self.endpoint = f"https://{self.region}.iaas.cloud.ibm.com"
+        self.zone = self.provider_config["availability_zone"]
         self.ibm_vpc_client = _get_vpc_client(
             self.endpoint, IAMAuthenticator(self.iam_api_key, url=self.iam_endpoint)
         )
+        self.vpc_provider = IBMVPCProvider(self.resource_group_id, self.region, self.zone, os.path.join(Path.home(),VPC_TAGS),cluster_name)
+        self.vpc_tags = self.vpc_provider.create_or_fetch_vpc_tags()
+        self.vpc_id = self.vpc_tags['vpc_id']
+        self.security_group_id = self.vpc_tags['security_group_id']
+        self.subnet_id = self.vpc_tags['subnet_id']
+        self.set_node_tags(None,None,vpc_update=True)
 
         self._load_tags()
 
@@ -395,7 +403,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
         return node["network_interfaces"][0].get("primary_ip")['address']
 
-    def set_node_tags(self, node_id, tags) -> None:
+    def set_node_tags(self, node_id, tags, vpc_update=False) -> None:
         """
         updates local (file) tags cache. also updates in memory cache if node_id and tags are specified. 
         Args:
@@ -414,7 +422,11 @@ class IBMVPCNodeProvider(NodeProvider):
             all_tags = {}
             if self.tags_file.is_file():
                 all_tags = json.loads(self.tags_file.read_text())
-            all_tags[self.cluster_name] = self.nodes_tags
+            all_tags.setdefault(self.cluster_name,self.cluster_name) # verifies dict contains cluster field, otherwise adds it
+            if vpc_update:
+                all_tags[self.cluster_name][VPC_CACHE_SEGMENT] = self.vpc_tags
+            else:
+                all_tags[self.cluster_name][RAY_CACHE_SEGMENT] = self.nodes_tags
             self.tags_file.write_text(json.dumps(all_tags))
 
     def _get_instance_data(self, name):
@@ -435,8 +447,8 @@ class IBMVPCNodeProvider(NodeProvider):
 
         logger.info("Creating new VM instance {}".format(name))
 
-        security_group_identity_model = {"id": base_config["security_group_id"]}
-        subnet_identity_model = {"id": base_config["subnet_id"]}
+        security_group_identity_model = {"id": self.security_group_id}
+        subnet_identity_model = {"id":self.subnet_id}
         primary_network_interface = {
             "name": "eth0",
             "subnet": subnet_identity_model,
@@ -463,11 +475,11 @@ class IBMVPCNodeProvider(NodeProvider):
         instance_prototype["name"] = name
         instance_prototype["keys"] = [key_identity_model]
         instance_prototype["profile"] = {"name": profile_name}
-        instance_prototype["resource_group"] = {"id": base_config["resource_group_id"]}
-        instance_prototype["vpc"] = {"id": base_config["vpc_id"]}
+        instance_prototype["resource_group"] = {"id": self.resource_group_id}
+        instance_prototype["vpc"] = {"id": self.vpc_id}
         instance_prototype["image"] = {"id": base_config["image_id"]}
 
-        instance_prototype["zone"] = {"name": self.provider_config["availability_zone"]}
+        instance_prototype["zone"] = {"name": self.zone}
         instance_prototype["boot_volume_attachment"] = boot_volume_attachment
         instance_prototype["primary_network_interface"] = primary_network_interface
 
@@ -507,9 +519,9 @@ class IBMVPCNodeProvider(NodeProvider):
         logger.info("Creating floating IP {}".format(floating_ip_name))
         floating_ip_prototype = {}
         floating_ip_prototype["name"] = floating_ip_name
-        floating_ip_prototype["zone"] = {"name": self.provider_config["availability_zone"]}
+        floating_ip_prototype["zone"] = {"name": self.zone}
         floating_ip_prototype["resource_group"] = {
-            "id": base_config["resource_group_id"]
+            "id": self.resource_group_id
         }
         response = self.ibm_vpc_client.create_floating_ip(floating_ip_prototype)
         floating_ip_data = response.result
@@ -785,28 +797,3 @@ class IBMVPCNodeProvider(NodeProvider):
     @staticmethod
     def bootstrap_config(cluster_config)-> Dict[str, Any]:
         return cluster_config
-
-def _configure_logger():
-    """
-    Configures the logger of this module for console output and file output
-    logs of level DEBUG and higher will be directed to file under LOGS_FOLDER.
-    logs of level INFO and higher will be directed to console output. 
-        This level can be modified via setting an environment variable LOGLEVEL.
-    """
-
-    if not os.path.exists(LOGS_FOLDER):
-        os.mkdir(LOGS_FOLDER)
-    logs_path =  LOGS_FOLDER + time.strftime("%Y-%m-%d--%H-%M-%S")
-
-    file_formatter   = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-
-    file_handler = logging.FileHandler(logs_path)
-    file_handler.setFormatter(file_formatter)
-    file_handler.setLevel(logging.DEBUG)
-
-    console_output_handler = logging.StreamHandler()
-    console_output_handler.setFormatter(file_formatter)
-    console_output_handler.setLevel(logging.INFO)
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console_output_handler)    
