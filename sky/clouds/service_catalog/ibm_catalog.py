@@ -1,7 +1,8 @@
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
+from typing import Dict, List, Optional, Tuple
 
-_df = common.read_catalog('ibm.csv')
+_df = common.read_catalog('ibm/vms.csv')
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)

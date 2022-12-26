@@ -3,13 +3,17 @@ import yaml
 import json
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.adaptors import ibm
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
+
+from sky.clouds.cloud import Region, Zone
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-_CREDENTIAL_FILES = {'path':os.path.expanduser('~/.ibm/'),'names':['credentials']}
+# CREDENTIAL_FILE = os.path.join(os.path.expanduser('~'),'.ibm','credentials.yaml')
+from sky.adaptors.ibm import CREDENTIAL_FILE
 
 @clouds.CLOUD_REGISTRY.register
 class IBM(clouds.Cloud):
@@ -21,7 +25,7 @@ class IBM(clouds.Cloud):
     @classmethod
     def regions(cls):
         if not cls._regions:
-            # regions and zones 
+            ## regions and zones 
             cls._regions = [
                 clouds.Region('us-south').set_zones([
                     clouds.Zone('us-south-1'),
@@ -73,6 +77,28 @@ class IBM(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def region_zones_provision_loop(
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: Optional[bool] = False,
+    ) -> Iterator[Tuple[Region, List[Zone]]]:
+        """Loops over (region, zones) to retry for provisioning.
+
+        returning a single zone list with its region, since ibm cloud currently doesn't  
+        support retries for list of zones.
+
+        Args:
+            instance_type: The instance type to provision.
+            accelerators: The accelerators to provision.
+            use_spot: Whether to use spot instances.
+        """
+        for region in cls.regions():
+            for zone in region.zones:
+                yield region, [zone]
+
+    @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
@@ -122,7 +148,16 @@ class IBM(clouds.Cloud):
         Returns:
           A dictionary of cloud-specific node type variables.
         """
-
+        def _get_profile_resources(instance_profile):
+            """returns a dict representing the cpu, memory and gpu of specified instance profile"""
+            profile_resources_str = instance_profile.split('-')[1]
+            # gpu number based on profile
+            gpu_num = int(profile_resources_str.split('x')[2].split('v')[0]) if len(profile_resources_str.split('x'))==3 else 0
+            # cpu number based on profile
+            cpu_num = int(profile_resources_str.split('x')[0])
+            # memory GBs on profile
+            memory_num = int(profile_resources_str.split('x')[1])
+            return {'CPU':cpu_num, 'memory':memory_num, 'GPU':gpu_num}    
 
         if region is None:
             assert zones is None, (
@@ -145,18 +180,24 @@ class IBM(clouds.Cloud):
         else:
             custom_resources = None
 
+        instance_resources = _get_profile_resources(r.instance_type)
+
         if r.image_id is not None:
             image_id = r.image_id
         else:
-            image_id = self.get_default_image()
+            image_id = self.get_default_image(region_name)
 
         return {
             'instance_type': r.instance_type,
+            'instance_resources': instance_resources,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
             'zones': ','.join(zones),
             'image_id': image_id,
+            'iam_api_key':get_cred_file_field('iam_api_key'),
+            'resource_group_id':get_cred_file_field('resource_group_id'),
+            'disk_size':get_cred_file_field('disk_capacity',100)
         }
 
     @classmethod
@@ -178,11 +219,8 @@ class IBM(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM.
-        return 'BL2.8x32'  
-
-    def _get_default_region():
-        return 'us_south'    
-
+        return get_cred_file_field('instance_profile_name','bx2d-8x32')
+ 
     def get_feasible_launchable_resources(self, resources):
         """Returns a list of feasible and launchable resources.
 
@@ -230,56 +268,59 @@ class IBM(clouds.Cloud):
                                                      
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
-        return 'us_south'            
+        return get_cred_file_field('region','us_south')     
 
     @classmethod
-    def get_default_image(cls):  # TODO IBM-TODO complete once the process of creating a gpu supported image has been streamlined.
+    def get_default_image(cls, region):
         """ 
         Returns default image. if user ran the ibm script to creating a gpu image,
         its id is loaded from local cache, otherwise provides a clean image of ubuntu 20.04.  
         """
-        base_config = None
-        with open(cls.credentials_path) as f:
-                    base_config = yaml.safe_load(f)
-        if 'image_id' in base_config and base_config['image_id']:
-            return base_config['image_id']
-        else:
-            # currently returning a clean image id of the image named: "ibm-ubuntu-20-04-4-minimal-amd64-2"
-            return 'r006-3e7bdf31-21f8-4726-b1ea-ee53d3c589dc' 
+        def _get_image_objects():
+            images = []
+            res = client.list_images().get_result()
+            images.extend(res['images'])
 
-            # May switch to dynamic implementation that requires authentication:
-            """
-            image_objects = self.ibm_vpc_client.list_images().get_result()['images']
-            image_obj = next((obj for obj in image_objects if 'ibm-ubuntu-20-04-' in obj['name']), None)
-            return image_obj['id']
-            """
+            while res.get('next'):
+                link_to_next = res['next']['href'].split('start=')[1].split('&limit')[0]
+                res = client.list_images(start=link_to_next).get_result()
+                images.extend(res['images'])
+            return images
+
+        if get_cred_file_field('image_id'):
+            return get_cred_file_field('image_id')
+
+        client = ibm.client(region=region)
+        # returns default image: "ibm-ubuntu-20-04" with amd architecture
+        return next((img for img in _get_image_objects() if img['name'].startswith("ibm-ubuntu-20-04") \
+            and img['operating_system']['architecture'].startswith('amd')))['id']       
         
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
+
         help_str = (
             ' Run the following command:'
-            f'a configuration script that asks for api key and stores it in {self.credentials_path}'
+            f'a configuration script that asks for api key and stores it in {CREDENTIAL_FILE}'
         )
-        if not os.path.isfile(os.path.expanduser(self.credentials_path)):
-            return (False, f'{self.credentials_path} does not exist.' + help_str)
-        base_config = None
-        with open(self.credentials_path) as f:
-                    base_config = yaml.safe_load(f)
+        if not os.path.isfile(CREDENTIAL_FILE):
+            return (False, f'{CREDENTIAL_FILE} does not exist.' + help_str)
+
+        base_config = _read_credential_file()
         if base_config and 'iam_api_key' in base_config:
-            # IBM-TODO check the viability of initializing a client to verify api key. 
-            return True, None
+            try:
+                ibm.client()
+                return True, None
+            except Exception as e:
+                return False, str(e)
         else:
-            return False, f"Missing iam_api_key filed in {self.credentials_path}"
+            return False, f"Missing iam_api_key in {CREDENTIAL_FILE}"
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
 
         Returns a dictionary that will be added to a task's file mounts.
         """
-        base_path = _CREDENTIAL_FILES['path']
-        return {
-            f'{base_path}{filename}': f'{base_path}{filename}' for filename in _CREDENTIAL_FILES['names']
-        }
+        return {CREDENTIAL_FILE: CREDENTIAL_FILE}
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
@@ -299,4 +340,10 @@ class IBM(clouds.Cloud):
             accelerator, acc_count, region, zone, 'ibm')
 
     
-        
+def _read_credential_file():
+    with open(CREDENTIAL_FILE,'r') as f:
+        return yaml.safe_load(f)
+
+def get_cred_file_field(field, default_val=None)->str:
+    """returns a the value of a field from the user's credentials file if exists, else default_val"""
+    return _read_credential_file().get(field, default_val)
