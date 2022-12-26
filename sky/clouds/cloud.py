@@ -63,7 +63,7 @@ class Cloud:
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
+                              accelerators: Optional[Dict[str, float]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[Region]:
         """Returns the regions that offer the specified resources.
@@ -87,7 +87,7 @@ class Cloud:
         cls,
         *,
         instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, int]] = None,
+        accelerators: Optional[Dict[str, float]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
@@ -278,7 +278,7 @@ class Cloud:
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
-                                      acc_count: int,
+                                      acc_count: float,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         """Returns whether the accelerator is valid in the region or zone."""

@@ -161,7 +161,7 @@ class Resources:
         return None
 
     @property
-    def accelerator_args(self) -> Optional[Dict[str, str]]:
+    def accelerator_args(self) -> Optional[Dict[str, Union[str, bool]]]:
         return self._accelerator_args
 
     @property
@@ -187,7 +187,7 @@ class Resources:
     def _set_accelerators(
         self,
         accelerators: Union[None, str, Dict[str, float]],
-        accelerator_args: Optional[Dict[str, str]],
+        accelerator_args: Optional[Dict[str, Union[str, bool]]],
     ) -> None:
         """Sets accelerators.
 
@@ -256,12 +256,13 @@ class Resources:
         self._accelerator_args = accelerator_args
 
     def is_launchable(self) -> bool:
-        return self.cloud is not None and self._instance_type is not None
+        return self._cloud is not None and self._instance_type is not None
 
     def need_cleanup_after_preemption(self) -> bool:
         """Returns whether a spot resource needs cleanup after preeemption."""
-        assert self.is_launchable() and self.cloud is not None, self
-        return self.cloud.need_cleanup_after_preemption(self)
+        assert self.is_launchable(), self
+        assert self._cloud is not None and self._instance_type is not None
+        return self._cloud.need_cleanup_after_preemption(self)
 
     def _set_region_zone(self, region: Optional[str],
                          zone: Optional[str]) -> None:
@@ -283,7 +284,8 @@ class Resources:
 
         Each `Region` has a list of `Zone`s that can provision this Resources.
         """
-        assert self.is_launchable()
+        assert self.is_launchable(), self
+        assert self._cloud is not None and self._instance_type is not None
         regions = self._cloud.regions_with_offering(self._instance_type,
                                                     self.accelerators,
                                                     self._use_spot,
@@ -334,23 +336,31 @@ class Resources:
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
         acc_requested = self.accelerators
-        if (isinstance(self.cloud, clouds.GCP) and
-                self.instance_type is not None):
+        if (isinstance(self._cloud, clouds.GCP) and
+                self._instance_type is not None):
             # Do this check even if acc_requested is None.
             clouds.GCP.check_host_accelerator_compatibility(
-                self.instance_type, acc_requested)
+                self._instance_type, acc_requested)
 
         if acc_requested is None:
             return
 
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
-            acc_requested = self.accelerators
+            assert self._cloud is not None and self._instance_type is not None
             acc_from_instance_type = (
-                self.cloud.get_accelerators_from_instance_type(
+                self._cloud.get_accelerators_from_instance_type(
                     self._instance_type))
+            acc_from_instance_type_cast: Optional[Dict[str, float]]
+            if isinstance(acc_from_instance_type, dict):
+                acc_from_instance_type_cast = {
+                    name: float(count)
+                    for name, count in acc_from_instance_type.items()
+                }
+            else:
+                acc_from_instance_type_cast = acc_from_instance_type
             if not Resources(accelerators=acc_requested).less_demanding_than(
-                    Resources(accelerators=acc_from_instance_type)):
+                    Resources(accelerators=acc_from_instance_type_cast)):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Infeasible resource demands found:\n'
@@ -366,10 +376,8 @@ class Resources:
 
         # Validate whether accelerator is available in specified region/zone.
         acc, acc_count = list(acc_requested.items())[0]
-        # Fractional accelerators are temporarily bumped up to 1.
-        if 0 < acc_count < 1:
-            acc_count = 1
         if self.region is not None or self.zone is not None:
+            assert self._cloud is not None, self
             if not self._cloud.accelerator_in_region_or_zone(
                     acc, acc_count, self.region, self.zone):
                 error_str = (f'Accelerator "{acc}" is not available in '
@@ -419,7 +427,7 @@ class Resources:
         if self._image_id is None:
             return
 
-        if self.cloud is None:
+        if self._cloud is None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cloud must be specified when image_id is provided.')
@@ -461,7 +469,7 @@ class Resources:
         for region, image_id in self._image_id.items():
             # Check the image exists and get the image size.
             # It will raise ValueError if the image does not exist.
-            image_size = self.cloud.get_image_size(image_id, region)
+            image_size = self._cloud.get_image_size(image_id, region)
             if image_size > self.disk_size:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
@@ -472,14 +480,22 @@ class Resources:
 
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
+        assert self.is_launchable(), self
+        assert self._cloud is not None and self._instance_type is not None, self
         hours = seconds / 3600
         # Instance.
-        hourly_cost = self.cloud.instance_type_to_hourly_cost(
+        hourly_cost = self._cloud.instance_type_to_hourly_cost(
             self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
         if self.accelerators is not None:
-            hourly_cost += self.cloud.accelerators_to_hourly_cost(
-                self.accelerators, self.use_spot, self._region, self._zone)
+            assert all(
+                count.is_integer()
+                for count in self.accelerators.values()), self.accelerators
+            accs = {
+                name: int(count) for name, count in self.accelerators.items()
+            }
+            hourly_cost += self._cloud.accelerators_to_hourly_cost(
+                accs, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -614,7 +630,7 @@ class Resources:
         """
         is_matched = True
         if (blocked.cloud is not None and
-                not self.cloud.is_same_cloud(blocked.cloud)):
+                not blocked.cloud.is_same_cloud(self.cloud)):
             is_matched = False
         if (blocked.instance_type is not None and
                 self.instance_type != blocked.instance_type):

@@ -132,9 +132,11 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, int]],
+                              accelerators: Optional[Dict[str, float]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
+        assert accelerators is None or all(
+            count.is_integer() for count in accelerators.values()), accelerators
         if accelerators is None:
             if instance_type is None:
                 # Fall back to the default regions.
@@ -146,7 +148,7 @@ class GCP(clouds.Cloud):
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
-            acc_count = list(accelerators.values())[0]
+            acc_count = int(list(accelerators.values())[0])
             acc_regions = service_catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
             if instance_type is None:
@@ -184,8 +186,8 @@ class GCP(clouds.Cloud):
         cls,
         *,
         instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        accelerators: Optional[Dict[str, float]] = None,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -581,7 +583,7 @@ class GCP(clouds.Cloud):
 
     def accelerator_in_region_or_zone(self,
                                       accelerator: str,
-                                      acc_count: int,
+                                      acc_count: float,
                                       region: Optional[str] = None,
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(

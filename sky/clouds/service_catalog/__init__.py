@@ -111,7 +111,7 @@ def validate_region_zone(
 
 def accelerator_in_region_or_zone(
     acc_name: str,
-    acc_count: int,
+    acc_count: float,
     region: Optional[str] = None,
     zone: Optional[str] = None,
     clouds: CloudFilter = None,
