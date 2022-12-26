@@ -23,6 +23,8 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
+# TODO(wei-lin): config_default may not be the config in use.
+# See: https://github.com/skypilot-org/skypilot/pull/1539
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # Do not place the backup under the gcloud config directory, as ray
 # autoscaler can overwrite that directory on the remote nodes.

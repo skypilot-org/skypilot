@@ -46,7 +46,6 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
-from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import tpu_utils
@@ -1695,8 +1694,8 @@ def check_owner_identity(cluster_name: str) -> None:
     elif owner_identity != current_user_identity:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterOwnerIdentityMismatchError(
-                f'Cluster {cluster_name!r} ({cloud}) is owned by account '
-                f'{owner_identity!r}, but the currently activated account '
+                f'{cluster_name!r} ({cloud}) is owned by account '
+                f'{owner_identity!r}, but the activated account '
                 f'is {current_user_identity!r}.')
 
 
@@ -1819,9 +1818,15 @@ def _update_cluster_status(
     design of the cluster status and transition, please refer to the
     sky/design_docs/cluster_status.md
 
+    Args:
+        cluster_name: The name of the cluster.
+        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
+            before updating the status.
+        need_owner_identity_check: Whether to check the owner identity before updating
+
     Returns:
-      If the cluster is terminated or does not exist, return None.
-      Otherwise returns the input record with status and ip potentially updated.
+        If the cluster is terminated or does not exist, return None.
+        Otherwise returns the input record with status and handle potentially updated.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
@@ -1851,20 +1856,27 @@ def _update_cluster_status(
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
-@timeline.event
-def refresh_cluster_status_handle(
-    cluster_name: str,
-    *,
-    force_refresh: bool = False,
-    acquire_per_cluster_status_lock: bool = True,
-    suppress_error: bool = False
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    """Refresh the cluster status and return the status and handle.
+def _refresh_cluster_record(
+        cluster_name: str,
+        *,
+        force_refresh: bool = False,
+        acquire_per_cluster_status_lock: bool = True
+) -> Optional[Dict[str, Any]]:
+    """Refresh the cluster, and return the possibly updated record.
 
     This function will also check the owner identity of the cluster, and raise
     exceptions if the current user is not the same as the user who created the
     cluster.
+
+    Args:
+        cluster_name: The name of the cluster.
+        force_refresh: refresh the cluster status as long as the cluster exists.
+        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
+            before updating the status.
+
+    Returns:
+        If the cluster is terminated or does not exist, return None.
+        Otherwise returns the cluster record.
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
@@ -1874,9 +1886,10 @@ def refresh_cluster_status_handle(
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
           fetched from the cloud provider.
     """
+
     record = global_user_state.get_cluster_from_name(cluster_name)
     if record is None:
-        return None, None
+        return None
     check_owner_identity(cluster_name)
 
     handle = record['handle']
@@ -1886,22 +1899,32 @@ def refresh_cluster_status_handle(
             record['status'] != global_user_state.ClusterStatus.STOPPED and
             record['autostop'] >= 0)
         if force_refresh or has_autostop or use_spot:
-            try:
-                record = _update_cluster_status(cluster_name,
-                                                acquire_per_cluster_status_lock=
-                                                acquire_per_cluster_status_lock,
-                                                need_owner_identity_check=False)
-                if record is None:
-                    return None, None
-            except (exceptions.ClusterOwnerIdentityMismatchError,
-                    exceptions.CloudUserIdentityError,
-                    exceptions.ClusterStatusFetchingError) as e:
-                if suppress_error:
-                    logger.debug(
-                        f'Failed to refresh cluster {cluster_name!r} due to {e}'
-                    )
-                    return None, None
-                raise
+            record = _update_cluster_status(
+                cluster_name,
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+    return record
+
+
+@timeline.event
+def refresh_cluster_status_handle(
+    cluster_name: str,
+    *,
+    force_refresh: bool = False,
+    acquire_per_cluster_status_lock: bool = True,
+) -> Tuple[Optional[global_user_state.ClusterStatus],
+           Optional[backends.Backend.ResourceHandle]]:
+    """Refresh the cluster, and return the possibly updated status and handle.
+
+    This is a wrapper of refresh_cluster_record, which returns the status and
+    handle of the cluster.
+    Please refer to the docstring of refresh_cluster_record for the details.
+    """
+    record = _refresh_cluster_record(
+        cluster_name,
+        force_refresh=force_refresh,
+        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+    if record is None:
+        return None, None
     return record['status'], record['handle']
 
 
@@ -2045,10 +2068,13 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _update_cluster_status(
-                cluster_name, acquire_per_cluster_status_lock=True)
+            record = _refresh_cluster_record(
+                cluster_name,
+                force_refresh=True,
+                acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
-                exceptions.ClusterOwnerIdentityMismatchError) as e:
+                exceptions.ClusterOwnerIdentityMismatchError,
+                exceptions.ClusterStatusFetchingError) as e:
             record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record
@@ -2094,11 +2120,8 @@ def get_clusters(
         plural = 's' if len(failed_clusters) > 1 else ''
         logger.warning(f'{yellow}Failed to refresh status for '
                        f'{len(failed_clusters)} cluster{plural}:{reset}')
-        table = log_utils.create_table(['Cluster', 'Error'])
         for cluster_name, e in failed_clusters:
-            table.add_row([cluster_name, str(e)])
-        logger.warning(table)
-
+            logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
     return kept_records
 
 
