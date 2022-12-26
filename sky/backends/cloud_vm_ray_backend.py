@@ -1029,8 +1029,11 @@ class RetryingVmProvisioner(object):
                                                       cluster_exists):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            zone_str = ','.join(
-                z.name for z in zones) if zones is not None else 'all zones'
+            if zones is None or len(zones) == 0:
+                # For Azure, zones is always an empty list.
+                zone_str = 'all zones'
+            else:
+                zone_str = ','.join(z.name for z in zones)
             try:
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
@@ -1166,14 +1169,18 @@ class RetryingVmProvisioner(object):
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=need_terminate)
 
-        if to_provision.zone is None:
+        if to_provision.zone is not None:
+            message = (
+                f'Failed to acquire resources in {to_provision.zone}. '
+                'Try changing resource requirements or use another zone.')
+        elif to_provision.region is not None:
             message = ('Failed to acquire resources in all zones in '
                        f'{to_provision.region}. Try changing resource '
                        'requirements or use another region.')
         else:
-            message = (
-                f'Failed to acquire resources in {to_provision.zone}. '
-                'Try changing resource requirements or use another zone.')
+            message = (f'Failed to acquire resources in {to_provision.cloud}. '
+                       'Try changing resource requirements or use another '
+                       'cloud provider.')
         # Do not failover to other clouds if the cluster was previously
         # UP or STOPPED, since the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
