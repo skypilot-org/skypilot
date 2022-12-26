@@ -2,14 +2,15 @@
 
 
 from functools import wraps
-from sky.clouds import ibm
-import os
+from sky import sky_logging
 import yaml
+import os
 
-
-ibm_cloud_sdk_core=None
-ibm_vpc=None
-client = None
+CREDENTIAL_FILE = os.path.join(os.path.expanduser('~'),'.ibm','credentials.yaml')
+logger = sky_logging.init_logger(__name__)
+vpc_client = None
+ibm_vpc = None
+ibm_cloud_sdk_core = None
 
 def import_package(func):
     @wraps(func)
@@ -32,10 +33,21 @@ def import_package(func):
 @import_package
 def client(**kwargs):
     """returns ibm vpc client"""
+    global vpc_client
 
-    if not client:
-        with open("~/.ibm/credentials") as f:
+    if not vpc_client:
+        with open(CREDENTIAL_FILE) as f:
                 base_config = yaml.safe_load(f)
-        return ibm_vpc.VpcV1(authenticator=ibm_cloud_sdk_core.authenticators.IAMAuthenticator(base_config['iam_api_key']))
-    else:
-        return client
+        try:
+            # Authenticate user - occurs once throughout the program 
+            vpc_client = ibm_vpc.VpcV1(version='2022-06-30',authenticator=ibm_cloud_sdk_core.authenticators.IAMAuthenticator(base_config['iam_api_key']))
+            if kwargs.get('region'):
+                vpc_client.set_service_url(f'https://{kwargs["region"]}.iaas.cloud.ibm.com' + '/v1')
+        except Exception:
+            logger.error("No registered API key found matching specified value")
+            raise  
+
+    elif kwargs.get('region'):
+        vpc_client.set_service_url(f'https://{kwargs["region"]}.iaas.cloud.ibm.com' + '/v1')
+
+    return vpc_client # returns either formerly or newly created client
