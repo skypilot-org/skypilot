@@ -924,7 +924,7 @@ def _fill_in_launchable_resources(
             # If the user has not specified any zone, a launchable will be made
             # for every zone even if some of the zones do not support the
             # host-accelerator combination. Then the provisioner may try to
-            # launch the instance, and failover to other zones. We find this
+            # launch the instance, and fail over to other zones. We find this
             # behavior acceptable because this will happen only when the user
             # requested GCP 4:P100 or 8:K80 with a very large host VM.
             launchable[resources] = _make_launchables_for_valid_region_zones(
