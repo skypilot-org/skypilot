@@ -1,5 +1,5 @@
 """Resources: compute requirements of Tasks."""
-from typing import Dict, List, Optional, Set, Union
+from typing import Dict, List, Optional, Union
 
 from sky import clouds
 from sky import global_user_state
@@ -364,7 +364,7 @@ class Resources:
         # Validate whether accelerator is available in specified region/zone.
         acc, acc_count = list(acc_requested.items())[0]
         # Fractional accelerators are temporarily bumped up to 1.
-        if acc_count > 0 and acc_count < 1:
+        if 0 < acc_count < 1:
             acc_count = 1
         if self.region is not None or self.zone is not None:
             if not self._cloud.accelerator_in_region_or_zone(

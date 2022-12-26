@@ -1,7 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
