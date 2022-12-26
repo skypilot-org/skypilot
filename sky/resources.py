@@ -275,7 +275,7 @@ class Resources:
         self._region, self._zone = self._cloud.validate_region_zone(
             region, zone)
 
-    def get_offering_regions_for_launchable(self) -> Set[clouds.Region]:
+    def get_offering_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
 
         Each `Region` has a list of `Zone`s that can provision this Resources.

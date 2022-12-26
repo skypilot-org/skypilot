@@ -65,9 +65,11 @@ class Cloud:
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> Set[Region]:
+                              zone: Optional[str]) -> List[Region]:
         """Returns the regions that offer the specified resources.
 
+        The order of the regions follow the order of the regions returned by
+        service_catalog/common.py#get_region_zones().
         When region or zone is not None, the returned value will be limited to
         the specified region/zone.
 

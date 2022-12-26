@@ -134,7 +134,7 @@ class GCP(clouds.Cloud):
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> Set[clouds.Region]:
+                              zone: Optional[str]) -> List[clouds.Region]:
         if accelerators is None:
             if instance_type is None:
                 # Fall back to the default regions.
@@ -177,8 +177,7 @@ class GCP(clouds.Cloud):
             for r in regions:
                 r.set_zones([z for z in r.zones if z.name == zone])
             regions = [r for r in regions if r.zones]
-
-        return set(regions)
+        return regions
 
     @classmethod
     def region_zones_provision_loop(
