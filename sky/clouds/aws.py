@@ -439,7 +439,8 @@ class AWS(clouds.Cloud):
                     raise exceptions.CloudUserIdentityError(
                         'awscli is too old to use SSO. Run the following command to upgrade:'
                         f'\n{self._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
-                        f'\n{self._INDENT_PREFIX}SSO may need to re-login. {self._sso_credentials_help_str()}'
+                        f'\n{self._INDENT_PREFIX}You may need to log into SSO again after '
+                        f'upgrading. {self._sso_credentials_help_str()}'
                     ) from None
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
