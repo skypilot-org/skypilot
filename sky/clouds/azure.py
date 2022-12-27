@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.utils import common_utils
@@ -15,6 +16,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources
 
+logger = sky_logging.init_logger(__name__)
+
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
     'azureProfile.json',
@@ -22,6 +25,8 @@ _CREDENTIAL_FILES = [
     'config',
     'msal_token_cache.json',
 ]
+
+_MAX_IDENTITY_FETCH_RETRY = 5
 
 
 def _run_output(cmd):
@@ -307,24 +312,31 @@ class Azure(clouds.Cloud):
     def get_current_user_identity(self) -> Optional[str]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
-        try:
-            import knack  # pylint: disable=import-outside-toplevel
-            account_email = azure.get_current_account_user()
-        except (FileNotFoundError, knack.util.CLIError) as e:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.CloudUserIdentityError(
+        retry_cnt = 0
+        while True:
+            retry_cnt += 1
+            try:
+                import knack  # pylint: disable=import-outside-toplevel
+                account_email = azure.get_current_account_user()
+                break
+            except (FileNotFoundError, knack.util.CLIError) as e:
+                error = exceptions.CloudUserIdentityError(
                     'Failed to get activated Azure account.\n'
                     '  Reason: '
-                    f'{common_utils.format_exception(e, use_bracket=True)}'
-                ) from None
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.CloudUserIdentityError(
-                    'Failed to get Azure user identity with unknown '
-                    f'exception.\n'
-                    '  Reason: '
-                    f'{common_utils.format_exception(e, use_bracket=True)}'
-                ) from e
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                if retry_cnt <= _MAX_IDENTITY_FETCH_RETRY:
+                    logger.debug(f'{error}.\nRetrying...')
+                    continue
+                with ux_utils.print_exception_no_traceback():
+                    raise error from None
+            except Exception as e:  # pylint: disable=broad-except
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to get Azure user identity with unknown '
+                        f'exception.\n'
+                        '  Reason: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}'
+                    ) from e
         try:
             project_id = self.get_project_id()
         except (ModuleNotFoundError, RuntimeError) as e:
