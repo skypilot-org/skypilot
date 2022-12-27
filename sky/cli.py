@@ -1607,10 +1607,10 @@ def logs(
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
-    if not jobs:
+    bold = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if not jobs and not all:
         # Friendly message for usage like 'sky cancel 1'.
-        bold = colorama.Style.BRIGHT
-        reset = colorama.Style.RESET_ALL
         raise click.UsageError(
             f'Use {bold}sky cancel <cluster> <job ID>{reset} '
             f'or {bold}sky cancel <cluster> --all{reset} to cancel one '
@@ -1619,7 +1619,21 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
     try:
         core.cancel(cluster, all, jobs)
     except ValueError as e:
-        raise click.UsageError(str(e))
+        if 'Cancelling jobs is not allowed' in str(e):
+            # Friendly message for usage like 'sky cancel <spot controller>
+            # -a/<job id>'.
+            if all:
+                arg_str = '--all'
+            else:
+                arg_str = ' '.join(map(str, jobs))
+            error_str = (
+                'Cancelling the spot controller\'s jobs is not allowed.'
+                f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
+                f'job IDs> [--all]{reset}'
+                f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        else:
+            error_str = str(e)
+        raise click.UsageError(error_str)
     except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
         click.echo(str(e))
         sys.exit(1)
