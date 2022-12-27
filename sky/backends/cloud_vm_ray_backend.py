@@ -2654,7 +2654,8 @@ class CloudVmRayBackend(backends.Backend):
                          handle: ResourceHandle,
                          terminate: bool,
                          purge: bool = False,
-                         post_teardown_cleanup: bool = True) -> bool:
+                         post_teardown_cleanup: bool = True,
+                         refresh_status: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2665,8 +2666,13 @@ class CloudVmRayBackend(backends.Backend):
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
-        prev_status, _ = backend_utils.refresh_cluster_status_handle(
-            handle.cluster_name, acquire_per_cluster_status_lock=False)
+        if refresh_status:
+            prev_status, _ = backend_utils.refresh_cluster_status_handle(
+                handle.cluster_name, acquire_per_cluster_status_lock=False)
+        else:
+            record = global_user_state.get_cluster_from_name(
+                handle.cluster_name)
+            prev_status = record['status']
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
