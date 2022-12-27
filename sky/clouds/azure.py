@@ -274,11 +274,8 @@ class Azure(clouds.Cloud):
         except subprocess.CalledProcessError:
             return False, (
                 # TODO(zhwu): Change the installation hint to from PyPI.
-                'Azure CLI returned error. Run the following commands in the SkyPilot codebase:'
-                '\n      $ pip install skypilot[azure]  # if installed from '
-                'PyPI'
-                '\n    Or:'
-                '\n      $ pip install .[azure]  # if installed from source'
+                'Azure CLI returned error. Run the following commands:'
+                '\n      $ pip install skypilot[azure]'
                 '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.

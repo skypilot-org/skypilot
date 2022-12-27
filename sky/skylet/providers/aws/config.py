@@ -278,7 +278,7 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
         _set_config_info(head_instance_profile_src="config")
         if skypilot_iam_role:
             # SkyPilot: let the workers use the same role as the head node, so that they
-            # can access the same S3 buckets.
+            # can access private S3 buckets.
             for node_type in config["available_node_types"].values():
                 node_type["node_config"]["IamInstanceProfile"] = head_node_config['IamInstanceProfile']
         return config
@@ -345,7 +345,7 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
 
             for policy_arn in attach_policy_arns:
                 role.attach_policy(PolicyArn=policy_arn)
-                        
+
             # SkyPilot: "PassRole" is required by the head node to pass the role to
             # the workers, so we can access S3 buckets on the workers. "Resource"
             # is to limit the role to only able to pass itself to the workers.
@@ -366,15 +366,16 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
                     }
                 ]
             }
-            role.Policy("SkypilotPassRolePolicy").put(
-                PolicyDocument=json.dumps(skypilot_pass_role_policy_doc)
-            )
+            if skypilot_iam_role:       
+                role.Policy("SkypilotPassRolePolicy").put(
+                    PolicyDocument=json.dumps(skypilot_pass_role_policy_doc)
+                )
 
         profile.add_role(RoleName=role.name)
         time.sleep(15)  # wait for propagation
     if skypilot_iam_role:
         # SkyPilot: let the workers use the same role as the head node, so that they
-        # can access the same S3 buckets.
+        # can access private S3 buckets.
         for node_type in config["available_node_types"].values():
             node_type["node_config"]["IamInstanceProfile"] = {"Arn": profile.arn}
     else:

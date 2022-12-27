@@ -50,13 +50,17 @@ class AWS(clouds.Cloud):
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
-    _SSO_CREDENTIAL_HELP_STR = (
-        'Run the following commands (must use aws v2 CLI):'
-        '\n      $ aws configure sso'
-        '\n      $ aws sso login --profile <profile_name>'
-        '\n    For more info: '
-        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
-    )
+    @classmethod
+    def _sso_credentials_help_str(cls, expired: bool = False) -> str:
+        help_str = 'Run the following commands (must use aws v2 CLI):'
+        if not expired:
+            help_str += f'\n{cls._INDENT_PREFIX}  $ aws configure sso'
+        help_str += (
+            f'\n{cls._INDENT_PREFIX}  $ aws sso login --profile <profile_name>'
+            f'\n{cls._INDENT_PREFIX}For more info: '
+            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
+        )
+        return help_str
 
     _MAX_AWSCLI_MAJOR_VERSION = 1
 
@@ -351,10 +355,8 @@ class AWS(clouds.Cloud):
         if proc.returncode != 0:
             return False, (
                 'AWS CLI is not installed properly. '
-                'Run the following commands under sky folder:'
-                # TODO(zhwu): after we publish sky to PyPI,
-                # change this to `pip install skypilot[aws]`
-                f'\n{self._INDENT_PREFIX}  $ pip install .[aws]'
+                'Run the following commands:'
+                f'\n{self._INDENT_PREFIX}  $ pip install skypilot[aws]'
                 f'{self._INDENT_PREFIX}Credentials may also need to be set. '
                 f'{self._STATIC_CREDENTIAL_HELP_STR}')
 
@@ -366,19 +368,25 @@ class AWS(clouds.Cloud):
             return False, str(e)
 
         hints = None
-        # `aws configure list` does not guarantee this file exists.
-        if self._is_sso_identity():
+        if self._is_current_identity_sso():
             hints = (
                 'AWS SSO is set. '
                 'It will work if you use AWS only, but will cause problems if you want to '
                 'use multiple clouds. To set up static credentials, try: aws configure'
             )
+        else:
+            # This file is required because it is required by the VMs launched on
+            # other clouds to access private s3 buckets and resources like EC2.
+            # `get_current_user_identity` does not guarantee this file exists.
+            if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
+                return (False, '~/.aws/credentials does not exist. ' +
+                        self._STATIC_CREDENTIAL_HELP_STR)
 
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
         return True, hints
 
-    def _is_sso_identity(self) -> bool:
+    def _is_current_identity_sso(self) -> bool:
         proc = subprocess.run('aws configure list',
                               shell=True,
                               check=False,
@@ -423,7 +431,7 @@ class AWS(clouds.Cloud):
                     raise exceptions.CloudUserIdentityError(
                         'awscli is too old to use SSO. Run the following command to upgrade:'
                         f'\n{self._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
-                        f'\n{self._INDENT_PREFIX}SSO may need to re-login. {self._SSO_CREDENTIAL_HELP_STR}'
+                        f'\n{self._INDENT_PREFIX}SSO may need to re-login. {self._sso_credentials_help_str()}'
                     ) from None
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -437,7 +445,8 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'AWS access token is expired.'
-                    f' {self._SSO_CREDENTIAL_HELP_STR}') from None
+                    f' {self._sso_credentials_help_str(expired=True)}'
+                ) from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -457,7 +466,7 @@ class AWS(clouds.Cloud):
         # The file should not be uploaded if the user is using SSO, as
         # the credential file can be from a different account, and will
         # make autopstop/autodown/spot controller misbehave.
-        if self._is_sso_identity():
+        if self._is_current_identity_sso():
             return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
