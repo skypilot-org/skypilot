@@ -26,7 +26,7 @@ _CREDENTIAL_FILES = [
     'msal_token_cache.json',
 ]
 
-_MAX_IDENTITY_FETCH_RETRY = 5
+_MAX_IDENTITY_FETCH_RETRY = 10
 
 
 def _run_output(cmd):
