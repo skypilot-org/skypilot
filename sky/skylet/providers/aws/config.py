@@ -369,7 +369,7 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
                 ]
             }
             if skypilot_iam_role:       
-                role.Policy("SkypilotPassRolePolicy").put(
+                role.Policy("SkyPilotPassRolePolicy").put(
                     PolicyDocument=json.dumps(skypilot_pass_role_policy_doc)
                 )
 
