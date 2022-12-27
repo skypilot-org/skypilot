@@ -520,7 +520,16 @@ class GCP(clouds.Cloud):
                     'auth list --filter=status:ACTIVE '
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
-        return f'{account} [project_id={self.get_project_id()}]'
+        try:
+            return f'{account} [project_id={self.get_project_id()}]'
+        except Exception as e: # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')

@@ -322,7 +322,13 @@ class Azure(clouds.Cloud):
                     '  Reason: '
                     f'{common_utils.format_exception(e, use_bracket=True)}'
                 ) from e
-        return f'{account_email} [subscription_id={self.get_project_id()}]'
+        try:
+            project_id = self.get_project_id()
+        except (ModuleNotFoundError, RuntimeError) as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get Azure project ID.') from e
+        return f'{account_email} [subscription_id={project_id}]'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:
