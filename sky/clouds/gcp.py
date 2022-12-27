@@ -522,7 +522,7 @@ class GCP(clouds.Cloud):
                     'returns the current user.')
         try:
             return f'{account} [project_id={self.get_project_id()}]'
-        except Exception as e: # pylint: disable=broad-except
+        except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get GCP user identity with unknown '
