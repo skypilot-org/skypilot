@@ -458,7 +458,7 @@ class AWS(clouds.Cloud):
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        # ~/.aws/credentials is required for users using multiple clouds.
+        # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
         # If this file does not exist, users can launch on AWS via AWS SSO and assign
         # IAM role to the cluster.
         # However, if users launch clusters in a non-AWS cloud, those clusters do not
