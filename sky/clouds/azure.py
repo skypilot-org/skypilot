@@ -207,7 +207,7 @@ class Azure(clouds.Cloud):
             'use_spot': r.use_spot,
             'region': region_name,
             # Azure does not support specific zones.
-            'zones': '',
+            'zones': None,
             **image_config
         }
 
