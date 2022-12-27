@@ -310,10 +310,13 @@ class Azure(clouds.Cloud):
         try:
             import knack  # pylint: disable=import-outside-toplevel
             account_email = azure.get_current_account_user()
-        except (FileNotFoundError, knack.util.CLIError):
+        except (FileNotFoundError, knack.util.CLIError) as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'Failed to get activated Azure account.') from None
+                    'Failed to get activated Azure account.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
