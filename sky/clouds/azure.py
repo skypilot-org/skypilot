@@ -319,8 +319,9 @@ class Azure(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     'Failed to get Azure user identity with unknown '
                     f'exception.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
-                    f'{e}') from e
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
         return f'{account_email} [subscription_id={self.get_project_id()}]'
 
     @classmethod

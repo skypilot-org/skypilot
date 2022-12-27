@@ -445,7 +445,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Invalid AWS configuration.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
         except aws.botocore_exceptions().TokenRetrievalError:
             # This is raised when the access token is expired, which mainly
@@ -460,7 +460,7 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
         return user_id
 
@@ -479,7 +479,8 @@ class AWS(clouds.Cloud):
         # TODO(zhwu/zongheng): We can also avoid uploading the credential file for the
         # cluster launched on AWS even if the user is using static credentials. We need
         # to define a mechanism to find out the cloud provider of the cluster to be
-        # launched in this function.
+        # launched in this function and make sure the cluster will not be used for
+        # launching clusters in other clouds, e.g. spot controller.
         if self._is_current_identity_sso():
             return {}
         return {

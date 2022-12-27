@@ -996,6 +996,7 @@ class RetryingVmProvisioner(object):
                             dryrun: bool,
                             stream_logs: bool,
                             cluster_name: str,
+                            cloud_user_identity: Optional[str],
                             cluster_exists: bool = False):
         """The provision retry loop."""
         style = colorama.Style
@@ -1062,10 +1063,8 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
-            cloud = handle.launched_resources.cloud
-            cloud_user_id = cloud.get_current_user_identity()
             global_user_state.set_owner_identity_for_cluster(
-                cluster_name, cloud_user_id)
+                cluster_name, cloud_user_identity)
 
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
@@ -1493,9 +1492,7 @@ class RetryingVmProvisioner(object):
 
         style = colorama.Style
         # Retrying launchable resources.
-        provision_failed = True
-        while provision_failed:
-            provision_failed = False
+        while True:
             try:
                 try:
                     # Recheck cluster name as the 'except:' block below may
@@ -1505,12 +1502,14 @@ class RetryingVmProvisioner(object):
                 except exceptions.InvalidClusterNameError as e:
                     # Let failover below handle this (i.e., block this cloud).
                     raise exceptions.ResourcesUnavailableError(str(e)) from e
+                cloud_user_id = to_provision.cloud.get_current_user_identity()
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
+                    cloud_user_identity=cloud_user_id,
                     cluster_exists=cluster_exists)
                 if dryrun:
                     return
@@ -1526,38 +1525,40 @@ class RetryingVmProvisioner(object):
                     raise e
 
                 logger.warning(e)
-                provision_failed = True
-                logger.warning(
-                    f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                    f'{to_provision}. Trying other launchable resources '
-                    f'(if any).{style.RESET_ALL}')
-                if not cluster_exists:
-                    # Add failed resources to the blocklist, only when it
-                    # is in fallback mode.
-                    self._blocked_launchable_resources.add(to_provision)
-                else:
-                    logger.info(
-                        'Retrying provisioning with requested resources '
-                        f'{task.num_nodes}x {task.resources}')
-                    # Retry with the current, potentially "smaller" resources:
-                    # to_provision == the current new resources (e.g., V100:1),
-                    # which may be "smaller" than the original (V100:8).
-                    # num_nodes is not part of a Resources so must be updated
-                    # separately.
-                    num_nodes = task.num_nodes
-                    cluster_exists = False
+            except exceptions.CloudUserIdentityError as e:
+                logger.warning(e)
+            else:
+                # Provisioning succeeded.
+                break
+            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                           f'{to_provision}. Trying other launchable resources '
+                           f'(if any).{style.RESET_ALL}')
+            if not cluster_exists:
+                # Add failed resources to the blocklist, only when it
+                # is in fallback mode.
+                self._blocked_launchable_resources.add(to_provision)
+            else:
+                logger.info('Retrying provisioning with requested resources '
+                            f'{task.num_nodes}x {task.resources}')
+                # Retry with the current, potentially "smaller" resources:
+                # to_provision == the current new resources (e.g., V100:1),
+                # which may be "smaller" than the original (V100:8).
+                # num_nodes is not part of a Resources so must be updated
+                # separately.
+                num_nodes = task.num_nodes
+                cluster_exists = False
 
-                # Set to None so that sky.optimize() will assign a new one
-                # (otherwise will skip re-optimizing this task).
-                # TODO: set all remaining tasks' best_resources to None.
-                task.best_resources = None
-                self._dag = sky.optimize(self._dag,
-                                         minimize=self._optimize_target,
-                                         blocked_launchable_resources=self.
-                                         _blocked_launchable_resources)
-                to_provision = task.best_resources
-                assert task in self._dag.tasks, 'Internal logic error.'
-                assert to_provision is not None, task
+            # Set to None so that sky.optimize() will assign a new one
+            # (otherwise will skip re-optimizing this task).
+            # TODO: set all remaining tasks' best_resources to None.
+            task.best_resources = None
+            self._dag = sky.optimize(
+                self._dag,
+                minimize=self._optimize_target,
+                blocked_launchable_resources=self._blocked_launchable_resources)
+            to_provision = task.best_resources
+            assert task in self._dag.tasks, 'Internal logic error.'
+            assert to_provision is not None, task
         return config_dict
 
 

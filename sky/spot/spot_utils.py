@@ -543,7 +543,7 @@ def is_spot_controller_up(
             f'Failed to get the status of the spot controller. '
             'It is not fatal, but spot commands/calls may hang or return stale '
             'information, when the controller is not up.\n'
-            f'  Details: [{common_utils.class_fullname(e.__class__)}]{e}')
+            f'  Details: {common_utils.format_exception(e, use_bracket=True)}')
         record = global_user_state.get_cluster_from_name(SPOT_CONTROLLER_NAME)
         controller_status, handle = None, None
         if record is not None:
