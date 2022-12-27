@@ -1607,6 +1607,15 @@ def logs(
 def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
+    if not jobs:
+        # Friendly message for usage like 'sky cancel 1'.
+        bold = colorama.Style.BRIGHT
+        reset = colorama.Style.RESET_ALL
+        raise click.UsageError(
+            f'Use {bold}sky cancel <cluster> <job ID>{reset} '
+            f'or {bold}sky cancel <cluster> --all{reset} to cancel one '
+            'or all jobs on a cluster. Job IDs can be looked up by '
+            f'{bold}sky queue{reset}.')
     try:
         core.cancel(cluster, all, jobs)
     except ValueError as e:
