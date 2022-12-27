@@ -471,9 +471,14 @@ class AWS(clouds.Cloud):
         # understand AWS IAM role so will not be able to access private AWS EC2 resources
         # and S3 buckets.
 
-        # The file should not be uploaded if the user is using SSO, as
-        # the credential file can be from a different account, and will
-        # make autopstop/autodown/spot controller misbehave.
+        # The file should not be uploaded if the user is using SSO, as the credential
+        # file can be from a different account, and will make autopstop/autodown/spot
+        # controller misbehave.
+
+        # TODO(zhwu/zongheng): We can also avoid uploading the credential file for the
+        # cluster launched on AWS even if the user is using static credentials. We need
+        # to define a mechanism to find out the cloud provider of the cluster to be
+        # launched in this function.
         if self._is_current_identity_sso():
             return {}
         return {
