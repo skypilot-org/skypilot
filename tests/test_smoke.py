@@ -687,7 +687,7 @@ def test_autostop():
             f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            'sleep 90',
+            'sleep 100',
             f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep STOPPED',
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
@@ -705,7 +705,7 @@ def test_autostop():
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s" | grep {name} | grep UP',
-            'sleep 90',
+            'sleep 100',
             f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep STOPPED',
 
             # Test restarting the idleness timer via exec:
