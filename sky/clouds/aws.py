@@ -375,18 +375,27 @@ class AWS(clouds.Cloud):
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
+        static_credential_exists = os.path.isfile(
+            os.path.expanduser('~/.aws/credentials'))
         hints = None
         if self._is_current_identity_sso():
-            hints = (
-                'AWS SSO is set. '
-                'It will work if you use AWS only, but will cause problems if you want to '
-                'use multiple clouds. To set up static credentials, try: aws configure'
-            )
+            hints = 'AWS SSO is set. '
+            if static_credential_exists:
+                hints += (
+                    ' To ensure multiple clouds work correctly, please use SkyPilot '
+                    'with static credentials (e.g., ~/.aws/credentials) by unsetting '
+                    'the AWS_PROFILE environment variable.')
+            else:
+                hints += (
+                    ' It will work if you use AWS only, but will cause problems '
+                    'if you want to use multiple clouds. To set up static credentials, '
+                    'try: aws configure')
+
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
             # `get_current_user_identity` does not guarantee this file exists.
-            if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
+            if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
                         self._STATIC_CREDENTIAL_HELP_STR)
 

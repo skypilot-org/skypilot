@@ -1494,22 +1494,21 @@ class RetryingVmProvisioner(object):
         # Retrying launchable resources.
         while True:
             try:
-                try:
-                    # Recheck cluster name as the 'except:' block below may
-                    # change the cloud assignment.
-                    backend_utils.check_cluster_name_is_valid(
-                        cluster_name, to_provision.cloud)
-                except exceptions.InvalidClusterNameError as e:
-                    # Let failover below handle this (i.e., block this cloud).
-                    raise exceptions.ResourcesUnavailableError(str(e)) from e
-                cloud_user_id = to_provision.cloud.get_current_user_identity()
+                # Recheck cluster name as the 'except:' block below may
+                # change the cloud assignment.
+                backend_utils.check_cluster_name_is_valid(
+                    cluster_name, to_provision.cloud)
+                if dryrun:
+                    cloud_user = None
+                else:
+                    cloud_user = to_provision.cloud.get_current_user_identity()
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
-                    cloud_user_identity=cloud_user_id,
+                    cloud_user_identity=cloud_user,
                     cluster_exists=cluster_exists)
                 if dryrun:
                     return
@@ -1524,9 +1523,11 @@ class RetryingVmProvisioner(object):
                         'optimize_target=sky.OptimizeTarget.COST)')
                     raise e
 
-                logger.warning(e)
-            except exceptions.CloudUserIdentityError as e:
-                logger.warning(e)
+                logger.warning(common_utils.format_exception(e))
+            except (exceptions.CloudUserIdentityError,
+                    exceptions.InvalidClusterNameError) as e:
+                # Let failover below handle this (i.e., block this cloud).
+                logger.warning(common_utils.format_exception(e))
             else:
                 # Provisioning succeeded.
                 break
