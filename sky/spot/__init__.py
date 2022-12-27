@@ -15,6 +15,7 @@ from sky.spot.spot_utils import SPOT_CONTROLLER_NAME
 from sky.spot.spot_utils import dump_job_table_cache
 from sky.spot.spot_utils import load_job_table_cache
 from sky.spot.spot_utils import format_job_table
+from sky.spot.spot_utils import is_spot_controller_up
 from sky.spot.spot_utils import load_spot_job_queue
 
 pathlib.Path(SPOT_TASK_YAML_PREFIX).expanduser().parent.mkdir(parents=True,
@@ -34,5 +35,6 @@ __all__ = [
     'dump_job_table_cache',
     'load_job_table_cache',
     'format_job_table',
+    'is_spot_controller_up',
     'load_spot_job_queue',
 ]

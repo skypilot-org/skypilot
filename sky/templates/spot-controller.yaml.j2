@@ -39,6 +39,9 @@ run: |
 
 envs:
   SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
+  # skip cloud identity check for spot controller to avoid the overhead.
+  SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: 1
+  SKYPILOT_USER: {{user}}
 {% if is_dev %}
   SKYPILOT_DEV: 1
 {% endif %}

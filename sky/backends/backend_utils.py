@@ -1,5 +1,4 @@
 """Util constants/functions for the backends."""
-import contextlib
 import copy
 from datetime import datetime
 import difflib
@@ -46,8 +45,10 @@ from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import command_runner
+from sky.utils import env_options
 from sky.utils import subprocess_utils
 from sky.utils import timeline
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 from sky.utils import validator
 from sky.usage import usage_lib
@@ -395,7 +396,8 @@ class SSHConfigHelper(object):
 
         Args:
             cluster_name: Cluster name (see `sky status`)
-            ips: List of IP addresses in the cluster. First IP is head node.
+            ips: List of public IP addresses in the cluster. First IP is head
+              node.
             auth_config: read_yaml(handle.cluster_yaml)['auth']
         """
         username = auth_config['ssh_user']
@@ -468,7 +470,7 @@ class SSHConfigHelper(object):
     def _add_multinode_config(
         cls,
         cluster_name: str,
-        worker_ips: List[str],
+        external_worker_ips: List[str],
         auth_config: Dict[str, str],
     ):
         username = auth_config['ssh_user']
@@ -477,13 +479,17 @@ class SSHConfigHelper(object):
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
                                f'{cluster_name}` to remove)')
 
-        overwrites = [False] * len(worker_ips)
-        overwrite_begin_idxs = [None] * len(worker_ips)
-        codegens = [None] * len(worker_ips)
+        # Ensure stableness of the aliases worker-<i> by sorting based on
+        # public IPs.
+        external_worker_ips = list(sorted(external_worker_ips))
+
+        overwrites = [False] * len(external_worker_ips)
+        overwrite_begin_idxs = [None] * len(external_worker_ips)
+        codegens = [None] * len(external_worker_ips)
         worker_names = []
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
 
-        for idx in range(len(worker_ips)):
+        for idx in range(len(external_worker_ips)):
             worker_names.append(cluster_name + f'-worker{idx+1}')
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
@@ -527,11 +533,11 @@ class SSHConfigHelper(object):
                 prev_line = config[i - 1] if i > 0 else ''
                 logger.warning(f'{cls.ssh_conf_path} contains '
                                f'host named {worker_names[idx]}.')
-                host_name = worker_ips[idx]
+                host_name = external_worker_ips[idx]
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, worker_ips[idx], username,
-                    key_path)
+                    sky_autogen_comment, host_name, external_worker_ips[idx],
+                    username, key_path)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -543,17 +549,17 @@ class SSHConfigHelper(object):
                     overwrites[idx] = True
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
-                    sky_autogen_comment, host_name, worker_ips[idx], username,
-                    key_path)
+                    sky_autogen_comment, host_name, external_worker_ips[idx],
+                    username, key_path)
 
         # This checks if all codegens have been created.
-        for idx, ip in enumerate(worker_ips):
+        for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
                     key_path)
 
-        for idx in range(len(worker_ips)):
+        for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.
             overwrite = overwrites[idx]
             overwrite_begin_idx = overwrite_begin_idxs[idx]
@@ -725,10 +731,20 @@ def write_cluster_config(
         - 'ray'
         - 'tpu-create-script' (if TPU is requested)
         - 'tpu-delete-script' (if TPU is requested)
+    Raises:
+        ResourceUnavailableError: if the region/zones requested does not appear
+            in the catalog.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
     cloud = to_provision.cloud
+    # This can raise a ResourceUnavailableError, when the region/zones requested
+    # does not appear in the catalog. It can be triggered when the user changed
+    # the catalog file, while there is a cluster in the removed region/zone.
+    # TODO(zhwu): We should change the exception type to a more specific one,
+    # as the ResourceUnavailableError is overly used. Also, it would be better
+    # to move the check out of this function, i.e. the caller should be
+    # responsible for the validation.
     resources_vars = cloud.make_deploy_resources_variables(
         to_provision, region, zones)
     config_dict = {}
@@ -753,7 +769,8 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
-    # Use a tmp file path to avoid incomplete YAML file being re-used in the future.
+    # Use a tmp file path to avoid incomplete YAML file being re-used in the
+    # future.
     tmp_yaml_path = yaml_path + '.tmp'
     tmp_yaml_path = fill_template(
         cluster_config_template,
@@ -763,6 +780,12 @@ def write_cluster_config(
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
+                # If the current code is run by controller, propagate the real
+                # calling user which should've been passed in as the
+                # SKYPILOT_USER env var (see spot-controller.yaml.j2).
+                'user': os.environ.get('SKYPILOT_USER', getpass.getuser()),
+
+                # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.
                 # See https://github.com/skypilot-org/skypilot/pull/742.
                 # Generate the name of the security group we're looking for.
@@ -1105,7 +1128,29 @@ def check_local_gpus() -> bool:
 def generate_cluster_name():
     # TODO: change this ID formatting to something more pleasant.
     # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
+    return f'sky-{uuid.uuid4().hex[:4]}-{get_cleaned_username()}'
+
+
+def get_cleaned_username() -> str:
+    """Cleans the current username to be used as part of a cluster name.
+
+    Clean up includes:
+     1. Making all characters lowercase
+     2. Removing any non-alphanumeric characters (excluding hyphens)
+     3. Removing any numbers and/or hyphens at the start of the username.
+     4. Removing any hyphens at the end of the username
+
+    e.g. 1SkY-PiLot2- becomes sky-pilot2.
+
+    Returns:
+      A cleaned username that will pass the regex in check_cluster_name_is_valid().
+    """
+    username = getpass.getuser()
+    username = username.lower()
+    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'^[0-9-]+', '', username)
+    username = re.sub(r'-$', '', username)
+    return username
 
 
 def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
@@ -1138,8 +1183,7 @@ def get_node_ips(cluster_yaml: str,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
-    """Returns the IPs of all nodes in the cluster."""
-
+    """Returns the IPs of all nodes in the cluster, with head node at front."""
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
     # won't work and we need to query the node IPs with gcloud as
@@ -1147,12 +1191,15 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        return _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
-
-    # Try optimize for the common case where we have 1 node.
-    if (expected_num_nodes == 1 and handle is not None and
-            handle.head_ip is not None):
-        return [handle.head_ip]
+        assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
+        try:
+            ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
+        except exceptions.CommandError as e:
+            raise exceptions.FetchIPError(
+                exceptions.FetchIPError.Reason.HEAD) from e
+        if len(ips) != tpu_utils.get_num_tpu_devices(handle.launched_resources):
+            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.HEAD)
+        return ips
 
     if get_internal_ips:
         with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
@@ -1182,6 +1229,7 @@ def get_node_ips(cluster_yaml: str,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE)
                 out = proc.stdout.decode()
+                break
             except subprocess.CalledProcessError as e:
                 if retry_cnt == worker_ip_max_attempts - 1:
                     raise exceptions.FetchIPError(
@@ -1220,40 +1268,61 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
-    # Excluding preempted VMs is safe as they are already terminated and
-    # do not charge.
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'"(labels.ray-cluster-name={cluster_name} AND '
-                 f'state!=PREEMPTED)" '
+                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
                  f'--zone={zone} --format=value\\(name\\)')
-    if not get_internal_ips:
-        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                     '(networkEndpoints.accessConfig.externalIp)"')
-    else:
-        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe $({query_cmd})'
-                     f' --zone {zone} --format="value[delimiter=\'\\n\']'
-                     '(networkEndpoints.ipAddress)"')
+    returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
+                                                      '/dev/null',
+                                                      shell=True,
+                                                      stream_logs=False,
+                                                      require_outputs=True)
+    subprocess_utils.handle_returncode(
+        returncode,
+        query_cmd,
+        'Failed to run gcloud to get TPU VM IDs.',
+        stderr=stdout + stderr)
+    if len(stdout) == 0:
+        logger.debug('No TPU VMs found with cluster name '
+                     f'{cluster_name} in zone {zone}.')
+    if len(stdout.splitlines()) > 1:
+        # Rare case, this could mean resource leakage. Hint user.
+        logger.warning('Found more than one TPU VM/Pod with the same cluster '
+                       f'name {cluster_name} in zone {zone}.')
 
-    rcode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                 '/dev/null',
-                                                 shell=True,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
-    if rcode != 0:
-        failure_massage = ('Failed to run gcloud to get TPU VM Pod IPs.\n'
-                           '**** STDOUT ****\n'
-                           '{stdout}\n'
-                           '**** STDERR ****\n'
-                           '{stderr}\n'
-                           '**** CMD ****\n'
-                           '{tpuvm_cmd}')
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                failure_massage.format(stdout=stdout,
-                                       stderr=stderr,
-                                       tpuvm_cmd=tpuvm_cmd))
-    all_ips = re.findall(IP_ADDR_REGEX, stdout)
+    all_ips = []
+    for tpu_id in stdout.splitlines():
+        tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
+                     f' --zone {zone} --format=json')
+        returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
+                                                          '/dev/null',
+                                                          shell=True,
+                                                          stream_logs=False,
+                                                          require_outputs=True)
+        subprocess_utils.handle_returncode(
+            returncode,
+            tpuvm_cmd,
+            'Failed to run gcloud tpu-vm describe.',
+            stderr=stdout + stderr)
+
+        tpuvm_json = json.loads(stdout)
+        if tpuvm_json['state'] != 'READY':
+            # May be a leaked preempted resource.
+            logger.warning(f'TPU VM {tpu_id} is not in READY state. '
+                           'Could be a garbage resource. Skipping...')
+            continue
+
+        if not get_internal_ips:
+            ips = [
+                endpoint['accessConfig']['externalIp']
+                for endpoint in tpuvm_json['networkEndpoints']
+            ]
+        else:
+            ips = [
+                endpoint['ipAddress']
+                for endpoint in tpuvm_json['networkEndpoints']
+            ]
+        all_ips.extend(ips)
+
     return all_ips
 
 
@@ -1264,8 +1333,6 @@ def get_head_ip(
     max_attempts: int = 1,
 ) -> str:
     """Returns the ip of the head node."""
-    assert not use_cached_head_ip or max_attempts == 1, (
-        'Cannot use cached_head_ip when max_attempts is not 1')
     if use_cached_head_ip:
         if handle.head_ip is None:
             # This happens for INIT clusters (e.g., exit 1 in setup).
@@ -1425,15 +1492,6 @@ def _process_cli_query(
     ]
 
 
-@contextlib.contextmanager
-def suppress_output():
-    """Suppress stdout and stderr."""
-    with open(os.devnull, 'w') as devnull:
-        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(
-                devnull):
-            yield
-
-
 def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     """Returns a set of Ray launch config hashes, one per node type."""
     # Use the cached Ray launch hashes if they exist.
@@ -1443,7 +1501,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_caches')
         return set(ray_launch_hashes)
-    with suppress_output():
+    with ux_utils.suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
@@ -1457,7 +1515,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         launch_config = copy.deepcopy(launch_config)
 
         launch_config.update(node_config['node_config'])
-        with suppress_output():
+        with ux_utils.suppress_output():
             current_hash = ray_util.hash_launch_conf(launch_config,
                                                      ray_config['auth'])
         launch_hashes.add(current_hash)
@@ -1599,8 +1657,50 @@ _QUERY_STATUS_FUNCS = {
 }
 
 
+def check_owner_identity(cluster_name: str) -> None:
+    """Check if the current user is the same as the user who created the cluster.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+    """
+    if env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.get():
+        return
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return
+    handle = record['handle']
+    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        return
+
+    cloud = handle.launched_resources.cloud
+    current_user_identity = cloud.get_current_user_identity()
+    owner_identity = record['owner']
+    if current_user_identity is None:
+        # Skip the check if the cloud does not support user identity.
+        return
+    # The user identity can be None, if the cluster is created by an older
+    # version of SkyPilot. In that case, we set the user identity to the
+    # current one.
+    # NOTE: a user who upgrades SkyPilot and switches to a new cloud identity
+    # immediately without `sky status --refresh` first, will cause a leakage
+    # of the existing cluster. We deem this an acceptable tradeoff mainly
+    # because multi-identity is not common (at least at the moment).
+    if owner_identity is None:
+        global_user_state.set_owner_identity_for_cluster(
+            cluster_name, current_user_identity)
+    elif owner_identity != current_user_identity:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterOwnerIdentityMismatchError(
+                f'{cluster_name!r} ({cloud}) is owned by account '
+                f'{owner_identity!r}, but the activated account '
+                f'is {current_user_identity!r}.')
+
+
 def _get_cluster_status_via_cloud_cli(
-    handle: 'backends.Backend.ResourceHandle'
+    handle: 'backends.CloudVmRayBackend.ResourceHandle'
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
@@ -1622,9 +1722,9 @@ def _update_cluster_status_no_lock(
     try:
         # TODO(zhwu): This function cannot distinguish transient network error
         # in ray's get IPs vs. ray runtime failing.
-        ips = get_node_ips(handle.cluster_yaml, handle.launched_nodes)
+        external_ips = handle.external_ips(use_cached_ips=False)
         # This happens to a stopped TPU VM as we use gcloud to query the IP.
-        if len(ips) == 0:
+        if external_ips is None or len(external_ips) == 0:
             raise exceptions.FetchIPError(
                 reason=exceptions.FetchIPError.Reason.HEAD)
         if handle.launched_nodes == 1:
@@ -1632,16 +1732,16 @@ def _update_cluster_status_no_lock(
             # case, since the get_node_ips() does not require ray cluster to be
             # running.
             ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml)
-            runner = command_runner.SSHCommandRunner(ips[0], **ssh_credentials)
+            runner = command_runner.SSHCommandRunner(external_ips[0],
+                                                     **ssh_credentials)
             returncode = runner.run('ray status', stream_logs=False)
             if returncode:
                 raise exceptions.FetchIPError(
                     reason=exceptions.FetchIPError.Reason.HEAD)
         # If we get node ips correctly, the cluster is UP. It is safe to
-        # set the status to UP, as the `get_node_ips` function uses ray
+        # set the status to UP, as the `handle.external_ips` function uses ray
         # to fetch IPs and starting ray is the final step of sky launch.
         record['status'] = global_user_state.ClusterStatus.UP
-        handle.head_ip = ips[0]
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
                                                 ready=True,
@@ -1682,7 +1782,9 @@ def _update_cluster_status_no_lock(
             backend = backends.CloudVmRayBackend()
             backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to reset autostop. Due to {type(e)}: {e}')
+            logger.debug(
+                f'Failed to reset autostop. Due to {common_utils.class_fullname(e.__class__)}: {e}'
+            )
         global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                      -1,
                                                      to_down=False)
@@ -1692,8 +1794,10 @@ def _update_cluster_status_no_lock(
         # that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
-        global_user_state.set_cluster_status(
-            cluster_name, global_user_state.ClusterStatus.INIT)
+        global_user_state.add_or_update_cluster(cluster_name,
+                                                handle,
+                                                ready=False,
+                                                is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
@@ -1705,15 +1809,31 @@ def _update_cluster_status_no_lock(
 def _update_cluster_status(
         cluster_name: str,
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
-    """Update the cluster status by checking ray cluster and real status from cloud.
+    """Update the cluster status.
+
+    The cluster status is updated by checking ray cluster and real status from cloud.
 
     The function will update the cached cluster status in the global state. For the
     design of the cluster status and transition, please refer to the
     sky/design_docs/cluster_status.md
 
+    Args:
+        cluster_name: The name of the cluster.
+        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
+            before updating the status.
+        need_owner_identity_check: Whether to check the owner identity before updating
+
     Returns:
-      If the cluster is terminated or does not exist, return None.
-      Otherwise returns the input record with status and ip potentially updated.
+        If the cluster is terminated or does not exist, return None.
+        Otherwise returns the input record with status and handle potentially updated.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+        same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+        identity.
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
+        fetched from the cloud provider.
     """
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
@@ -1732,6 +1852,55 @@ def _update_cluster_status(
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
+def _refresh_cluster_record(
+        cluster_name: str,
+        *,
+        force_refresh: bool = False,
+        acquire_per_cluster_status_lock: bool = True
+) -> Optional[Dict[str, Any]]:
+    """Refresh the cluster, and return the possibly updated record.
+
+    This function will also check the owner identity of the cluster, and raise
+    exceptions if the current user is not the same as the user who created the
+    cluster.
+
+    Args:
+        cluster_name: The name of the cluster.
+        force_refresh: refresh the cluster status as long as the cluster exists.
+        acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
+            before updating the status.
+
+    Returns:
+        If the cluster is terminated or does not exist, return None.
+        Otherwise returns the cluster record.
+
+    Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+        exceptions.ClusterStatusFetchingError: the cluster status cannot be
+          fetched from the cloud provider.
+    """
+
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    check_owner_identity(cluster_name)
+
+    handle = record['handle']
+    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+        use_spot = handle.launched_resources.use_spot
+        has_autostop = (
+            record['status'] != global_user_state.ClusterStatus.STOPPED and
+            record['autostop'] >= 0)
+        if force_refresh or has_autostop or use_spot:
+            record = _update_cluster_status(
+                cluster_name,
+                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
+    return record
+
+
 @timeline.event
 def refresh_cluster_status_handle(
     cluster_name: str,
@@ -1740,21 +1909,91 @@ def refresh_cluster_status_handle(
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
            Optional[backends.Backend.ResourceHandle]]:
-    record = global_user_state.get_cluster_from_name(cluster_name)
+    """Refresh the cluster, and return the possibly updated status and handle.
+
+    This is a wrapper of refresh_cluster_record, which returns the status and
+    handle of the cluster.
+    Please refer to the docstring of refresh_cluster_record for the details.
+    """
+    record = _refresh_cluster_record(
+        cluster_name,
+        force_refresh=force_refresh,
+        acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
     if record is None:
         return None, None
-
-    handle = record['handle']
-    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
-        if force_refresh or record['autostop'] >= 0:
-            # Refresh the status only when force_refresh is True or the cluster
-            # has autostopped turned on.
-            record = _update_cluster_status(
-                cluster_name,
-                acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
-            if record is None:
-                return None, None
     return record['status'], record['handle']
+
+
+def check_cluster_available(
+    cluster_name: str,
+    *,
+    operation: str,
+    check_cloud_vm_ray_backend: bool = True,
+) -> backends.Backend.ResourceHandle:
+    """Check if the cluster is available.
+
+    Raises:
+        ValueError: if the cluster does not exist.
+        exceptions.ClusterNotUpError: if the cluster is not UP.
+        exceptions.NotSupportedError: if the cluster is not based on
+          CloudVmRayBackend.
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
+          same as the user who created the cluster.
+        exceptions.CloudUserIdentityError: if we fail to get the current user
+          identity.
+    """
+    try:
+        cluster_status, handle = refresh_cluster_status_handle(cluster_name)
+    except exceptions.ClusterStatusFetchingError as e:
+        # Failed to refresh the cluster status is not fatal error as the callers
+        # can still be done by only using ssh, but the ssh can hang if the
+        # cluster is not up (e.g., autostopped).
+
+        # We do not catch the exception for cloud identity checking for now, in order
+        # to disable all operations on clusters created by another user identity.
+        # That will make the design simpler and easier to understand, but it might be
+        # useful to allow the user to use operations that only involve ssh (e.g., sky
+        # exec, sky logs, etc) even if the user is not the owner of the cluster.
+        ux_utils.console_newline()
+        logger.warning(
+            f'Failed to refresh the status for cluster {cluster_name!r}. It is not fatal, but '
+            f'{operation} might hang if the cluster is not up.\n'
+            f'Detailed reason: {e}')
+        record = global_user_state.get_cluster_from_name(cluster_name)
+        cluster_status, handle = record['status'], record['handle']
+
+    if handle is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'{colorama.Fore.YELLOW}Cluster {cluster_name!r} does not '
+                f'exist.{colorama.Style.RESET_ALL}')
+    backend = get_backend_from_handle(handle)
+    if check_cloud_vm_ray_backend and not isinstance(
+            backend, backends.CloudVmRayBackend):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
+                f'{cluster_name!r}. It is only supported by backend: '
+                f'{backends.CloudVmRayBackend.NAME}.'
+                f'{colorama.Style.RESET_ALL}')
+    if cluster_status != global_user_state.ClusterStatus.UP:
+        if onprem_utils.check_if_local_cloud(cluster_name):
+            raise exceptions.ClusterNotUpError(
+                constants.UNINITIALIZED_ONPREM_CLUSTER_MESSAGE.format(
+                    cluster_name))
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
+                f'{cluster_name!r} (status: {cluster_status.value}). It is only allowed for '
+                f'{global_user_state.ClusterStatus.UP.value} clusters.'
+                f'{colorama.Style.RESET_ALL}')
+
+    if handle.head_ip is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ClusterNotUpError(
+                f'Cluster {cluster_name!r} has been stopped or not properly '
+                'set up. Please re-launch it with `sky start`.')
+    return handle
 
 
 class CloudFilter(enum.Enum):
@@ -1824,8 +2063,15 @@ def get_clusters(
         total=len(records))
 
     def _refresh_cluster(cluster_name):
-        record = _update_cluster_status(cluster_name,
-                                        acquire_per_cluster_status_lock=True)
+        try:
+            record = _refresh_cluster_record(
+                cluster_name,
+                force_refresh=True,
+                acquire_per_cluster_status_lock=True)
+        except (exceptions.ClusterStatusFetchingError,
+                exceptions.ClusterOwnerIdentityMismatchError,
+                exceptions.ClusterStatusFetchingError) as e:
+            record = {'status': 'UNKNOWN', 'error': e}
         progress.update(task, advance=1)
         return record
 
@@ -1835,13 +2081,22 @@ def get_clusters(
             _refresh_cluster, cluster_names)
 
     # Show information for removed clusters.
-    autodown_clusters, remaining_clusters = [], []
+    kept_records = []
+    autodown_clusters, remaining_clusters, failed_clusters = [], [], []
     for i, record in enumerate(records):
         if updated_records[i] is None:
             if record['to_down']:
                 autodown_clusters.append(cluster_names[i])
             else:
                 remaining_clusters.append(cluster_names[i])
+        elif updated_records[i]['status'] == 'UNKNOWN':
+            failed_clusters.append(
+                (cluster_names[i], updated_records[i]['error']))
+            # Keep the original record if the status is unknown,
+            # so that the user can still see the cluster.
+            kept_records.append(record)
+        else:
+            kept_records.append(updated_records[i])
 
     yellow = colorama.Fore.YELLOW
     bright = colorama.Style.BRIGHT
@@ -1857,11 +2112,13 @@ def get_clusters(
         logger.warning(f'{yellow}Cluster{plural} terminated on '
                        f'the cloud: {reset}{bright}{cluster_str}{reset}')
 
-    # Filter out removed clusters.
-    updated_records = [
-        record for record in updated_records if record is not None
-    ]
-    return updated_records
+    if failed_clusters:
+        plural = 's' if len(failed_clusters) > 1 else ''
+        logger.warning(f'{yellow}Failed to refresh status for '
+                       f'{len(failed_clusters)} cluster{plural}:{reset}')
+        for cluster_name, e in failed_clusters:
+            logger.warning(f'  {bright}{cluster_name}{reset}: {e}')
+    return kept_records
 
 
 def get_backend_from_handle(
@@ -1962,7 +2219,7 @@ def check_cluster_name_not_reserved(
     return None.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
-        msg = (f'Cluster {cluster_name!r} is reserved for '
+        msg = (f'Cluster {cluster_name!r} is reserved for the '
                f'{SKY_RESERVED_CLUSTER_NAMES[cluster_name].lower()}.')
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
