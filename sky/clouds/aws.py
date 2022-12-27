@@ -19,16 +19,22 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-# This local file (under ~/.aws/) will be uploaded to remote nodes (any cloud), if:
+# This local file (under ~/.aws/) will be uploaded to remote nodes (any
+# cloud), if all of the following conditions hold:
 #   - the current user identity is not using AWS SSO
 #   - this file exists
 # It has the following purposes:
 #   - make all nodes (any cloud) able to access private S3 buckets
-#   - make some remote nodes able to launch new nodes on AWS (i.e., makes AWS head node able to launch AWS workers, or any-cloud spot controller able to launch spot clusters on AWS).
-# 
-# If we detect the current user identity is AWS SSO, we will not upload this file to any remote nodes (any cloud).
-# Instead a SkyPilot IAM role is assigned to both AWS head and workers. 
-# TODO(skypilot): This also means we leave open a bug for AWS SSO users that use multiple clouds. The non-AWS nodes will have neither the credential file nor the ability to understand AWS IAM.
+#   - make some remote nodes able to launch new nodes on AWS (i.e., makes
+#     AWS head node able to launch AWS workers, or any-cloud spot controller
+#     able to launch spot clusters on AWS).
+#
+# If we detect the current user identity is AWS SSO, we will not upload this
+# file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
+# assigned to both AWS head and workers.
+# TODO(skypilot): This also means we leave open a bug for AWS SSO users that
+# use multiple clouds. The non-AWS nodes will have neither the credential
+# file nor the ability to understand AWS IAM.
 _CREDENTIAL_FILES = [
     'credentials',
 ]

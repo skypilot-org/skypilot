@@ -243,6 +243,8 @@ def bootstrap_aws(config, skypilot_iam_role: bool = False):
 
     # The head node needs to have an IAM role that allows it to create further
     # EC2 instances.
+    # If skypilot_iam_role is True, we use our own IAM role for both head and
+    # workers.
     config = _configure_iam_role(config, skypilot_iam_role=skypilot_iam_role)
 
     # Configure SSH access, using an existing key pair if possible.
