@@ -1621,7 +1621,7 @@ def _query_status_gcp(
                                  terminate=True,
                                  purge=False,
                                  post_teardown_cleanup=False,
-                                 refresh_status=False)
+                                 refresh_cluster_status=False)
     return status_list
 
 

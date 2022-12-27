@@ -2655,18 +2655,21 @@ class CloudVmRayBackend(backends.Backend):
                          terminate: bool,
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
-                         refresh_status: bool = True) -> bool:
+                         refresh_cluster_status: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
         status lock already.
+
+        refresh_cluster_status is only used internally in the status refresh
+        process, and should not be set to False in other cases.
         """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
-        if refresh_status:
+        if refresh_cluster_status:
             prev_status, _ = backend_utils.refresh_cluster_status_handle(
                 handle.cluster_name, acquire_per_cluster_status_lock=False)
         else:
