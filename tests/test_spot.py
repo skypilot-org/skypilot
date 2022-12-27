@@ -169,4 +169,5 @@ class TestReservedClustersOperations:
         result = cli_runner.invoke(cli.cancel,
                                    [spot.SPOT_CONTROLLER_NAME, '-a'])
         assert result.exit_code == click.UsageError.exit_code
-        assert 'Cancelling jobs is not allowed' in str(result.output)
+        assert 'Cancelling the spot controller\'s jobs is not allowed.' in str(
+            result.output)
