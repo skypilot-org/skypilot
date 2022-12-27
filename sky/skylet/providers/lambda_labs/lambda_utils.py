@@ -3,11 +3,11 @@ import os
 import json
 import requests
 
-CREDENTIALS_PATH = '~/.lambda/lambda_keys'
+CREDENTIALS_PATH = '~/.lambda_labs/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 
 
-class LambdaError(Exception):
+class LambdaLabsError(Exception):
     __module__ = 'builtins'
 
 
@@ -41,7 +41,7 @@ class Metadata:
 
 
 def raise_lambda_error(response, error_status_codes):
-    """Raise LambdaError if appropriate.
+    """Raise LambdaLabsError if appropriate.
 
     response: Lambda Labs API response
     error_status_codes: if response.status_code is in error_status_codes, then
@@ -54,16 +54,16 @@ def raise_lambda_error(response, error_status_codes):
         resp_json = response.json()
         code = resp_json['error']['code']
         message = resp_json['error']['message']
-        raise LambdaError(f'{code}: {message}')
+        raise LambdaLabsError(f'{code}: {message}')
     elif status_code == 429:
         # https://docs.lambdalabs.com/cloud/rate-limiting/
-        raise LambdaError('Your API requests are being rate limited.')
+        raise LambdaLabsError('Your API requests are being rate limited.')
     else:
         # Error, but no json
-        raise LambdaError(f'Unexpected error. Status code: {status_code}')
+        raise LambdaLabsError(f'Unexpected error. Status code: {status_code}')
 
 
-class LambdaClient:
+class LambdaLabsClient:
     """Wrapper functions for Lambda Labs API."""
 
     def __init__(self):
@@ -96,9 +96,9 @@ class LambdaClient:
                 ['regions_with_capacity_available']
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
-            raise LambdaError(('instance-operations/launch/'
-                               'insufficient-capacity: Not enough capacity '
-                               'to fulfill launch request.'))
+            raise LambdaLabsError(('instance-operations/launch/'
+                                   'insufficient-capacity: Not enough '
+                                   'capacity to fulfill launch request.'))
 
         # Try to launch instance
         data = json.dumps({

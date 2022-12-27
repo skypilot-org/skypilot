@@ -5,13 +5,13 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, LambdaError
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaLabsClient, LambdaLabsError
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.lambda that grant Lambda Labs access.
+# Minimum set of files under ~/.lambda_labs that grant Lambda Labs access.
 _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
@@ -160,19 +160,19 @@ class Lambda(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
-            LambdaClient().ls()
-        except (AssertionError, LambdaError):
+            LambdaLabsClient().ls()
+        except (AssertionError, LambdaLabsError):
             return False, ('Failed to access Lambda Labs with credentials. '
                            'To configure credentials, go to:\n    '
                            '  https://cloud.lambdalabs.com/api-keys\n    '
                            'to generate API key and add the line\n    '
                            '  api_key=[YOUR API KEY]\n    '
-                           'to ~/.lambda/lambda_keys')
+                           'to ~/.lambda_labs/lambda_keys')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f'~/.lambda/{filename}': f'~/.lambda/{filename}'
+            f'~/.lambda_labs/{filename}': f'~/.lambda_labs/{filename}'
             for filename in _CREDENTIAL_FILES
         }
 

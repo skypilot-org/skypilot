@@ -746,7 +746,7 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'LambdaError:' in s.strip()
+            if 'LambdaLabsError:' in s.strip()
         ]
         if not errors:
             logger.info('====== stdout ======')

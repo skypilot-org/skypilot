@@ -6,11 +6,11 @@ from threading import RLock
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from sky.authentication import PRIVATE_SSH_KEY_PATH
-from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient, Metadata
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaLabsClient, Metadata
 from sky.utils import command_runner
 
 REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
-LOCAL_TAG_PATH_PREFIX = '~/.lambda/metadata'
+LOCAL_TAG_PATH_PREFIX = '~/.lambda_labs/metadata'
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class LambdaNodeProvider(NodeProvider):
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
-        self.lambda_client = LambdaClient()
+        self.lambda_client = LambdaLabsClient()
         # Only used for tags
         if _on_local():
             self.metadata = Metadata(LOCAL_TAG_PATH_PREFIX, cluster_name)

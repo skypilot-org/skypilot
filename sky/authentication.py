@@ -21,7 +21,7 @@ from sky.adaptors import gcp
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaLabsClient
 
 logger = sky_logging.init_logger(__name__)
 
@@ -306,7 +306,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
 
     # Ensure ssh key is registered with Lambda Labs
-    lambda_client = LambdaClient()
+    lambda_client = LambdaLabsClient()
     if lambda_client.ssh_key_name is None:
         public_key_path = os.path.expanduser(PUBLIC_SSH_KEY_PATH)
         with open(public_key_path, 'r') as f:

@@ -43,7 +43,7 @@ from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
-from sky.skylet.providers.lambda_labs.lambda_utils import LambdaClient
+from sky.skylet.providers.lambda_labs.lambda_utils import LambdaLabsClient
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -1663,7 +1663,7 @@ def _query_status_lambda(
         'active': global_user_state.ClusterStatus.UP,
     }
     # TODO(ewzeng): filter by hash_filter_string to be safe
-    vms = LambdaClient().ls().get('data', [])
+    vms = LambdaLabsClient().ls().get('data', [])
     for node in vms:
         if node['name'] == cluster:
             return [status_map[node['status']]]

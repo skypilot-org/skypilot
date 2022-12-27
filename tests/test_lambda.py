@@ -236,7 +236,6 @@ def test_huggingface():
 
 
 # ---------- Testing Autodowning ----------
-@pytest.mark.slow
 def test_autodown():
     name = _get_cluster_name()
     test = Test(

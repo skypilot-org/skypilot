@@ -710,12 +710,20 @@ def _launch_with_confirm(
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # Lambda Labs does not support autostop.
-    if task.resources and not down and idle_minutes_to_autostop is not None:
+    # Lambda Labs does not support autostop or multiple nodes.
+    # If task.resources is None, cannot be Lambda Labs.
+    if task.resources:
         for resource in task.resources:
             if resource.cloud.is_same_cloud(sky.Lambda()):
-                raise exceptions.NotSupportedError(
-                    ('Lambda Labs does not support stopping instances.'))
+                if not down and idle_minutes_to_autostop is not None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            ('Lambda Labs does not support stopping '
+                             'instances.'))
+                elif task.num_nodes > 1:
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.NotSupportedError(
+                            ('Lambda Labs does not support --num-nodes > 1.'))
 
     if node_type is not None:
         if maybe_status != global_user_state.ClusterStatus.UP:
