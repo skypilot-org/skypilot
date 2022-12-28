@@ -15,6 +15,8 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import clouds
 from sky.utils import db_utils
 from sky.utils import common_utils
@@ -82,14 +84,26 @@ class ClusterStatus(enum.Enum):
     # Initializing.  This means a backend.provision() call has started but has
     # not successfully finished. The cluster may be undergoing setup, may have
     # failed setup, may be live or down.
+
     INIT = 'INIT'
 
     # The cluster is recorded as up.  This means a backend.provision() has
     # previously succeeded.
     UP = 'UP'
 
-    # Stopped.  This means a `sky stop` call has previously succeeded.
+    # Stopped.  This means a `sky stop` _call has previously succeeded.
     STOPPED = 'STOPPED'
+
+    def colored_str(self):
+        color = STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+STATUS_TO_COLOR = {
+    ClusterStatus.INIT: colorama.Fore.BLUE,
+    ClusterStatus.UP: colorama.Fore.GREEN,
+    ClusterStatus.STOPPED: colorama.Fore.LIGHTWHITE_EX,
+}
 
 
 class StorageStatus(enum.Enum):

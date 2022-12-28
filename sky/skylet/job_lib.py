@@ -74,6 +74,7 @@ _CONN = _DB.conn
 
 class JobStatus(enum.Enum):
     """Job status"""
+
     # 3 in-flux states: each can transition to any state below it.
     # The `job_id` has been generated, but the generated ray program has
     # not started yet. skylet can transit the state from INIT to FAILED
@@ -115,8 +116,12 @@ class JobStatus(enum.Enum):
     def __lt__(self, other):
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
+    def colored_str(self):
+        color = JOB_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
-_JOB_STATUS_TO_COLOR = {
+
+JOB_STATUS_TO_COLOR = {
     JobStatus.INIT: colorama.Fore.BLUE,
     JobStatus.SETTING_UP: colorama.Fore.BLUE,
     JobStatus.PENDING: colorama.Fore.BLUE,
@@ -479,11 +484,6 @@ def is_cluster_idle() -> bool:
         return count == 0
 
 
-def _colored_status(status: JobStatus):
-    color = _JOB_STATUS_TO_COLOR[status]
-    return f'{color}{status.value}{colorama.Style.RESET_ALL}'
-
-
 def format_job_queue(jobs: List[Dict[str, Any]]):
     """Format the job queue for display.
 
@@ -505,7 +505,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
                                              job['end_at'],
                                              absolute=True),
             job['resources'],
-            _colored_status(job['status']),
+            job['status'].colored_str(),
             job['log_path'],
         ])
     return job_table

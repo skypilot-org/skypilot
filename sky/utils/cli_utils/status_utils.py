@@ -4,19 +4,12 @@ import click
 import colorama
 
 from sky import backends
-from sky import global_user_state
 from sky import spot
 from sky.backends import backend_utils
 from sky.utils import common_utils
 from sky.utils import log_utils
 
 _COMMAND_TRUNC_LENGTH = 25
-
-_STATUS_TO_COLOR = {
-    global_user_state.ClusterStatus.INIT: colorama.Fore.BLUE,
-    global_user_state.ClusterStatus.UP: colorama.Fore.GREEN,
-    global_user_state.ClusterStatus.STOPPED: colorama.Fore.RED,
-}
 
 
 def _truncate_long_string(s: str, max_length: int = 35) -> str:
@@ -227,8 +220,7 @@ _get_command = (lambda cluster_status: cluster_status['last_use'])
 
 def _get_status(cluster_status):
     status = cluster_status['status']
-    color = _STATUS_TO_COLOR[status]
-    return f'{color}{status.value}{colorama.Style.RESET_ALL}'
+    return status.colored_str()
 
 
 def _get_resources(cluster_status):
