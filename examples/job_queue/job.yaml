@@ -8,6 +8,9 @@
 
 name: job
 
+resources:
+  accelerators: K80:0.5
+
 setup: |
   echo "running setup"
 

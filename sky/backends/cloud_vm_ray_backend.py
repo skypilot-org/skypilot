@@ -2283,8 +2283,9 @@ class CloudVmRayBackend(backends.Backend):
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
 
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
-        mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && touch {remote_log_path}'
-                      '&& echo START > {remote_log_path} 2>&1')
+        mkdir_code = (
+            f'{cd} && mkdir -p {remote_log_dir} && touch {remote_log_path}'
+            '&& echo START > {remote_log_path} 2>&1')
         code += '&&' + mkdir_code
 
         # instead of directly running job_submit_cmd, queue it up instead

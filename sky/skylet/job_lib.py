@@ -241,7 +241,8 @@ class JobScheduler:
 
     def _run_job(self, job_id: int, run_cmd: str):
         _CURSOR.execute(
-            f'UPDATE pending_jobs SET submit={int(time.time())} WHERE job_id={job_id!r}')
+            f'UPDATE pending_jobs SET submit={int(time.time())} WHERE job_id={job_id!r}'
+        )
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
@@ -267,7 +268,7 @@ class FIFOScheduler(JobScheduler):
         job_owner = getpass.getuser()
         jobs = list(self._get_jobs())
         if len(jobs) > 0:
-            update_status(job_owner, end_job = jobs[-1][0])
+            update_status(job_owner, end_job=jobs[-1][0])
         for job_id, run_cmd, submit, _ in jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = self._get_job_status(job_id)
@@ -416,10 +417,14 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 
 
 def _get_pending_jobs():
-    rows = _CURSOR.execute('SELECT job_id, created_time, submit FROM pending_jobs')
+    rows = _CURSOR.execute(
+        'SELECT job_id, created_time, submit FROM pending_jobs')
     rows = list(rows)
     return {
-        job_id: {'created_time': created_time, 'submit': submit} for job_id, created_time, submit in rows
+        job_id: {
+            'created_time': created_time,
+            'submit': submit
+        } for job_id, created_time, submit in rows
     }
 
 
@@ -466,7 +471,8 @@ def update_job_status(job_owner: str,
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
             # Give job 5 seconds between being submit and showing up on ray job client
-            if pending_jobs[job_id]['submit'] > 0 and pending_jobs[job_id]['submit'] < time.time() - 5:
+            if pending_jobs[job_id]['submit'] > 0 and pending_jobs[job_id][
+                    'submit'] < time.time() - 5:
                 continue
             if pending_jobs[job_id]['created_time'] < psutil.boot_time():
                 job_statuses[i] = JobStatus.FAILED
@@ -480,7 +486,7 @@ def update_job_status(job_owner: str,
         # Per-job status lock is required because between the job status
         # query and the job status update, the job status in the databse
         # can be modified by the generated ray program.
-        if end_job != -1 and job_id > end_job: 
+        if end_job != -1 and job_id > end_job:
             # Do not update jobs past current one
             continue
         # TODO(mraheja): remove pylint disabling when filelock version
@@ -532,7 +538,9 @@ def fail_all_jobs_in_progress() -> None:
     _CONN.commit()
 
 
-def update_status(job_owner: str, submitted_gap_sec: int = 0, end_job: int = -1) -> None:
+def update_status(job_owner: str,
+                  submitted_gap_sec: int = 0,
+                  end_job: int = -1) -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
     # NOTE: there might be a INIT job in the database set to FAILED by this
@@ -544,7 +552,7 @@ def update_status(job_owner: str, submitted_gap_sec: int = 0, end_job: int = -1)
                                  submitted_gap_sec=submitted_gap_sec)
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
-    update_job_status(job_owner, nonterminal_job_ids, end_job = end_job)
+    update_job_status(job_owner, nonterminal_job_ids, end_job=end_job)
 
 
 def is_cluster_idle() -> bool:

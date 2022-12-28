@@ -425,7 +425,7 @@ def test_job_queue():
     test = Test(
         'job_queue',
         [
-            f'sky launch -y -c {name} examples/job_queue/cluster.yaml',
+            f'sky launch -y -c {name} examples/job_queue/cluster.yaml --cloud gcp',
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
             f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
@@ -451,7 +451,7 @@ def test_n_node_job_queue():
     test = Test(
         'job_queue_multinode',
         [
-            f'sky launch -y -c {name} examples/job_queue/cluster_multinode.yaml',
+            f'sky launch -y -c {name} examples/job_queue/cluster_multinode.yaml --cloud gcp',
             f'sky exec {name} -n {name}-1 -d examples/job_queue/job_multinode.yaml',
             f'sky exec {name} -n {name}-2 -d examples/job_queue/job_multinode.yaml',
             f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
@@ -488,7 +488,7 @@ def test_large_job_queue():
         'large_job_queue',
         [
             f'sky launch -y -c {name}',
-            f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
+            f'for i in `seq 1 75`; do sky exec {name} -n {name}-$i -d "echo $i; sleep 100000000"; done',
             f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 30',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.

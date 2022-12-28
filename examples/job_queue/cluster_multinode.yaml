@@ -8,6 +8,6 @@
 #   sky exec mjq job.yaml
 
 resources:
-  cloud: aws
+  cloud: gcp
 
 num_nodes: 2
