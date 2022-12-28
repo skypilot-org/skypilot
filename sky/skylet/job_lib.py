@@ -241,7 +241,7 @@ class JobScheduler:
 
     def _run_job(self, job_id: int, run_cmd: str):
         _CURSOR.execute(
-            f'UPDATE pending_jobs SET submit=1 WHERE job_id={job_id!r}')
+            f'UPDATE pending_jobs SET submit={int(time.time())} WHERE job_id={job_id!r}')
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
@@ -465,7 +465,8 @@ def update_job_status(job_owner: str,
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
         if job_id in pending_jobs:
-            if pending_jobs[job_id]['submit']:
+            # Give job 5 seconds between being submit and showing up on ray job client
+            if pending_jobs[job_id]['submit'] > 0 and pending_jobs[job_id]['submit'] < time.time() - 5:
                 continue
             if pending_jobs[job_id]['created_time'] < psutil.boot_time():
                 job_statuses[i] = JobStatus.FAILED
