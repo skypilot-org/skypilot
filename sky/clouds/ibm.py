@@ -12,7 +12,6 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-# CREDENTIAL_FILE = os.path.join(os.path.expanduser('~'),'.ibm','credentials.yaml')
 from sky.adaptors.ibm import CREDENTIAL_FILE
 
 @clouds.CLOUD_REGISTRY.register
@@ -316,11 +315,10 @@ class IBM(clouds.Cloud):
             return False, f"Missing iam_api_key in {CREDENTIAL_FILE}"
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        """Returns the files necessary to access this cloud.
-
-        Returns a dictionary that will be added to a task's file mounts.
+        """Returns a {remote:local} credential path mapping written to the cluster's file_mounts segment
+             of its yaml file (e.g., ibm-ray.yml.j2)
         """
-        return {CREDENTIAL_FILE: CREDENTIAL_FILE}
+        return {"~/.ibm/credentials.yaml":CREDENTIAL_FILE}
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""

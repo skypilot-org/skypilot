@@ -312,6 +312,7 @@ def setup_azure_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
     return config
 
+
 def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
 
@@ -336,7 +337,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     return config
 
 
-def setup_ibm_authentication(config): # TODO IBM-TODO
+def setup_ibm_authentication(config):
     """ registers keys if they do not exist in sky folder and updates config file.
     
     keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub' 
@@ -348,7 +349,7 @@ def setup_ibm_authentication(config): # TODO IBM-TODO
         return f"skypilot-key-{str(uuid.uuid4())[:SUFFIX_LEN]}"
 
     client = ibm.client(region=config['provider']['region'])
-    resource_group_id = config['available_node_types']['ray_head_default']['node_config']['resource_group_id']
+    resource_group_id = config['provider']['resource_group_id']
     
     private_key_path, public_key_path = get_or_generate_keys()
     with open(os.path.abspath(os.path.expanduser(public_key_path)), 'r') as file:
