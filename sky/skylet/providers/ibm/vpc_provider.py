@@ -1,13 +1,19 @@
 import json
 import uuid
+import copy
 from sky.adaptors import ibm
 from ibm_cloud_sdk_core import ApiException
-from sky.skylet.providers.ibm.utils import get_logger
+from sky.skylet.providers.ibm.utils import get_logger, VPC_CACHE_SEGMENT
+from pprint import pprint
 
-VPC_CACHE_SEGMENT = 'vpc'
-logger = get_logger()
+logger = get_logger("vpc_provider_")
+REQUIRED_RULES = {'outbound_tcp_all': 'selected security group is missing rule permitting outbound TCP access\n', 'outbound_udp_all': 'selected security group is missing rule permitting outbound UDP access\n', 'inbound_tcp_sg': 'selected security group is missing rule permitting inbound tcp traffic inside selected security group\n',
+                'inbound_tcp_22': 'selected security group is missing rule permitting inbound traffic to tcp port 22 required for ssh\n'}
+INSECURE_RULES = {'inbound_tcp_6379': 'selected security group is missing rule permitting inbound traffic to tcp port 6379 required for Redis\n', 'inbound_tcp_8265': 'selected security group is missing rule permitting inbound traffic to tcp port 8265 required to access Ray Dashboard\n'}
+REQUIRED_RULES.update(INSECURE_RULES)
 
 class IBMVPCProvider():
+
     def __init__(self, resource_group_id ,region, zone, cache_path, cluster_name):
         self.vpc_client = ibm.client(region=region)
         self.resource_group_id = resource_group_id
@@ -15,42 +21,57 @@ class IBMVPCProvider():
         self.zone = zone
         self.cluster_name = cluster_name
         self.cache_path = cache_path
-
     
-    def create_or_fetch_vpc_tags(self):
+    def create_or_fetch_vpc(self):
         reuse_vpc = False
         vpc_fields = {'vpc_id','subnet_id','security_group_id','region','zone'}
-        cluster_vpc_tags = {}
+        cached_cluster_vpc_tags = {}
 
-        if self.tags_file.is_file():
+        if self.cache_path.is_file():
             all_tags = json.loads(self.cache_path.read_text()) # tags of all clusters
-            
+
             if self.cluster_name in all_tags and VPC_CACHE_SEGMENT in all_tags[self.cluster_name]: 
-                    cluster_vpc_tags = all_tags[self.cluster_name][VPC_CACHE_SEGMENT] 
-                    if vpc_fields.issubset(set(cluster_vpc_tags.keys())) and cluster_vpc_tags.get('region')==self.region:
+                    cached_cluster_vpc_tags = all_tags[self.cluster_name][VPC_CACHE_SEGMENT] # tags for cached
+                    if vpc_fields.issubset(set(cached_cluster_vpc_tags.keys())) and cached_cluster_vpc_tags.get('region')==self.region:
                         reuse_vpc = True                          
             else:
                 all_tags.update({self.cluster_name:{VPC_CACHE_SEGMENT:{}}})
 
+        # reuses most current vpc found in local cache if its components pass the necessary verifications.   
         if reuse_vpc:
-            """
-            if zone is different delete subnets and create a new subnet in that zone. 
-            verify vpc components are valid, unless we just created them (if zone was different).
-            if valid, return vpc_fields values, otherwise the module will continue to create a new vpc. 
-            """
+            cached_vpc_data = self.get_vpc_data(cached_cluster_vpc_tags['vpc_id'], self.region) # cached vpc is in the same region as self.region, otherwise it wouldn't get reused
+            if cached_vpc_data and cached_vpc_data['status']=='available':  # vpc is up
 
-            # all_tags[self.cluster_name][VPC_CACHE_SEGMENT]=cluster_vpc_tags
-            # return vpc_tags
-            pass
+                # verify subnet and gateway
+                subnets = self.get_vpc_subnets(cached_vpc_data, self.region) # cached vpc is in the same region as self.region, otherwise it wouldn't get reused
+                subnet_in_zone = next((subnet for subnet in subnets if subnet['zone']['name'] == self.zone), None)
+                if subnet_in_zone:
+                    subnet_id = subnet_in_zone['id']
+                    public_gateway = subnet_in_zone.get('public_gateway')
+                    if not public_gateway:
+                        public_gateway = self.create_public_gateway(vpc_id=cached_cluster_vpc_tags['vpc_id'], zone=self.zone, subnet_data=subnet_in_zone)
+                else: # create new subnet and gateway 
+                    subnet_data = self.create_subnet(cached_cluster_vpc_tags['vpc_id'], self.region)
+                    subnet_id = subnet_data['id']
+                    public_gateway = self.create_public_gateway(vpc_id=cached_cluster_vpc_tags['vpc_id'] ,zone=self.zone, subnet_data=subnet_data)
+
+                # add missing security group rules if missing 
+                security_group = cached_vpc_data.get('default_security_group')
+                if security_group:
+                    sg_id = security_group['id']
+                    self.add_missing_sg_rules(sg_id)
+
+                    # managed to reuse found VPC
+                    logger.info(f"Reusing VPC {cached_cluster_vpc_tags['vpc_id']} named: {cached_vpc_data['name']}")
+                    return {"vpc_id":cached_cluster_vpc_tags['vpc_id'], "subnet_id":subnet_id,"security_group_id":sg_id, "region":self.region, "zone":self.zone} 
         else:
-            self.delete_vpc(cluster_vpc_tags.get('vpc_id'),cluster_vpc_tags.get('region'))
+            self.delete_vpc(cached_cluster_vpc_tags.get('vpc_id'),cached_cluster_vpc_tags.get('region'))
         vpc_tags = self.create_vpc()
-        all_tags[self.cluster_name][VPC_CACHE_SEGMENT]=vpc_tags  
         return vpc_tags
 
     def create_vpc(self):
         vpc_data = self.vpc_client.create_vpc(address_prefix_management='auto', classic_access=False,
-                                                name="test3", resource_group={'id':self.resource_group_id}).get_result()
+                                                name=f"sky-vpc-{self.cluster_name}-{str(uuid.uuid4())[:5]}", resource_group={'id':self.resource_group_id}).get_result()
         subnet_data = self.create_subnet(vpc_data['id'], self.zone)
         self.create_public_gateway(vpc_data['id'], self.zone, subnet_data)
         sg_id = self.create_sg_rules(vpc_data)
@@ -60,9 +81,9 @@ class IBMVPCProvider():
     def create_subnet(self, vpc_id, zone_name):
         ipv4_cidr_block = None
         subnet_name = f"sky-subnet-{self.cluster_name}-{str(uuid.uuid4())[:5]}"
-        res = self.vpc_client.list_vpc_address_prefixes(vpc_id).result
-        address_prefixes = res['address_prefixes']
+        res = self.vpc_client.list_vpc_address_prefixes(vpc_id).get_result()
 
+        address_prefixes = res['address_prefixes']
         # searching for the CIDR block (internal ip range) matching the specified zone of a VPC (whose region has already been set) 
         for address_prefix in address_prefixes:
             if address_prefix['zone']['name'] == zone_name:
@@ -78,7 +99,7 @@ class IBMVPCProvider():
         subnet_prototype['ipv4_cidr_block'] = ipv4_cidr_block
 
         subnet_data = self.vpc_client.create_subnet(
-            subnet_prototype).result
+            subnet_prototype).get_result()
         return subnet_data
         
 
@@ -93,46 +114,13 @@ class IBMVPCProvider():
             **gateway_prototype).get_result()
         gateway_id = gateway_data['id']
 
-        print(
-            f"\033[92mVPC public gateway {gateway_prototype['name']} been created\033[0m")
         self.vpc_client.set_subnet_public_gateway(subnet_data['id'], {'id': gateway_id})
         return gateway_id            
 
     def create_sg_rules(self,vpc_data):
     
-        def _build_security_group_rule_prototype_model(missing_rule, sg_id=None):
-            direction, protocol, port = missing_rule.split('_')
-            remote = {"cidr_block": "0.0.0.0/0"}
-
-            try: # port number was specified
-                port = int(port)
-                port_min = port
-                port_max = port
-            except:
-                port_min = 1
-                port_max = 65535
-
-                # only valid if security group already exists
-                if port == 'sg':
-                    if not sg_id:
-                        return None
-                    remote = {'id': sg_id}
-
-            return {
-                'direction': direction,
-                'ip_version': 'ipv4',
-                'protocol': protocol,
-                'remote': remote,
-                'port_min': port_min,
-                'port_max': port_max
-            }
         sg_id = vpc_data['default_security_group']['id']
         sg_name = f'{self.cluster_name}-{vpc_data["name"]}-sg'
-
-        REQUIRED_RULES = {'outbound_tcp_all': 'selected security group is missing rule permitting outbound TCP access\n', 'outbound_udp_all': 'selected security group is missing rule permitting outbound UDP access\n', 'inbound_tcp_sg': 'selected security group is missing rule permitting inbound tcp traffic inside selected security group\n',
-                        'inbound_tcp_22': 'selected security group is missing rule permitting inbound traffic to tcp port 22 required for ssh\n'}
-        INSECURE_RULES = {'inbound_tcp_6379': 'selected security group is missing rule permitting inbound traffic to tcp port 6379 required for Redis\n', 'inbound_tcp_8265': 'selected security group is missing rule permitting inbound traffic to tcp port 8265 required to access Ray Dashboard\n'}
-        REQUIRED_RULES.update(INSECURE_RULES)
 
         # update sg name
         self.vpc_client.update_security_group(
@@ -154,7 +142,6 @@ class IBMVPCProvider():
 
         return sg_id   
 
-
     def get_vpc_data(self, vpc_id, old_region):
         """returns vpc data if exists, else None"""
         if not vpc_id: return None
@@ -167,22 +154,130 @@ class IBMVPCProvider():
                 logger.debug("VPC doesn't exist.")
                 return None
             else: raise 
+    
+    def get_vpc_subnets(self, vpc_data, region, field = ""):
+        if not vpc_data:
+            return None
+        tmp_vpc_client = ibm.client(region=region)
+        subnets_attached_to_routing_table = tmp_vpc_client.list_subnets(routing_table_id = vpc_data['default_routing_table']['id']).get_result()['subnets']
+        if field:
+            return [subnet[field] for subnet in subnets_attached_to_routing_table]
+        else:
+            return subnets_attached_to_routing_table
 
     def delete_vpc(self, vpc_id, old_region):
         logger.debug(f"Deleting vpc:{vpc_id}")
+        tmp_vpc_client = ibm.client(region=old_region)
         vpc_data = self.get_vpc_data(vpc_id, old_region)
         if not vpc_data:
             return None
-        self.delete_subnets(vpc_id, old_region)
-        tmp_vpc_client = ibm.client(region=old_region)
+        self.delete_subnets(tmp_vpc_client, vpc_data, old_region)
+        self.delete_gateways(tmp_vpc_client,vpc_id)
         # at this point vpc was already verified to be existing, thus no relevant exception to catch when deleting.  
         tmp_vpc_client.delete_vpc(vpc_id)
 
-    def delete_subnets(self, vpc_id, old_region):
-        tmp_vpc_client = ibm.client(region=old_region)
-        vpc_data = self.get_vpc_data(vpc_id, old_region)
+    def delete_subnets(self, vpc_client, vpc_data, region):
+        for subnet_id in self.get_vpc_subnets(vpc_data, region, field="id"):
+            vpc_client.delete_subnet(subnet_id).get_result() # get_result() used for synchronization
 
-        subnets_attached_to_routing_table = tmp_vpc_client.list_subnets(routing_table_id = vpc_data['default_routing_table']['id']).get_result()['subnets']
-        subnets_ids = [subnet['id'] for subnet in subnets_attached_to_routing_table]
-        for id in subnets_ids:
-            tmp_vpc_client.delete_subnet(id)
+    def delete_gateways(self, vpc_client, vpc_id):
+        gateways = vpc_client.list_public_gateways(resource_group_id=self.resource_group_id).get_result()['public_gateways']
+        gateways_ids_of_vpc = [gateway['id'] for gateway in gateways if gateway['vpc']['id']== vpc_id]
+        for gateway_id in gateways_ids_of_vpc:
+            vpc_client.delete_public_gateway(gateway_id).get_result() # get_result() used for synchronization
+
+    def add_missing_sg_rules(self, sec_group_id):
+        missing_rules = self.get_unsatisfied_security_group_rules(sec_group_id)
+
+        if missing_rules:
+            for val in missing_rules.values():
+                logger.debug(f'missing {val}')
+            for missing_rule in missing_rules.keys():
+                sg_rule_prototype = _build_security_group_rule_prototype_model(missing_rule, sec_group_id)
+                self.vpc_client.create_security_group_rule(sec_group_id, sg_rule_prototype).get_result()
+                
+    def get_unsatisfied_security_group_rules(self,sg_id):
+        """
+        returns unsatisfied security group rules.
+        """
+
+        unsatisfied_rules = copy.deepcopy(REQUIRED_RULES)
+        sg = self.vpc_client.get_security_group(sg_id).get_result()
+
+        for rule in sg['rules']:
+
+            # check outbound rules that are not associated with a specific IP address range 
+            if rule['direction'] == 'outbound' and rule['remote'] == {'cidr_block': '0.0.0.0/0'}:
+                if rule['protocol'] == 'all':
+                    # outbound is fine!
+                    unsatisfied_rules.pop('outbound_tcp_all', None)
+                    unsatisfied_rules.pop('outbound_udp_all', None)
+                elif rule['protocol'] == 'tcp':
+                    unsatisfied_rules.pop('outbound_tcp_all', None)
+                elif rule['protocol'] == 'udp':
+                    unsatisfied_rules.pop('outbound_udp_all', None)
+            
+            # Check inbound rules 
+            elif rule['direction'] == 'inbound':
+                # check rules that are not associated with a specific IP address range
+                if rule['remote'] == {'cidr_block': '0.0.0.0/0'}:
+                    # we interested only in all or tcp protocols
+                    if rule['protocol'] == 'all':
+                        # there a rule permitting all traffic
+                        unsatisfied_rules.pop('inbound_tcp_sg', None)
+                        unsatisfied_rules.pop('inbound_tcp_22', None)
+                        unsatisfied_rules.pop('inbound_tcp_6379', None)
+                        unsatisfied_rules.pop('inbound_tcp_8265', None)
+
+                    elif rule['protocol'] == 'tcp':
+                        if rule['port_min'] == 1 and rule['port_max'] == 65535:
+                            # all ports are open
+                            unsatisfied_rules.pop('inbound_tcp_sg', None)
+                            unsatisfied_rules.pop('inbound_tcp_22', None)
+                            unsatisfied_rules.pop('inbound_tcp_6379', None)
+                            unsatisfied_rules.pop('inbound_tcp_8265', None)
+                        else:
+                            port_min = rule['port_min']
+                            port_max = rule['port_max']
+                            if port_min <= 22 and port_max >= 22:
+                                unsatisfied_rules.pop('inbound_tcp_22', None)
+                            elif port_min <= 6379 and port_max >= 6379:
+                                unsatisfied_rules.pop('inbound_tcp_6379', None)
+                            elif port_min <= 8265 and port_max >= 8265:
+                                unsatisfied_rules.pop('inbound_tcp_8265', None)
+
+                # rule regards private traffic within the VSIs associated with the security group  
+                elif rule['remote'].get('id') == sg['id']:
+                    # validate that inbound traffic inside group available
+                    if rule['protocol'] == 'all' or rule['protocol'] == 'tcp':
+                        unsatisfied_rules.pop('inbound_tcp_sg', None)
+
+        return unsatisfied_rules  
+
+
+def _build_security_group_rule_prototype_model(missing_rule, sg_id=None):
+    direction, protocol, port = missing_rule.split('_')
+    remote = {"cidr_block": "0.0.0.0/0"}
+
+    try: # port number was specified
+        port = int(port)
+        port_min = port
+        port_max = port
+    except:
+        port_min = 1
+        port_max = 65535
+
+        # only valid if security group already exists
+        if port == 'sg':
+            if not sg_id:
+                return None
+            remote = {'id': sg_id}
+
+    return {
+        'direction': direction,
+        'ip_version': 'ipv4',
+        'protocol': protocol,
+        'remote': remote,
+        'port_min': port_min,
+        'port_max': port_max
+    }    
