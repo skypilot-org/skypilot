@@ -3,7 +3,6 @@
 from multiprocessing import pool
 import os
 import subprocess
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -95,7 +94,7 @@ def _group_files_by_dir(
     Args:
         source_list: List[str]; List of paths to group
     """
-    grouped_files = {}
+    grouped_files: Dict[str, List[str]] = {}
     dirs = []
     for source in source_list:
         source = os.path.abspath(os.path.expanduser(source))
@@ -110,7 +109,7 @@ def _group_files_by_dir(
     return grouped_files, dirs
 
 
-def parallel_upload(source_path_list: List[Path],
+def parallel_upload(source_path_list: List[str],
                     filesync_command_generator: Callable[[str, List[str]], str],
                     dirsync_command_generator: Callable[[str, str], str],
                     bucket_name: str,
@@ -171,6 +170,7 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                           stdout=subprocess.DEVNULL,
                           shell=True) as process:
         stderr = []
+        assert process.stderr is not None  # for mypy
         while True:
             line = process.stderr.readline()
             if not line:
@@ -187,9 +187,9 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                         'the bucket is public.')
         returncode = process.wait()
         if returncode != 0:
-            stderr = '\n'.join(stderr)
+            stderr_str = '\n'.join(stderr)
             with ux_utils.print_exception_no_traceback():
-                logger.error(stderr)
+                logger.error(stderr_str)
                 raise exceptions.StorageUploadError(
                     f'Upload to bucket failed for store {bucket_name}. '
                     'Please check the logs.')

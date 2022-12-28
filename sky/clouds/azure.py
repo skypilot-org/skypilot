@@ -6,12 +6,17 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
+from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+
+logger = sky_logging.init_logger(__name__)
 
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
@@ -20,6 +25,8 @@ _CREDENTIAL_FILES = [
     'config',
     'msal_token_cache.json',
 ]
+
+_MAX_IDENTITY_FETCH_RETRY = 10
 
 
 def _run_output(cmd):
@@ -139,7 +146,7 @@ class Azure(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         del accelerators  # unused
 
@@ -167,7 +174,7 @@ class Azure(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='azure')
 
@@ -178,15 +185,13 @@ class Azure(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
 
         region_name = region.name
-        # Azure does not support specific zones.
-        zones = []
 
         r = resources
         assert not r.use_spot, \
@@ -206,7 +211,8 @@ class Azure(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
-            'zones': zones,
+            # Azure does not support specific zones.
+            'zones': None,
             **image_config
         }
 
@@ -269,22 +275,20 @@ class Azure(clouds.Cloud):
                     f'{azure_token_cache_file} does not exist.' + help_str)
 
         try:
-            output = _run_output('az account show --output=json')
+            _run_output('az --version')
         except subprocess.CalledProcessError:
             return False, (
+                # TODO(zhwu): Change the installation hint to from PyPI.
                 'Azure CLI returned error. Run the following commands:'
-                '\n      $ pip install skypilot[azure]  # if installed from '
-                'PyPI'
-                '\n    Or:'
-                '\n      $ pip install .[azure]  # if installed from source'
+                '\n      $ pip install skypilot[azure]'
                 '\n    Credentials may also need to be set.' + help_str)
-        # If Azure is properly logged in, this will return something like:
-        #   {"id": ..., "user": ...}
-        # and if not, it will return:
-        #   Please run 'az login' to setup account.
-        if output.startswith('{'):
-            return True, None
-        return False, 'Azure credentials not set.' + help_str
+        # If Azure is properly logged in, this will return the account email
+        # address + subscription ID.
+        try:
+            self.get_current_user_identity()
+        except exceptions.CloudUserIdentityError:
+            return False, 'Azure credential is not set.' + help_str
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a dict of credential file paths to mount paths."""
@@ -304,6 +308,42 @@ class Azure(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'azure')
+
+    def get_current_user_identity(self) -> Optional[str]:
+        """Returns the cloud user identity."""
+        # This returns the user's email address + [subscription_id].
+        retry_cnt = 0
+        while True:
+            retry_cnt += 1
+            try:
+                import knack  # pylint: disable=import-outside-toplevel
+                account_email = azure.get_current_account_user()
+                break
+            except (FileNotFoundError, knack.util.CLIError) as e:
+                error = exceptions.CloudUserIdentityError(
+                    'Failed to get activated Azure account.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                if retry_cnt <= _MAX_IDENTITY_FETCH_RETRY:
+                    logger.debug(f'{error}.\nRetrying...')
+                    continue
+                with ux_utils.print_exception_no_traceback():
+                    raise error from None
+            except Exception as e:  # pylint: disable=broad-except
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to get Azure user identity with unknown '
+                        f'exception.\n'
+                        '  Reason: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}'
+                    ) from e
+        try:
+            project_id = self.get_project_id()
+        except (ModuleNotFoundError, RuntimeError) as e:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    'Failed to get Azure project ID.') from e
+        return f'{account_email} [subscription_id={project_id}]'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

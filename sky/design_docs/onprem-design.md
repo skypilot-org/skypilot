@@ -15,7 +15,7 @@
 
 ## Registering clusters as a regular user
 - Registering clusters can be done in two steps:
-  - Creating a cluster config in `~/.sky/local/`. This cluster is uninitialized, as SkyPilot has not registered the cluster into it's database.
+  - Creating a cluster config in `~/.sky/local/`. This cluster is uninitialized, as SkyPilot has not registered the cluster into its database.
   - Running `sky launch -c [LOCAL_CLUSTER_NAME] ''` for the first time. This will intialize the cluster and register it into SkyPilot's database.
 - `sky status` shows both initialized and uninitialized local clusters.
 
