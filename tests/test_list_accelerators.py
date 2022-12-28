@@ -21,8 +21,11 @@ def test_list_accelerators_name_filter():
     result = sky.list_accelerators(gpus_only=False, name_filter='V100')
     assert sorted(result.keys()) == ['V100', 'V100-32GB'], result
 
+
 def test_list_accelerators_region_filter():
-    result = sky.list_accelerators(gpus_only=False, clouds="aws", region_filter='us-west-1')
+    result = sky.list_accelerators(gpus_only=False,
+                                   clouds="aws",
+                                   region_filter='us-west-1')
     all_regions = []
     for res in result.values():
         for instance in res:

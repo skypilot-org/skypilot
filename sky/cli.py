@@ -2662,7 +2662,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
                 'HOURLY_SPOT_PRICE',
             ]
             if not show_all:
-                accelerator_table_headers.append("REGION")
+                accelerator_table_headers.append('REGION')
             accelerator_table = log_utils.create_table(
                 accelerator_table_headers)
             for item in items:
