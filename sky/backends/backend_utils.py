@@ -1793,7 +1793,7 @@ def _update_cluster_status_no_lock(
             backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.debug(
-                f'Failed to reset autostop. Due to {common_utils.class_fullname(e.__class__)}: {e}'
+                f'Failed to reset autostop. Due to {common_utils.format_exception(e)}'
             )
         global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                      -1,
@@ -1839,11 +1839,11 @@ def _update_cluster_status(
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-        same as the user who created the cluster.
+          same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
-        identity.
+          identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-        fetched from the cloud provider.
+          fetched from the cloud provider.
     """
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
