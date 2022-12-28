@@ -2656,19 +2656,28 @@ class CloudVmRayBackend(backends.Backend):
                          handle: ResourceHandle,
                          terminate: bool,
                          purge: bool = False,
-                         post_teardown_cleanup: bool = True) -> bool:
+                         post_teardown_cleanup: bool = True,
+                         refresh_cluster_status: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
         status lock already.
+
+        refresh_cluster_status is only used internally in the status refresh
+        process, and should not be set to False in other cases.
         """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
-        prev_status, _ = backend_utils.refresh_cluster_status_handle(
-            handle.cluster_name, acquire_per_cluster_status_lock=False)
+        if refresh_cluster_status:
+            prev_status, _ = backend_utils.refresh_cluster_status_handle(
+                handle.cluster_name, acquire_per_cluster_status_lock=False)
+        else:
+            record = global_user_state.get_cluster_from_name(
+                handle.cluster_name)
+            prev_status = record['status']
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
@@ -2707,36 +2716,8 @@ class CloudVmRayBackend(backends.Backend):
                 # TODO(wei-lin): refactor by calling functions of node provider
                 # that uses Python API rather than CLI
                 if use_tpu_vm:
-                    # check if gcloud includes TPU VM API
-                    backend_utils.check_gcp_cli_include_tpu_vm()
-
-                    query_cmd = (
-                        f'gcloud compute tpus tpu-vm list --filter='
-                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                        f'--zone={zone} --format=value\\(name\\)')
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        query_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
-
-                    # Skip the termination command, if the TPU ID
-                    # query command fails.
-                    if returncode != 0:
-                        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
-                                         f'echo "{stdout}" && '
-                                         f'echo "{stderr}" >&2 && '
-                                         f'exit {returncode}')
-                    else:
-                        # Needs to create a list as GCP does not allow deleting
-                        # multiple TPU VMs at once.
-                        tpu_terminate_cmds = []
-                        for tpu_id in stdout.splitlines():
-                            tpu_terminate_cmds.append(
-                                'gcloud compute tpus tpu-vm delete '
-                                f'--zone={zone} --quiet {tpu_id}')
-                        terminate_cmd = ' && '.join(tpu_terminate_cmds)
+                    terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
+                        cluster_name, zone, log_abs_path)
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='

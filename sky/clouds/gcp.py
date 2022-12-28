@@ -561,6 +561,10 @@ class GCP(clouds.Cloud):
         # pylint: disable=import-outside-toplevel
         from google import auth  # type: ignore
         _, project_id = auth.default()
+        if project_id is None:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to get GCP project id. Please make sure you have '
+                'run: gcloud init')
         return project_id
 
     @staticmethod
