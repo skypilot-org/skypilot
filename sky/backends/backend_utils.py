@@ -362,8 +362,9 @@ class SSHConfigHelper(object):
 
     @classmethod
     def _get_generated_config(cls, autogen_comment: str, host_name: str,
-                              ip: str, username: str, ssh_key_path: str):
-        codegen = textwrap.dedent(f"""\
+                              ip: str, username: str, ssh_key_path: str,
+                              forwarded_ports: List[int]):
+        config = f"""\
             {autogen_comment}
             Host {host_name}
               HostName {ip}
@@ -372,8 +373,12 @@ class SSHConfigHelper(object):
               IdentitiesOnly yes
               ForwardAgent yes
               StrictHostKeyChecking no
-              Port 22
-            """)
+              Port 22"""
+        for port in forwarded_ports:
+            config += f"""
+              LocalForward {port} localhost:{port}
+            """
+        codegen = textwrap.dedent(config)
         return codegen
 
     @classmethod
@@ -383,6 +388,7 @@ class SSHConfigHelper(object):
         cluster_name: str,
         ips: List[str],
         auth_config: Dict[str, str],
+        forwarded_ports: List[int],
     ):
         """Add authentication information for cluster to local SSH config file.
 
@@ -439,7 +445,7 @@ class SSHConfigHelper(object):
             os.chmod(config_path, 0o644)
 
         codegen = cls._get_generated_config(sky_autogen_comment, host_name, ip,
-                                            username, key_path)
+                                            username, key_path, forwarded_ports)
 
         # Add (or overwrite) the new config.
         if overwrite:
@@ -464,15 +470,13 @@ class SSHConfigHelper(object):
 
         if len(ips) > 1:
             SSHConfigHelper._add_multinode_config(cluster_name, ips[1:],
-                                                  auth_config)
+                                                  auth_config, forwarded_ports)
 
     @classmethod
-    def _add_multinode_config(
-        cls,
-        cluster_name: str,
-        external_worker_ips: List[str],
-        auth_config: Dict[str, str],
-    ):
+    def _add_multinode_config(cls, cluster_name: str,
+                              external_worker_ips: List[str],
+                              auth_config: Dict[str, str],
+                              forwarded_ports: List[int]):
         username = auth_config['ssh_user']
         key_path = os.path.expanduser(auth_config['ssh_private_key'])
         host_name = cluster_name
@@ -537,7 +541,7 @@ class SSHConfigHelper(object):
                 logger.warning(f'Using {host_name} to identify host instead.')
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path)
+                    username, key_path, forwarded_ports)
 
         # All workers go to SKY_USER_FILE_PATH/ssh/{cluster_name}
         for i, line in enumerate(extra_config):
@@ -550,14 +554,14 @@ class SSHConfigHelper(object):
                     overwrite_begin_idxs[idx] = i - 1
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, host_name, external_worker_ips[idx],
-                    username, key_path)
+                    username, key_path, forwarded_ports)
 
         # This checks if all codegens have been created.
         for idx, ip in enumerate(external_worker_ips):
             if not codegens[idx]:
                 codegens[idx] = cls._get_generated_config(
                     sky_autogen_comment, worker_names[idx], ip, username,
-                    key_path)
+                    key_path, forwarded_ports)
 
         for idx in range(len(external_worker_ips)):
             # Add (or overwrite) the new config.

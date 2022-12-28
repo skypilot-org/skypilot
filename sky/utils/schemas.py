@@ -155,6 +155,9 @@ def get_task_schema():
                 'required': [],
                 'additionalProperties': True,
             },
+            'forwarded_ports': {
+                'type': 'string',
+            },
             # inputs and outputs are experimental
             'inputs': {
                 'type': 'object',

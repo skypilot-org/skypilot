@@ -157,6 +157,8 @@ class Task:
         self.time_estimator_func = None
         self.file_mounts = None
 
+        self.forwarded_ports = []
+
         # Only set when 'self' is a spot controller task: 'self.spot_task' is
         # the underlying managed spot task (Task object).
         self.spot_task = None
@@ -322,6 +324,10 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
+        if config.get('forwarded_ports') is not None:
+            task.set_forwarded_ports(
+                [int(e) for e in config.pop('forwarded_ports').split(',')])
+
         resources = config.pop('resources', None)
         resources = sky.Resources.from_yaml_config(resources)
 
@@ -449,6 +455,9 @@ class Task:
 
     def get_resources(self):
         return self.resources
+
+    def set_forwarded_ports(self, forwarded_ports: List[int]):
+        self.forwarded_ports = forwarded_ports
 
     def set_time_estimator(self, func: Callable[['sky.Resources'],
                                                 int]) -> 'Task':

@@ -2058,7 +2058,7 @@ class CloudVmRayBackend(backends.Backend):
                 auth_config = common_utils.read_yaml(
                     handle.cluster_yaml)['auth']
                 backend_utils.SSHConfigHelper.add_cluster(
-                    cluster_name, ip_list, auth_config)
+                    cluster_name, ip_list, auth_config, task.forwarded_ports)
 
                 os.remove(lock_path)
                 return handle
