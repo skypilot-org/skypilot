@@ -108,9 +108,8 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
-    # azure-cli need to be pinned to 2.31.0 due to later versions
-    # do not have azure-identity (used in node_provider) installed
-    'azure': ['azure-cli==2.31.0', 'azure-core'],
+    # azure-identity is needed in node_provider.
+    'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
 }
