@@ -23,6 +23,8 @@ DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH = os.path.expanduser(
     '~/.config/gcloud/'
     'application_default_credentials.json')
 
+# TODO(wei-lin): config_default may not be the config in use.
+# See: https://github.com/skypilot-org/skypilot/pull/1539
 GCP_CONFIG_PATH = '~/.config/gcloud/configurations/config_default'
 # Do not place the backup under the gcloud config directory, as ray
 # autoscaler can overwrite that directory on the remote nodes.
@@ -508,8 +510,9 @@ class GCP(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get GCP user identity with unknown '
                     f'exception.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
-                    f'{e}') from e
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
         if not account:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -517,7 +520,16 @@ class GCP(clouds.Cloud):
                     'auth list --filter=status:ACTIVE '
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
-        return f'{account} [project_id={self.get_project_id()}]'
+        try:
+            return f'{account} [project_id={self.get_project_id()}]'
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
@@ -549,6 +561,10 @@ class GCP(clouds.Cloud):
         # pylint: disable=import-outside-toplevel
         from google import auth  # type: ignore
         _, project_id = auth.default()
+        if project_id is None:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to get GCP project id. Please make sure you have '
+                'run: gcloud init')
         return project_id
 
     @staticmethod
