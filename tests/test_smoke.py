@@ -563,7 +563,7 @@ def test_tpu_vm():
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
             # Use retry: guard against transient errors observed for
             # just-stopped TPU VMs (#962).
             f'sky start --retry-until-up -y {name}',
@@ -684,11 +684,11 @@ def test_autostop():
 
             # Ensure the cluster is not stopped early.
             'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            'sleep 90',
-            f'sky status --refresh | grep {name} | grep STOPPED',
+            'sleep 100',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep STOPPED',
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
             f'sky start -y {name}',
@@ -704,9 +704,9 @@ def test_autostop():
             f'sky autostop -y {name} --cancel',
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
-            'sleep 90',
-            f'sky status --refresh | grep {name} | grep STOPPED',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s" | grep {name} | grep UP',
+            'sleep 100',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep STOPPED',
 
             # Test restarting the idleness timer via exec:
             f'sky start -y {name}',
@@ -715,9 +715,9 @@ def test_autostop():
             'sleep 45',  # Almost reached the threshold.
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep UP',
             'sleep 90',
-            f'sky status --refresh | grep {name} | grep STOPPED',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -737,7 +737,7 @@ def test_autodown():
             f'sky status | grep {name} | grep "1m (down)"',
             # Ensure the cluster is not terminated early.
             'sleep 45',
-            f'sky status --refresh | grep {name} | grep UP',
+            f's=$(sky status --refresh); printf "$s"; echo; echo; printf "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',

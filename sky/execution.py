@@ -439,7 +439,7 @@ def exec(  # pylint: disable=redefined-builtin
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        operation='executing tasks on',
+        operation='executing tasks',
         check_cloud_vm_ray_backend=False)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
