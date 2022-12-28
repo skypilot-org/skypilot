@@ -1614,9 +1614,10 @@ def _query_status_gcp(
         # Do not use refresh cluster status during teardown, as that will
         # cause inifinite recursion by calling cluster status refresh
         # again.
-        # The caller of this function, `_update_cluster_status_no_lock() -> _get_cluster_status_via_cloud_cli()`,
-        # will do the post teardown cleanup, which will remove the cluster entry
-        # from the status table & the ssh config file.
+        # The caller of this function, `_update_cluster_status_no_lock() ->
+        # _get_cluster_status_via_cloud_cli()`, will do the post teardown
+        # cleanup, which will remove the cluster entry from the status table
+        # & the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,

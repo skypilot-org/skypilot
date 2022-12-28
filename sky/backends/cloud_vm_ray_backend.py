@@ -2782,6 +2782,9 @@ class CloudVmRayBackend(backends.Backend):
                         stderr=stderr))
                 return False
 
+        # No need to clean up when the cluster is already terminated
+        # (prev_status), as the clean up will always be done after the cluster
+        # is removed from the status table.
         if prev_status is not None and post_teardown_cleanup:
             return self.post_teardown_cleanup(handle, terminate, purge)
         else:
