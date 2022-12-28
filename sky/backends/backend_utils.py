@@ -1294,7 +1294,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         tpuvm_cmd = (f'gcloud compute tpus tpu-vm describe {tpu_id}'
                      f' --zone {zone} --format=json')
         returncode, stdout, stderr = log_lib.run_with_log(tpuvm_cmd,
-                                                          '/dev/null',
+                                                          os.devnull,
                                                           shell=True,
                                                           stream_logs=False,
                                                           require_outputs=True)
@@ -1306,9 +1306,11 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
-            # May be a leaked preempted resource.
+            # May be a leaked preempted resource, or terminated by user in the
+            # console.
+            ux_utils.console_newline()
             logger.warning(f'TPU VM {tpu_id} is not in READY state. '
-                           'Could be a garbage resource. Skipping...')
+                           'Skipping...')
             continue
 
         if not get_internal_ips:
@@ -1572,9 +1574,10 @@ def _query_status_gcp(
             # 'STOPPED' in GCP TPU VM means stopped, with disk preserved.
             'STOPPING': global_user_state.ClusterStatus.STOPPED,
             'STOPPED': global_user_state.ClusterStatus.STOPPED,
+            'DELETING': None,
             'PREEMPTED': None,
         }
-        check_gcp_cli_include_tpu_vm()
+        tpu_utils.check_gcp_cli_include_tpu_vm()
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
@@ -1605,13 +1608,20 @@ def _query_status_gcp(
     # GCP does not clean up preempted TPU VMs. We remove it ourselves.
     # TODO(wei-lin): handle multi-node cases.
     if use_tpu_vm and len(status_list) == 0:
+        logger.debug(f'Terminating preempted TPU VM cluster {cluster}')
         backend = backends.CloudVmRayBackend()
         handle = global_user_state.get_handle_from_cluster_name(cluster)
+        # Do not use refresh cluster status during teardown, as that will
+        # cause inifinite recursion by calling cluster status refresh
+        # again.
+        # The caller of this function, `_update_cluster_status_no_lock() -> _get_cluster_status_via_cloud_cli()`,
+        # will do the post teardown cleanup, which will remove the cluster entry
+        # from the status table & the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,
-                                 post_teardown_cleanup=False)
-
+                                 post_teardown_cleanup=False,
+                                 refresh_cluster_status=False)
     return status_list
 
 
@@ -1783,7 +1793,7 @@ def _update_cluster_status_no_lock(
             backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.debug(
-                f'Failed to reset autostop. Due to {common_utils.class_fullname(e.__class__)}: {e}'
+                f'Failed to reset autostop. Due to {common_utils.format_exception(e)}'
             )
         global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                      -1,
@@ -1829,11 +1839,11 @@ def _update_cluster_status(
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-        same as the user who created the cluster.
+          same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
-        identity.
+          identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
-        fetched from the cloud provider.
+          fetched from the cloud provider.
     """
     if not acquire_per_cluster_status_lock:
         return _update_cluster_status_no_lock(cluster_name)
@@ -2225,41 +2235,6 @@ def check_cluster_name_not_reserved(
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
             raise ValueError(msg)
-
-
-def check_gcp_cli_include_tpu_vm() -> None:
-    # TPU VM API available with gcloud version >= 382.0.0
-    version_cmd = 'gcloud version --format=json'
-    rcode, stdout, stderr = log_lib.run_with_log(version_cmd,
-                                                 '/dev/null',
-                                                 shell=True,
-                                                 stream_logs=False,
-                                                 require_outputs=True)
-
-    if rcode != 0:
-        failure_massage = ('Failed to run "gcloud version".\n'
-                           '**** STDOUT ****\n'
-                           '{stdout}\n'
-                           '**** STDERR ****\n'
-                           '{stderr}')
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                failure_massage.format(stdout=stdout, stderr=stderr))
-
-    sdk_ver = json.loads(stdout).get('Google Cloud SDK', None)
-
-    if sdk_ver is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Failed to get Google Cloud SDK version from'
-                               f' "gcloud version": {stdout}')
-    else:
-        major_ver = sdk_ver.split('.')[0]
-        major_ver = int(major_ver)
-        if major_ver < 382:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Google Cloud SDK version must be >= 382.0.0 to use'
-                    ' TPU VM APIs, check "gcloud version" for details.')
 
 
 # Handle ctrl-c
