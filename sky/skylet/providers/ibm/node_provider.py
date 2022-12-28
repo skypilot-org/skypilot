@@ -17,7 +17,6 @@
 import concurrent.futures as cf
 import inspect
 import json
-import logging
 import re
 import socket
 import threading
@@ -43,9 +42,9 @@ from ray.autoscaler.tags import (
     TAG_RAY_NODE_NAME,
 )
 from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
-from sky.skylet.providers.ibm.utils import get_logger
+from sky.skylet.providers.ibm.utils import get_logger, VPC_CACHE_SEGMENT, RAY_CACHE_SEGMENT
 
-logger = get_logger()
+logger = get_logger("node_provider_")
 
 INSTANCE_NAME_UUID_LEN = 8
 INSTANCE_NAME_MAX_LEN = 64
@@ -54,8 +53,7 @@ PROFILE_NAME_DEFAULT = "cx2-2x4"
 VOLUME_TIER_NAME_DEFAULT = "general-purpose"
 RAY_RECYCLABLE = "ray-recyclable"  # identifies resources created by this package. these resources are deleted alongside the node.  
 VPC_TAGS = ".sky-vpc-tags"
-RAY_CACHE_SEGMENT = 'ray'
-VPC_CACHE_SEGMENT = 'vpc' 
+
 
 def _get_vpc_client(endpoint, authenticator):
     """
@@ -112,8 +110,6 @@ class IBMVPCNodeProvider(NodeProvider):
         """if local tags cache (file) exists (cluster is restarting), cache is loaded and deleted nodes are filtered away. result is dumped to local cache.
         otherwise, initializes the in memory and local storage tags cache with the head's cluster tags.     """
         self.nodes_tags = {}
-
-        self.tags_file = Path.home() / VPC_TAGS
 
         # local tags cache exists from former runs 
         if self.tags_file.is_file():
@@ -176,6 +172,7 @@ class IBMVPCNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
 
         self.lock = threading.RLock()
+        self.tags_file =  Path.home() / VPC_TAGS
         self.iam_api_key = provider_config["iam_api_key"]
         self.resource_group_id = provider_config["resource_group_id"]
         self.iam_endpoint = provider_config.get("iam_endpoint")
@@ -185,12 +182,7 @@ class IBMVPCNodeProvider(NodeProvider):
         self.ibm_vpc_client = _get_vpc_client(
             self.endpoint, IAMAuthenticator(self.iam_api_key, url=self.iam_endpoint)
         )
-        self.vpc_provider = IBMVPCProvider(self.resource_group_id, self.region, self.zone, os.path.join(Path.home(),VPC_TAGS),cluster_name)
-        self.vpc_tags = self.vpc_provider.create_or_fetch_vpc_tags()
-        self.vpc_id = self.vpc_tags['vpc_id']
-        self.security_group_id = self.vpc_tags['security_group_id']
-        self.subnet_id = self.vpc_tags['subnet_id']
-        self.set_node_tags(None,None,vpc_update=True)
+        self.vpc_provider = IBMVPCProvider(self.resource_group_id, self.region, self.zone, self.tags_file ,self.cluster_name)
 
         self._load_tags()
 
@@ -410,19 +402,26 @@ class IBMVPCNodeProvider(NodeProvider):
             node_id(str): id of the node provided by the cloud provider at creation.
             tags(dict): specified conditions by which nodes will be filtered.
         """
+        def _set_default_fields(tags):
+            if self.cluster_name not in tags:
+                tags[self.cluster_name] = {RAY_CACHE_SEGMENT:{},VPC_CACHE_SEGMENT:{}}
+            else:
+                if 'ray' not in tags[self.cluster_name]:
+                    tags[self.cluster_name].update({RAY_CACHE_SEGMENT:{}})
+                if 'vpc' not in tags[self.cluster_name]:
+                    tags[self.cluster_name].update({VPC_CACHE_SEGMENT:{}})
+
         with self.lock:
             # update in-memory cache
             if node_id and tags:
                 node_cache = self.nodes_tags.setdefault(node_id, {})
                 node_cache.update(tags)
 
-            # dump in-memory cache to file
-            self.tags_file = Path.home() / VPC_TAGS
-
+            # dump in-memory cache to file. 
             all_tags = {}
             if self.tags_file.is_file():
                 all_tags = json.loads(self.tags_file.read_text())
-            all_tags.setdefault(self.cluster_name,self.cluster_name) # verifies dict contains cluster field, otherwise adds it
+            _set_default_fields(all_tags)
             if vpc_update:
                 all_tags[self.cluster_name][VPC_CACHE_SEGMENT] = self.vpc_tags
             else:
@@ -447,8 +446,8 @@ class IBMVPCNodeProvider(NodeProvider):
 
         logger.info("Creating new VM instance {}".format(name))
 
-        security_group_identity_model = {"id": self.security_group_id}
-        subnet_identity_model = {"id":self.subnet_id}
+        security_group_identity_model = {"id": self.vpc_tags['security_group_id']}
+        subnet_identity_model = {"id":self.vpc_tags['subnet_id']}
         primary_network_interface = {
             "name": "eth0",
             "subnet": subnet_identity_model,
@@ -476,7 +475,7 @@ class IBMVPCNodeProvider(NodeProvider):
         instance_prototype["keys"] = [key_identity_model]
         instance_prototype["profile"] = {"name": profile_name}
         instance_prototype["resource_group"] = {"id": self.resource_group_id}
-        instance_prototype["vpc"] = {"id": self.vpc_id}
+        instance_prototype["vpc"] = {"id": self.vpc_tags['vpc_id']}
         instance_prototype["image"] = {"id": base_config["image_id"]}
 
         instance_prototype["zone"] = {"name": self.zone}
@@ -628,7 +627,6 @@ class IBMVPCNodeProvider(NodeProvider):
 
         return {instance["id"]: instance}
 
-    # @log_in_out
     def create_node(self, base_config, tags, count) -> None:
         """
         returns dict of {instance_id:instance_data} of nodes. creates 'count' number of nodes.
@@ -641,6 +639,12 @@ class IBMVPCNodeProvider(NodeProvider):
             count(int): number of nodes to create. 
 
         """
+
+        # Create/fetch a VPC if creating a head node 
+        if self._get_node_type(tags[TAG_RAY_NODE_NAME]) == NODE_KIND_HEAD:
+            self.vpc_tags = self.vpc_provider.create_or_fetch_vpc()
+            self.set_node_tags(None,None,vpc_update=True)
+        
         logger.debug(f"""create_node: count: {count}\ntags: {pprint(tags)}\nbase_config:{pprint(base_config)}\n """)
         stopped_nodes_dict = {}
         futures = []
@@ -751,6 +755,9 @@ class IBMVPCNodeProvider(NodeProvider):
         if cache_stopped_nodes==true in the cluster config file, nodes are stopped instead. """
 
         logger.info("Deleting VM instance {}".format(node_id))
+        is_head_node = False
+        if self.nodes_tags[node_id][TAG_RAY_NODE_KIND] == NODE_KIND_HEAD:
+            is_head_node = True
 
         try:
             if self.cache_stopped_nodes:
@@ -770,6 +777,15 @@ class IBMVPCNodeProvider(NodeProvider):
                 pass
             else:
                 raise e
+
+        # Terminate VPC is node deleted is a head node                 
+        if is_head_node:
+            if self.poll_instance_exists(node_id):
+                self.vpc_provider.delete_vpc(self.vpc_tags['vpc_id'], self.region)
+                # removes tags of deleted vpc in local cache
+                self.vpc_tags = {}
+                self.set_node_tags(None,None,vpc_update=True)
+            
 
     def _get_node(self, node_id):
         """Refresh and get info for this node, updating the cache."""
@@ -793,6 +809,21 @@ class IBMVPCNodeProvider(NodeProvider):
             return self.cached_nodes[node_id]
 
         return self._get_node(node_id)
+    
+    def poll_instance_exists(self, instance_id):
+        tries = 20 # waits up to 200sec with 10 sec interval
+        sleep_interval = 10
+        while tries:
+            try:
+                instance_data = self.ibm_vpc_client.get_instance(instance_id).get_result()
+            except Exception:
+                logger.debug('Deleted VM instance with id: {}'.format(instance_id))
+                return True
+            
+            tries -= 1
+            time.sleep(sleep_interval)
+        logger.Error(f"\Failed to delete instance within expected time frame of {(tries*sleep_interval)/60} minutes.\n")
+        return False
 
     @staticmethod
     def bootstrap_config(cluster_config)-> Dict[str, Any]:
