@@ -336,3 +336,15 @@ def remove_color(s: str):
         A string without color.
     """
     return _COLOR_PATTERN.sub('', s)
+
+
+def remove_file_if_exists(path: str):
+    """Delete a file if it exists.
+
+    Args:
+        path: The path to the file.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass

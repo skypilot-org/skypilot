@@ -2060,7 +2060,7 @@ class CloudVmRayBackend(backends.Backend):
                 backend_utils.SSHConfigHelper.add_cluster(
                     cluster_name, ip_list, auth_config)
 
-                os.remove(lock_path)
+                common_utils.remove_file_if_exists(lock_path)
                 return handle
 
     def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -2472,7 +2472,7 @@ class CloudVmRayBackend(backends.Backend):
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
-                os.remove(lock_path)
+                common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
             raise RuntimeError(
                 f'Cluster {cluster_name!r} is locked by {lock_path}. '
@@ -2846,13 +2846,13 @@ class CloudVmRayBackend(backends.Backend):
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None
-                os.remove(handle.tpu_create_script)
-                os.remove(handle.tpu_delete_script)
+                common_utils.remove_file_if_exists(handle.tpu_create_script)
+                common_utils.remove_file_if_exists(handle.tpu_delete_script)
 
             # Clean up generated config
             # No try-except is needed since Ray will fail to teardown the
             # cluster if the cluster_yaml is missing.
-            os.remove(handle.cluster_yaml)
+            common_utils.remove_file_if_exists(handle.cluster_yaml)
         return True
 
     def set_autostop(self,
