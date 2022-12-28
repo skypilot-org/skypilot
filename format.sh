@@ -93,7 +93,7 @@ fi
 # TODO(zhwu): When more of the codebase is typed properly, the mypy flags
 # should be set to do a more stringent check.
 echo 'SkyPilot mypy:'
-mypy @tests/mypy_files.txt
+mypy $(cat tests/mypy_files.txt)
 
 # Run Pylint
 echo 'Sky Pylint:'
