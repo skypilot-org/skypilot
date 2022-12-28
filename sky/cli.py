@@ -2562,13 +2562,16 @@ def check():
     '--region',
     required=False,
     type=str,
-    help=
-    ('The region to use for the query. If not specified, shows accelerators from all regions. '
+    help=(
+        'The region to use. If not given, shows accelerators from all regions. '
     ),
 )
 @usage_lib.entrypoint
-def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str],
-              region: Optional[str]):  # pylint: disable=redefined-builtin
+def show_gpus(
+        gpu_name: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        cloud: Optional[str],
+        region: Optional[str]):
     """Show supported GPU/TPU/accelerators.
 
     The names and counts shown can be set in the ``accelerators`` field in task
