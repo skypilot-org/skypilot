@@ -2782,7 +2782,7 @@ class CloudVmRayBackend(backends.Backend):
                         stderr=stderr))
                 return False
 
-        if post_teardown_cleanup:
+        if prev_status is not None and post_teardown_cleanup:
             return self.post_teardown_cleanup(handle, terminate, purge)
         else:
             return True
