@@ -166,7 +166,7 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 
 def get_instance_type_for_accelerator(
         acc_name: str,
-        acc_count: int,
+        acc_count: float,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -182,6 +182,8 @@ def get_instance_type_for_accelerator(
     if instance_list is None:
         return None, fuzzy_candidate_list
 
+    assert acc_count.is_integer(), acc_count
+    acc_count = int(acc_count)
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus

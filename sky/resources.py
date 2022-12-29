@@ -484,7 +484,6 @@ class Resources:
     def get_cost(self, seconds: float) -> float:
         """Returns cost in USD for the runtime in seconds."""
         assert self.is_launchable(), self
-        assert self._cloud is not None and self._instance_type is not None, self
         hours = seconds / 3600
         # Instance.
         hourly_cost = self.cloud.instance_type_to_hourly_cost(
@@ -627,7 +626,7 @@ class Resources:
         """
         is_matched = True
         if (blocked.cloud is not None and
-                not self.cloud.is_same_cloud(blocked.cloud)):
+                not blocked.cloud.is_same_cloud(self.cloud)):
             is_matched = False
         if (blocked.instance_type is not None and
                 self.instance_type != blocked.instance_type):

@@ -60,7 +60,7 @@ def get_accelerators_from_instance_type(
 
 def get_instance_type_for_accelerator(
         acc_name: str,
-        acc_count: int,
+        acc_count: float,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:

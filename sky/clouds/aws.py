@@ -299,7 +299,7 @@ class AWS(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[Any]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')

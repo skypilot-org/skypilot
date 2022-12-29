@@ -276,7 +276,7 @@ def get_accelerators_from_instance_type_impl(
 def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
-    acc_count: int,
+    acc_count: float,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
