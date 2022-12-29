@@ -19,22 +19,26 @@ if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.aws that grant AWS access.
+# This local file (under ~/.aws/) will be uploaded to remote nodes (any
+# cloud), if all of the following conditions hold:
+#   - the current user identity is not using AWS SSO
+#   - this file exists
+# It has the following purposes:
+#   - make all nodes (any cloud) able to access private S3 buckets
+#   - make some remote nodes able to launch new nodes on AWS (i.e., makes
+#     AWS head node able to launch AWS workers, or any-cloud spot controller
+#     able to launch spot clusters on AWS).
+#
+# If we detect the current user identity is AWS SSO, we will not upload this
+# file to any remote nodes (any cloud). Instead, a SkyPilot IAM role is
+# assigned to both AWS head and workers.
+# TODO(skypilot): This also means we leave open a bug for AWS SSO users that
+# use multiple clouds. The non-AWS nodes will have neither the credential
+# file nor the ability to understand AWS IAM.
 _CREDENTIAL_FILES = [
     'credentials',
 ]
 
-
-def _run_output(cmd):
-    proc = subprocess.run(cmd,
-                          shell=True,
-                          check=True,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.PIPE)
-    return proc.stdout.decode('ascii')
-
-
-# TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_AMI_GB = 45
 
 
@@ -45,21 +49,28 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
     _regions: List[clouds.Region] = []
 
+    _INDENT_PREFIX = '    '
     _STATIC_CREDENTIAL_HELP_STR = (
         'Run the following commands:'
-        '\n      $ pip install boto3'
-        '\n      $ aws configure'
-        '\n    For more info: '
+        f'\n{_INDENT_PREFIX}  $ pip install boto3'
+        f'\n{_INDENT_PREFIX}  $ aws configure'
+        f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
 
-    _SSO_CREDENTIAL_HELP_STR = (
-        'Run the following commands (must use aws v2 CLI):'
-        '\n      $ aws configure sso'
-        '\n      $ aws sso login --profile <profile_name>'
-        '\n    For more info: '
-        'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
-    )
+    @classmethod
+    def _sso_credentials_help_str(cls, expired: bool = False) -> str:
+        help_str = 'Run the following commands (must use aws v2 CLI):'
+        if not expired:
+            help_str += f'\n{cls._INDENT_PREFIX}  $ aws configure sso'
+        help_str += (
+            f'\n{cls._INDENT_PREFIX}  $ aws sso login --profile <profile_name>'
+            f'\n{cls._INDENT_PREFIX}For more info: '
+            'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html'  # pylint: disable=line-too-long
+        )
+        return help_str
+
+    _MAX_AWSCLI_MAJOR_VERSION = 1
 
     #### Regions/Zones ####
 
@@ -96,12 +107,10 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, float]],
+                              accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators  # unused
-        assert accelerators is None or all(
-            count.is_integer() for count in accelerators.values())
         if instance_type is None:
             # Fall back to default regions
             regions = cls.regions()
@@ -122,7 +131,7 @@ class AWS(clouds.Cloud):
         cls,
         *,
         instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, float]] = None,
+        accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
@@ -290,8 +299,7 @@ class AWS(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[Any]]:
-        assert resources.is_launchable(), resources
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -376,24 +384,20 @@ class AWS(clouds.Cloud):
         except ImportError:
             raise ImportError('Fail to import dependencies for AWS.'
                               'Try pip install "skypilot[aws]"') from None
-        # This file is required because it will be synced to remote VMs for
-        # `aws` to access private storage buckets.
-        # `aws configure list` does not guarantee this file exists.
-        if not os.path.isfile(os.path.expanduser('~/.aws/credentials')):
-            return (False, '~/.aws/credentials does not exist. ' +
-                    self._STATIC_CREDENTIAL_HELP_STR)
 
         # Checks if the AWS CLI is installed properly
-        try:
-            _run_output('aws configure list')
-        except subprocess.CalledProcessError:
+        proc = subprocess.run('aws --version',
+                              shell=True,
+                              check=False,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
             return False, (
-                'AWS CLI is not installed properly.'
-                # TODO(zhwu): Change the installation hint to from PyPI.
-                ' Run the following commands in the SkyPilot codebase:'
-                '\n     $ pip install .[aws]'
-                '\n   Credentials may also need to be set. ' +
-                self._STATIC_CREDENTIAL_HELP_STR)
+                'AWS CLI is not installed properly. '
+                'Run the following commands:'
+                f'\n{self._INDENT_PREFIX}  $ pip install skypilot[aws]'
+                f'{self._INDENT_PREFIX}Credentials may also need to be set. '
+                f'{self._STATIC_CREDENTIAL_HELP_STR}')
 
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
@@ -402,9 +406,43 @@ class AWS(clouds.Cloud):
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
+        static_credential_exists = os.path.isfile(
+            os.path.expanduser('~/.aws/credentials'))
+        hints = None
+        if self._is_current_identity_sso():
+            hints = 'AWS SSO is set. '
+            if static_credential_exists:
+                hints += (
+                    ' To ensure multiple clouds work correctly, please use SkyPilot '
+                    'with static credentials (e.g., ~/.aws/credentials) by unsetting '
+                    'the AWS_PROFILE environment variable.')
+            else:
+                hints += (
+                    ' It will work if you use AWS only, but will cause problems '
+                    'if you want to use multiple clouds. To set up static credentials, '
+                    'try: aws configure')
+
+        else:
+            # This file is required because it is required by the VMs launched on
+            # other clouds to access private s3 buckets and resources like EC2.
+            # `get_current_user_identity` does not guarantee this file exists.
+            if not static_credential_exists:
+                return (False, '~/.aws/credentials does not exist. ' +
+                        self._STATIC_CREDENTIAL_HELP_STR)
+
         # Fetch the AWS availability zones mapping from ID to name.
         from sky.clouds.service_catalog import aws_catalog  # pylint: disable=import-outside-toplevel,unused-import
-        return True, None
+        return True, hints
+
+    def _is_current_identity_sso(self) -> bool:
+        proc = subprocess.run('aws configure list',
+                              shell=True,
+                              check=False,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            return False
+        return 'sso' in proc.stdout.decode().split()
 
     def get_current_user_identity(self) -> Optional[str]:
         """Returns the identity of the user on this cloud."""
@@ -431,6 +469,24 @@ class AWS(clouds.Cloud):
                     'Failed to access AWS services with credentials. '
                     'Make sure that the access and secret keys are correct.'
                     f' {self._STATIC_CREDENTIAL_HELP_STR}') from None
+        except aws.botocore_exceptions().InvalidConfigError as e:
+            import awscli
+            from packaging import version
+            awscli_version = version.parse(awscli.__version__)
+            if (awscli_version < version.parse('1.27.10') and
+                    'configured to use SSO' in str(e)):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'awscli is too old to use SSO. Run the following command to upgrade:'
+                        f'\n{self._INDENT_PREFIX}  $ pip install awscli>=1.27.10'
+                        f'\n{self._INDENT_PREFIX}You may need to log into SSO again after '
+                        f'upgrading. {self._sso_credentials_help_str()}'
+                    ) from None
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Invalid AWS configuration.\n'
+                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
+                ) from None
         except aws.botocore_exceptions().TokenRetrievalError:
             # This is raised when the access token is expired, which mainly
             # happens when the user is using temporary credentials or SSO
@@ -438,19 +494,39 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     'AWS access token is expired.'
-                    f' {self._SSO_CREDENTIAL_HELP_STR}') from None
+                    f' {self._sso_credentials_help_str(expired=True)}'
+                ) from None
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get AWS user.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] {e}.'
+                    f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
         return user_id
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        # TODO(skypilot): ~/.aws/credentials is required for users using multiple clouds.
+        # If this file does not exist, users can launch on AWS via AWS SSO and assign
+        # IAM role to the cluster.
+        # However, if users launch clusters in a non-AWS cloud, those clusters do not
+        # understand AWS IAM role so will not be able to access private AWS EC2 resources
+        # and S3 buckets.
+
+        # The file should not be uploaded if the user is using SSO, as the credential
+        # file can be from a different account, and will make autopstop/autodown/spot
+        # controller misbehave.
+
+        # TODO(zhwu/zongheng): We can also avoid uploading the credential file for the
+        # cluster launched on AWS even if the user is using static credentials. We need
+        # to define a mechanism to find out the cloud provider of the cluster to be
+        # launched in this function and make sure the cluster will not be used for
+        # launching clusters in other clouds, e.g. spot controller.
+        if self._is_current_identity_sso():
+            return {}
         return {
             f'~/.aws/{filename}': f'~/.aws/{filename}'
             for filename in _CREDENTIAL_FILES
+            if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
     def instance_type_exists(self, instance_type):

@@ -132,11 +132,9 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, float]],
+                              accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        assert accelerators is None or all(
-            count.is_integer() for count in accelerators.values()), accelerators
         if accelerators is None:
             if instance_type is None:
                 # Fall back to the default regions.
@@ -148,7 +146,7 @@ class GCP(clouds.Cloud):
         else:
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
-            acc_count = int(list(accelerators.values())[0])
+            acc_count = list(accelerators.values())[0]
             acc_regions = service_catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
             if instance_type is None:
@@ -186,7 +184,7 @@ class GCP(clouds.Cloud):
         cls,
         *,
         instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, float]] = None,
+        accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         regions = cls.regions_with_offering(instance_type,
@@ -292,7 +290,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[Any]]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -567,8 +565,9 @@ class GCP(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get GCP user identity with unknown '
                     f'exception.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
-                    f'{e}') from e
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
         if not account:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -576,7 +575,16 @@ class GCP(clouds.Cloud):
                     'auth list --filter=status:ACTIVE '
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
-        return f'{account} [project_id={self.get_project_id()}]'
+        try:
+            return f'{account} [project_id={self.get_project_id()}]'
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
@@ -608,6 +616,10 @@ class GCP(clouds.Cloud):
         # pylint: disable=import-outside-toplevel
         from google import auth  # type: ignore
         _, project_id = auth.default()
+        if project_id is None:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to get GCP project id. Please make sure you have '
+                'run: gcloud init')
         return project_id
 
     @staticmethod

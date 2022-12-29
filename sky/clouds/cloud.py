@@ -1,7 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
+from typing import Dict, Iterator, List, Optional, Tuple, Type
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
@@ -63,7 +63,7 @@ class Cloud:
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
-                              accelerators: Optional[Dict[str, float]],
+                              accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[Region]:
         """Returns the regions that offer the specified resources.
@@ -87,7 +87,7 @@ class Cloud:
         cls,
         *,
         instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, float]] = None,
+        accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
@@ -151,7 +151,7 @@ class Cloud:
         resources: 'resources.Resources',
         region: Optional['Region'],
         zones: Optional[List['Zone']],
-    ) -> Dict[str, Optional[Any]]:
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,

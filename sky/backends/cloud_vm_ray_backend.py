@@ -1004,6 +1004,7 @@ class RetryingVmProvisioner(object):
                             dryrun: bool,
                             stream_logs: bool,
                             cluster_name: str,
+                            cloud_user_identity: Optional[str],
                             cluster_exists: bool = False):
         """The provision retry loop."""
         style = colorama.Style
@@ -1029,7 +1030,7 @@ class RetryingVmProvisioner(object):
                                                       cluster_exists):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            if zones is None or len(zones) == 0:
+            if not zones:
                 # For Azure, zones is always an empty list.
                 zone_str = 'all zones'
             else:
@@ -1073,10 +1074,8 @@ class RetryingVmProvisioner(object):
             global_user_state.add_or_update_cluster(cluster_name,
                                                     cluster_handle=handle,
                                                     ready=False)
-            cloud = handle.launched_resources.cloud
-            cloud_user_id = cloud.get_current_user_identity()
             global_user_state.set_owner_identity_for_cluster(
-                cluster_name, cloud_user_id)
+                cluster_name, cloud_user_identity)
 
             tpu_name = config_dict.get('tpu_name')
             if tpu_name is not None:
@@ -1514,24 +1513,23 @@ class RetryingVmProvisioner(object):
 
         style = colorama.Style
         # Retrying launchable resources.
-        provision_failed = True
-        while provision_failed:
-            provision_failed = False
+        while True:
             try:
-                try:
-                    # Recheck cluster name as the 'except:' block below may
-                    # change the cloud assignment.
-                    backend_utils.check_cluster_name_is_valid(
-                        cluster_name, to_provision.cloud)
-                except exceptions.InvalidClusterNameError as e:
-                    # Let failover below handle this (i.e., block this cloud).
-                    raise exceptions.ResourcesUnavailableError(str(e)) from e
+                # Recheck cluster name as the 'except:' block below may
+                # change the cloud assignment.
+                backend_utils.check_cluster_name_is_valid(
+                    cluster_name, to_provision.cloud)
+                if dryrun:
+                    cloud_user = None
+                else:
+                    cloud_user = to_provision.cloud.get_current_user_identity()
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
+                    cloud_user_identity=cloud_user,
                     cluster_exists=cluster_exists)
                 if dryrun:
                     return
@@ -1546,43 +1544,50 @@ class RetryingVmProvisioner(object):
                         'optimize_target=sky.OptimizeTarget.COST)')
                     raise e
 
-                logger.warning(e)
-                provision_failed = True
-                if to_provision.zone is None:
-                    region_or_zone_str = str(to_provision.region)
-                else:
-                    region_or_zone_str = str(to_provision.zone)
-                logger.warning(
-                    f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                    f'{to_provision} in {region_or_zone_str}. '
-                    f'Trying other locations (if any).{style.RESET_ALL}')
-                if not cluster_exists:
-                    # Add failed resources to the blocklist, only when it
-                    # is in fallback mode.
-                    self._blocked_launchable_resources.add(to_provision)
-                else:
-                    logger.info(
-                        'Retrying provisioning with requested resources '
-                        f'{task.num_nodes}x {task.resources}')
-                    # Retry with the current, potentially "smaller" resources:
-                    # to_provision == the current new resources (e.g., V100:1),
-                    # which may be "smaller" than the original (V100:8).
-                    # num_nodes is not part of a Resources so must be updated
-                    # separately.
-                    num_nodes = task.num_nodes
-                    cluster_exists = False
+                logger.warning(common_utils.format_exception(e))
+            except (exceptions.CloudUserIdentityError,
+                    exceptions.InvalidClusterNameError) as e:
+                # Let failover below handle this (i.e., block this cloud).
+                logger.warning(common_utils.format_exception(e))
+            else:
+                # Provisioning succeeded.
+                break
+            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                           f'{to_provision}. Trying other launchable resources '
+                           f'(if any).{style.RESET_ALL}')
+            if to_provision.zone is None:
+                region_or_zone_str = str(to_provision.region)
+            else:
+                region_or_zone_str = str(to_provision.zone)
+            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                           f'{to_provision} in {region_or_zone_str}. '
+                           f'Trying other locations (if any).{style.RESET_ALL}')
+            if not cluster_exists:
+                # Add failed resources to the blocklist, only when it
+                # is in fallback mode.
+                self._blocked_launchable_resources.add(to_provision)
+            else:
+                logger.info('Retrying provisioning with requested resources '
+                            f'{task.num_nodes}x {task.resources}')
+                # Retry with the current, potentially "smaller" resources:
+                # to_provision == the current new resources (e.g., V100:1),
+                # which may be "smaller" than the original (V100:8).
+                # num_nodes is not part of a Resources so must be updated
+                # separately.
+                num_nodes = task.num_nodes
+                cluster_exists = False
 
-                # Set to None so that sky.optimize() will assign a new one
-                # (otherwise will skip re-optimizing this task).
-                # TODO: set all remaining tasks' best_resources to None.
-                task.best_resources = None
-                self._dag = sky.optimize(self._dag,
-                                         minimize=self._optimize_target,
-                                         blocked_launchable_resources=self.
-                                         _blocked_launchable_resources)
-                to_provision = task.best_resources
-                assert task in self._dag.tasks, 'Internal logic error.'
-                assert to_provision is not None, task
+            # Set to None so that sky.optimize() will assign a new one
+            # (otherwise will skip re-optimizing this task).
+            # TODO: set all remaining tasks' best_resources to None.
+            task.best_resources = None
+            self._dag = sky.optimize(
+                self._dag,
+                minimize=self._optimize_target,
+                blocked_launchable_resources=self._blocked_launchable_resources)
+            to_provision = task.best_resources
+            assert task in self._dag.tasks, 'Internal logic error.'
+            assert to_provision is not None, task
         return config_dict
 
 
@@ -2685,19 +2690,28 @@ class CloudVmRayBackend(backends.Backend):
                          handle: ResourceHandle,
                          terminate: bool,
                          purge: bool = False,
-                         post_teardown_cleanup: bool = True) -> bool:
+                         post_teardown_cleanup: bool = True,
+                         refresh_cluster_status: bool = True) -> bool:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
         status lock already.
+
+        refresh_cluster_status is only used internally in the status refresh
+        process, and should not be set to False in other cases.
         """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
         log_abs_path = os.path.abspath(log_path)
         cloud = handle.launched_resources.cloud
         config = common_utils.read_yaml(handle.cluster_yaml)
-        prev_status, _ = backend_utils.refresh_cluster_status_handle(
-            handle.cluster_name, acquire_per_cluster_status_lock=False)
+        if refresh_cluster_status:
+            prev_status, _ = backend_utils.refresh_cluster_status_handle(
+                handle.cluster_name, acquire_per_cluster_status_lock=False)
+        else:
+            record = global_user_state.get_cluster_from_name(
+                handle.cluster_name)
+            prev_status = record['status']
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
@@ -2736,36 +2750,8 @@ class CloudVmRayBackend(backends.Backend):
                 # TODO(wei-lin): refactor by calling functions of node provider
                 # that uses Python API rather than CLI
                 if use_tpu_vm:
-                    # check if gcloud includes TPU VM API
-                    backend_utils.check_gcp_cli_include_tpu_vm()
-
-                    query_cmd = (
-                        f'gcloud compute tpus tpu-vm list --filter='
-                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                        f'--zone={zone} --format=value\\(name\\)')
-                    returncode, stdout, stderr = log_lib.run_with_log(
-                        query_cmd,
-                        log_abs_path,
-                        shell=True,
-                        stream_logs=False,
-                        require_outputs=True)
-
-                    # Skip the termination command, if the TPU ID
-                    # query command fails.
-                    if returncode != 0:
-                        terminate_cmd = (f'echo "cmd: {query_cmd}" && '
-                                         f'echo "{stdout}" && '
-                                         f'echo "{stderr}" >&2 && '
-                                         f'exit {returncode}')
-                    else:
-                        # Needs to create a list as GCP does not allow deleting
-                        # multiple TPU VMs at once.
-                        tpu_terminate_cmds = []
-                        for tpu_id in stdout.splitlines():
-                            tpu_terminate_cmds.append(
-                                'gcloud compute tpus tpu-vm delete '
-                                f'--zone={zone} --quiet {tpu_id}')
-                        terminate_cmd = ' && '.join(tpu_terminate_cmds)
+                    terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
+                        cluster_name, zone, log_abs_path)
                 else:
                     query_cmd = (
                         f'gcloud compute instances list --filter='

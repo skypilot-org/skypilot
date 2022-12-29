@@ -8,6 +8,7 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.utils import accelerator_registry
 from sky.utils import schemas
+from sky.utils import tpu_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -236,7 +237,7 @@ class Resources:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', False)
                 if use_tpu_vm:
-                    backend_utils.check_gcp_cli_include_tpu_vm()
+                    tpu_utils.check_gcp_cli_include_tpu_vm()
                 if self.instance_type is not None and use_tpu_vm:
                     if self.instance_type != 'TPU-VM':
                         with ux_utils.print_exception_no_traceback():
@@ -284,8 +285,7 @@ class Resources:
 
         Each `Region` has a list of `Zone`s that can provision this Resources.
         """
-        assert self.is_launchable(), self
-        assert self._cloud is not None and self._instance_type is not None
+        assert self.is_launchable()
         regions = self._cloud.regions_with_offering(self._instance_type,
                                                     self.accelerators,
                                                     self._use_spot,
@@ -347,7 +347,7 @@ class Resources:
 
         if self.is_launchable() and not isinstance(self.cloud, clouds.GCP):
             # GCP attaches accelerators to VMs, so no need for this check.
-            assert self._cloud is not None and self._instance_type is not None
+            acc_requested = self.accelerators
             acc_from_instance_type = (
                 self._cloud.get_accelerators_from_instance_type(
                     self._instance_type))
@@ -376,6 +376,9 @@ class Resources:
 
         # Validate whether accelerator is available in specified region/zone.
         acc, acc_count = list(acc_requested.items())[0]
+        # Fractional accelerators are temporarily bumped up to 1.
+        if 0 < acc_count < 1:
+            acc_count = 1
         if self.region is not None or self.zone is not None:
             assert self._cloud is not None, self
             if not self._cloud.accelerator_in_region_or_zone(
@@ -484,18 +487,12 @@ class Resources:
         assert self._cloud is not None and self._instance_type is not None, self
         hours = seconds / 3600
         # Instance.
-        hourly_cost = self._cloud.instance_type_to_hourly_cost(
+        hourly_cost = self.cloud.instance_type_to_hourly_cost(
             self._instance_type, self.use_spot, self._region, self._zone)
         # Accelerators (if any).
         if self.accelerators is not None:
-            assert all(
-                count.is_integer()
-                for count in self.accelerators.values()), self.accelerators
-            accs = {
-                name: int(count) for name, count in self.accelerators.items()
-            }
-            hourly_cost += self._cloud.accelerators_to_hourly_cost(
-                accs, self.use_spot, self._region, self._zone)
+            hourly_cost += self.cloud.accelerators_to_hourly_cost(
+                self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
     def is_same_resources(self, other: 'Resources') -> bool:
@@ -630,7 +627,7 @@ class Resources:
         """
         is_matched = True
         if (blocked.cloud is not None and
-                not blocked.cloud.is_same_cloud(self.cloud)):
+                not self.cloud.is_same_cloud(blocked.cloud)):
             is_matched = False
         if (blocked.instance_type is not None and
                 self.instance_type != blocked.instance_type):

@@ -167,7 +167,7 @@ def get_accelerators_from_instance_type(
 
 def get_instance_type_for_accelerator(
     acc_name: str,
-    acc_count: float,
+    acc_count: int,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
