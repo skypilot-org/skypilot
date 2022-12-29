@@ -21,3 +21,4 @@ env = [
 python_version = "3.8"
 follow_imports = "skip"
 ignore_missing_imports = true
+allow_redefinition = true

@@ -165,7 +165,7 @@ def validate_region_zone_impl(
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
-    def _get_candidate_str(loc: str, all_loc: List[str]) -> List[str]:
+    def _get_candidate_str(loc: str, all_loc: List[str]) -> str:
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
@@ -422,6 +422,7 @@ def accelerator_in_region_or_zone_impl(
     assert region is not None or zone is not None, (
         'Both region and zone are None.')
     if zone is None:
+        assert region is not None
         return _accelerator_in_region(df, accelerator_name, acc_count, region)
     else:
         return _accelerator_in_zone(df, accelerator_name, acc_count, zone)

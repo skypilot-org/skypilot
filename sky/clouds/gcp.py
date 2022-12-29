@@ -185,7 +185,7 @@ class GCP(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -290,7 +290,7 @@ class GCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
@@ -301,7 +301,7 @@ class GCP(clouds.Cloud):
                 'Set either both or neither for: region, zones.')
 
         region_name = region.name
-        zones = [zones[0].name]
+        zone_name = zones[0].name
 
         # gcloud compute images list \
         # --project deeplearning-platform-release \
@@ -316,7 +316,7 @@ class GCP(clouds.Cloud):
         resources_vars = {
             'instance_type': r.instance_type,
             'region': region_name,
-            'zones': ','.join(zones),
+            'zones': zone_name,
             'gpu': None,
             'gpu_count': None,
             'tpu': None,
@@ -431,7 +431,7 @@ class GCP(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 
@@ -439,7 +439,7 @@ class GCP(clouds.Cloud):
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
-            from google import auth
+            from google import auth  # type: ignore
             # Check google-api-python-client installation.
             import googleapiclient
 
@@ -565,8 +565,9 @@ class GCP(clouds.Cloud):
                 raise exceptions.CloudUserIdentityError(
                     f'Failed to get GCP user identity with unknown '
                     f'exception.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
-                    f'{e}') from e
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
         if not account:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
@@ -574,7 +575,16 @@ class GCP(clouds.Cloud):
                     'auth list --filter=status:ACTIVE '
                     '--format="value(account)"` and ensure it correctly '
                     'returns the current user.')
-        return f'{account} [project_id={self.get_project_id()}]'
+        try:
+            return f'{account} [project_id={self.get_project_id()}]'
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.CloudUserIdentityError(
+                    f'Failed to get GCP user identity with unknown '
+                    f'exception.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}'
+                ) from e
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, 'gcp')
@@ -603,8 +613,13 @@ class GCP(clouds.Cloud):
     def get_project_id(cls, dryrun: bool = False) -> str:
         if dryrun:
             return 'dryrun-project-id'
-        from google import auth  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from google import auth  # type: ignore
         _, project_id = auth.default()
+        if project_id is None:
+            raise exceptions.CloudUserIdentityError(
+                'Failed to get GCP project id. Please make sure you have '
+                'run: gcloud init')
         return project_id
 
     @staticmethod

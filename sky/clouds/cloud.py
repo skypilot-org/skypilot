@@ -1,7 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Type
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
@@ -40,7 +40,7 @@ class _CloudRegistry(dict):
                                  f'{list(self.keys())}')
         return self.get(name.lower())
 
-    def register(self, cloud_cls: 'Cloud') -> None:
+    def register(self, cloud_cls: Type['Cloud']) -> Type['Cloud']:
         name = cloud_cls.__name__.lower()
         assert name not in self, f'{name} already registered'
         self[name] = cloud_cls()
@@ -88,7 +88,7 @@ class Cloud:
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
@@ -151,7 +151,7 @@ class Cloud:
         resources: 'resources.Resources',
         region: Optional['Region'],
         zones: Optional[List['Zone']],
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
