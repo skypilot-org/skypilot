@@ -298,7 +298,7 @@ class RayCodeGen:
             # FIXME: This is a hack to make sure that we do not reserve
             # GPU when requesting TPU.
             if 'tpu' in acc_name.lower():
-                gpu_dict = dict()
+                gpu_dict = {}
             for bundle in bundles:
                 bundle.update({
                     **accelerator_dict,
@@ -411,7 +411,7 @@ class RayCodeGen:
 
         sky_env_vars_dict_str = [
             textwrap.dedent("""\
-            sky_env_vars_dict = dict()
+            sky_env_vars_dict = {}
             sky_env_vars_dict['SKYPILOT_NODE_IPS'] = job_ip_list_str
             # Environment starting with `SKY_` is deprecated.
             sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
@@ -1221,7 +1221,7 @@ class RetryingVmProvisioner(object):
         worker_start_ray_commands += ray_config['worker_start_ray_commands']
 
         # Setup TPU VM Pod workers and launch Ray cluster.
-        backend_utils.do_filemounts_and_setup_on_local_workers(
+        onprem_utils.do_filemounts_and_setup_on_local_workers(
             cluster_yaml,
             worker_ips=all_ips[1:],
             extra_setup_cmds=worker_start_ray_commands)
@@ -1412,7 +1412,7 @@ class RetryingVmProvisioner(object):
         # nodes. Hence, this method here replicates what the Ray autoscaler
         # would do were it for public cloud.
         if isinstance(to_provision_cloud, clouds.Local):
-            backend_utils.do_filemounts_and_setup_on_local_workers(
+            onprem_utils.do_filemounts_and_setup_on_local_workers(
                 cluster_config_file)
 
         # FIXME(zongheng): the below requires ray processes are up on head. To

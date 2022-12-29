@@ -2,4 +2,6 @@ sky/adaptors
 sky/clouds
 sky/data
 sky/spot
+sky/usage
 sky/utils
+sky/backends/backend_utils.py

@@ -161,6 +161,6 @@ class AutostopEvent(SkyletEvent):
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
         # Empty the file_mounts.
-        config['file_mounts'] = dict()
+        config['file_mounts'] = {}
         common_utils.dump_yaml(yaml_path, config)
         logger.debug('Replaced upscaling speed to 0.')

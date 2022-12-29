@@ -47,14 +47,14 @@ class MessageType(enum.Enum):
 class MessageToReport:
     """Abstract class for messages to be sent to Loki."""
 
-    def __init__(self, schema_version: str):
+    def __init__(self, schema_version: int):
         self.schema_version = schema_version
-        self.start_time: int = None
-        self.send_time: int = None
+        self.start_time: Optional[int] = None
+        self.send_time: Optional[int] = None
 
     def start(self):
         if self.start_time is None:
-            self.start_time: int = _get_current_timestamp_ns()
+            self.start_time = _get_current_timestamp_ns()
 
     @property
     def message_sent(self):
@@ -107,8 +107,8 @@ class UsageMessageToReport(MessageToReport):
         self.resources: Optional[Dict[str,
                                       Any]] = None  # update_cluster_resources
         #: Resources of the local cluster.
-        self.local_resources: Optional[Dict[
-            str, Any]] = None  # update_local_cluster_resources
+        self.local_resources: Optional[List[Dict[
+            str, Any]]] = None  # update_local_cluster_resources
         #: The number of nodes in the cluster.
         self.num_nodes: Optional[int] = None  # update_cluster_resources
         #: The status of the cluster.
@@ -148,7 +148,7 @@ class UsageMessageToReport(MessageToReport):
         self.ray_yamls: Optional[List[Dict[str, Any]]] = None
         #: Number of Ray YAML files.
         self.num_tried_regions: Optional[int] = None  # update_ray_yaml
-        self.runtimes: Dict[str, int] = {}  # update_runtime
+        self.runtimes: Dict[str, float] = {}  # update_runtime
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
     def __repr__(self) -> str:
@@ -316,7 +316,7 @@ def _send_to_loki(message_type: MessageType):
     messages.reset(message_type)
 
 
-def _clean_yaml(yaml_info: Dict[str, str]):
+def _clean_yaml(yaml_info: Dict[str, Optional[str]]):
     """Remove sensitive information from user YAML."""
     cleaned_yaml_info = yaml_info.copy()
     for redact_type in constants.USAGE_MESSAGE_REDACT_KEYS:

@@ -5,7 +5,9 @@ import hashlib
 import os
 import pathlib
 import shlex
+import typing
 from typing import List, Optional, Tuple, Union
+from typing_extensions import Literal
 
 from sky import sky_logging
 from sky.utils import subprocess_utils
@@ -163,6 +165,40 @@ class SSHCommandRunner:
         return ssh + ssh_options_list(
             self.ssh_private_key,
             self.ssh_control_name) + [f'{self.ssh_user}@{self.ip}']
+
+    @typing.overload
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = None,
+            # Advanced options.
+            require_outputs: Literal[True],
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
+            **kwargs) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run(
+            self,
+            cmd: Union[str, List[str]],
+            *,
+            port_forward: Optional[List[int]] = None,
+            # Advanced options.
+            require_outputs: Literal[False] = False,
+            log_path: str = os.devnull,
+            # If False, do not redirect stdout/stderr to optimize performance.
+            process_stream: bool = True,
+            stream_logs: bool = True,
+            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
+            separate_stderr: bool = False,
+            **kwargs) -> int:
+        ...
 
     def run(
             self,

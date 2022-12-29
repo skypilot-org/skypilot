@@ -782,7 +782,7 @@ class Storage(object):
         return storage_obj
 
     def to_yaml_config(self) -> Dict[str, str]:
-        config = dict()
+        config = {}
 
         def add_if_not_none(key: str, value: Optional[Any]):
             if value is not None:

@@ -11,7 +11,7 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 import uuid
 import yaml
 
@@ -315,7 +315,8 @@ def class_fullname(cls):
     return f'{cls.__module__}.{cls.__name__}'
 
 
-def format_exception(e: Exception, use_bracket: bool = False) -> str:
+def format_exception(e: Union[Exception, SystemExit],
+                     use_bracket: bool = False) -> str:
     """Format an exception to a string.
 
     Args:

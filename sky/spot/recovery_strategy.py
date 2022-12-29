@@ -20,7 +20,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-SPOT_STRATEGIES = dict()
+SPOT_STRATEGIES = {}
 SPOT_DEFAULT_STRATEGY = None
 
 # Waiting time for job from INIT/PENDING to RUNNING

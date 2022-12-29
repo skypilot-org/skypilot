@@ -371,7 +371,7 @@ def update_job_status(job_owner: str,
     # which contains the job status (str) and submission_id (str).
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
-    job_details = dict()
+    job_details = {}
     ray_job_ids_set = set(ray_job_ids)
     for job_detail in job_detail_lists:
         if job_detail.submission_id in ray_job_ids_set:
@@ -583,7 +583,7 @@ def run_timestamp_with_globbing_payload(
             SELECT * FROM jobs
             WHERE {query_str}""", job_ids)
     rows = _CURSOR.fetchall()
-    run_timestamps = dict()
+    run_timestamps = {}
     for row in rows:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]

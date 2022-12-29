@@ -1410,7 +1410,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
     """
     cluster_records = core.status(refresh=refresh)
     nonreserved_cluster_records = []
-    reserved_clusters = dict()
+    reserved_clusters = {}
     for cluster_record in cluster_records:
         cluster_name = cluster_record['name']
         if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:

@@ -489,7 +489,7 @@ def spot_launch(
     assert len(task.resources) == 1, task
     resources = list(task.resources)[0]
 
-    change_default_value = dict()
+    change_default_value = {}
     if not resources.use_spot_specified:
         change_default_value['use_spot'] = True
     if resources.spot_recovery is None:
@@ -574,7 +574,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
             f'source paths to SkyPilot Storage...{colorama.Style.RESET_ALL}')
 
     # Step 1: Translate the workdir to SkyPilot storage.
-    new_storage_mounts = dict()
+    new_storage_mounts = {}
     if task.workdir is not None:
         bucket_name = spot.constants.SPOT_WORKDIR_BUCKET_NAME.format(
             username=getpass.getuser(), id=run_id)
@@ -603,7 +603,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     # TODO(zhwu): Optimize this by:
     # 1. Use the same bucket for all the mounts.
     # 2. When the src is the same, use the same bucket.
-    copy_mounts_with_file_in_src = dict()
+    copy_mounts_with_file_in_src = {}
     for i, (dst, src) in enumerate(copy_mounts.items()):
         task.file_mounts.pop(dst)
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
@@ -632,7 +632,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
     file_bucket_name = spot.constants.SPOT_FM_FILE_ONLY_BUCKET_NAME.format(
         username=getpass.getuser(), id=run_id)
     if copy_mounts_with_file_in_src:
-        src_to_file_id = dict()
+        src_to_file_id = {}
         for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
             src_to_file_id[src] = i
             os.link(os.path.abspath(os.path.expanduser(src)),
@@ -672,7 +672,7 @@ def _maybe_translate_local_file_mounts_and_sync_up(
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
-    new_file_mounts = dict()
+    new_file_mounts = {}
     for dst, src in copy_mounts_with_file_in_src.items():
         storage = task.storage_mounts[spot.constants.SPOT_FM_REMOTE_TMP_DIR]
         store_type = list(storage.stores.keys())[0]

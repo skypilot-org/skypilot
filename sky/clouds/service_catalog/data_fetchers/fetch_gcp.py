@@ -87,7 +87,7 @@ def get_regions(doc: 'html.HtmlElement') -> Dict[str, str]:
     # Get the dictionary of regions.
     # E.g., 'kr': 'asia-northeast3'
     region_info = doc.xpath('//md-option')
-    regions = dict()
+    regions = {}
     for region in region_info:
         region_fullname = re.search(r'\((.*?)\)', region.text)
         if region_fullname is None:

@@ -674,7 +674,7 @@ class Resources:
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
 
-        resources_fields = dict()
+        resources_fields = {}
         if config.get('cloud') is not None:
             resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
                 config.pop('cloud'))

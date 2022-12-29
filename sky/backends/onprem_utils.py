@@ -16,6 +16,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import schemas
@@ -127,7 +128,7 @@ def get_local_ips(cluster_name: str) -> List[str]:
     return ips
 
 
-def get_local_auth_config(cluster_name: str) -> List[str]:
+def get_local_auth_config(cluster_name: str) -> Dict[str, str]:
     """Returns IP addresses of the local cluster."""
     config = get_local_cluster_config_or_error(cluster_name)
     return config['auth']
@@ -182,7 +183,7 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
     def _install_and_check_dependencies(
             runner: command_runner.SSHCommandRunner) -> None:
         # Checks for python3 installation.
-        python_version = backend_utils.run_command_and_handle_ssh_failure(
+        python_version = _run_command_and_handle_ssh_failure(
             runner, ('python3 --version'),
             failure_message=f'Python3 is not installed on {runner.ip}.')
         python_version = python_version.split(' ')[-1].strip()
@@ -194,19 +195,19 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
                 f'the minimum requirement: Python {min_python_version}.')
 
         # Checks for pip3 installation.
-        backend_utils.run_command_and_handle_ssh_failure(
+        _run_command_and_handle_ssh_failure(
             runner, ('pip3 --version'),
             failure_message=f'Pip3 is not installed on {runner.ip}.')
 
         # If Ray does not exist, installs Ray.
-        backend_utils.run_command_and_handle_ssh_failure(
+        _run_command_and_handle_ssh_failure(
             runner, ('ray --version || '
                      f'(pip3 install ray[default]=={sky_ray_version})'),
             failure_message=f'Ray is not installed on {runner.ip}.')
 
         # If Ray exists, check Ray version. If the version does not match
         # raise an error.
-        backend_utils.run_command_and_handle_ssh_failure(
+        _run_command_and_handle_ssh_failure(
             runner,
             f'ray --version | grep {sky_ray_version}',
             failure_message=(
@@ -222,13 +223,13 @@ def check_and_install_local_env(ips: List[str], auth_config: Dict[str, str]):
         # since the last SkyPilot release. If required, please install
         # skypilot from source on the onprem machine(s) before running sky
         # admin deploy
-        backend_utils.run_command_and_handle_ssh_failure(
+        _run_command_and_handle_ssh_failure(
             runner,
             'sky --help || (pip3 install skypilot)',
             failure_message=f'Sky is not installed on {runner.ip}.')
 
         # Patches global Ray.
-        backend_utils.run_command_and_handle_ssh_failure(
+        _run_command_and_handle_ssh_failure(
             runner, ('python3 -c "from sky.skylet.ray_patches '
                      'import patch; patch()"'),
             failure_message=f'Failed to patch ray on {runner.ip}.')
@@ -306,7 +307,7 @@ def get_local_cluster_accelerators(
                          target=_SKY_GET_ACCELERATORS_SCRIPT_PATH,
                          up=True,
                          stream_logs=False)
-            output = backend_utils.run_command_and_handle_ssh_failure(
+            output = _run_command_and_handle_ssh_failure(
                 runner,
                 f'python3 {_SKY_GET_ACCELERATORS_SCRIPT_PATH}',
                 failure_message=f'Fail to fetch accelerators on {runner.ip}')
@@ -360,7 +361,7 @@ def launch_ray_on_local_cluster(
     with console.status('[bold cyan]Stopping ray cluster'):
 
         def _stop_ray_workers(runner: command_runner.SSHCommandRunner):
-            backend_utils.run_command_and_handle_ssh_failure(
+            _run_command_and_handle_ssh_failure(
                 runner,
                 'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
@@ -376,7 +377,7 @@ def launch_ray_on_local_cluster(
                 f'--resources={head_resources!r} --num-gpus={head_gpu_count}')
 
     with console.status('[bold cyan]Launching ray cluster on head'):
-        backend_utils.run_command_and_handle_ssh_failure(
+        _run_command_and_handle_ssh_failure(
             head_runner,
             head_cmd,
             failure_message='Failed to launch ray on head node.')
@@ -405,7 +406,7 @@ def launch_ray_on_local_cluster(
         def _start_ray_workers(
                 runner_tuple: Tuple[command_runner.SSHCommandRunner, int]):
             runner, idx = runner_tuple
-            backend_utils.run_command_and_handle_ssh_failure(
+            _run_command_and_handle_ssh_failure(
                 runner,
                 'ray stop -f',
                 failure_message=f'Failed to stop ray on {runner.ip}.')
@@ -417,7 +418,7 @@ def launch_ray_on_local_cluster(
                           '--object-manager-port=8076 --dashboard-port 8265 '
                           f'--resources={worker_resources!r} '
                           f'--num-gpus={worker_gpu_count}')
-            backend_utils.run_command_and_handle_ssh_failure(
+            _run_command_and_handle_ssh_failure(
                 runner,
                 worker_cmd,
                 failure_message=
@@ -436,7 +437,7 @@ def launch_ray_on_local_cluster(
                              up=True,
                              stream_logs=False)
             # Kill existing dashboard connection and launch new one
-            backend_utils.run_command_and_handle_ssh_failure(
+            _run_command_and_handle_ssh_failure(
                 runner, f'chmod a+rwx {dashboard_remote_path};'
                 'screen -S ray-dashboard -X quit;'
                 f'screen -S ray-dashboard -dm {dashboard_remote_path}',
@@ -463,7 +464,7 @@ def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
     # Admin authentication must be censored out.
     cluster_config['auth']['ssh_user'] = AUTH_PLACEHOLDER
     cluster_config['auth']['ssh_private_key'] = AUTH_PLACEHOLDER
-    cluster_config['python'] = backend_utils.run_command_and_handle_ssh_failure(
+    cluster_config['python'] = _run_command_and_handle_ssh_failure(
         head_runner,
         'which python3',
         failure_message='Failed to obtain admin python path.').split()[0]
@@ -511,3 +512,84 @@ def check_local_cloud_args(cloud: Optional[str] = None,
                     'See `sky status` for local cluster name(s).')
 
         return False
+
+
+def _run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
+                                        command: str,
+                                        failure_message: str) -> str:
+    """Runs command remotely and returns output with proper error handling."""
+    rc, stdout, stderr = runner.run(command,
+                                    require_outputs=True,
+                                    stream_logs=False)
+    if rc == 255:
+        # SSH failed
+        raise RuntimeError(
+            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
+            f'to {runner.ip} failed. This is most likely due to incorrect '
+            'credentials or incorrect permissions for the key file. Check '
+            'your credentials and try again.')
+    subprocess_utils.handle_returncode(rc,
+                                       command,
+                                       failure_message,
+                                       stderr=stderr)
+    return stdout
+
+
+def do_filemounts_and_setup_on_local_workers(
+        cluster_config_file: str,
+        worker_ips: Optional[List[str]] = None,
+        extra_setup_cmds: Optional[List[str]] = None):
+    """Completes filemounting and setup on worker nodes.
+
+    Syncs filemounts and runs setup on worker nodes for a local cluster. This
+    is a workaround for a Ray Autoscaler bug where `ray up` does not perform
+    filemounting or setup for local cluster worker nodes.
+    """
+    config = common_utils.read_yaml(cluster_config_file)
+
+    ssh_credentials = backend_utils.ssh_credential_from_yaml(
+        cluster_config_file)
+    if worker_ips is None:
+        worker_ips = config['provider']['worker_ips']
+    file_mounts = config['file_mounts']
+
+    setup_cmds = config['setup_commands']
+    if extra_setup_cmds is not None:
+        setup_cmds += extra_setup_cmds
+    setup_script = log_lib.make_task_bash_script('\n'.join(setup_cmds))
+
+    worker_runners = command_runner.SSHCommandRunner.make_runner_list(
+        worker_ips, **ssh_credentials)
+
+    # Uploads setup script to the worker node
+    with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
+        f.write(setup_script)
+        f.flush()
+        setup_sh_path = f.name
+        setup_file = os.path.basename(setup_sh_path)
+        file_mounts[f'/tmp/{setup_file}'] = setup_sh_path
+
+        # Ray Autoscaler Bug: Filemounting + Ray Setup
+        # does not happen on workers.
+        def _setup_local_worker(runner: command_runner.SSHCommandRunner):
+            for dst, src in file_mounts.items():
+                mkdir_dst = f'mkdir -p {os.path.dirname(dst)}'
+                _run_command_and_handle_ssh_failure(
+                    runner,
+                    mkdir_dst,
+                    failure_message=f'Failed to run {mkdir_dst} on remote.')
+                if os.path.isdir(src):
+                    src = os.path.join(src, '')
+                runner.rsync(source=src, target=dst, up=True, stream_logs=False)
+
+            setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
+            rc, stdout, _ = runner.run(setup_cmd,
+                                       stream_logs=False,
+                                       require_outputs=True)
+            subprocess_utils.handle_returncode(
+                rc,
+                setup_cmd,
+                'Failed to setup Ray autoscaler commands on remote.',
+                stderr=stdout)
+
+        subprocess_utils.run_in_parallel(_setup_local_worker, worker_runners)
