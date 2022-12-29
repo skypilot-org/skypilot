@@ -53,4 +53,4 @@ jobs:
           pip install pytest pytest-xdist pytest-env>=0.6
 
       - name: Run tests with pytest
-        run: SKYPILOT_DISABLE_USAGE_COLLECTION=1 pytest ${{ matrix.test-path }}
+        run: SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest ${{ matrix.test-path }}

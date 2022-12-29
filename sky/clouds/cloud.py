@@ -1,7 +1,7 @@
 """Interfaces: clouds, regions, and zones."""
 import collections
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Type
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
@@ -40,7 +40,7 @@ class _CloudRegistry(dict):
                                  f'{list(self.keys())}')
         return self.get(name.lower())
 
-    def register(self, cloud_cls: 'Cloud') -> None:
+    def register(self, cloud_cls: Type['Cloud']) -> Type['Cloud']:
         name = cloud_cls.__name__.lower()
         assert name not in self, f'{name} already registered'
         self[name] = cloud_cls()
@@ -62,12 +62,33 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[Region]:
+        """Returns the regions that offer the specified resources.
+
+        The order of the regions follow the order of the regions returned by
+        service_catalog/common.py#get_region_zones().
+        When region or zone is not None, the returned value will be limited to
+        the specified region/zone.
+
+        Returns:
+            A set of `Region`s that have the offerings for the specified
+            resources.
+            For each `Region` in the set, `region.zones` is the list of `Zone`s
+            which have the offerings. For the clouds that do not expose `Zone`s,
+            `region.zones` is an empty list.
+        """
+        raise NotImplementedError
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: Optional[bool] = False,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
@@ -103,12 +124,15 @@ class Cloud:
 
     #### Normal methods ####
 
-    # TODO: incorporate region/zone into the API.
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool,
+                                     region: Optional[str],
+                                     zone: Optional[str]) -> float:
         """Returns the hourly on-demand/spot price for an instance type."""
         raise NotImplementedError
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self, accelerators: Dict[str, int],
+                                    use_spot: bool, region: Optional[str],
+                                    zone: Optional[str]) -> float:
         """Returns the hourly on-demand price for accelerators."""
         raise NotImplementedError
 
@@ -127,7 +151,7 @@ class Cloud:
         resources: 'resources.Resources',
         region: Optional['Region'],
         zones: Optional[List['Zone']],
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -188,6 +212,44 @@ class Cloud:
         string describing the reason if the user cannot access.
         """
         raise NotImplementedError
+
+    def get_current_user_identity(self) -> Optional[str]:
+        """(Advanced) Returns currently active user identity of this cloud.
+
+        The user "identity" is associated with each SkyPilot cluster they
+        creates. This is used in protecting cluster operations, such as
+        provision, teardown and status refreshing, in a multi-identity
+        scenario, where the same user/device can switch between different
+        cloud identities. We check that the user identity matches before:
+            - Provisioning/starting a cluster
+            - Stopping/tearing down a cluster
+            - Refreshing the status of a cluster
+
+        Design choice: we allow the operations that can correctly work with
+        a different user identity, as a user should have full control over
+        all their clusters (no matter which identity it belongs to), e.g.,
+        submitting jobs, viewing logs, auto-stopping, etc.
+
+        The choice of what constitutes an identity is up to each cloud's
+        implementation. In general, to suffice for the above purposes,
+        ensure that different identities should imply different sets of
+        resources are used when the user invoked each cloud's default
+        CLI/API.
+
+        Example identities (see cloud implementations):
+            - AWS: unique aws:user_id
+            - GCP: email address + project ID
+            - Azure: email address + subscription ID
+
+        Returns:
+            None if the cloud does not have a concept of user identity
+            (access protection will be disabled for these clusters);
+            otherwise the currently active user identity.
+        Raises:
+            exceptions.CloudUserIdentityError: If the user identity cannot be
+                retrieved.
+        """
+        return None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns the files necessary to access this cloud.
