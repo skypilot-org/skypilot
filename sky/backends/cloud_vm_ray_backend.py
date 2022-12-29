@@ -1030,7 +1030,7 @@ class RetryingVmProvisioner(object):
                                                       cluster_exists):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            if zones is None or len(zones) == 0:
+            if not zones:
                 # For Azure, zones is always an empty list.
                 zone_str = 'all zones'
             else:
@@ -1559,10 +1559,9 @@ class RetryingVmProvisioner(object):
                 region_or_zone_str = str(to_provision.region)
             else:
                 region_or_zone_str = str(to_provision.zone)
-            logger.warning(
-                    f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                    f'{to_provision} in {region_or_zone_str}. '
-                    f'Trying other locations (if any).{style.RESET_ALL}')
+            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                           f'{to_provision} in {region_or_zone_str}. '
+                           f'Trying other locations (if any).{style.RESET_ALL}')
             if not cluster_exists:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
