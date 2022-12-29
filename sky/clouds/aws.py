@@ -106,6 +106,27 @@ class AWS(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        del accelerators  # unused
+        if instance_type is None:
+            # Fall back to default regions
+            regions = cls.regions()
+        else:
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'aws')
+
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
+        return regions
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
@@ -115,14 +136,11 @@ class AWS(clouds.Cloud):
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         # AWS provisioner can handle batched requests, so yield all zones under
         # each region.
-        del accelerators  # unused
-
-        if instance_type is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'aws')
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
         for region in regions:
             yield region, region.zones
 
@@ -207,14 +225,23 @@ class AWS(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
                                                use_spot=use_spot,
+                                               region=region,
+                                               zone=zone,
                                                clouds='aws')
 
-    def accelerators_to_hourly_cost(self, accelerators,
-                                    use_spot: bool) -> float:
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
+        del accelerators, use_spot, region, zone  # unused
         # AWS includes accelerators as part of the instance type.  Implementing
         # this is also necessary for e.g., the instance may have 4 GPUs, while
         # the task specifies to use 1 GPU.
@@ -336,9 +363,13 @@ class AWS(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='aws')
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='aws')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
