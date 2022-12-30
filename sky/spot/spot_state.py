@@ -70,12 +70,14 @@ class SpotStatus(enum.Enum):
 
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
-        return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
-                cls.FAILED_CONTROLLER, cls.CANCELLED)
+        return [
+            cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER, cls.CANCELLED
+        ]
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
-        return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
+        return [cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER]
 
 
 # === Status transition functions ===
@@ -265,3 +267,4 @@ def get_latest_job_id() -> Optional[int]:
         SELECT job_id FROM spot ORDER BY submitted_at DESC LIMIT 1""")
     for (job_id,) in rows:
         return job_id
+    return None
