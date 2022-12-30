@@ -5,7 +5,6 @@ import json
 import pathlib
 import shlex
 import time
-import typing
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import colorama
@@ -22,9 +21,6 @@ from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.spot import spot_state
 from sky.utils import subprocess_utils
-
-if typing.TYPE_CHECKING:
-    pass
 
 logger = sky_logging.init_logger(__name__)
 
