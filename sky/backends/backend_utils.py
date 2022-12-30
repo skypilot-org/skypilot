@@ -15,6 +15,7 @@ import threading
 import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
+from typing_extensions import Literal
 import uuid
 
 import colorama
@@ -1043,7 +1044,7 @@ def ssh_credential_from_yaml(cluster_yaml: str) -> Dict[str, str]:
 
 def parallel_data_transfer_to_nodes(
     runners: List[command_runner.SSHCommandRunner],
-    source: str,
+    source: Optional[str],
     target: str,
     cmd: Optional[str],
     run_rsync: bool,
@@ -1057,8 +1058,8 @@ def parallel_data_transfer_to_nodes(
 
     Args:
         runners: A list of SSHCommandRunner objects that represent multiple nodes.
-        source_target: Tuple[str, str]; Source for rsync on local node and
-            Destination on remote node for rsync
+        source: str; Source for rsync on local node
+        target: str; Destination on remote node for rsync
         cmd: str; Command to be executed on all nodes
         action_message: str; Message to be printed while the command runs
         log_path: str; Path to the log file
@@ -1082,8 +1083,9 @@ def parallel_data_transfer_to_nodes(
                 stderr=stdout + stderr)
 
         if run_rsync:
+            assert source is not None
             # TODO(zhwu): Optimize for large amount of files.
-            # zip / transfer/ unzip
+            # zip / transfer / unzip
             runner.rsync(
                 source=source,
                 target=target,
@@ -1180,7 +1182,8 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 @timeline.event
 def get_node_ips(cluster_yaml: str,
                  expected_num_nodes: int,
-                 handle: Optional[backends.Backend.ResourceHandle] = None,
+                 handle: Optional[
+                     backends.CloudVmRayBackend.ResourceHandle] = None,
                  head_ip_max_attempts: int = 1,
                  worker_ip_max_attempts: int = 1,
                  get_internal_ips: bool = False) -> List[str]:
@@ -1332,7 +1335,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
 @timeline.event
 def get_head_ip(
-    handle: backends.Backend.ResourceHandle,
+    handle: backends.CloudVmRayBackend.ResourceHandle,
     use_cached_head_ip: bool = True,
     max_attempts: int = 1,
 ) -> str:
@@ -1855,6 +1858,26 @@ def refresh_cluster_status_handle(
     return record['status'], record['handle']
 
 
+@typing.overload
+def check_cluster_available(
+    cluster_name: str,
+    *,
+    operation: str,
+    check_cloud_vm_ray_backend: Literal[True] = True,
+) -> backends.CloudVmRayBackend.ResourceHandle:
+    ...
+
+
+@typing.overload
+def check_cluster_available(
+    cluster_name: str,
+    *,
+    operation: str,
+    check_cloud_vm_ray_backend: Literal[False],
+) -> backends.Backend.ResourceHandle:
+    ...
+
+
 def check_cluster_available(
     cluster_name: str,
     *,
@@ -2052,12 +2075,27 @@ def get_clusters(
     return kept_records
 
 
+@typing.overload
+def get_backend_from_handle(
+    handle: backends.CloudVmRayBackend.ResourceHandle
+) -> backends.CloudVmRayBackend:
+    ...
+
+
+@typing.overload
+def get_backend_from_handle(
+    handle: backends.LocalDockerBackend.ResourceHandle
+) -> backends.LocalDockerBackend:
+    ...
+
+
 def get_backend_from_handle(
         handle: backends.Backend.ResourceHandle) -> backends.Backend:
     """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
     """
+    backend: backends.Backend
     if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
         backend = backends.CloudVmRayBackend()
     elif isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
@@ -2085,7 +2123,7 @@ def safe_console_status(msg: str):
     return NoOpConsole()
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, int]]:
+def get_task_demands_dict(task: 'task_lib.Task') -> Optional[Dict[str, float]]:
     """Returns the accelerator dict of the task"""
     # TODO: CPU and other memory resources are not supported yet.
     accelerator_dict = None

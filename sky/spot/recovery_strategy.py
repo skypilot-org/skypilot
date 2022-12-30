@@ -7,6 +7,7 @@ import sky
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky import backends
 from sky.backends import backend_utils
 from sky.skylet import job_lib
 from sky.spot import spot_utils
@@ -15,7 +16,6 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import backends
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -43,6 +43,8 @@ class StrategyExecutor:
             task: The task to execute.
             retry_until_up: Whether to retry until the cluster is up.
         """
+        assert isinstance(backend, backends.CloudVmRayBackend), (
+            'Only CloudVMRayBackend is supported.')
         self.dag = sky.Dag()
         self.dag.add(task)
         self.cluster_name = cluster_name

@@ -2,7 +2,7 @@
 import subprocess
 import tempfile
 import typing
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import colorama
 from rich import console as rich_console
@@ -30,7 +30,7 @@ _DOCKER_LABEL_PREFIX = 'skymeta_'
 _DOCKER_HANDLE_PREFIX = 'skydocker-'
 
 
-class LocalDockerBackend(backends.Backend):
+class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
     """Local docker backend for debugging.
 
     Ignores resource demands when allocating. Optionally uses GPU if required.
@@ -78,7 +78,7 @@ class LocalDockerBackend(backends.Backend):
 
     NAME = 'localdocker'
 
-    class ResourceHandle(str):
+    class ResourceHandle(str, backends.Backend.ResourceHandle):
         """The name of the cluster/container prefixed with the handle prefix."""
 
         def __new__(cls, s, **kw):
@@ -110,15 +110,19 @@ class LocalDockerBackend(backends.Backend):
         """
         self._use_gpu = backend_utils.check_local_gpus() if use_gpu == 'auto' \
             else use_gpu
-        self.volume_mounts = {}  # Stores the ResourceHandle->volume mounts map
-        self.images = {}  # Stores the ResourceHandle->[image_tag, metadata] map
-        self.containers = {}
+        self.volume_mounts: Dict[LocalDockerBackend.ResourceHandle, Dict[
+            str, Any]] = {}  # Stores the ResourceHandle->volume mounts map
+        self.images: Dict[LocalDockerBackend.ResourceHandle, Tuple[str, Dict[
+            str,
+            str]]] = {}  # Stores the ResourceHandle->[image_tag, metadata] map
+        self.containers: Dict[LocalDockerBackend.ResourceHandle, Any] = {}
         self.client = docker.from_env()
         self._update_state()
 
     # --- Implementation of Backend APIs ---
 
-    def check_resources_fit_cluster(self, handle: ResourceHandle,
+    def check_resources_fit_cluster(self,
+                                    handle: LocalDockerBackend.ResourceHandle,
                                     task: 'task_lib.Task') -> None:
         pass
 
@@ -150,7 +154,7 @@ class LocalDockerBackend(backends.Backend):
                     'This might take some time.')
         with console.status('[bold cyan]Building Docker image[/]'):
             image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
-        self.images[handle] = [image_tag, metadata]
+        self.images[handle] = (image_tag, metadata)
         logger.info(f'Image {image_tag} built.')
         logger.info('Provisioning complete.')
         global_user_state.add_or_update_cluster(cluster_name,
@@ -190,15 +194,15 @@ class LocalDockerBackend(backends.Backend):
                 }
         self.volume_mounts[handle] = docker_mounts
 
-    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task') -> None:
-        """
-        Launches a container and runs a sleep command on it.
+    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+               detach_setup: bool) -> None:
+        """Launches a container and runs a sleep command on it.
 
         setup() in LocalDockerBackend runs the container with a sleep job
         so that the container is kept alive and we can issue docker exec cmds
         to it to handle sky exec commands.
         """
-        del task  # unused
+        del task, detach_setup  # unused
         colorama.init()
         style = colorama.Style
         assert handle in self.images, \

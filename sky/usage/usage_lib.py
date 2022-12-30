@@ -10,7 +10,7 @@ import os
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import requests
 
@@ -424,7 +424,7 @@ def entrypoint_context(name: str, fallback: bool = False):
         _send_local_messages()
 
 
-def entrypoint(name_or_fn: str, fallback: bool = False):
+def entrypoint(name_or_fn: Union[str, Callable], fallback: bool = False):
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

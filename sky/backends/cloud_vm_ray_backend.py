@@ -14,7 +14,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
@@ -51,7 +51,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import dag
 
-OptimizeTarget = optimizer.OptimizeTarget
 Path = str
 
 SKY_REMOTE_APP_DIR = backend_utils.SKY_REMOTE_APP_DIR
@@ -269,7 +268,7 @@ class RayCodeGen:
     def add_gang_scheduling_placement_group(
         self,
         num_nodes: int,
-        accelerator_dict: Dict[str, int],
+        accelerator_dict: Optional[Dict[str, float]],
         stable_cluster_internal_ips: List[str],
     ) -> None:
         """Create the gang scheduling placement group for a Task.
@@ -368,12 +367,12 @@ class RayCodeGen:
         ]
 
     def add_ray_task(self,
-                     bash_script: str,
+                     bash_script: Optional[str],
                      task_name: Optional[str],
                      job_run_id: Optional[str],
                      ray_resources_dict: Optional[Dict[str, float]],
                      log_dir: str,
-                     env_vars: Dict[str, str] = None,
+                     env_vars: Optional[Dict[str, str]] = None,
                      gang_scheduling_id: int = 0,
                      use_sudo: bool = False) -> None:
         """Generates code for a ray remote task that runs a bash command."""
@@ -388,7 +387,7 @@ class RayCodeGen:
         cpu_str = f', num_cpus={backend_utils.DEFAULT_TASK_CPU_DEMAND}'
 
         resources_str = ''
-        num_gpus = 0
+        num_gpus = 0.0
         num_gpus_str = ''
         if ray_resources_dict is not None:
             assert len(ray_resources_dict) == 1, \
@@ -522,7 +521,7 @@ class RetryingVmProvisioner(object):
 
         def __init__(self,
                      cluster_name: str,
-                     resources: Optional[resources_lib.Resources],
+                     resources: resources_lib.Resources,
                      num_nodes: int,
                      cluster_exists: bool = False) -> None:
             assert cluster_name is not None, 'cluster_name must be specified.'
@@ -540,11 +539,11 @@ class RetryingVmProvisioner(object):
         HEAD_FAILED = 2
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
-                 optimize_target: OptimizeTarget,
+                 optimize_target: 'optimizer.OptimizeTarget',
                  local_wheel_path: pathlib.Path, wheel_hash: str):
-        self._blocked_regions = set()
-        self._blocked_zones = set()
-        self._blocked_launchable_resources = set()
+        self._blocked_regions: Set[str] = set()
+        self._blocked_zones: Set[str] = set()
+        self._blocked_launchable_resources: Set[resources_lib.Resources] = set()
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
@@ -1186,8 +1185,9 @@ class RetryingVmProvisioner(object):
         raise exceptions.ResourcesUnavailableError(
             message, no_failover=is_prev_cluster_healthy)
 
-    def _tpu_pod_setup(self, cluster_yaml: str,
-                       cluster_handle: 'backends.Backend.ResourceHandle'):
+    def _tpu_pod_setup(
+            self, cluster_yaml: str,
+            cluster_handle: 'backends.CloudVmRayBackend.ResourceHandle'):
         """Completes setup and start Ray cluster on TPU VM Pod nodes.
 
         This is a workaround for Ray Autoscaler where `ray up` does not
@@ -1207,8 +1207,8 @@ class RetryingVmProvisioner(object):
                                                       **ssh_credentials)
         cmd_str = 'python3 -c \"import ray; print(ray._private.services.get_node_ip_address())\"'  # pylint: disable=line-too-long
         rc, stdout, stderr = head_runner.run(cmd_str,
-                                             stream_logs=False,
-                                             require_outputs=True)
+                                             require_outputs=True,
+                                             stream_logs=False)
         subprocess_utils.handle_returncode(
             rc,
             cmd_str,
@@ -1229,7 +1229,7 @@ class RetryingVmProvisioner(object):
     @timeline.event
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
-            cluster_handle: 'backends.Backend.ResourceHandle',
+            cluster_handle: 'backends.CloudVmRayBackend.ResourceHandle',
             log_abs_path: str, stream_logs: bool, logging_info: dict,
             use_spot: bool
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
@@ -1591,7 +1591,7 @@ class RetryingVmProvisioner(object):
         return config_dict
 
 
-class CloudVmRayBackend(backends.Backend):
+class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
     """Backend: runs on cloud virtual machines, managed by Ray.
 
     Changing this class may also require updates to:
@@ -1601,7 +1601,7 @@ class CloudVmRayBackend(backends.Backend):
 
     NAME = 'cloudvmray'
 
-    class ResourceHandle(object):
+    class ResourceHandle(backends.Backend.ResourceHandle):
         """A pickle-able tuple of:
 
         - (required) Cluster name.
@@ -1616,17 +1616,16 @@ class CloudVmRayBackend(backends.Backend):
         """
         _VERSION = 3
 
-        def __init__(
-                self,
-                *,
-                cluster_name: str,
-                cluster_yaml: str,
-                stable_internal_external_ips: Optional[List[Tuple[str,
-                                                                  str]]] = None,
-                launched_nodes: Optional[int] = None,
-                launched_resources: Optional[resources_lib.Resources] = None,
-                tpu_create_script: Optional[str] = None,
-                tpu_delete_script: Optional[str] = None) -> None:
+        def __init__(self,
+                     *,
+                     cluster_name: str,
+                     cluster_yaml: str,
+                     launched_nodes: int,
+                     launched_resources: resources_lib.Resources,
+                     stable_internal_external_ips: Optional[List[Tuple[
+                         str, str]]] = None,
+                     tpu_create_script: Optional[str] = None,
+                     tpu_delete_script: Optional[str] = None) -> None:
             self._version = self._VERSION
             self.cluster_name = cluster_name
             self._cluster_yaml = cluster_yaml.replace(os.path.expanduser('~'),
@@ -1718,8 +1717,7 @@ class CloudVmRayBackend(backends.Backend):
             self.launched_resources = self.launched_resources.copy(
                 region=region)
 
-        def _update_stable_cluster_ips(self,
-                                       max_attempts: int = 1) -> List[str]:
+        def _update_stable_cluster_ips(self, max_attempts: int = 1) -> None:
             cluster_external_ips = backend_utils.get_node_ips(
                 self.cluster_yaml,
                 self.launched_nodes,
@@ -1833,7 +1831,8 @@ class CloudVmRayBackend(backends.Backend):
     def register_info(self, **kwargs) -> None:
         self._dag = kwargs.pop('dag', self._dag)
         self._optimize_target = kwargs.pop(
-            'optimize_target', self._optimize_target) or OptimizeTarget.COST
+            'optimize_target',
+            self._optimize_target) or optimizer.OptimizeTarget.COST
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(self, handle: ResourceHandle,
@@ -1905,7 +1904,7 @@ class CloudVmRayBackend(backends.Backend):
                    dryrun: bool,
                    stream_logs: bool,
                    cluster_name: str,
-                   retry_until_up: bool = False) -> ResourceHandle:
+                   retry_until_up: bool = False) -> Optional[ResourceHandle]:
         """Provisions using 'ray up'."""
         # FIXME: ray up for Azure with different cluster_names will overwrite
         # each other.
@@ -2001,7 +2000,7 @@ class CloudVmRayBackend(backends.Backend):
                         raise exceptions.ResourcesUnavailableError(
                             error_message) from None
             if dryrun:
-                return
+                return None
             cluster_config_file = config_dict['ray']
 
             handle = self.ResourceHandle(
@@ -2168,7 +2167,7 @@ class CloudVmRayBackend(backends.Backend):
         self._execute_storage_mounts(handle, storage_mounts)
 
     def _setup(self, handle: ResourceHandle, task: task_lib.Task,
-               detach_setup: bool) -> Optional[str]:
+               detach_setup: bool) -> None:
         start = time.time()
         style = colorama.Style
         fore = colorama.Fore
@@ -2198,7 +2197,7 @@ class CloudVmRayBackend(backends.Backend):
             # Need this `-i` option to make sure `source ~/.bashrc` work
             setup_cmd = f'/bin/bash -i /tmp/{setup_file} 2>&1'
 
-            def _setup_node(runner: command_runner.SSHCommandRunner) -> int:
+            def _setup_node(runner: command_runner.SSHCommandRunner) -> None:
                 runner.rsync(source=setup_sh_path,
                              target=f'/tmp/{setup_file}',
                              up=True,
@@ -2517,9 +2516,9 @@ class CloudVmRayBackend(backends.Backend):
     def get_job_status(
         self,
         handle: ResourceHandle,
-        job_ids: Optional[List[str]] = None,
+        job_ids: Optional[List[int]] = None,
         stream_logs: bool = True
-    ) -> Dict[Optional[str], Optional[job_lib.JobStatus]]:
+    ) -> Dict[Optional[int], Optional[job_lib.JobStatus]]:
         code = job_lib.JobLibCodeGen.get_job_status(job_ids)
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,
@@ -2547,7 +2546,7 @@ class CloudVmRayBackend(backends.Backend):
     def sync_down_logs(
             self,
             handle: ResourceHandle,
-            job_ids: Optional[str],
+            job_ids: Optional[List[str]],
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         """Sync down logs for the given job_ids.
 
@@ -2568,7 +2567,7 @@ class CloudVmRayBackend(backends.Backend):
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
-            return
+            return {}
 
         job_ids = list(run_timestamps.keys())
         run_timestamps = list(run_timestamps.values())
@@ -2914,7 +2913,7 @@ class CloudVmRayBackend(backends.Backend):
         handle: ResourceHandle,
         cmd: str,
         *,
-        port_forward: Optional[List[str]] = None,
+        port_forward: Optional[List[int]] = None,
         log_path: str = '/dev/null',
         process_stream: bool = True,
         stream_logs: bool = False,
@@ -3190,6 +3189,8 @@ class CloudVmRayBackend(backends.Backend):
             mount_cmd = store.mount_command(dst)
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
+            if isinstance(src_print, list):
+                src_print = ', '.join(src_print)
             backend_utils.parallel_data_transfer_to_nodes(
                 runners,
                 source=src_print,
@@ -3234,7 +3235,7 @@ class CloudVmRayBackend(backends.Backend):
             constants.JOB_ID_ENV_VAR,
             common_utils.get_global_job_id(self.run_timestamp,
                                            cluster_name=handle.cluster_name,
-                                           job_id=job_id))
+                                           job_id=str(job_id)))
 
         command_for_node = task.run if isinstance(task.run, str) else None
         use_sudo = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3274,6 +3275,7 @@ class CloudVmRayBackend(backends.Backend):
                 handle.launched_resources)
         else:
             num_actual_nodes = task.num_nodes
+        assert isinstance(num_actual_nodes, int), num_actual_nodes
 
         codegen = RayCodeGen()
         is_local = isinstance(handle.launched_resources.cloud, clouds.Local)
@@ -3299,7 +3301,7 @@ class CloudVmRayBackend(backends.Backend):
             constants.JOB_ID_ENV_VAR,
             common_utils.get_global_job_id(self.run_timestamp,
                                            cluster_name=handle.cluster_name,
-                                           job_id=job_id))
+                                           job_id=str(job_id)))
 
         # TODO(zhwu): The resources limitation for multi-node ray.tune and
         # horovod should be considered.

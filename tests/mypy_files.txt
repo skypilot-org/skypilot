@@ -1,7 +1,12 @@
 sky/adaptors
+sky/backends
 sky/clouds
 sky/data
 sky/spot
 sky/usage
 sky/utils
-sky/backends/backend_utils.py
+sky/core.py
+sky/skylet
+
+--exclude
+sky/skylet/providers

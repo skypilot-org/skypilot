@@ -1,6 +1,6 @@
 """Sky backend interface."""
 import typing
-from typing import Dict, Optional
+from typing import Dict, Generic, Optional
 
 import sky
 from sky.utils import timeline
@@ -12,9 +12,11 @@ if typing.TYPE_CHECKING:
     from sky.data import storage as storage_lib
 
 Path = str
+ResourceHandleType = typing.TypeVar('ResourceHandleType',
+                                    bound='Backend.ResourceHandle')
 
 
-class Backend:
+class Backend(Generic[ResourceHandleType]):
     """Backend interface: handles provisioning, setup, and scheduling."""
 
     # NAME is used to identify the backend class from cli/yaml.
@@ -28,7 +30,7 @@ class Backend:
             raise NotImplementedError
 
     # --- APIs ---
-    def check_resources_fit_cluster(self, handle: ResourceHandle,
+    def check_resources_fit_cluster(self, handle: ResourceHandleType,
                                     task: 'task_lib.Task') -> None:
         """Check whether resources of the task are satisfied by cluster."""
         raise NotImplementedError
@@ -41,7 +43,7 @@ class Backend:
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None,
-                  retry_until_up: bool = False) -> ResourceHandle:
+                  retry_until_up: bool = False) -> Optional[ResourceHandleType]:
         if cluster_name is None:
             cluster_name = sky.backends.backend_utils.generate_cluster_name()
         usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -51,14 +53,14 @@ class Backend:
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_workdir')
-    def sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def sync_workdir(self, handle: ResourceHandleType, workdir: Path) -> None:
         return self._sync_workdir(handle, workdir)
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('sync_file_mounts')
     def sync_file_mounts(
         self,
-        handle: ResourceHandle,
+        handle: ResourceHandleType,
         all_file_mounts: Dict[Path, Path],
         storage_mounts: Dict[Path, 'storage_lib.Storage'],
     ) -> None:
@@ -66,7 +68,7 @@ class Backend:
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
-    def setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def setup(self, handle: ResourceHandleType, task: 'task_lib.Task',
               detach_setup: bool) -> None:
         return self._setup(handle, task, detach_setup)
 
@@ -75,7 +77,7 @@ class Backend:
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('execute')
-    def execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def execute(self, handle: ResourceHandleType, task: 'task_lib.Task',
                 detach_run: bool) -> None:
         usage_lib.record_cluster_name_for_current_operation(
             handle.get_cluster_name())
@@ -83,7 +85,7 @@ class Backend:
         return self._execute(handle, task, detach_run)
 
     @timeline.event
-    def post_execute(self, handle: ResourceHandle, down: bool) -> None:
+    def post_execute(self, handle: ResourceHandleType, down: bool) -> None:
         """Post execute(): e.g., print helpful inspection messages."""
         return self._post_execute(handle, down)
 
@@ -94,7 +96,7 @@ class Backend:
     @timeline.event
     @usage_lib.messages.usage.update_runtime('teardown')
     def teardown(self,
-                 handle: ResourceHandle,
+                 handle: ResourceHandleType,
                  terminate: bool,
                  purge: bool = False) -> None:
         self._teardown(handle, terminate, purge)
@@ -104,42 +106,43 @@ class Backend:
         pass
 
     # --- Implementations of the APIs ---
-    def _provision(self,
-                   task: 'task_lib.Task',
-                   to_provision: Optional['resources.Resources'],
-                   dryrun: bool,
-                   stream_logs: bool,
-                   cluster_name: str,
-                   retry_until_up: bool = False) -> ResourceHandle:
+    def _provision(
+            self,
+            task: 'task_lib.Task',
+            to_provision: Optional['resources.Resources'],
+            dryrun: bool,
+            stream_logs: bool,
+            cluster_name: str,
+            retry_until_up: bool = False) -> Optional[ResourceHandleType]:
         raise NotImplementedError
 
-    def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def _sync_workdir(self, handle: ResourceHandleType, workdir: Path) -> None:
         raise NotImplementedError
 
     def _sync_file_mounts(
         self,
-        handle: ResourceHandle,
+        handle: ResourceHandleType,
         all_file_mounts: Dict[Path, Path],
         storage_mounts: Dict[Path, 'storage_lib.Storage'],
     ) -> None:
         raise NotImplementedError
 
-    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def _setup(self, handle: ResourceHandleType, task: 'task_lib.Task',
                detach_setup: bool) -> None:
         raise NotImplementedError
 
-    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def _execute(self, handle: ResourceHandleType, task: 'task_lib.Task',
                  detach_run: bool) -> None:
         raise NotImplementedError
 
-    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
+    def _post_execute(self, handle: ResourceHandleType, down: bool) -> None:
         raise NotImplementedError
 
     def _teardown_ephemeral_storage(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
 
     def _teardown(self,
-                  handle: ResourceHandle,
+                  handle: ResourceHandleType,
                   terminate: bool,
                   purge: bool = False):
         raise NotImplementedError

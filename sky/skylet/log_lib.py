@@ -67,7 +67,7 @@ def process_subprocess_stream(
             while len(sel.get_map()) > 0:
                 events = sel.select()
                 for key, _ in events:
-                    line = key.fileobj.readline()
+                    line = key.fileobj.readline()  # type: ignore
                     if not line:
                         # Unregister the io when EOF reached
                         sel.unregister(key.fileobj)
@@ -110,11 +110,12 @@ def process_subprocess_stream(
 def run_with_log(
     cmd: Union[List[str], str],
     log_path: str,
+    *,
+    require_outputs: bool = False,
     stream_logs: bool = False,
     start_streaming_at: str = '',
     end_streaming_at: Optional[str] = None,
     skip_lines: Optional[List[str]] = None,
-    require_outputs: bool = False,
     shell: bool = False,
     with_ray: bool = False,
     process_stream: bool = True,
@@ -161,13 +162,13 @@ def run_with_log(
         os.makedirs(dirname, exist_ok=True)
     # Redirect stderr to stdout when using ray, to preserve the order of
     # stdout and stderr.
-    stdout = stderr = None
+    stdout_arg = stderr_arg = None
     if process_stream:
-        stdout = subprocess.PIPE
-        stderr = subprocess.PIPE if not with_ray else subprocess.STDOUT
+        stdout_arg = subprocess.PIPE
+        stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
     with subprocess.Popen(cmd,
-                          stdout=stdout,
-                          stderr=stderr,
+                          stdout=stdout_arg,
+                          stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
                           **kwargs) as proc:
@@ -302,6 +303,7 @@ def run_bash_command_with_log(bash_command: str,
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
 
+        subprocess_cmd: Union[str, List[str]]
         if use_sudo:
             subprocess.run(f'chmod a+rwx {script_path}', shell=True, check=True)
             subprocess_cmd = job_lib.make_job_command_with_user_switching(
@@ -359,7 +361,8 @@ def _follow_job_logs(file,
                     time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
-                print(f'INFO: Job finished (status: {status.value}).')
+                status_str = status.value if status is not None else 'None'
+                print(f'INFO: Job finished (status: {status_str}).')
                 return
 
             time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)

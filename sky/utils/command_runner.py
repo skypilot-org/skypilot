@@ -5,9 +5,7 @@ import hashlib
 import os
 import pathlib
 import shlex
-import typing
 from typing import List, Optional, Tuple, Union
-from typing_extensions import Literal
 
 from sky import sky_logging
 from sky.utils import subprocess_utils
@@ -166,47 +164,13 @@ class SSHCommandRunner:
             self.ssh_private_key,
             self.ssh_control_name) + [f'{self.ssh_user}@{self.ip}']
 
-    @typing.overload
     def run(
             self,
             cmd: Union[str, List[str]],
             *,
-            port_forward: Optional[List[int]] = None,
-            # Advanced options.
-            require_outputs: Literal[True],
-            log_path: str = os.devnull,
-            # If False, do not redirect stdout/stderr to optimize performance.
-            process_stream: bool = True,
-            stream_logs: bool = True,
-            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
-            separate_stderr: bool = False,
-            **kwargs) -> Tuple[int, str, str]:
-        ...
-
-    @typing.overload
-    def run(
-            self,
-            cmd: Union[str, List[str]],
-            *,
-            port_forward: Optional[List[int]] = None,
-            # Advanced options.
-            require_outputs: Literal[False] = False,
-            log_path: str = os.devnull,
-            # If False, do not redirect stdout/stderr to optimize performance.
-            process_stream: bool = True,
-            stream_logs: bool = True,
-            ssh_mode: SshMode = SshMode.NON_INTERACTIVE,
-            separate_stderr: bool = False,
-            **kwargs) -> int:
-        ...
-
-    def run(
-            self,
-            cmd: Union[str, List[str]],
-            *,
-            port_forward: Optional[List[int]] = None,
-            # Advanced options.
             require_outputs: bool = False,
+            port_forward: Optional[List[int]] = None,
+            # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
             process_stream: bool = True,
@@ -294,9 +258,9 @@ class SSHCommandRunner:
 
         return log_lib.run_with_log(' '.join(command),
                                     log_path,
-                                    stream_logs,
-                                    process_stream=process_stream,
                                     require_outputs=require_outputs,
+                                    stream_logs=stream_logs,
+                                    process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
                                     **kwargs)

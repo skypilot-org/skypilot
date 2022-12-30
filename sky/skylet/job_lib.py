@@ -222,7 +222,7 @@ def set_job_started(job_id: int) -> None:
         _CONN.commit()
 
 
-def get_status_no_lock(job_id: int) -> JobStatus:
+def get_status_no_lock(job_id: int) -> Optional[JobStatus]:
     """Get the status of the job with the given id.
 
     This function can return a stale status if there is a concurrent update.
@@ -236,6 +236,7 @@ def get_status_no_lock(job_id: int) -> JobStatus:
         if status is None:
             return None
         return JobStatus(status)
+    return None
 
 
 def get_status(job_id: int) -> Optional[JobStatus]:
@@ -258,7 +259,8 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     return common_utils.encode_payload(statuses)
 
 
-def load_statuses_payload(statuses_payload: str) -> Dict[int, JobStatus]:
+def load_statuses_payload(
+        statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
     statuses = common_utils.decode_payload(statuses_payload)
     for job_id, status in statuses.items():
         if status is not None:
@@ -271,14 +273,16 @@ def get_latest_job_id() -> Optional[int]:
         'SELECT job_id FROM jobs ORDER BY job_id DESC LIMIT 1')
     for (job_id,) in rows:
         return job_id
+    return None
 
 
-def get_job_time_payload(job_id: int, is_end: bool) -> Optional[int]:
+def get_job_time_payload(job_id: int, is_end: bool) -> str:
     field = 'end_at' if is_end else 'start_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
         return common_utils.encode_payload(timestamp)
+    assert False, 'Should not reach here'
 
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
@@ -376,7 +380,7 @@ def update_job_status(job_owner: str,
     for job_detail in job_detail_lists:
         if job_detail.submission_id in ray_job_ids_set:
             job_details[job_detail.submission_id] = job_detail
-    job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
+    job_statuses: List[Optional[JobStatus]] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
         if ray_job_id in job_details:
             ray_status = job_details[ray_job_id].status
@@ -393,8 +397,9 @@ def update_job_status(job_owner: str,
         # updated
         # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job_id)):
+            original_status = get_status_no_lock(job_id)
+            assert original_status is not None, (job_id, status)
             if status is None:
-                original_status = get_status_no_lock(job_id)
                 status = original_status
                 if not original_status.is_terminal():
                     # The job may be stale, when the instance is restarted
@@ -406,7 +411,6 @@ def update_job_status(job_owner: str,
                     if not silent:
                         logger.info(f'Updated job {job_id} status to {status}')
             else:
-                original_status = get_status_no_lock(job_id)
                 # Taking max of the status is necessary because:
                 # 1. It avoids race condition, where the original status has
                 # already been set to later state by the job. We skip the
@@ -465,6 +469,7 @@ def is_cluster_idle() -> bool:
         """, in_progress_status)
     for (count,) in rows:
         return count == 0
+    assert False, 'Should not reach here'
 
 
 def format_job_queue(jobs: List[Dict[str, Any]]):
@@ -501,7 +506,9 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
         username: The username to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
-    status_list = [JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING]
+    status_list: Optional[List[JobStatus]] = [
+        JobStatus.SETTING_UP, JobStatus.PENDING, JobStatus.RUNNING
+    ]
     if all_jobs:
         status_list = None
 
@@ -574,8 +581,7 @@ def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
     return run_timestamp
 
 
-def run_timestamp_with_globbing_payload(
-        job_ids: List[Optional[str]]) -> Dict[str, str]:
+def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
     """Returns the relative paths to the log files for job with globbing."""
     query_str = ' OR '.join(['job_id GLOB (?)'] * len(job_ids))
     _CURSOR.execute(

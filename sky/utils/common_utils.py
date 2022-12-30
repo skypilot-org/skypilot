@@ -11,7 +11,7 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union
 import uuid
 import yaml
 
@@ -191,7 +191,7 @@ def dump_yaml_str(config):
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn, **ctx_kwargs):
+def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
     """Make the cls a decorator.
 
     class cls:

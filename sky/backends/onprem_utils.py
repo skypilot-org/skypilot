@@ -68,7 +68,7 @@ def check_and_get_local_clusters(suppress_error: bool = False) -> List[str]:
     ]
 
     local_cluster_names = []
-    name_to_path_dict = {}
+    name_to_path_dict: Dict[str, str] = {}
 
     for path in local_cluster_paths:
         with open(path, 'r') as f:
@@ -140,7 +140,7 @@ def get_python_executable(cluster_name: str) -> str:
     return config['python']
 
 
-def get_job_owner(cluster_yaml: dict) -> str:
+def get_job_owner(cluster_yaml: str) -> str:
     """Get the owner of the job."""
     cluster_config = common_utils.read_yaml(os.path.expanduser(cluster_yaml))
     # User name is guaranteed to exist (on all jinja files)
@@ -319,9 +319,8 @@ def get_local_cluster_accelerators(
     return custom_resources
 
 
-def launch_ray_on_local_cluster(
-        cluster_config: Dict[str, Dict[str, Any]],
-        custom_resources: List[Dict[str, int]] = None) -> None:
+def launch_ray_on_local_cluster(cluster_config: Dict[str, Dict[str, Any]],
+                                custom_resources: List[Dict[str, int]]) -> None:
     """Launches Ray on all nodes for local cluster.
 
     Launches Ray on the root user of all nodes and opens the Ray dashboard port
@@ -389,8 +388,9 @@ def launch_ray_on_local_cluster(
     # to worker node.
     remote_ssh_key = f'~/.ssh/{os.path.basename(ssh_key)}'
     dashboard_remote_path = '~/.sky/dashboard_portforward.sh'
-    worker_runners = [(runner, idx) for idx, runner in enumerate(worker_runners)
-                     ]
+    worker_runner_idxs = [
+        (runner, idx) for idx, runner in enumerate(worker_runners)
+    ]
     # Connect head node's Ray dashboard to worker nodes
     # Worker nodes need access to Ray dashboard to poll the
     # JobSubmissionClient (in subprocess_daemon.py) for completed,
@@ -444,10 +444,10 @@ def launch_ray_on_local_cluster(
                 failure_message=
                 f'Failed to connect ray dashboard to worker node {runner.ip}.')
 
-        subprocess_utils.run_in_parallel(_start_ray_workers, worker_runners)
+        subprocess_utils.run_in_parallel(_start_ray_workers, worker_runner_idxs)
 
 
-def save_distributable_yaml(cluster_config: Dict[str, Dict[str, Any]]) -> None:
+def save_distributable_yaml(cluster_config: Dict[str, Any]) -> None:
     """Generates a distributable yaml for the system admin to send to users.
 
     Args:
