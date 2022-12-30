@@ -100,7 +100,7 @@ class AzureNodeProvider(NodeProvider):
         resource_group = self.provider_config["resource_group"]
         instance = self.compute_client.virtual_machines.instance_view(
             resource_group_name=resource_group, vm_name=vm.name
-        ).as_{}
+        ).as_dict()
         for status in instance["statuses"]:
             code, state = status["code"].split("/")
             # skip provisioning status
