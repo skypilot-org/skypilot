@@ -6,4 +6,3 @@ sky
 --exclude sky/resources.py
 --exclude sky/global_user_state.py
 --exclude sky/optimizer.py
---exclude sky/task.py
