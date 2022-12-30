@@ -122,7 +122,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
     # --- Implementation of Backend APIs ---
 
     def check_resources_fit_cluster(self,
-                                    handle: LocalDockerBackend.ResourceHandle,
+                                    handle: 'LocalDockerBackend.ResourceHandle',
                                     task: 'task_lib.Task') -> None:
         pass
 
@@ -139,6 +139,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
+        del to_provision, dryrun  # Unused
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
         if retry_until_up:
@@ -167,6 +168,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
 
         This happens in the execute step.
         """
+        del handle, workdir  # Unused
         logger.info('Since the workdir is synced at build time, sync_workdir is'
                     ' a NoOp. If you are running sky exec, your workdir has not'
                     ' been updated.')

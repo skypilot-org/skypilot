@@ -57,6 +57,8 @@ from sky.usage import usage_lib
 if typing.TYPE_CHECKING:
     from sky import resources
     from sky import task as task_lib
+    from sky.backends import cloud_vm_ray_backend
+    from sky.backends import local_docker_backend
 
 logger = sky_logging.init_logger(__name__)
 console = rich_console.Console()
@@ -1180,13 +1182,14 @@ def query_head_ip_with_retries(cluster_yaml: str, max_attempts: int = 1) -> str:
 
 
 @timeline.event
-def get_node_ips(cluster_yaml: str,
-                 expected_num_nodes: int,
-                 handle: Optional[
-                     backends.CloudVmRayBackend.ResourceHandle] = None,
-                 head_ip_max_attempts: int = 1,
-                 worker_ip_max_attempts: int = 1,
-                 get_internal_ips: bool = False) -> List[str]:
+def get_node_ips(
+        cluster_yaml: str,
+        expected_num_nodes: int,
+        handle: Optional[
+            'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle'] = None,
+        head_ip_max_attempts: int = 1,
+        worker_ip_max_attempts: int = 1,
+        get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster, with head node at front."""
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
@@ -1335,7 +1338,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
 @timeline.event
 def get_head_ip(
-    handle: backends.CloudVmRayBackend.ResourceHandle,
+    handle: 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle',
     use_cached_head_ip: bool = True,
     max_attempts: int = 1,
 ) -> str:
@@ -1634,7 +1637,7 @@ def check_owner_identity(cluster_name: str) -> None:
 
 
 def _get_cluster_status_via_cloud_cli(
-    handle: 'backends.CloudVmRayBackend.ResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle'
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
@@ -1864,7 +1867,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[True] = True,
-) -> backends.CloudVmRayBackend.ResourceHandle:
+) -> 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle':
     ...
 
 
@@ -2077,15 +2080,15 @@ def get_clusters(
 
 @typing.overload
 def get_backend_from_handle(
-    handle: backends.CloudVmRayBackend.ResourceHandle
-) -> backends.CloudVmRayBackend:
+    handle: 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle'
+) -> 'cloud_vm_ray_backend.CloudVmRayBackend':
     ...
 
 
 @typing.overload
 def get_backend_from_handle(
-    handle: backends.LocalDockerBackend.ResourceHandle
-) -> backends.LocalDockerBackend:
+    handle: 'local_docker_backend.LocalDockerBackend.ResourceHandle'
+) -> 'local_docker_backend.LocalDockerBackend':
     ...
 
 
