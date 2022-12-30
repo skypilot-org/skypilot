@@ -9,6 +9,7 @@ toml==0.10.2
 mypy==0.991
 types-PyYAML
 types-requests
+types-setuptools
 
 # testing
 pytest
