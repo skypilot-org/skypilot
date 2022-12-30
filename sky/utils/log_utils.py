@@ -67,8 +67,8 @@ def create_table(field_names: List[str], **kwargs) -> prettytable.PrettyTable:
     return table
 
 
-def readable_time_duration(start: Optional[int],
-                           end: Optional[int] = None,
+def readable_time_duration(start: Optional[float],
+                           end: Optional[float] = None,
                            absolute: bool = False) -> str:
     """Human readable time duration from timestamps.
 

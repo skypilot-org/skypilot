@@ -509,7 +509,7 @@ def dump_job_table_cache(job_table: str):
         json.dump((time.time(), job_table), f)
 
 
-def load_job_table_cache() -> Optional[Tuple[str, str]]:
+def load_job_table_cache() -> Optional[Tuple[float, str]]:
     """Load job table cache from file."""
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():

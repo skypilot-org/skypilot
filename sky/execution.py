@@ -17,7 +17,7 @@ import enum
 import getpass
 import tempfile
 import os
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import colorama
 
@@ -41,8 +41,6 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-
-OptimizeTarget = optimizer.OptimizeTarget
 
 # Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
@@ -111,7 +109,7 @@ def _execute(
     handle: Any = None,
     backend: Optional[backends.Backend] = None,
     retry_until_up: bool = False,
-    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
@@ -250,6 +248,7 @@ def _execute(
 
         if Stage.PRE_EXEC in stages:
             if idle_minutes_to_autostop is not None:
+                assert isinstance(backend, backends.CloudVmRayBackend)
                 backend.set_autostop(handle,
                                      idle_minutes_to_autostop,
                                      down=down)
@@ -294,7 +293,7 @@ def launch(
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: OptimizeTarget = OptimizeTarget.COST,
+    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
@@ -489,7 +488,7 @@ def spot_launch(
     assert len(task.resources) == 1, task
     resources = list(task.resources)[0]
 
-    change_default_value = {}
+    change_default_value: Dict[str, Any] = {}
     if not resources.use_spot_specified:
         change_default_value['use_spot'] = True
     if resources.spot_recovery is None:

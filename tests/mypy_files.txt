@@ -1,12 +1,9 @@
-sky/adaptors
-sky/backends
-sky/clouds
-sky/data
-sky/skylet
-sky/spot
-sky/usage
-sky/utils
-sky/core.py
+sky
 
---exclude
-sky/skylet/providers
+--exclude sky/benchmark
+--exclude sky/callbacks
+--exclude sky/skylet/providers
+--exclude sky/resources.py
+--exclude sky/global_user_state.py
+--exclude sky/optimizer.py
+--exclude sky/task.py
