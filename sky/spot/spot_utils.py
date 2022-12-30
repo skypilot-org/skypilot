@@ -521,7 +521,7 @@ def load_job_table_cache() -> Optional[Tuple[float, str]]:
 def is_spot_controller_up(
     stopped_message: str,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.CloudVmRayBackend.ResourceHandle]]:
+           Optional['backends.CloudVmRayBackend.ResourceHandle']]:
     """Check if the spot controller is up.
 
     It can be used to check the actual controller status (since the autostop is

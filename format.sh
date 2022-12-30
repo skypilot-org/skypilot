@@ -98,8 +98,6 @@ mypy $(cat tests/mypy_files.txt)
 # Run Pylint
 echo 'Sky Pylint:'
 pylint --load-plugins pylint_quotes sky
-echo 'Sky Utils Pylint:'
-pylint --load-plugins pylint_quotes sky/utils
 
 if ! git diff --quiet &>/dev/null; then
     echo 'Reformatted files. Please review and stage the changes.'
