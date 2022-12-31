@@ -158,7 +158,10 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
         # Check the status of the managed spot job status. If it is in
         # terminal state, we can safely skip it.
         job_status = spot_state.get_status(job_id)
-        if job_status.is_terminal():
+        if job_status is None:
+            logger.info(f'Job {job_id} not found. Skipped.')
+            continue
+        elif job_status.is_terminal():
             logger.info(f'Job {job_id} is already in terminal state '
                         f'{job_status.value}. Skipped.')
             continue
@@ -267,6 +270,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 time.sleep(JOB_STATUS_CHECK_GAP_SECONDS)
                 spot_status = spot_state.get_status(job_id)
                 continue
+            assert spot_status is not None
             status_display.stop()
             returncode = backend.tail_logs(handle,
                                            job_id=None,
@@ -293,6 +297,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                     f'Retrying in {JOB_STATUS_CHECK_GAP_SECONDS} seconds.')
             # Finish early if the spot status is already in terminal state.
             spot_status = spot_state.get_status(job_id)
+            assert spot_status is not None, job_id
             if spot_status.is_terminal():
                 break
             logger.info(f'{colorama.Fore.YELLOW}The job is preempted.'
@@ -313,9 +318,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
     spot_status = spot_state.get_status(job_id)
+    assert spot_status is not None, job_id
     while not spot_status.is_terminal() and follow:
         time.sleep(1)
         spot_status = spot_state.get_status(job_id)
+        assert spot_status is not None, job_id
+
     logger.info(f'Logs finished for job {job_id} '
                 f'(status: {spot_status.value}).')
     return ''
@@ -388,7 +396,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         columns += ['STARTED', 'CLUSTER', 'REGION']
     job_table = log_utils.create_table(columns)
 
-    status_counts = collections.defaultdict(int)
+    status_counts: Dict[str, int] = collections.defaultdict(int)
     for job in jobs:
         # The job['job_duration'] is already calculated in
         # dump_spot_job_queue().
@@ -487,10 +495,10 @@ class SpotCodeGen:
         return cls._build(code)
 
     @classmethod
-    def _build(cls, code: List[str] = None) -> str:
+    def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
-        code = '; '.join(code)
-        return f'python3 -u -c {shlex.quote(code)}'
+        generated_code = '; '.join(code)
+        return f'python3 -u -c {shlex.quote(generated_code)}'
 
 
 def dump_job_table_cache(job_table: str):
@@ -500,7 +508,7 @@ def dump_job_table_cache(job_table: str):
         json.dump((time.time(), job_table), f)
 
 
-def load_job_table_cache() -> Tuple[str, str]:
+def load_job_table_cache() -> Optional[Tuple[str, str]]:
     """Load job table cache from file."""
     cache_file = pathlib.Path(_SPOT_STATUS_CACHE).expanduser()
     if not cache_file.exists():

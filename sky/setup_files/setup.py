@@ -80,7 +80,7 @@ install_requires = [
     'PrettyTable',
     # Lower local ray version is not fully supported, due to the
     # autoscaler issues (also tracked in #537).
-    'ray[default]>=1.9.0,<=2.0.1',
+    'ray[default]>=1.9.0,<=2.2.0',
     'rich',
     'tabulate',
     'filelock',  # TODO(mraheja): Enforce >=3.6.0 when python version is >= 3.7
@@ -109,9 +109,8 @@ extras_require = {
     ],
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
     # Tracked in: https://github.com/Azure/azure-cli/issues/7387
-    # azure-cli need to be pinned to 2.31.0 due to later versions
-    # do not have azure-identity (used in node_provider) installed
-    'azure': ['azure-cli==2.31.0', 'azure-core'],
+    # azure-identity is needed in node_provider.
+    'azure': ['azure-cli>=2.31.0', 'azure-core', 'azure-identity'],
     'gcp': ['google-api-python-client', 'google-cloud-storage'],
     'docker': ['docker'],
 }

@@ -606,7 +606,12 @@ class RetryingVmProvisioner(object):
                         # This skip is only correct if we implement "first
                         # retry the region/zone of an existing cluster with the
                         # same name" correctly.
-                        for r, _ in clouds.GCP.region_zones_provision_loop():
+                        for r in clouds.GCP.regions_with_offering(
+                                instance_type=None,
+                                accelerators=None,
+                                use_spot=False,
+                                region=None,
+                                zone=None):
                             self._blocked_regions.add(r.name)
                     else:
                         # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
@@ -667,7 +672,6 @@ class RetryingVmProvisioner(object):
                                        'check logs above.')
 
     def _update_blocklist_on_aws_error(self, region, zones, stdout, stderr):
-        del zones  # Unused.
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
@@ -698,9 +702,13 @@ class RetryingVmProvisioner(object):
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
-        # The underlying ray autoscaler / boto3 will try all zones of a region
-        # at once.
-        logger.warning(f'Got error(s) in all zones of {region.name}:')
+        if set(zones) == set(region.zones):
+            # The underlying ray autoscaler / boto3 will try all zones of a
+            # region at once.
+            logger.warning(f'Got error(s) in all zones of {region.name}:')
+        else:
+            zones_str = ', '.join(z.name for z in zones)
+            logger.warning(f'Got error(s) in {zones_str}:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
@@ -1022,8 +1030,11 @@ class RetryingVmProvisioner(object):
                                                       cluster_exists):
             if self._in_blocklist(to_provision.cloud, region, zones):
                 continue
-            zone_str = ','.join(
-                z.name for z in zones) if zones is not None else 'all zones'
+            if not zones:
+                # For Azure, zones is always an empty list.
+                zone_str = 'all zones'
+            else:
+                zone_str = ','.join(z.name for z in zones)
             try:
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
@@ -1157,9 +1168,19 @@ class RetryingVmProvisioner(object):
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=need_terminate)
 
-        message = ('Failed to acquire resources in all regions/zones of '
-                   f'{to_provision.cloud}. '
-                   'Try changing resource requirements or use another cloud.')
+        if to_provision.zone is not None:
+            message = (
+                f'Failed to acquire resources in {to_provision.zone}. '
+                'Try changing resource requirements or use another zone.')
+        elif to_provision.region is not None:
+            # For public clouds, provision.region is always set.
+            message = ('Failed to acquire resources in all zones in '
+                       f'{to_provision.region}. Try changing resource '
+                       'requirements or use another region.')
+        else:
+            message = (f'Failed to acquire resources in {to_provision.cloud}. '
+                       'Try changing resource requirements or use another '
+                       'cloud provider.')
         # Do not failover to other clouds if the cluster was previously
         # UP or STOPPED, since the user can have some data on the cluster.
         raise exceptions.ResourcesUnavailableError(
@@ -1534,6 +1555,13 @@ class RetryingVmProvisioner(object):
             logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
                            f'{to_provision}. Trying other launchable resources '
                            f'(if any).{style.RESET_ALL}')
+            if to_provision.zone is None:
+                region_or_zone_str = str(to_provision.region)
+            else:
+                region_or_zone_str = str(to_provision.zone)
+            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
+                           f'{to_provision} in {region_or_zone_str}. '
+                           f'Trying other locations (if any).{style.RESET_ALL}')
             if not cluster_exists:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
@@ -1914,14 +1942,20 @@ class CloudVmRayBackend(backends.Backend):
             backoff = common_utils.Backoff(_RETRY_UNTIL_UP_INIT_GAP_SECONDS)
             attempt_cnt = 1
             while True:
-                # RetryingVmProvisioner will retry within a cloud's regions
-                # first (if a region is not explicitly requested), then
-                # optionally retry on all other clouds (if
-                # backend.register_info() has been called).  After this "round"
-                # of optimization across clouds, provisioning may still have
-                # not succeeded. This while loop will then kick in if
-                # retry_until_up is set, which will kick off new "rounds" of
-                # optimization infinitely.
+                # For on-demand instances, RetryingVmProvisioner will retry
+                # within the given region first, then optionally retry on all
+                # other clouds and regions (if backend.register_info()
+                # has been called).
+                # For spot instances, each provisioning request is made for a
+                # single zone and the provisioner will retry on all other
+                # clouds, regions, and zones.
+                # See optimizer.py#_make_launchables_for_valid_region_zones()
+                # for detailed reasons.
+
+                # After this "round" of optimization across clouds, provisioning
+                # may still have not succeeded. This while loop will then kick
+                # in if retry_until_up is set, which will kick off new "rounds"
+                # of optimization infinitely.
                 try:
                     provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
                                                         self._optimize_target,

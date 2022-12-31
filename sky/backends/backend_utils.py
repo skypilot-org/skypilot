@@ -2079,6 +2079,7 @@ def get_clusters(
                 force_refresh=True,
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
+                exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError,
                 exceptions.ClusterStatusFetchingError) as e:
             record = {'status': 'UNKNOWN', 'error': e}

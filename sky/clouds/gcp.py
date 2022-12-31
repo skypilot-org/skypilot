@@ -131,17 +131,14 @@ class GCP(clouds.Cloud):
         return cls._regions
 
     @classmethod
-    def region_zones_provision_loop(
-        cls,
-        *,
-        instance_type: Optional[str] = None,
-        accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool = False,
-    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        # GCP provisioner currently takes 1 zone per request.
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
         if accelerators is None:
             if instance_type is None:
-                # fallback to manually specified region/zones
+                # Fall back to the default regions.
+                # TODO: Get the regions from the service catalog.
                 regions = cls.regions()
             else:
                 regions = service_catalog.get_region_zones_for_instance_type(
@@ -150,9 +147,52 @@ class GCP(clouds.Cloud):
             assert len(accelerators) == 1, accelerators
             acc = list(accelerators.keys())[0]
             acc_count = list(accelerators.values())[0]
-            regions = service_catalog.get_region_zones_for_accelerators(
+            acc_regions = service_catalog.get_region_zones_for_accelerators(
                 acc, acc_count, use_spot, clouds='gcp')
+            if instance_type is None:
+                regions = acc_regions
+            elif instance_type == 'TPU-VM':
+                regions = acc_regions
+            else:
+                vm_regions = service_catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, clouds='gcp')
+                # Find the intersection between `acc_regions` and `vm_regions`.
+                regions = []
+                for r1 in acc_regions:
+                    for r2 in vm_regions:
+                        if r1.name != r2.name:
+                            continue
+                        zones = []
+                        for z1 in r1.zones:
+                            for z2 in r2.zones:
+                                if z1.name == z2.name:
+                                    zones.append(z1)
+                        if zones:
+                            regions.append(r1.set_zones(zones))
+                        break
 
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
+        return regions
+
+    @classmethod
+    def region_zones_provision_loop(
+        cls,
+        *,
+        instance_type: Optional[str] = None,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool = False,
+    ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
+        # GCP provisioner currently takes 1 zone per request.
         for region in regions:
             for zone in region.zones:
                 yield (region, [zone])
@@ -168,18 +208,29 @@ class GCP(clouds.Cloud):
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
                                                use_spot=use_spot,
+                                               region=region,
+                                               zone=zone,
                                                clouds='gcp')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool):
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
         assert len(accelerators) == 1, accelerators
         acc, acc_count = list(accelerators.items())[0]
         return service_catalog.get_accelerator_hourly_cost(acc,
                                                            acc_count,
-                                                           use_spot,
+                                                           use_spot=use_spot,
+                                                           region=region,
+                                                           zone=zone,
                                                            clouds='gcp')
 
     def get_egress_cost(self, num_gigabytes):
@@ -340,9 +391,13 @@ class GCP(clouds.Cloud):
             )) == 1, 'cannot handle more than one accelerator candidates.'
             acc, acc_count = list(resources.accelerators.items())[0]
             (instance_list, fuzzy_candidate_list
-            ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                                  acc_count,
-                                                                  clouds='gcp')
+            ) = service_catalog.get_instance_type_for_accelerator(
+                acc,
+                acc_count,
+                use_spot=resources.use_spot,
+                region=resources.region,
+                zone=resources.zone,
+                clouds='gcp')
 
             if instance_list is None:
                 return ([], fuzzy_candidate_list)
@@ -376,7 +431,7 @@ class GCP(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='gcp')
 
