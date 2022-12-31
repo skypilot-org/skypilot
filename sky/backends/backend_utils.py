@@ -658,8 +658,7 @@ class SSHConfigHelper(object):
 
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
         extra_config_path = os.path.expanduser(extra_path_name)
-        if os.path.exists(extra_config_path):
-            os.remove(extra_config_path)
+        common_utils.remove_file_if_exists(extra_config_path)
 
         # Delete include statement
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '

@@ -347,4 +347,5 @@ def remove_file_if_exists(path: str):
     try:
         os.remove(path)
     except FileNotFoundError:
+        logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
         pass
