@@ -2,9 +2,6 @@ import logging
 import os
 import time
 
-RAY_CACHE_SEGMENT = 'ray'
-VPC_CACHE_SEGMENT = 'vpc' 
-
 def get_logger(caller_name):
     """
     Configures the logger of this module for console output and file output
