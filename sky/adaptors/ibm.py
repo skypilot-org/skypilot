@@ -4,41 +4,26 @@
 from functools import wraps
 from sky import sky_logging
 import yaml
+import ibm_cloud_sdk_core
+import ibm_vpc
+from ibm_platform_services import GlobalSearchV2, GlobalTaggingV1
 import os
 
-CREDENTIAL_FILE = os.path.join(os.path.expanduser('~'),'.ibm','credentials.yaml')
+CREDENTIAL_FILE ='~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
-ibm_vpc = None
-ibm_cloud_sdk_core = None
-
-def import_package(func):
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        global ibm_cloud_sdk_core, ibm_vpc
-        if ibm_cloud_sdk_core is None or ibm_vpc is None:
-            try:
-                import ibm_cloud_sdk_core as _ibm_cloud_sdk_core
-                import ibm_vpc as _ibm_vpc
-                ibm_cloud_sdk_core = _ibm_cloud_sdk_core
-                ibm_vpc = _ibm_vpc
-            except ImportError:
-                raise ImportError('Fail to import dependencies for IBM.'
-                                  'Try pip install "skypilot[ibm]"') from None
-        return func(*args, **kwargs)
-
-    return wrapper
 
 
-@import_package
+def get_authenticator():
+    with open(os.path.expanduser(CREDENTIAL_FILE)) as f:
+        base_config = yaml.safe_load(f)
+    return ibm_cloud_sdk_core.authenticators.IAMAuthenticator(base_config['iam_api_key'])
+
 def client(**kwargs):
     """returns ibm vpc client"""
 
-    
-    with open(CREDENTIAL_FILE) as f:
-            base_config = yaml.safe_load(f)
     try:
         # Authenticate user - occurs once throughout the program 
-        vpc_client = ibm_vpc.VpcV1(version='2022-06-30',authenticator=ibm_cloud_sdk_core.authenticators.IAMAuthenticator(base_config['iam_api_key']))
+        vpc_client = ibm_vpc.VpcV1(version='2022-06-30',authenticator=get_authenticator())
         if kwargs.get('region'):
             vpc_client.set_service_url(f'https://{kwargs["region"]}.iaas.cloud.ibm.com' + '/v1')
     except Exception:
@@ -46,3 +31,9 @@ def client(**kwargs):
         raise  
 
     return vpc_client # returns either formerly or newly created client
+
+def search_client():
+    return GlobalSearchV2(authenticator=get_authenticator())
+
+def tagging_client():
+    return GlobalTaggingV1(authenticator=get_authenticator())
