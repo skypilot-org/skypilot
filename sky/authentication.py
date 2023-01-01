@@ -372,8 +372,14 @@ def setup_ibm_authentication(config):
         else:
             raise Exception("Failed to register a key")   
 
-    config['auth']['ssh_private_key'] = private_key_path
-    config['auth'].update({'ssh_public_key':public_key_path}) 
+    config['auth']['ssh_private_key'] = PUBLIC_SSH_KEY_PATH.rsplit('.',1)[0]
+    config['auth'].update({'ssh_public_key':PUBLIC_SSH_KEY_PATH}) 
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config']['key_id'] = vpc_key_id 
+
+    # Add public key path to file mounts
+    file_mounts = config['file_mounts']
+    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
+    config['file_mounts'] = file_mounts
+    
     return config
