@@ -41,12 +41,12 @@ available_node_types:
   ray_worker_default:
     min_workers: {{num_nodes - 1}}
     max_workers: {{num_nodes - 1}}
-    resources: {{instance_resources}}
+    resources: {{worker_instance_resources}}
     node_config:
       image_id: {{image_id}} 
       boot_volume_capacity: {{disk_capacity}}
       volume_tier_name: general-purpose
-      instance_profile_name: {{instance_type}}
+      instance_profile_name: {{worker_instance_type}}
 
       {% if use_spot %}
       InstanceMarketOptions:
