@@ -1707,7 +1707,31 @@ def _query_status_ibm(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
-    pass  # TODO IBM-TODO
+    """
+    returns a list of Statuses for each of the cluster's nodes.
+    this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
+    """
+    from sky.adaptors import ibm
+    status_map = {
+        'pending': global_user_state.ClusterStatus.INIT,
+        'starting': global_user_state.ClusterStatus.INIT,
+        'restarting': global_user_state.ClusterStatus.INIT,
+        'running': global_user_state.ClusterStatus.UP,
+        'stopping': global_user_state.ClusterStatus.STOPPED,
+        'stopped': global_user_state.ClusterStatus.STOPPED,
+        'deleting': None,
+        'failed': None,
+    }
+
+    client = ibm.client(region=ray_config['provider']['region'])
+    search_client = ibm.search_client()
+    vpcs_filtered_by_tags_and_region = search_client.search(query=f"type:vpc AND tags:{cluster} AND region:{ray_config['provider']['region']}",
+            fields=["tags","region","type"], limit = 1000).get_result()['items']  
+    vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':',1)[-1]
+    instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
+
+    return [status_map[instance['status']] for instance in instances]
+    
 
 def _query_status_lambda(
         cluster: str,
