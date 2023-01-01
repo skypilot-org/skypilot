@@ -181,6 +181,9 @@ class IBM(clouds.Cloud):
 
         instance_resources = _get_profile_resources(r.instance_type)
 
+        worker_instance_type = get_cred_file_field("worker_instance_type",r.instance_type)
+        worker_instance_resources = _get_profile_resources(worker_instance_type)
+
         if r.image_id is not None:
             image_id = r.image_id
         else:
@@ -189,6 +192,8 @@ class IBM(clouds.Cloud):
         return {
             'instance_type': r.instance_type,
             'instance_resources': instance_resources,
+            'worker_instance_type':worker_instance_type,
+            'worker_instance_resources':worker_instance_resources,
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
@@ -301,8 +306,8 @@ class IBM(clouds.Cloud):
             ' Run the following command:'
             f'a configuration script that asks for api key and stores it in {CREDENTIAL_FILE}'
         )
-        if not os.path.isfile(CREDENTIAL_FILE):
-            return (False, f'{CREDENTIAL_FILE} does not exist.' + help_str)
+        if not os.path.isfile(os.path.expanduser(CREDENTIAL_FILE)):
+            return (False, f'{os.path.expanduser(CREDENTIAL_FILE)} does not exist.' + help_str)
 
         base_config = _read_credential_file()
         if base_config and 'iam_api_key' in base_config:
@@ -312,13 +317,13 @@ class IBM(clouds.Cloud):
             except Exception as e:
                 return False, str(e)
         else:
-            return False, f"Missing iam_api_key in {CREDENTIAL_FILE}"
+            return False, f"Missing iam_api_key in {os.path.expanduser(CREDENTIAL_FILE)}"
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping written to the cluster's file_mounts segment
              of its yaml file (e.g., ibm-ray.yml.j2)
         """
-        return {"~/.ibm/credentials.yaml":CREDENTIAL_FILE}
+        return {CREDENTIAL_FILE:CREDENTIAL_FILE}
 
     def instance_type_exists(self, instance_type):
         """Returns whether the instance type exists for this cloud."""
@@ -339,7 +344,7 @@ class IBM(clouds.Cloud):
 
     
 def _read_credential_file():
-    with open(CREDENTIAL_FILE,'r') as f:
+    with open(os.path.expanduser(CREDENTIAL_FILE),'r') as f:
         return yaml.safe_load(f)
 
 def get_cred_file_field(field, default_val=None)->str:
