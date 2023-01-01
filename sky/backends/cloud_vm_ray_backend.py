@@ -2700,18 +2700,21 @@ class CloudVmRayBackend(backends.Backend):
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
         """
-        log_path = os.path.join(os.path.expanduser(self.log_dir),
-                                'teardown.log')
-        log_abs_path = os.path.abspath(log_path)
-        cloud = handle.launched_resources.cloud
-        config = common_utils.read_yaml(handle.cluster_yaml)
         if refresh_cluster_status:
             prev_status, _ = backend_utils.refresh_cluster_status_handle(
                 handle.cluster_name, acquire_per_cluster_status_lock=False)
         else:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)
-            prev_status = record['status']
+            prev_status = record['status'] if record is not None else None
+        if prev_status is None:
+            logger.warning(f'Cluster {handle.cluster_name} does not exist. Skip.')
+            return True
+        log_path = os.path.join(os.path.expanduser(self.log_dir),
+                                'teardown.log')
+        log_abs_path = os.path.abspath(log_path)
+        cloud = handle.launched_resources.cloud
+        config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
@@ -2819,7 +2822,7 @@ class CloudVmRayBackend(backends.Backend):
         # No need to clean up if the cluster is already terminated
         # (i.e., prev_status is None), as the cleanup has already been done
         # if the cluster is removed from the status table.
-        if prev_status is not None and post_teardown_cleanup:
+        if post_teardown_cleanup:
             return self.post_teardown_cleanup(handle, terminate, purge)
         else:
             return True
