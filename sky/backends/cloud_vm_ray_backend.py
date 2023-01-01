@@ -2708,6 +2708,9 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_name)
             prev_status = record['status'] if record is not None else None
         if prev_status is None:
+            # When the cluster is not in the cluster table, we guarantee that
+            # all related resources / cache / config are cleaned up, i.e. it
+            # is safe to skip and return True.
             logger.warning(
                 f'Cluster {handle.cluster_name} does not exist. Skip.')
             return True
