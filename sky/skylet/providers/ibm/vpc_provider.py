@@ -1,9 +1,9 @@
-import json
 import uuid
 import copy
+import time
 from sky.adaptors import ibm
 from ibm_cloud_sdk_core import ApiException
-from sky.skylet.providers.ibm.utils import get_logger, VPC_CACHE_SEGMENT
+from sky.skylet.providers.ibm.utils import get_logger
 from pprint import pprint
 
 logger = get_logger("vpc_provider_")
@@ -14,60 +14,53 @@ REQUIRED_RULES.update(INSECURE_RULES)
 
 class IBMVPCProvider():
 
-    def __init__(self, resource_group_id ,region, zone, cache_path, cluster_name):
+    def __init__(self, resource_group_id ,region, zone, cluster_name):
         self.vpc_client = ibm.client(region=region)
+        self.search_client = ibm.search_client()
+        self.tagging_client = ibm.tagging_client()
         self.resource_group_id = resource_group_id
         self.region = region
         self.zone = zone
         self.cluster_name = cluster_name
-        self.cache_path = cache_path
     
     def create_or_fetch_vpc(self):
-        reuse_vpc = False
-        vpc_fields = {'vpc_id','subnet_id','security_group_id','region','zone'}
-        cached_cluster_vpc_tags = {}
+        reused_vpc_data = None
+        vpcs_filtered_by_tags_and_region = self.search_client.search(query=f"type:vpc AND tags:{self.cluster_name} AND region:{self.region}",
+                    fields=["tags","region","type"], limit = 1000).get_result()['items']  
+        for vpc in vpcs_filtered_by_tags_and_region:
+            vpc_id = vpc['crn'].rsplit(':',1)[-1]
+            vpc_data = self.get_vpc_data(vpc_id,self.region)
+            if vpc_data['status'] == 'available':
+                reused_vpc_data = vpc_data
+                break
+        if reused_vpc_data:
+                #verify subnet and gateway
+            subnets = self.get_vpc_subnets(reused_vpc_data, self.region) # cached vpc is in the same region as self.region, otherwise it wouldn't get reused
+            subnet_in_zone = next((subnet for subnet in subnets if subnet['zone']['name'] == self.zone), None)
+            if subnet_in_zone:
+                subnet_id = subnet_in_zone['id']
+                public_gateway = subnet_in_zone.get('public_gateway')
+                if not public_gateway:
+                    public_gateway = self.create_public_gateway(vpc_id=reused_vpc_data['id'], zone=self.zone, subnet_data=subnet_in_zone)
+            else: # create new subnet and gateway 
+                subnet_data = self.create_subnet(reused_vpc_data['id'], self.region)
+                subnet_id = subnet_data['id']
+                public_gateway = self.create_public_gateway(vpc_id=reused_vpc_data['id'] ,zone=self.zone, subnet_data=subnet_data)
 
-        if self.cache_path.is_file():
-            all_tags = json.loads(self.cache_path.read_text()) # tags of all clusters
+            # add missing security group rules if missing 
+            security_group = reused_vpc_data.get('default_security_group')
+            if security_group:
+                sg_id = security_group['id']
+                self.add_missing_sg_rules(sg_id)
 
-            if self.cluster_name in all_tags and VPC_CACHE_SEGMENT in all_tags[self.cluster_name]: 
-                    cached_cluster_vpc_tags = all_tags[self.cluster_name][VPC_CACHE_SEGMENT] # tags for cached
-                    if vpc_fields.issubset(set(cached_cluster_vpc_tags.keys())) and cached_cluster_vpc_tags.get('region')==self.region:
-                        reuse_vpc = True                          
+                # managed to reuse found VPC
+                logger.info(f"Reusing VPC {reused_vpc_data['id']} named: {reused_vpc_data['name']}")
+                return {"vpc_id":reused_vpc_data['id'], "subnet_id":subnet_id, "security_group_id":sg_id} 
             else:
-                all_tags.update({self.cluster_name:{VPC_CACHE_SEGMENT:{}}})
-
-        # reuses most current vpc found in local cache if its components pass the necessary verifications.   
-        if reuse_vpc:
-            cached_vpc_data = self.get_vpc_data(cached_cluster_vpc_tags['vpc_id'], self.region) # cached vpc is in the same region as self.region, otherwise it wouldn't get reused
-            if cached_vpc_data and cached_vpc_data['status']=='available':  # vpc is up
-
-                # verify subnet and gateway
-                subnets = self.get_vpc_subnets(cached_vpc_data, self.region) # cached vpc is in the same region as self.region, otherwise it wouldn't get reused
-                subnet_in_zone = next((subnet for subnet in subnets if subnet['zone']['name'] == self.zone), None)
-                if subnet_in_zone:
-                    subnet_id = subnet_in_zone['id']
-                    public_gateway = subnet_in_zone.get('public_gateway')
-                    if not public_gateway:
-                        public_gateway = self.create_public_gateway(vpc_id=cached_cluster_vpc_tags['vpc_id'], zone=self.zone, subnet_data=subnet_in_zone)
-                else: # create new subnet and gateway 
-                    subnet_data = self.create_subnet(cached_cluster_vpc_tags['vpc_id'], self.region)
-                    subnet_id = subnet_data['id']
-                    public_gateway = self.create_public_gateway(vpc_id=cached_cluster_vpc_tags['vpc_id'] ,zone=self.zone, subnet_data=subnet_data)
-
-                # add missing security group rules if missing 
-                security_group = cached_vpc_data.get('default_security_group')
-                if security_group:
-                    sg_id = security_group['id']
-                    self.add_missing_sg_rules(sg_id)
-
-                    # managed to reuse found VPC
-                    logger.info(f"Reusing VPC {cached_cluster_vpc_tags['vpc_id']} named: {cached_vpc_data['name']}")
-                    return {"vpc_id":cached_cluster_vpc_tags['vpc_id'], "subnet_id":subnet_id,"security_group_id":sg_id, "region":self.region, "zone":self.zone} 
-        else:
-            self.delete_vpc(cached_cluster_vpc_tags.get('vpc_id'),cached_cluster_vpc_tags.get('region'))
+                self.delete_vpc(reused_vpc_data['id'], self.region)
         vpc_tags = self.create_vpc()
         return vpc_tags
+            
 
     def create_vpc(self):
         vpc_data = self.vpc_client.create_vpc(address_prefix_management='auto', classic_access=False,
@@ -75,8 +68,11 @@ class IBMVPCProvider():
         subnet_data = self.create_subnet(vpc_data['id'], self.zone)
         self.create_public_gateway(vpc_data['id'], self.zone, subnet_data)
         sg_id = self.create_sg_rules(vpc_data)
+        # tag vpc with the cluster's name
+        resource_model = {'resource_id': vpc_data['crn']}
+        tag_results = self.tagging_client.attach_tag(resources=[resource_model],tag_names=[self.cluster_name],tag_type='user').get_result()
         
-        return {"vpc_id":vpc_data['id'], "subnet_id":subnet_data['id'],"security_group_id":sg_id, "region":self.region, "zone":self.zone} 
+        return {"vpc_id":vpc_data['id'], "subnet_id":subnet_data['id'],"security_group_id":sg_id} 
 
     def create_subnet(self, vpc_id, zone_name):
         ipv4_cidr_block = None
@@ -177,8 +173,22 @@ class IBMVPCProvider():
         tmp_vpc_client.delete_vpc(vpc_id)
 
     def delete_subnets(self, vpc_client, vpc_data, region):
+        def _poll_subnet_deleted(subnet_id):
+            tries = 10
+            sleep_interval = 2
+            while tries:
+                try:
+                    subnet_data = self.vpc_client.get_subnet(subnet_id).result
+                except Exception:
+                    print('Deleted subnet id: {}'.format(subnet_id))
+                    return True
+                tries -= 1
+                time.sleep(sleep_interval)
+            print(f"\Failed to delete instance within expected time frame of {tries*sleep_interval/60} minutes.\n")
+            return False
         for subnet_id in self.get_vpc_subnets(vpc_data, region, field="id"):
             vpc_client.delete_subnet(subnet_id).get_result() # get_result() used for synchronization
+            _poll_subnet_deleted(subnet_id)
 
     def delete_gateways(self, vpc_client, vpc_id):
         gateways = vpc_client.list_public_gateways(resource_group_id=self.resource_group_id).get_result()['public_gateways']
