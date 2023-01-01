@@ -2708,7 +2708,8 @@ class CloudVmRayBackend(backends.Backend):
                 handle.cluster_name)
             prev_status = record['status'] if record is not None else None
         if prev_status is None:
-            logger.warning(f'Cluster {handle.cluster_name} does not exist. Skip.')
+            logger.warning(
+                f'Cluster {handle.cluster_name} does not exist. Skip.')
             return True
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
