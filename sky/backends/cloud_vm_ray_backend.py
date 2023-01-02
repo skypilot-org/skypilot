@@ -1418,7 +1418,7 @@ class RetryingVmProvisioner(object):
         assert ray_up_return_value is not None
         returncode, stdout, stderr = ray_up_return_value
 
-        logger.debug(f'Ray up takes {time.time() - start} seconds with '
+        logger.debug(f'`ray up` takes {time.time() - start:.1f} seconds with '
                      f'{retry_cnt} retries.')
         if returncode != 0:
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
