@@ -41,7 +41,11 @@ def check(quiet: bool = False) -> None:
     else:
         echo('\nSkyPilot will use only the enabled clouds to run tasks. '
              'To change this, configure cloud credentials, '
-             'and run ' + click.style('sky check', bold=True) + '.')
+             'and run ' + click.style('sky check', bold=True) + '.'
+             '\n' + click.style(
+                 'If any problems remain, please file an issue at '
+                 'https://github.com/skypilot-org/skypilot/issues/new',
+                 dim=True))
 
     global_user_state.set_enabled_clouds(enabled_clouds)
 

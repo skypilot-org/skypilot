@@ -258,8 +258,8 @@ class SSHCommandRunner:
                 '; exit ${PIPESTATUS[0]}'
             ]
 
-        command = ' '.join(command)
-        command = base_ssh_command + [shlex.quote(command)]
+        command_str = ' '.join(command)
+        command = base_ssh_command + [shlex.quote(command_str)]
 
         executable = None
         if not process_stream:

@@ -2,7 +2,7 @@
 import collections
 import importlib
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from sky.clouds.service_catalog.constants import (
     HOSTED_CATALOG_DIR_URL,
@@ -18,12 +18,12 @@ CloudFilter = Optional[Union[List[str], str]]
 _ALL_CLOUDS = ('aws', 'azure', 'gcp')
 
 
-def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
+def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if clouds is None:
         clouds = list(_ALL_CLOUDS)
     single = isinstance(clouds, str)
     if single:
-        clouds = [clouds]
+        clouds = [clouds]  # type: ignore
 
     results = []
     for cloud in clouds:
@@ -61,7 +61,8 @@ def list_accelerators(
                                   name_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
-    ret = collections.defaultdict(list)
+    ret: Dict[str,
+              List['common.InstanceTypeInfo']] = collections.defaultdict(list)
     for result in results:
         for gpu, items in result.items():
             ret[gpu] += items
@@ -82,12 +83,13 @@ def list_accelerator_counts(
                                   name_filter)
     if not isinstance(results, list):
         results = [results]
-    ret = collections.defaultdict(set)
+    accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)
     for result in results:
         for gpu, items in result.items():
             for item in items:
-                ret[gpu].add(item.accelerator_count)
-    for gpu, counts in ret.items():
+                accelerator_counts[gpu].add(item.accelerator_count)
+    ret: Dict[str, List[int]] = {}
+    for gpu, counts in accelerator_counts.items():
         ret[gpu] = sorted(counts)
     return ret
 
@@ -129,12 +131,23 @@ def get_region_zones_for_instance_type(
 
 
 def get_hourly_cost(instance_type: str,
-                    region: Optional[str],
                     use_spot: bool,
-                    clouds: CloudFilter = None):
-    """Returns the cost, or the cheapest cost among all zones for spot."""
-    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type, region,
-                               use_spot)
+                    region: Optional[str],
+                    zone: Optional[str],
+                    clouds: CloudFilter = None) -> float:
+    """Returns the hourly price of a VM instance in the given region and zone.
+
+    * If (region, zone) == (None, None), return the cheapest hourly price among
+        all regions and zones.
+    * If (region, zone) == (str, None), return the cheapest hourly price among
+        all the zones in the given region.
+    * If (region, zone) == (None, str), return the hourly price of the instance
+        type in the zone.
+    * If (region, zone) == (str, str), zone must be in the region, and the
+        function returns the hourly price of the instance type in the zone.
+    """
+    return _map_clouds_catalog(clouds, 'get_hourly_cost', instance_type,
+                               use_spot, region, zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str,
@@ -155,6 +168,9 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
+    use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Tuple[Optional[List[str]], List[str]]:
     """
@@ -162,21 +178,35 @@ def get_instance_type_for_accelerator(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
-                               acc_name, acc_count)
+                               acc_name, acc_count, use_spot, region, zone)
 
 
 def get_accelerator_hourly_cost(
     acc_name: str,
     acc_count: int,
     use_spot: bool,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> float:
-    """Returns the hourly cost with the accelerators."""
+    """Returns the hourly price of the accelerator in the given region and zone.
+
+    * If (region, zone) == (None, None), return the cheapest hourly price among
+        all regions and zones.
+    * If (region, zone) == (str, None), return the cheapest hourly price among
+        all the zones in the given region.
+    * If (region, zone) == (None, str), return the hourly price of the
+        accelerator in the zone.
+    * If (region, zone) == (str, str), zone must be in the region, and the
+        function returns the hourly price of the accelerator in the zone.
+    """
     return _map_clouds_catalog(clouds,
                                'get_accelerator_hourly_cost',
                                acc_name,
                                acc_count,
-                               use_spot=use_spot)
+                               use_spot=use_spot,
+                               region=region,
+                               zone=zone)
 
 
 def get_region_zones_for_accelerators(
@@ -245,7 +275,7 @@ def get_image_id_from_tag(tag: str,
 
 def is_image_tag_valid(tag: str,
                        region: Optional[str],
-                       clouds: CloudFilter = None) -> None:
+                       clouds: CloudFilter = None) -> bool:
     """Validates the image tag."""
     return _map_clouds_catalog(clouds, 'is_image_tag_valid', tag, region)
 

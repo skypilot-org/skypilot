@@ -1475,12 +1475,15 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except exceptions.NotSupportedError as e:
-            unsupported_clusters.append(cluster)
-            click.echo(str(e))
-            continue
-        except (RuntimeError, exceptions.ClusterNotUpError) as e:
-            click.echo(str(e))
+        except (RuntimeError, exceptions.NotSupportedError,
+                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            if isinstance(e, exceptions.NotSupportedError):
+                unsupported_clusters.append(cluster)
+            click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
+                       f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
+                       f'  {common_utils.class_fullname(e.__class__)}: '
+                       f'{common_utils.remove_color(str(e))}')
             continue
         job_table = job_lib.format_job_queue(job_table)
         click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
@@ -1989,9 +1992,11 @@ def start(
                        retry_until_up,
                        down=down,
                        force=force)
-        except exceptions.NotSupportedError as e:
+        except (exceptions.NotSupportedError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
-        click.secho(f'Cluster {name} started.', fg='green')
+        else:
+            click.secho(f'Cluster {name} started.', fg='green')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2270,7 +2275,8 @@ def _down_or_stop_clusters(
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
                     'Please check the logs and try again.'
                     f'{colorama.Style.RESET_ALL}')
-            except exceptions.NotSupportedError as e:
+            except (exceptions.NotSupportedError,
+                    exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
             else:  # no exception raised
                 message = (
@@ -2804,27 +2810,6 @@ def admin_deploy(clusterspec_yaml: str):
                 fg='green')
 
 
-# Managed Spot CLIs
-def _is_spot_controller_up(
-    stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if controller_status is None:
-        click.echo('No managed spot job has been run.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
-        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        click.echo(msg)
-        handle = None
-    return controller_status, handle
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Commands for managed spot jobs."""
@@ -3048,7 +3033,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     """
 
-    _, handle = _is_spot_controller_up(
+    _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
         return
