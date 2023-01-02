@@ -1563,7 +1563,7 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
             # console for workers).
             #
             # Note that head node is launched from the local client, whose
-            # launch has *does* include ssh_proxy_command.
+            # launch hash *does* include ssh_proxy_command.
             auth_config.pop('ssh_proxy_command', None)
         launch_config = copy.deepcopy(launch_config)
 
