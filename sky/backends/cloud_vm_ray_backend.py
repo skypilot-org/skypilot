@@ -3047,11 +3047,52 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     shell=True,
                     stream_logs=False,
                     require_outputs=True)
+
+        if isinstance(cloud, clouds.IBM) and terminate and prev_status == global_user_state.ClusterStatus.STOPPED:
+            from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
+            from sky.adaptors import ibm
+            vpc_client = ibm.client()
+            search_client = ibm.search_client()
+            vpc_found = False
+            config_provider = common_utils.read_yaml(handle.cluster_yaml)['provider']
+
+            def _poll_instance_exists(instance_id):
+                tries = 20
+                sleep_interval = 3
+                while tries:
+                    try:
+                        instance_data = vpc_client.get_instance(instance_id).get_result()
+                    except Exception:
+                        return True
+                    tries -= 1
+                    time.sleep(sleep_interval)
+                # Failed to delete instance within expected time frame 
+                return False
+
+            vpcs_filtered_by_tags_and_region = search_client.search(query=f"type:vpc AND tags:{handle.cluster_name} AND region:{config_provider['region']}",
+            fields=["tags","region","type"], limit = 1000).get_result()['items']  
+            try: 
+                vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':',1)[-1]
+                vpc_found = True
+            except Exception:
+                logger.critical("failed to locate vpc for ibm cloud")
+                returncode = -1
+            if vpc_found:
+                instances = vpc_client.list_instances(vpc_id=vpc_id).get_result()['instances']
+                instances_ids = [instance['id'] for instance in instances]
+                for id in instances_ids:
+                    vpc_client.delete_instance(id=id).get_result()
+                    _poll_instance_exists(id)
+            vpc_provider = IBMVPCProvider(config_provider['resource_group_id'] ,config_provider['region'], config_provider['availability_zone'], handle.cluster_name)
+            vpc_provider.delete_vpc(vpc_id,config_provider['region'])
+            # successfully removed cluster
+            returncode = 0
+
         elif (terminate and
               (prev_cluster_status == global_user_state.ClusterStatus.STOPPED or
                use_tpu_vm)):
             # For TPU VMs, gcloud CLI is used for VM termination.
-            if isinstance(cloud, clouds.AWS):  # TODO IBM-TODO
+            if isinstance(cloud, clouds.AWS):
                 # TODO(zhwu): Room for optimization. We can move these cloud
                 # specific handling to the cloud class.
                 # The stopped instance on AWS will not be correctly terminated
