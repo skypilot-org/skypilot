@@ -533,7 +533,11 @@ def spot_launch(
             #
             # Pop any proxy command, because the controller would've been
             # launched behind the proxy, and in general any nodes we launch may
-            # not have or need the proxy setup.
+            # not have or need the proxy setup. (If the controller needs to
+            # launch spot clusters in another region/VPC, the user should
+            # properly set up VPC peering, which will allow the
+            # cross-region/VPC communication. The proxy command is orthogonal
+            # to this scenario.)
             #
             # This file will be uploaded to the controller node and will be
             # used throughout the spot job's recovery attempts (i.e., if it

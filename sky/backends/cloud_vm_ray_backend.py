@@ -821,7 +821,7 @@ class RetryingVmProvisioner(object):
         # func to skip cleaning up never-launched clusters that encountered VPC
         # errors; their launch should not have printed any such outputs.
         head_node_launch_may_have_been_requested = any(
-            line.startswith('Acquiring an up-to-date head node')
+            'Acquiring an up-to-date head node' in line
             for line in stdout_splits + stderr_splits)
         # If head node request has definitely not been sent (this happens when
         # there are errors during node provider "bootstrapping", e.g.,

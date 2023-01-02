@@ -130,7 +130,7 @@ def get_nested(keys: Tuple[str], default_value: Any) -> Any:
 
 
 def pop_nested(keys: Tuple[str]) -> Dict[str, Any]:
-    """Pops a nested key and returns a deep-copy dictionary.
+    """Returns a deep-copied config with the nested key popped.
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
