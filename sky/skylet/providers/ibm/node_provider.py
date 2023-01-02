@@ -693,9 +693,9 @@ class IBMVPCNodeProvider(NodeProvider):
 
         logger.info("Deleting VM instance {}".format(node_id))
         
-        is_head_node = False
-        if self.nodes_tags[node_id][TAG_RAY_NODE_KIND] == NODE_KIND_HEAD:
-            is_head_node = True
+        vpc_id_to_delete = None
+        if self._get_node_type(self._get_cached_node(node_id)['name']) == NODE_KIND_HEAD:
+            vpc_id_to_delete = self.ibm_vpc_client.get_instance(node_id).get_result()['vpc']['id']
 
         try:
             floating_ips = []
@@ -729,14 +729,10 @@ class IBMVPCNodeProvider(NodeProvider):
             else:
                 raise e
 
-        # Terminate VPC if:
-        # node deleted is a head node
-        # unless it was ordered to stop.
-        # and a vpc was already created in this runtime                 
-        if is_head_node and not self.cache_stopped_nodes and self.vpc_tags:
+        # Terminate VPC if node deleted is a head node                
+        if vpc_id_to_delete:
             if self.poll_instance_deleted(node_id):
-                self.vpc_provider.delete_vpc(self.vpc_tags['vpc_id'], self.region)
-                self.vpc_tags = {}
+                self.vpc_provider.delete_vpc(vpc_id_to_delete, self.region)
 
     def terminate_nodes(self, node_ids)-> Optional[Dict[str, Any]]:
 

@@ -59,8 +59,7 @@ class IBMVPCProvider():
             else:
                 self.delete_vpc(reused_vpc_data['id'], self.region)
         vpc_tags = self.create_vpc()
-        return vpc_tags
-            
+        return vpc_tags        
 
     def create_vpc(self):
         vpc_data = self.vpc_client.create_vpc(address_prefix_management='auto', classic_access=False,
@@ -180,11 +179,11 @@ class IBMVPCProvider():
                 try:
                     subnet_data = self.vpc_client.get_subnet(subnet_id).result
                 except Exception:
-                    print('Deleted subnet id: {}'.format(subnet_id))
+                    logger.debug('Deleted subnet id: {}'.format(subnet_id))
                     return True
                 tries -= 1
                 time.sleep(sleep_interval)
-            print(f"\Failed to delete instance within expected time frame of {tries*sleep_interval/60} minutes.\n")
+            logger.debug(f"\Failed to delete instance within expected time frame of {tries*sleep_interval/60} minutes.\n")
             return False
         for subnet_id in self.get_vpc_subnets(vpc_data, region, field="id"):
             vpc_client.delete_subnet(subnet_id).get_result() # get_result() used for synchronization
