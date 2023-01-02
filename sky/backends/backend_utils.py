@@ -102,7 +102,8 @@ _MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
 
-# Mapping from reserved cluster names to the corresponding group name (logging purpose).
+# Mapping from reserved cluster names to the corresponding group name (logging
+# purpose).
 # NOTE: each group can only have one reserved cluster name for now.
 SKY_RESERVED_CLUSTER_NAMES = {
     spot_lib.SPOT_CONTROLLER_NAME: 'Managed spot controller'
@@ -115,14 +116,14 @@ CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS = 20
 # Remote dir that holds our runtime files.
 _REMOTE_RUNTIME_FILES_DIR = '~/.sky/.runtime_files'
 
-# Include the fields that will be used for generating tags that  distinguishes the
-# cluster in ray, to avoid the stopped cluster being discarded due to updates in
-# the yaml template.
+# Include the fields that will be used for generating tags that distinguishes
+# the cluster in ray, to avoid the stopped cluster being discarded due to
+# updates in the yaml template.
 # Some notes on the fields:
-# - 'provider' fields will be used for bootstrapping and insert more new items in
-#   'node_config'.
-# - keeping the auth is not enough becuase the content of the key file will be used
-#   for calculating the hash.
+# - 'provider' fields will be used for bootstrapping and insert more new items
+#   in 'node_config'.
+# - keeping the auth is not enough becuase the content of the key file will be
+#   used for calculating the hash.
 # TODO(zhwu): Keep in sync with the fields used in https://github.com/ray-project/ray/blob/e4ce38d001dbbe09cd21c497fedd03d692b2be3e/python/ray/autoscaler/_private/commands.py#L687-L701
 _RAY_YAML_KEYS_TO_RESTORE_FOR_BACK_COMPATIBILITY = {
     'cluster_name', 'provider', 'auth', 'node_config'
@@ -222,8 +223,9 @@ def _optimize_file_mounts(yaml_path: str) -> None:
 
         mkdir_parent = f'mkdir -p {dst_parent_dir}'
         if os.path.isdir(os.path.expanduser(src)):
-            # Special case for directories. If the dst already exists as a folder,
-            # directly copy the folder will create a subfolder under the dst.
+            # Special case for directories. If the dst already exists as a
+            # folder, directly copy the folder will create a subfolder under
+            # the dst.
             mkdir_parent = f'mkdir -p {dst}'
             src_basename = f'{src_basename}/*'
         mv = (f'cp -r {_REMOTE_RUNTIME_FILES_DIR}/{src_basename} '
@@ -847,7 +849,8 @@ def write_cluster_config(
         config_dict['ray'] = tmp_yaml_path
         return config_dict
     _add_auth_to_cluster_config(cloud, tmp_yaml_path)
-    # Delay the optimization of the config until the authentication files is added.
+    # Delay the optimization of the config until the authentication files is
+    # added.
     if not isinstance(cloud, clouds.Local):
         # Only optimize the file mounts for public clouds now, as local has not
         # been fully tested yet.
@@ -998,8 +1001,8 @@ def wait_until_ray_cluster_ready(
                                  f'{ready_workers} out of {num_nodes - 1} '
                                  'workers ready')
 
-            # In the local case, ready_head=0 and ready_workers=num_nodes
-            # This is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
+            # In the local case, ready_head=0 and ready_workers=num_nodes. This
+            # is because there is no matching regex for _LAUNCHED_HEAD_PATTERN.
             if ready_head + ready_workers == num_nodes:
                 # All nodes are up.
                 break
@@ -1078,7 +1081,7 @@ def parallel_data_transfer_to_nodes(
     """Runs a command on all nodes and optionally runs rsync from src->dst.
 
     Args:
-        runners: A list of SSHCommandRunner objects that represent multiple nodes.
+        runners: A list of SSHCommandRunner's that represent multiple nodes.
         source_target: Tuple[str, str]; Source for rsync on local node and
             Destination on remote node for rsync
         cmd: str; Command to be executed on all nodes
@@ -1099,8 +1102,8 @@ def parallel_data_transfer_to_nodes(
                                             require_outputs=True)
             subprocess_utils.handle_returncode(
                 rc,
-                cmd,
-                f'Failed to run command before rsync {origin_source} -> {target}.',
+                cmd, ('Failed to run command before rsync '
+                      f'{origin_source} -> {target}.'),
                 stderr=stdout + stderr)
 
         if run_rsync:
@@ -1166,7 +1169,8 @@ def get_cleaned_username() -> str:
     e.g. 1SkY-PiLot2- becomes sky-pilot2.
 
     Returns:
-      A cleaned username that will pass the regex in check_cluster_name_is_valid().
+      A cleaned username that will pass the regex in
+      check_cluster_name_is_valid().
     """
     username = getpass.getuser()
     username = username.lower()
@@ -1193,6 +1197,9 @@ def _query_head_ip_with_retries(cluster_yaml: str,
                 stderr=subprocess.DEVNULL).stdout.decode().strip()
             head_ip = re.findall(IP_ADDR_REGEX, out)
             if len(head_ip) > 1:
+                # This could be triggered if e.g., some logging is added in
+                # sky_config, a module that has some code executed whenever
+                # `sky` is imported.
                 logger.warning(
                     'Detected more than 1 IP from the output of '
                     'the `ray get-head-ip` command. This could '
@@ -1229,7 +1236,8 @@ def get_node_ips(cluster_yaml: str,
     ray_config = common_utils.read_yaml(cluster_yaml)
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
     if use_tpu_vm:
-        assert expected_num_nodes == 1, 'TPU VM only supports single node for now.'
+        assert expected_num_nodes == 1, (
+            'TPU VM only supports single node for now.')
         try:
             ips = _get_tpu_vm_pod_ips(ray_config, get_internal_ips)
         except exceptions.CommandError as e:
@@ -1293,7 +1301,24 @@ def get_node_ips(cluster_yaml: str,
                     del worker_ips[i]
                     break
         if len(worker_ips) != expected_num_nodes - 1:
-            raise exceptions.FetchIPError(exceptions.FetchIPError.Reason.WORKER)
+            n = expected_num_nodes - 1
+            # This could be triggered if e.g., some logging is added in
+            # sky_config, a module that has some code executed whenever `sky`
+            # is imported.
+            logger.warning(
+                f'Expected {n} worker IP(s); found '
+                f'{len(worker_ips)}: {worker_ips}'
+                '\nThis could happen if there is extra output from '
+                '`ray get-worker-ips`, which should be inspected below.'
+                f'\n== Output ==\n{out}'
+                f'\n== Output ends ==')
+            if len(worker_ips) > n:
+                logger.warning(f'\nProceeding with the last {n} '
+                               f'detected IP(s): {worker_ips[-n:]}.')
+                worker_ips = worker_ips[-n:]
+            else:
+                raise exceptions.FetchIPError(
+                    exceptions.FetchIPError.Reason.WORKER)
     else:
         worker_ips = []
     return head_ip + worker_ips
@@ -1519,8 +1544,8 @@ def _process_cli_query(
     if returncode != 0:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterStatusFetchingError(
-                f'Failed to query {cloud} cluster {cluster!r} status: {stdout + stderr}'
-            )
+                f'Failed to query {cloud} cluster {cluster!r} status: '
+                f'{stdout + stderr}')
 
     cluster_status = stdout.strip()
     if cluster_status == '':
@@ -1544,7 +1569,8 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     with ux_utils.suppress_output():
         ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
-    # TODO(zhwu): this logic is duplicated from the ray code above (keep in sync).
+    # TODO(zhwu): this logic is duplicated from the ray code above (keep in
+    # sync).
     launch_hashes = set()
     head_node_type = ray_config['head_node_type']
     for node_type, node_config in ray_config['available_node_types'].items():
@@ -1643,12 +1669,13 @@ def _query_status_gcp(
             # 'TERMINATED' in GCP means stopped, with disk preserved.
             'STOPPING': global_user_state.ClusterStatus.STOPPED,
             'TERMINATED': global_user_state.ClusterStatus.STOPPED,
-            # 'SUSPENDED' in GCP means stopped, with disk and OS memory preserved.
+            # 'SUSPENDED' in GCP means stopped, with disk and OS memory
+            # preserved.
             'SUSPENDING': global_user_state.ClusterStatus.STOPPED,
             'SUSPENDED': global_user_state.ClusterStatus.STOPPED,
         }
-        # TODO(zhwu): The status of the TPU attached to the cluster should also be
-        # checked, since TPUs are not part of the VMs.
+        # TODO(zhwu): The status of the TPU attached to the cluster should also
+        # be checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
                      f'--filter="(labels.ray-cluster-name={cluster} AND '
                      f'labels.ray-launch-config=({hash_filter_str}))" '
@@ -1665,9 +1692,10 @@ def _query_status_gcp(
         # Do not use refresh cluster status during teardown, as that will
         # cause inifinite recursion by calling cluster status refresh
         # again.
-        # The caller of this function, `_update_cluster_status_no_lock() -> _get_cluster_status_via_cloud_cli()`,
-        # will do the post teardown cleanup, which will remove the cluster entry
-        # from the status table & the ssh config file.
+        # The caller of this function, `_update_cluster_status_no_lock() ->
+        # _get_cluster_status_via_cloud_cli()`, will do the post teardown
+        # cleanup, which will remove the cluster entry from the status table &
+        # the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,
@@ -1719,11 +1747,11 @@ _QUERY_STATUS_FUNCS = {
 
 
 def check_owner_identity(cluster_name: str) -> None:
-    """Check if the current user is the same as the user who created the cluster.
+    """Check if current user is the same as the user who created the cluster.
 
     Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-          same as the user who created the cluster.
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
@@ -1847,16 +1875,15 @@ def _update_cluster_status_no_lock(
             backend = backends.CloudVmRayBackend()
             backend.set_autostop(handle, -1, stream_logs=False)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.debug(
-                f'Failed to reset autostop. Due to {common_utils.format_exception(e)}'
-            )
+            logger.debug(f'Failed to reset autostop. Due to '
+                         f'{common_utils.format_exception(e)}')
         global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                      -1,
                                                      to_down=False)
 
-        # If the user starts part of a STOPPED cluster, we still need a status to
-        # represent the abnormal status. For spot cluster, it can also represent
-        # that the cluster is partially preempted.
+        # If the user starts part of a STOPPED cluster, we still need a status
+        # to represent the abnormal status. For spot cluster, it can also
+        # represent that the cluster is partially preempted.
         # TODO(zhwu): the definition of INIT should be audited/changed.
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_or_update_cluster(cluster_name,
@@ -1864,7 +1891,8 @@ def _update_cluster_status_no_lock(
                                                 ready=False,
                                                 is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
-    # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
+    # Now is_abnormal is False: either node_statuses is empty or all nodes are
+    # STOPPED.
     backend = backends.CloudVmRayBackend()
     # TODO(zhwu): adding output for the cluster removed by status refresh.
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
@@ -1876,25 +1904,27 @@ def _update_cluster_status(
         acquire_per_cluster_status_lock: bool) -> Optional[Dict[str, Any]]:
     """Update the cluster status.
 
-    The cluster status is updated by checking ray cluster and real status from cloud.
+    The cluster status is updated by checking ray cluster and real status from
+    cloud.
 
-    The function will update the cached cluster status in the global state. For the
-    design of the cluster status and transition, please refer to the
+    The function will update the cached cluster status in the global state. For
+    the design of the cluster status and transition, please refer to the
     sky/design_docs/cluster_status.md
 
     Args:
         cluster_name: The name of the cluster.
         acquire_per_cluster_status_lock: Whether to acquire the per-cluster lock
             before updating the status.
-        need_owner_identity_check: Whether to check the owner identity before updating
+        need_owner_identity_check: Whether to check the owner identity before
+            updating
 
     Returns:
-        If the cluster is terminated or does not exist, return None.
-        Otherwise returns the input record with status and handle potentially updated.
+        If the cluster is terminated or does not exist, return None. Otherwise
+        returns the input record with status and handle potentially updated.
 
     Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-          same as the user who created the cluster.
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
@@ -1911,9 +1941,8 @@ def _update_cluster_status(
                                CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
             return _update_cluster_status_no_lock(cluster_name)
     except filelock.Timeout:
-        logger.debug(
-            f'Refreshing status: Failed get the lock for cluster {cluster_name!r}.'
-            ' Using the cached status.')
+        logger.debug('Refreshing status: Failed get the lock for cluster '
+                     f'{cluster_name!r}. Using the cached status.')
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
@@ -1940,8 +1969,8 @@ def _refresh_cluster_record(
         Otherwise returns the cluster record.
 
     Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-          same as the user who created the cluster.
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
         exceptions.ClusterStatusFetchingError: the cluster status cannot be
@@ -2002,8 +2031,8 @@ def check_cluster_available(
         exceptions.ClusterNotUpError: if the cluster is not UP.
         exceptions.NotSupportedError: if the cluster is not based on
           CloudVmRayBackend.
-        exceptions.ClusterOwnerIdentityMismatchError: if the current user is not the
-          same as the user who created the cluster.
+        exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+          not the same as the user who created the cluster.
         exceptions.CloudUserIdentityError: if we fail to get the current user
           identity.
     """
@@ -2014,15 +2043,16 @@ def check_cluster_available(
         # can still be done by only using ssh, but the ssh can hang if the
         # cluster is not up (e.g., autostopped).
 
-        # We do not catch the exception for cloud identity checking for now, in order
-        # to disable all operations on clusters created by another user identity.
-        # That will make the design simpler and easier to understand, but it might be
-        # useful to allow the user to use operations that only involve ssh (e.g., sky
-        # exec, sky logs, etc) even if the user is not the owner of the cluster.
+        # We do not catch the exception for cloud identity checking for now, in
+        # order to disable all operations on clusters created by another user
+        # identity.  That will make the design simpler and easier to
+        # understand, but it might be useful to allow the user to use
+        # operations that only involve ssh (e.g., sky exec, sky logs, etc) even
+        # if the user is not the owner of the cluster.
         ux_utils.console_newline()
         logger.warning(
-            f'Failed to refresh the status for cluster {cluster_name!r}. It is not fatal, but '
-            f'{operation} might hang if the cluster is not up.\n'
+            f'Failed to refresh the status for cluster {cluster_name!r}. It is '
+            f'not fatal, but {operation} might hang if the cluster is not up.\n'
             f'Detailed reason: {e}')
         record = global_user_state.get_cluster_from_name(cluster_name)
         cluster_status, handle = record['status'], record['handle']
@@ -2037,8 +2067,8 @@ def check_cluster_available(
             backend, backends.CloudVmRayBackend):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
-                f'{cluster_name!r}. It is only supported by backend: '
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
+                f'cluster {cluster_name!r}. It is only supported by backend: '
                 f'{backends.CloudVmRayBackend.NAME}.'
                 f'{colorama.Style.RESET_ALL}')
     if cluster_status != global_user_state.ClusterStatus.UP:
@@ -2048,8 +2078,9 @@ def check_cluster_available(
                     cluster_name))
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
-                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for cluster '
-                f'{cluster_name!r} (status: {cluster_status.value}). It is only allowed for '
+                f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
+                f'cluster {cluster_name!r} (status: {cluster_status.value}). '
+                'It is only allowed for '
                 f'{global_user_state.ClusterStatus.UP.value} clusters.'
                 f'{colorama.Style.RESET_ALL}')
 
