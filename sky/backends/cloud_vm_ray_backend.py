@@ -2799,7 +2799,8 @@ class CloudVmRayBackend(backends.Backend):
             # is safe to skip and return True.
             ux_utils.console_newline()
             logger.warning(
-                f'Cluster {handle.cluster_name!r} is already terminated. Skip.')
+                f'Cluster {handle.cluster_name!r} is already terminated. '
+                'Skipped.')
             return True
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
