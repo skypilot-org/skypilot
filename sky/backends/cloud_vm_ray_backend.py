@@ -10,6 +10,7 @@ import pathlib
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -98,6 +99,13 @@ _CTRL_C_TIP_MESSAGE = ('INFO: Tip: use Ctrl-C to exit log streaming '
 _MAX_RAY_UP_RETRY = 5
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
+
+# Path to the monkey-patched ray up script.
+# We don't do import then __file__ because that script needs to be filled in
+# (so import would fail).
+_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
+    pathlib.Path(sky.__file__).resolve().parent / 'backends' /
+    'monkey_patches' / 'ray_up_with_monkey_patched_hash_launch_conf.py')
 
 
 def _get_cluster_config_template(cloud):
@@ -1290,26 +1298,45 @@ class RetryingVmProvisioner(object):
         # FIXME: refactor code path to remove use of stream_logs
         del stream_logs
 
-        style = colorama.Style
-
         def ray_up():
+            # Runs `ray up --no-restart` with our monkey-patched launch hash
+            # calculation. See the monkey patch file for why.
+            #
+            # The only other `ray up` in this file inside
+            # _ensure_cluster_ray_started() doesn't need this monkey patch (to
+            # test: launch a cluster; log in and `ray stop`; then launch
+            # again).
+            #
+            # NOTE: --no-restart solves the following bug.  Without it, if 'ray
+            # up' (sky launch) twice on a cluster with >1 node, the worker node
+            # gets disconnected/killed by ray autoscaler; the whole task will
+            # just freeze.  (Doesn't affect 1-node clusters.)  With this flag,
+            # ray processes no longer restart and this bug doesn't show.
+            # Downside is existing tasks on the cluster will keep running
+            # (which may be ok with the semantics of 'sky launch' twice).
+            # Tracked in https://github.com/ray-project/ray/issues/20402.
+            # Ref:
+            #  https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49
+            with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH,
+                      'r') as f:
+                ray_up_no_restart_script = f.read().format(
+                    ray_yaml_path=repr(cluster_config_file),
+                    kwargs={'no_restart': True})
+
+            with tempfile.NamedTemporaryFile('w',
+                                             prefix='skypilot_ray_up_',
+                                             suffix='.py',
+                                             delete=False) as f:
+                f.write(ray_up_no_restart_script)
+                logger.debug(f'`ray up` script: {f.name}')
+
             # Redirect stdout/err to the file and streaming (if stream_logs).
             # With stdout/err redirected, 'ray up' will have no color and
             # different order from directly running in the console. The
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
-
             returncode, stdout, stderr = log_lib.run_with_log(
-                # NOTE: --no-restart solves the following bug.  Without it, if
-                # 'ray up' (sky launch) twice on a cluster with >1 node, the
-                # worker node gets disconnected/killed by ray autoscaler; the
-                # whole task will just freeze.  (Doesn't affect 1-node
-                # clusters.)  With this flag, ray processes no longer restart
-                # and this bug doesn't show.  Downside is existing tasks on the
-                # cluster will keep running (which may be ok with the semantics
-                # of 'sky launch' twice).
-                # Tracked in https://github.com/ray-project/ray/issues/20402.
-                ['ray', 'up', '-y', '--no-restart', cluster_config_file],
+                [sys.executable, f.name],
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at='Shared connection to',

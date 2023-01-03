@@ -145,6 +145,15 @@ class AutostopEvent(SkyletEvent):
             # 2.2.0: https://github.com/ray-project/ray/blame/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py#L114-L143  # pylint: disable=line-too-long
             # which has not changed for 3 years, so it covers all local Ray
             # versions we support inside setup.py.
+            #
+            # TODO(zongheng): it seems we could skip monkey patching this, if
+            # we monkey patch hash_launch_conf() to drop ssh_proxy_command as
+            # is done in the provision code path. I tried it and could not get
+            # it to work: (1) no outputs are shown (tried both subprocess.run()
+            # and log_lib.run_with_log()) (2) this first `ray up
+            # --restart-only` somehow calculates a different launch hash than
+            # the one used when the head node was created. To clean up in the
+            # future.
             def monkey_patch_init(self, ssh_key, control_path=None, **kwargs):
                 """SSHOptions.__init__(), but pops 'ProxyCommand'."""
                 self.ssh_key = ssh_key
