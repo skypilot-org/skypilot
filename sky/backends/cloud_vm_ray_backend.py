@@ -771,6 +771,7 @@ class RetryingVmProvisioner(object):
             self._blocked_resources.add(
                 launchable_resources.copy(zone=zone.name))
 
+
     def _update_blocklist_on_azure_error(
             self, launchable_resources: 'resources_lib.Resources',
             region: 'clouds.Region', zones: Optional[List['clouds.Zone']],
@@ -806,9 +807,38 @@ class RetryingVmProvisioner(object):
         else:
             self._blocked_resources.add(launchable_resources.copy(zone=None))
 
+    
+    def _update_blocklist_on_ibm_error(self, region, zones, stdout, stderr): #IBM-TODO
 
-    def _update_blocklist_on_ibm_error(self, region, zones, stdout, stderr):
-        pass  # TODO IBM-TODO
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'ERR' in s.strip() or 'PANIC' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Errors occurred during launching of cluster services; '
+                    'check logs above.')
+        logger.warning('Got error(s) on IBM cluster:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+
+        # add zone to blocked zones set.
+        self._blocked_zones.add(zones[0].name)
+        zones_in_region = {zone.name for zone in region.zones}
+        # if all zones in region are blocked, add region to blocked set as well.
+        if self._blocked_zones == zones_in_region:
+            self._blocked_regions.add(region.name)
 
 
     def _update_blocklist_on_lambda_error(
