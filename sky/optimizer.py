@@ -865,6 +865,11 @@ def _fill_in_launchable_resources(
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Local)
                 ]
+            # Lambda Labs does not support spot instances.
+            if resources.use_spot:
+                clouds_list = [
+                    c for c in clouds_list if not isinstance(c, clouds.Lambda)
+                ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
                 (feasible_resources, fuzzy_candidate_list
