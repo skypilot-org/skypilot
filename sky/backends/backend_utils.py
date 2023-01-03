@@ -14,7 +14,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -2015,14 +2015,17 @@ class CloudFilter(enum.Enum):
 
 
 def get_clusters(
-        include_reserved: bool,
-        refresh: bool,
-        cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER
+    include_reserved: bool,
+    refresh: bool,
+    cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER,
+    cluster_names: Optional[Union[str, Sequence[str]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Returns a list of cached cluster records.
+    """Returns a list of cached or optionally refreshed cluster records.
 
     Combs through the database (in ~/.sky/state.db) to get a list of records
-    corresponding to launched clusters.
+    corresponding to launched clusters (filtered by `cluster_names` if it is
+    specified). The refresh flag can be used to force a refresh of the status
+    of the clusters.
 
     Args:
         include_reserved: Whether to include reserved clusters, e.g. spot
@@ -2032,9 +2035,12 @@ def get_clusters(
         cloud_filter: Sets which clouds to filer through from the global user
             state. Supports three values, 'all' for all clouds, 'public' for
             public clouds only, and 'local' for only local clouds.
+        cluster_names: If provided, only return records for the given cluster
+            names.
 
     Returns:
-        A list of cluster records.
+        A list of cluster records. If the cluster does not exist or has been
+        terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
 
@@ -2043,6 +2049,27 @@ def get_clusters(
             record for record in records
             if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
         ]
+
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
 
     def _is_local_cluster(record):
         handle = record['handle']
@@ -2108,9 +2135,6 @@ def get_clusters(
         else:
             kept_records.append(updated_records[i])
 
-    yellow = colorama.Fore.YELLOW
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if autodown_clusters:
         plural = 's' if len(autodown_clusters) > 1 else ''
         cluster_str = ', '.join(autodown_clusters)
