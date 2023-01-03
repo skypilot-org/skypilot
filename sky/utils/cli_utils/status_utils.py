@@ -103,10 +103,11 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
     status_columns = [
         StatusColumn('NAME', _get_name),
         StatusColumn('LAUNCHED', _get_launched),
-        StatusColumn('DURATION (hours)', _get_duration),
+        StatusColumn('DURATION', _get_duration),
         StatusColumn('RESOURCES',
                      _get_resources_for_cost_report,
                      trunc_length=70 if not show_all else 0),
+        StatusColumn('HOURLY_PRICE', _get_price, show_by_default=True),
         StatusColumn('COST (est.)', get_cost_report, show_by_default=True),
     ]
 
@@ -245,8 +246,8 @@ _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
 _get_status = (lambda cluster_status: cluster_status['status'].value)
 _get_command = (lambda cluster_status: cluster_status['last_use'])
-_get_duration = (
-    lambda cluster_status: round(cluster_status['total_time'] / 3600, 2))
+_get_duration = (lambda cluster_status: log_utils.readable_time_duration(
+    0, cluster_status['duration'], absolute=True))
 
 
 def _get_resources(cluster_status):
@@ -283,6 +284,15 @@ def _get_zone(cluster_status):
     return zone_str
 
 
+def _get_price(cluster_status):
+    launched_nodes = cluster_status['num_nodes']
+    launched_resources = cluster_status['resources']
+
+    hourly_cost = (launched_resources.get_cost(3600) * launched_nodes)
+    price_str = f'$ {hourly_cost:.3f}'
+    return price_str
+
+
 def _get_autostop(cluster_status):
     autostop_str = ''
     separtion = ''
@@ -299,12 +309,7 @@ def _get_autostop(cluster_status):
 
 
 def get_cost_report(cluster_status: str,) -> float:
-
-    duration = cluster_status['total_time']
-    launched_nodes = cluster_status['num_nodes']
-    launched_resources = cluster_status['resources']
-
-    cost = (launched_resources.get_cost(duration) * launched_nodes)
+    cost = cluster_status['total_cost']
 
     if not cost:
         return '-'

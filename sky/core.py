@@ -69,9 +69,22 @@ def report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
-        The following fields for each cluster are recorded: cluster name,
-        resources, launched time, duration that cluster was up,
-        and total cost.
+    Each returned value has the following fields:
+
+    .. code-block:: python
+
+        {
+            'name': (str) cluster name,
+            'launched_at': (int) timestamp of last launch on this cluster,
+            'duration': (int) total seconds that cluster was up and running,
+            'last_use': (str) the last command/entrypoint that affected this
+            'num_nodes': (int) number of nodes launched for cluster,
+            'resources': (resources.Resources) type of resource launched,
+            'cluster_hash': (str) unique hash identifying cluster,
+            'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
+            'total_cost': (float) cost given resources and usage intervals,
+        }
+
 
         The estimated cost column indicates price for the cluster based on the
         type of resources being used and the duration of use up until the call
@@ -81,11 +94,24 @@ def report() -> List[Dict[str, Any]]:
         the cluster with autostop/use_spot set or terminated/stopped
         on the cloud console.
 
-        Returns:
+    Returns:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    return global_user_state.get_clusters_from_history()
+    cluster_reports = global_user_state.get_clusters_from_history()
+
+    def get_total_cost(cluster_report: dict) -> float:
+        duration = cluster_report['duration']
+        launched_nodes = cluster_report['num_nodes']
+        launched_resources = cluster_report['resources']
+
+        cost = (launched_resources.get_cost(duration) * launched_nodes)
+        return cost
+
+    for cluster_report in cluster_reports:
+        cluster_report['total_cost'] = get_total_cost(cluster_report)
+
+    return cluster_reports
 
 
 def _start(
