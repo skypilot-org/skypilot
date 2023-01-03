@@ -543,6 +543,17 @@ def spot_launch(
             # used throughout the spot job's recovery attempts (i.e., if it
             # relaunches due to preemption, we make sure the same config is
             # used).
+            #
+            # NOTE: suppose that we have a controller in old VPC, then user
+            # changes 'vpc_name' in the config and does a 'spot launch'. In
+            # general, the old controller may not successfully launch the job
+            # in the new VPC. This happens if the two VPCs don’t have peering
+            # set up. Like other places in the code, we assume properly setting
+            # up networking is user's responsibilities.
+            # TODO(zongheng): consider adding a basic check that checks
+            # controller VPC (or name) == the spot job's VPC (or name). It may
+            # not be a sufficient check (as it's always possible that peering
+            # is not set up), but it may catch some obvious errors.
             config_dict = sky_config.pop_nested(('auth', 'ssh_proxy_command'))
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
