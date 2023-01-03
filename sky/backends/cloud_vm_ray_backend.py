@@ -28,6 +28,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
+from sky import sky_config
 from sky import spot as spot_lib
 from sky import task as task_lib
 from sky.data import data_utils
@@ -1780,13 +1781,25 @@ class CloudVmRayBackend(backends.Backend):
                 # IPs since the cached IPs are up-to-date.
                 return
 
-            cluster_internal_ips = backend_utils.get_node_ips(
-                self.cluster_yaml,
-                self.launched_nodes,
-                handle=self,
-                head_ip_max_attempts=max_attempts,
-                worker_ip_max_attempts=max_attempts,
-                get_internal_ips=True)
+            is_cluster_aws = (self.launched_resources is not None and
+                              isinstance(self.launched_resources.cloud,
+                                         clouds.AWS))
+            if is_cluster_aws and sky_config.get_nested(
+                    keys=('aws', 'use_internal_ips'), default_value=False):
+                # Optimization: if we know use_internal_ips is True (currently
+                # only exposed for AWS), then our AWS NodeProvider is
+                # guaranteed to pick subnets that will not assign public IPs,
+                # thus the first list of IPs returned above are already private
+                # IPs. So skip the second query.
+                cluster_internal_ips = list(cluster_external_ips)
+            else:
+                cluster_internal_ips = backend_utils.get_node_ips(
+                    self.cluster_yaml,
+                    self.launched_nodes,
+                    handle=self,
+                    head_ip_max_attempts=max_attempts,
+                    worker_ip_max_attempts=max_attempts,
+                    get_internal_ips=True)
 
             assert len(cluster_external_ips) == len(cluster_internal_ips), (
                 f'Cluster {self.cluster_name!r}:'
