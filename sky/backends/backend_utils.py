@@ -14,7 +14,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import uuid
 
 import colorama
@@ -2015,9 +2015,10 @@ class CloudFilter(enum.Enum):
 
 
 def get_clusters(
-        include_reserved: bool,
-        refresh: bool,
-        cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER
+    include_reserved: bool,
+    refresh: bool,
+    cloud_filter: str = CloudFilter.CLOUDS_AND_DOCKER,
+    cluster_names: Optional[Union[str, List[str]]] = None,
 ) -> List[Dict[str, Any]]:
     """Returns a list of cached cluster records.
 
@@ -2043,6 +2044,27 @@ def get_clusters(
             record for record in records
             if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
         ]
+
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    if cluster_names:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
 
     def _is_local_cluster(record):
         handle = record['handle']
@@ -2108,9 +2130,6 @@ def get_clusters(
         else:
             kept_records.append(updated_records[i])
 
-    yellow = colorama.Fore.YELLOW
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if autodown_clusters:
         plural = 's' if len(autodown_clusters) > 1 else ''
         cluster_str = ', '.join(autodown_clusters)

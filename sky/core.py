@@ -97,19 +97,9 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
         cluster. If the cluster is not found, it will be omitted from the
         returned list.
     """
-    if cluster_names is None:
-        return backend_utils.get_clusters(include_reserved=True,
-                                          refresh=refresh)
-    if isinstance(cluster_names, str):
-        cluster_names = [cluster_names]
-
-    cluster_records = []
-    for cluster_name in cluster_names:
-        record = backend_utils.refresh_cluster_record(cluster_name,
-                                                      force_refresh=refresh)
-        if record is not None:
-            cluster_records.append(record)
-    return cluster_records
+    return backend_utils.get_clusters(include_reserved=True,
+                                      refresh=refresh,
+                                      cluster_names=cluster_names)
 
 
 def _start(
