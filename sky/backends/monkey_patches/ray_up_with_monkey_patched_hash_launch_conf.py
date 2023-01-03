@@ -33,9 +33,6 @@ def monkey_patch_hash_launch_conf(node_conf, auth):
                 full_auth[key_type] = key.read()
     hasher.update(
         json.dumps([node_conf, full_auth], sort_keys=True).encode('utf-8'))
-    print('Hashed without ssh_proxy_command:', hasher.hexdigest())
-    print(node_conf)
-    print(full_auth)
     return hasher.hexdigest()
 
 

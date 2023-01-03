@@ -1580,19 +1580,20 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
         else:
             launch_config = ray_config.get('worker_nodes', {})
             auth_config = dict(ray_config['auth'])
-            # Ray uses the head node to launch worker nodes. On the head node,
-            # ~/ray_bootstrap_config.yaml, which has any ssh_proxy_command
-            # field removed (see Ray's autoscaler/_private/commands.py), is
-            # passed to the autoscaler. Therefore when Ray calculates the hash
-            # for workers, ssh_proxy_command is not included. Here we follow
-            # this (otherwise our hash here would not match with what's on the
-            # console for workers).
-            #
-            # Note that head node is launched from the local client, whose
-            # launch hash *does* include ssh_proxy_command.
-            auth_config.pop('ssh_proxy_command', None)
+        # Why pop ssh_proxy_command for both head and workers:
+        #
+        # When we launch the head node from the local client: our call to `ray
+        # up` has a monkey-patched version of hash_launch_conf(), which drops
+        # this field.
+        #
+        # When the head node launches worker nodes: On the head node,
+        # ~/ray_bootstrap_config.yaml, which has any ssh_proxy_command field
+        # removed (see Ray's autoscaler/_private/commands.py), is passed to the
+        # autoscaler. Therefore when Ray calculates the hash for workers,
+        # ssh_proxy_command is not included. Here we follow this (otherwise our
+        # hash here would not match with what's on the console for workers).
+        auth_config.pop('ssh_proxy_command', None)
         launch_config = copy.deepcopy(launch_config)
-
         launch_config.update(node_config['node_config'])
         with ux_utils.suppress_output():
             current_hash = ray_autoscaler_private_util.hash_launch_conf(
