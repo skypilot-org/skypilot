@@ -3,17 +3,17 @@
 On module import, we attempt to parse the config located at CONFIG_PATH. Caller
 can then use
 
-  >> sky_config.loaded()
+  >> skypilot_config.loaded()
 
 to check if the config is successfully loaded.
 
 To read a nested-key config:
 
-  >> sky_config.get_nested(('auth', 'some_auth_config'), default_value)
+  >> skypilot_config.get_nested(('auth', 'some_auth_config'), default_value)
 
 To pop a nested-key config:
 
-  >> config_dict = sky_config.pop_nested(('auth', 'some_key'))
+  >> config_dict = skypilot_config.pop_nested(('auth', 'some_key'))
 
 This operation returns a deep-copy dict, and is safe in that any key not found
 will not raise an error.
@@ -29,17 +29,17 @@ Consider the following config contents:
 then:
 
     # Assuming ~/.sky/config.yaml exists and can be loaded:
-    sky_config.loaded()  # ==> True
+    skypilot_config.loaded()  # ==> True
 
-    sky_config.get_nested(('a', 'nested'), None)    # ==> 1
-    sky_config.get_nested(('a', 'nonexist'), None)  # ==> None
-    sky_config.get_nested(('a',), None)             # ==> {'nested': 1}
+    skypilot_config.get_nested(('a', 'nested'), None)    # ==> 1
+    skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
+    skypilot_config.get_nested(('a',), None)             # ==> {'nested': 1}
 
     # If ~/.sky/config.yaml doesn't exist or failed to be loaded:
-    sky_config.loaded()  # ==> False
-    sky_config.get_nested(('a', 'nested'), None)    # ==> None
-    sky_config.get_nested(('a', 'nonexist'), None)  # ==> None
-    sky_config.get_nested(('a',), None)             # ==> None
+    skypilot_config.loaded()  # ==> False
+    skypilot_config.get_nested(('a', 'nested'), None)    # ==> None
+    skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
+    skypilot_config.get_nested(('a',), None)             # ==> None
 """
 import copy
 import os

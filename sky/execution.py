@@ -26,7 +26,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
-from sky import sky_config
+from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -526,10 +526,10 @@ def spot_launch(
             'retry_until_up': retry_until_up,
             'user': os.environ.get('USER', None),
         }
-        if sky_config.loaded():
+        if skypilot_config.loaded():
             # Look up the contents of the already loaded configs via the
-            # 'sky_config' module. Don't simply read the on-disk file as it may
-            # have changed since this process started.
+            # 'skypilot_config' module. Don't simply read the on-disk file as
+            # it may have changed since this process started.
             #
             # Pop any proxy command, because the controller would've been
             # launched behind the proxy, and in general any nodes we launch may
@@ -554,13 +554,14 @@ def spot_launch(
             # controller VPC (or name) == the spot job's VPC (or name). It may
             # not be a sufficient check (as it's always possible that peering
             # is not set up), but it may catch some obvious errors.
-            config_dict = sky_config.pop_nested(('auth', 'ssh_proxy_command'))
+            config_dict = skypilot_config.pop_nested(
+                ('auth', 'ssh_proxy_command'))
             with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
                 common_utils.dump_yaml(tmpfile.name, config_dict)
                 vars_to_fill.update({
                     'user_config_path': tmpfile.name,
                     'env_var_skypilot_config':
-                        sky_config.ENV_VAR_SKYPILOT_CONFIG,
+                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
                 })
 
         yaml_path = backend_utils.fill_template(

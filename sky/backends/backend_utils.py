@@ -38,7 +38,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
-from sky import sky_config
+from sky import skypilot_config
 from sky import sky_logging
 from sky import spot as spot_lib
 from sky.backends import onprem_utils
@@ -802,15 +802,16 @@ def write_cluster_config(
                 # Generate the name of the security group we're looking for.
                 # (username, last 4 chars of hash of hostname): for uniquefying
                 # users on shared-account scenarios.
-                'security_group': sky_config.get_nested(
+                'security_group': skypilot_config.get_nested(
                     ('aws', 'security_group_name'),
                     f'sky-sg-{common_utils.user_and_hostname_hash()}'),
-                'vpc_name': sky_config.get_nested(('aws', 'vpc_name'), None),
-                'use_internal_ips': sky_config.get_nested(
+                'vpc_name': skypilot_config.get_nested(('aws', 'vpc_name'),
+                                                       None),
+                'use_internal_ips': skypilot_config.get_nested(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
-                'ssh_proxy_command': sky_config.get_nested(
+                'ssh_proxy_command': skypilot_config.get_nested(
                     ('auth', 'ssh_proxy_command'), None),
 
                 # Azure only:
@@ -1197,8 +1198,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
             head_ip = re.findall(IP_ADDR_REGEX, out)
             if len(head_ip) > 1:
                 # This could be triggered if e.g., some logging is added in
-                # sky_config, a module that has some code executed whenever
-                # `sky` is imported.
+                # skypilot_config, a module that has some code executed
+                # whenever `sky` is imported.
                 logger.warning(
                     'Detected more than 1 IP from the output of '
                     'the `ray get-head-ip` command. This could '
@@ -1302,8 +1303,8 @@ def get_node_ips(cluster_yaml: str,
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
             # This could be triggered if e.g., some logging is added in
-            # sky_config, a module that has some code executed whenever `sky`
-            # is imported.
+            # skypilot_config, a module that has some code executed whenever
+            # `sky` is imported.
             logger.warning(
                 f'Expected {n} worker IP(s); found '
                 f'{len(worker_ips)}: {worker_ips}'

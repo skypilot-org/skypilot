@@ -29,7 +29,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
-from sky import sky_config
+from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import task as task_lib
 from sky.data import data_utils
@@ -1810,7 +1810,7 @@ class CloudVmRayBackend(backends.Backend):
             is_cluster_aws = (self.launched_resources is not None and
                               isinstance(self.launched_resources.cloud,
                                          clouds.AWS))
-            if is_cluster_aws and sky_config.get_nested(
+            if is_cluster_aws and skypilot_config.get_nested(
                     keys=('aws', 'use_internal_ips'), default_value=False):
                 # Optimization: if we know use_internal_ips is True (currently
                 # only exposed for AWS), then our AWS NodeProvider is
