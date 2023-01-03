@@ -2711,8 +2711,9 @@ class CloudVmRayBackend(backends.Backend):
             # When the cluster is not in the cluster table, we guarantee that
             # all related resources / cache / config are cleaned up, i.e. it
             # is safe to skip and return True.
+            ux_utils.console_newline()
             logger.warning(
-                f'Cluster {handle.cluster_name} does not exist. Skip.')
+                f'Cluster {handle.cluster_name!r} does not exist. Skip.')
             return True
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
