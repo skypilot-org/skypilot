@@ -16,7 +16,6 @@ import hashlib
 import json
 import os
 
-from ray.autoscaler._private import util as ray_autoscaler_private_util
 from ray.autoscaler import sdk
 
 
@@ -40,5 +39,7 @@ def monkey_patch_hash_launch_conf(node_conf, auth):
     return hasher.hexdigest()
 
 
-ray_autoscaler_private_util.hash_launch_conf = monkey_patch_hash_launch_conf
+# Since hash_launch_conf is imported this way, we must patch this imported
+# version.
+sdk.sdk.commands.hash_launch_conf = monkey_patch_hash_launch_conf
 sdk.create_or_update_cluster({ray_yaml_path}, **{kwargs})
