@@ -94,7 +94,8 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
     Returns:
         A list of dicts, with each dict containing the information of a
-        cluster.
+        cluster. If the cluster is not found, it will be omitted from the
+        returned list.
     """
     if cluster_names is None:
         return backend_utils.get_clusters(include_reserved=True,
