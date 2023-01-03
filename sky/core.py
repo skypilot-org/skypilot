@@ -105,9 +105,10 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
     cluster_records = []
     for cluster_name in cluster_names:
-        cluster_records.append(
-            backend_utils.refresh_cluster_record(cluster_name,
-                                                 force_refresh=refresh))
+        record = backend_utils.refresh_cluster_record(cluster_name,
+                                                      force_refresh=refresh)
+        if record is not None:
+            cluster_records.append(record)
     return cluster_records
 
 
