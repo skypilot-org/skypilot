@@ -1361,15 +1361,14 @@ class RetryingVmProvisioner(object):
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-
+        style = colorama.Style
         if isinstance(to_provision_cloud, clouds.Local):
             cluster_name = logging_info['cluster_name']
-            logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
+            logger.info(f'{style.BRIGHT}Launching on local cluster '
                         f'{cluster_name!r}.')
         else:
-            logger.info(
-                f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
-                f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+            logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
+                        f'{region_name}{style.RESET_ALL} ({zone_str})')
         start = time.time()
 
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
