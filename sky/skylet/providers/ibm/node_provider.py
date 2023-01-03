@@ -300,23 +300,19 @@ class IBMVPCNodeProvider(NodeProvider):
                     else:
                         self.pending_nodes.pop(node["id"], None)
 
-            # if node is a head node, validate a floating ip is bound to it 
-            if self._get_node_type(node["name"]) == NODE_KIND_HEAD:
-                nic_id = node["network_interfaces"][0]["id"]
+            # skypilot-adjustment: verify ip is attached to worker nodes as well
+            nic_id = node["network_interfaces"][0]["id"]
 
-                # find head node external ip
-                res = self.ibm_vpc_client.list_instance_network_interface_floating_ips(
-                    node["id"], nic_id
-                ).get_result()
+            res = self.ibm_vpc_client.list_instance_network_interface_floating_ips(
+                node["id"], nic_id
+            ).get_result()
 
-                floating_ips = res["floating_ips"]
-                if len(floating_ips) == 0:
-                    # not adding a head node that's missing floating ip
-                    continue
-                else:
-                    # currently head node always has floating ip
-                    # in case floating ip present we want to add it
-                    node["floating_ips"] = floating_ips
+            floating_ips = res["floating_ips"]
+            if len(floating_ips) == 0:
+                # not adding a node that's missing floating ip
+                continue
+            else:
+                node["floating_ips"] = floating_ips
 
             res_nodes.append(node)
 
@@ -354,20 +350,17 @@ class IBMVPCNodeProvider(NodeProvider):
 
     def _get_hybrid_ip(self, node_id):
         """return external ip for head and private ips for workers"""
-    
-        node = self._get_cached_node(node_id)
-        node_type = self._get_node_type(node["name"])
-        if node_type == NODE_KIND_HEAD:
-            fip = node.get("floating_ips")
-            if fip:
-                return fip[0]["address"]
 
-            node = self._get_node(node_id)
-            fip = node.get("floating_ips")
-            if fip:
-                return fip[0]["address"]
-        else:
-            return self.internal_ip(node_id)
+        # skypilot-adjustment returns external ips for worker nodes as well.
+        node = self._get_cached_node(node_id)
+        fip = node.get("floating_ips")
+        if fip:
+            return fip[0]["address"]
+
+        node = self._get_node(node_id)
+        fip = node.get("floating_ips")
+        if fip:
+            return fip[0]["address"]    
   
     def external_ip(self, node_id)-> str:
         """returns head node's public ip. 
@@ -610,10 +603,9 @@ class IBMVPCNodeProvider(NodeProvider):
         tags[TAG_RAY_NODE_NAME] = name
         self.set_node_tags(instance["id"], tags)
 
-        # currently always creating public ip for head node
-        if self._get_node_type(name) == NODE_KIND_HEAD:
-            fip_data = self._create_floating_ip(base_config)
-            self._attach_floating_ip(instance, fip_data)
+        # skypilot-adjustment create ip for worker nodes as well
+        fip_data = self._create_floating_ip(base_config)
+        self._attach_floating_ip(instance, fip_data)
 
         return {instance["id"]: instance}
 
@@ -693,6 +685,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
         logger.info("Deleting VM instance {}".format(node_id))
         
+        # get vpc_id to delete if deleting head node
         vpc_id_to_delete = None
         if self._get_node_type(self._get_cached_node(node_id)['name']) == NODE_KIND_HEAD:
             vpc_id_to_delete = self.ibm_vpc_client.get_instance(node_id).get_result()['vpc']['id']
