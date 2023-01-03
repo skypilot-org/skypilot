@@ -84,7 +84,7 @@ def ssh_options_list(ssh_private_key: Optional[str],
     ] if ssh_private_key is not None else []
 
     if ssh_proxy_command is not None:
-        logger.info(f'--- Proxy: {ssh_proxy_command} ---')
+        logger.debug(f'--- Proxy: {ssh_proxy_command} ---')
         arg_dict.update({
             # Due to how log_lib.run_with_log() works (using shell=True) we
             # must quote this value.

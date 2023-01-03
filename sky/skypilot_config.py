@@ -124,8 +124,7 @@ def get_nested(keys: Tuple[str], default_value: Any) -> Any:
             curr = curr[key]
         else:
             return default_value
-    # FIXME: remove this logging:
-    logger.info(f'Found user config: {".".join(keys)} -> {curr}')
+    logger.debug(f'User config: {".".join(keys)} -> {curr}')
     return curr
 
 
@@ -145,8 +144,7 @@ def pop_nested(keys: Tuple[str]) -> Dict[str, Any]:
             curr = curr[key]
             if i == len(keys) - 1:
                 prev.pop(key)
-                # FIXME: remove this logging:
-                logger.info(f'Popped {keys}. Returning conf: {to_return}')
+                logger.debug(f'Popped {keys}. Returning conf: {to_return}')
         else:
             # If any key not found, simply return.
             return to_return
