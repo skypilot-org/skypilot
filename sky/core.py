@@ -2,7 +2,7 @@
 import colorama
 import getpass
 import sys
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from sky import dag
 from sky import task
@@ -30,7 +30,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(cluster_names: Optional[Union[str, List[str]]] = None,
+def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
            refresh: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster statuses.
@@ -94,8 +94,8 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
 
     Returns:
         A list of dicts, with each dict containing the information of a
-        cluster. If the cluster is not found/terminated, it will be omitted from
-        the returned list.
+        cluster. If a cluster is found to be terminated or not found, it will
+        be omitted from the returned list.
     """
     return backend_utils.get_clusters(include_reserved=True,
                                       refresh=refresh,
