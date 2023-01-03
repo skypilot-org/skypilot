@@ -1861,7 +1861,7 @@ def _update_cluster_status(
         return global_user_state.get_cluster_from_name(cluster_name)
 
 
-def _refresh_cluster_record(
+def refresh_cluster_record(
         cluster_name: str,
         *,
         force_refresh: bool = False,
@@ -1924,7 +1924,7 @@ def refresh_cluster_status_handle(
     handle of the cluster.
     Please refer to the docstring of refresh_cluster_record for the details.
     """
-    record = _refresh_cluster_record(
+    record = refresh_cluster_record(
         cluster_name,
         force_refresh=force_refresh,
         acquire_per_cluster_status_lock=acquire_per_cluster_status_lock)
@@ -2073,7 +2073,7 @@ def get_clusters(
 
     def _refresh_cluster(cluster_name):
         try:
-            record = _refresh_cluster_record(
+            record = refresh_cluster_record(
                 cluster_name,
                 force_refresh=True,
                 acquire_per_cluster_status_lock=True)
