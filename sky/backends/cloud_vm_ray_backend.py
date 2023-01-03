@@ -2093,7 +2093,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                 backend_utils.SSHConfigHelper.add_cluster(
                     cluster_name, ip_list, auth_config)
 
-                os.remove(lock_path)
+                common_utils.remove_file_if_exists(lock_path)
                 return handle
 
     def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
@@ -2505,7 +2505,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
                 success = self.teardown_no_lock(handle, terminate, purge)
             if success and terminate:
-                os.remove(lock_path)
+                common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
             raise RuntimeError(
                 f'Cluster {cluster_name!r} is locked by {lock_path}. '
@@ -2699,18 +2699,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
         """
-        log_path = os.path.join(os.path.expanduser(self.log_dir),
-                                'teardown.log')
-        log_abs_path = os.path.abspath(log_path)
-        cloud = handle.launched_resources.cloud
-        config = common_utils.read_yaml(handle.cluster_yaml)
         if refresh_cluster_status:
             prev_status, _ = backend_utils.refresh_cluster_status_handle(
                 handle.cluster_name, acquire_per_cluster_status_lock=False)
         else:
             record = global_user_state.get_cluster_from_name(
                 handle.cluster_name)
-            prev_status = record['status']
+            prev_status = record['status'] if record is not None else None
+        if prev_status is None:
+            # When the cluster is not in the cluster table, we guarantee that
+            # all related resources / cache / config are cleaned up, i.e. it
+            # is safe to skip and return True.
+            ux_utils.console_newline()
+            logger.warning(
+                f'Cluster {handle.cluster_name!r} is already terminated. Skip.')
+            return True
+        log_path = os.path.join(os.path.expanduser(self.log_dir),
+                                'teardown.log')
+        log_abs_path = os.path.abspath(log_path)
+        cloud = handle.launched_resources.cloud
+        config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
         if terminate and isinstance(cloud, clouds.Azure):
@@ -2815,6 +2823,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                         stderr=stderr))
                 return False
 
+        # No need to clean up if the cluster is already terminated
+        # (i.e., prev_status is None), as the cleanup has already been done
+        # if the cluster is removed from the status table.
         if post_teardown_cleanup:
             return self.post_teardown_cleanup(handle, terminate, purge)
         else:
@@ -2876,13 +2887,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
             # Clean up TPU creation/deletion scripts
             if handle.tpu_delete_script is not None:
                 assert handle.tpu_create_script is not None
-                os.remove(handle.tpu_create_script)
-                os.remove(handle.tpu_delete_script)
+                common_utils.remove_file_if_exists(handle.tpu_create_script)
+                common_utils.remove_file_if_exists(handle.tpu_delete_script)
 
             # Clean up generated config
             # No try-except is needed since Ray will fail to teardown the
             # cluster if the cluster_yaml is missing.
-            os.remove(handle.cluster_yaml)
+            common_utils.remove_file_if_exists(handle.cluster_yaml)
         return True
 
     def set_autostop(self,

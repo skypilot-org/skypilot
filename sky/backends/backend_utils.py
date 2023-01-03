@@ -14,7 +14,7 @@ import textwrap
 import threading
 import time
 import typing
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, Union
 from typing_extensions import Literal
 import uuid
 
@@ -663,8 +663,7 @@ class SSHConfigHelper(object):
 
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
         extra_config_path = os.path.expanduser(extra_path_name)
-        if os.path.exists(extra_config_path):
-            os.remove(extra_config_path)
+        common_utils.remove_file_if_exists(extra_config_path)
 
         # Delete include statement
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -1541,9 +1540,10 @@ def _query_status_gcp(
         # Do not use refresh cluster status during teardown, as that will
         # cause inifinite recursion by calling cluster status refresh
         # again.
-        # The caller of this function, `_update_cluster_status_no_lock() -> _get_cluster_status_via_cloud_cli()`,
-        # will do the post teardown cleanup, which will remove the cluster entry
-        # from the status table & the ssh config file.
+        # The caller of this function, `_update_cluster_status_no_lock() ->
+        # _get_cluster_status_via_cloud_cli()`, will do the post teardown
+        # cleanup, which will remove the cluster entry from the status table
+        # & the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,
@@ -1738,7 +1738,6 @@ def _update_cluster_status_no_lock(
         return global_user_state.get_cluster_from_name(cluster_name)
     # Now is_abnormal is False: either node_statuses is empty or all nodes are STOPPED.
     backend = backends.CloudVmRayBackend()
-    # TODO(zhwu): adding output for the cluster removed by status refresh.
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
@@ -1965,12 +1964,15 @@ class CloudFilter(enum.Enum):
 def get_clusters(
     include_reserved: bool,
     refresh: bool,
-    cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER
+    cloud_filter: CloudFilter = CloudFilter.CLOUDS_AND_DOCKER,
+    cluster_names: Optional[Union[str, Sequence[str]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Returns a list of cached cluster records.
+    """Returns a list of cached or optionally refreshed cluster records.
 
     Combs through the database (in ~/.sky/state.db) to get a list of records
-    corresponding to launched clusters.
+    corresponding to launched clusters (filtered by `cluster_names` if it is
+    specified). The refresh flag can be used to force a refresh of the status
+    of the clusters.
 
     Args:
         include_reserved: Whether to include reserved clusters, e.g. spot
@@ -1980,9 +1982,12 @@ def get_clusters(
         cloud_filter: Sets which clouds to filer through from the global user
             state. Supports three values, 'all' for all clouds, 'public' for
             public clouds only, and 'local' for only local clouds.
+        cluster_names: If provided, only return records for the given cluster
+            names.
 
     Returns:
-        A list of cluster records.
+        A list of cluster records. If the cluster does not exist or has been
+        terminated, the record will be omitted from the returned list.
     """
     records = global_user_state.get_clusters()
 
@@ -1991,6 +1996,27 @@ def get_clusters(
             record for record in records
             if record['name'] not in SKY_RESERVED_CLUSTER_NAMES
         ]
+
+    yellow = colorama.Fore.YELLOW
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+
+    if cluster_names is not None:
+        if isinstance(cluster_names, str):
+            cluster_names = [cluster_names]
+        new_records = []
+        not_exist_cluster_names = []
+        for cluster_name in cluster_names:
+            for record in records:
+                if record['name'] == cluster_name:
+                    new_records.append(record)
+                    break
+            else:
+                not_exist_cluster_names.append(cluster_name)
+        if not_exist_cluster_names:
+            clusters_str = ', '.join(not_exist_cluster_names)
+            logger.info(f'Cluster(s) not found: {bright}{clusters_str}{reset}.')
+        records = new_records
 
     def _is_local_cluster(record):
         handle = record['handle']
@@ -2026,6 +2052,7 @@ def get_clusters(
                 force_refresh=True,
                 acquire_per_cluster_status_lock=True)
         except (exceptions.ClusterStatusFetchingError,
+                exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError,
                 exceptions.ClusterStatusFetchingError) as e:
             record = {'status': 'UNKNOWN', 'error': e}
@@ -2055,9 +2082,6 @@ def get_clusters(
         else:
             kept_records.append(updated_records[i])
 
-    yellow = colorama.Fore.YELLOW
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if autodown_clusters:
         plural = 's' if len(autodown_clusters) > 1 else ''
         cluster_str = ', '.join(autodown_clusters)
