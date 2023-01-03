@@ -670,8 +670,7 @@ class SSHConfigHelper(object):
 
         extra_path_name = cls.ssh_multinode_path.format(cluster_name)
         extra_config_path = os.path.expanduser(extra_path_name)
-        if os.path.exists(extra_config_path):
-            os.remove(extra_config_path)
+        common_utils.remove_file_if_exists(extra_config_path)
 
         # Delete include statement
         sky_autogen_comment = ('# Added by sky (use `sky stop/down '
@@ -1694,8 +1693,8 @@ def _query_status_gcp(
         # again.
         # The caller of this function, `_update_cluster_status_no_lock() ->
         # _get_cluster_status_via_cloud_cli()`, will do the post teardown
-        # cleanup, which will remove the cluster entry from the status table &
-        # the ssh config file.
+        # cleanup, which will remove the cluster entry from the status table
+        # & the ssh config file.
         backend.teardown_no_lock(handle,
                                  terminate=True,
                                  purge=False,
@@ -1894,7 +1893,6 @@ def _update_cluster_status_no_lock(
     # Now is_abnormal is False: either node_statuses is empty or all nodes are
     # STOPPED.
     backend = backends.CloudVmRayBackend()
-    # TODO(zhwu): adding output for the cluster removed by status refresh.
     backend.post_teardown_cleanup(handle, terminate=to_terminate, purge=False)
     return global_user_state.get_cluster_from_name(cluster_name)
 
