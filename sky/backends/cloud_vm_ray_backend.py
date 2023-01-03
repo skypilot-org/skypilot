@@ -1315,8 +1315,7 @@ class RetryingVmProvisioner(object):
             # Downside is existing tasks on the cluster will keep running
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
-            # Ref:
-            #  https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49
+            # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
             with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH,
                       'r') as f:
                 ray_up_no_restart_script = f.read().format(
@@ -1355,7 +1354,7 @@ class RetryingVmProvisioner(object):
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264  # pylint: disable=line-too-long
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
