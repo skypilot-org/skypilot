@@ -126,69 +126,6 @@ class AutostopEvent(SkyletEvent):
             self._stop_cluster(autostop_config)
 
     def _stop_cluster(self, autostop_config):
-
-        def _ray_up_to_reset_upscaling_params():
-            from ray.autoscaler import sdk  # pylint: disable=import-outside-toplevel
-            from ray.autoscaler._private import command_runner  # pylint: disable=import-outside-toplevel
-
-            # Monkey patch. We must do this, otherwise with ssh_proxy_command
-            # still under 'auth:' `ray up ~/.sky/sky_ray.yaml` on the head node
-            # will fail (in general, the clusters do not need or have the proxy
-            # set up).
-            #
-            # Note also that we can't simply drop ssh_proxy_command from that
-            # yaml: this is because then the `ray up` command would calculate a
-            # different launch hash, prompting the autoscaler to stop the head
-            # node and launch a new one.
-            #
-            # Ref:
-            # 2.2.0: https://github.com/ray-project/ray/blame/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py#L114-L143  # pylint: disable=line-too-long
-            # which has not changed for 3 years, so it covers all local Ray
-            # versions we support inside setup.py.
-            #
-            # TODO(zongheng): it seems we could skip monkey patching this, if
-            # we monkey patch hash_launch_conf() to drop ssh_proxy_command as
-            # is done in the provision code path. I tried it and could not get
-            # it to work: (1) no outputs are shown (tried both subprocess.run()
-            # and log_lib.run_with_log()) (2) this first `ray up
-            # --restart-only` somehow calculates a different launch hash than
-            # the one used when the head node was created. To clean up in the
-            # future.
-            def monkey_patch_init(self, ssh_key, control_path=None, **kwargs):
-                """SSHOptions.__init__(), but pops 'ProxyCommand'."""
-                self.ssh_key = ssh_key
-                self.arg_dict = {
-                    # Supresses initial fingerprint verification.
-                    'StrictHostKeyChecking': 'no',
-                    # SSH IP and fingerprint pairs no longer added to
-                    # known_hosts.  This is to remove a 'REMOTE HOST
-                    # IDENTIFICATION HAS CHANGED' warning if a new node has the
-                    # same IP as a previously deleted node, because the
-                    # fingerprints will not match in that case.
-                    'UserKnownHostsFile': os.devnull,
-                    # Try fewer extraneous key pairs.
-                    'IdentitiesOnly': 'yes',
-                    # Abort if port forwarding fails (instead of just printing
-                    # to stderr).
-                    'ExitOnForwardFailure': 'yes',
-                    # Quickly kill the connection if network connection breaks
-                    # (as opposed to hanging/blocking).
-                    'ServerAliveInterval': 5,
-                    'ServerAliveCountMax': 3,
-                }
-                if control_path:
-                    self.arg_dict.update({
-                        'ControlMaster': 'auto',
-                        'ControlPath': '{}/%C'.format(control_path),
-                        'ControlPersist': '10s',
-                    })
-                # NOTE(skypilot): pops ProxyCommand. This is the only change.
-                kwargs.pop('ProxyCommand', None)
-                self.arg_dict.update(kwargs)
-
-            command_runner.SSHOptions.__init__ = monkey_patch_init
-            sdk.create_or_update_cluster(self._ray_yaml_path, restart_only=True)
-
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             self._replace_yaml_for_stopping(self._ray_yaml_path,
@@ -198,7 +135,11 @@ class AutostopEvent(SkyletEvent):
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
             logger.info('Running ray up.')
-            _ray_up_to_reset_upscaling_params()
+            subprocess.run([
+                'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
+                self._ray_yaml_path
+            ],
+                           check=True)
 
             logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.
@@ -225,6 +166,18 @@ class AutostopEvent(SkyletEvent):
         config = yaml.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
+        # NOTE: We must do this, otherwise with ssh_proxy_command still under
+        # 'auth:', `ray up ~/.sky/sky_ray.yaml` on the head node will fail (in
+        # general, the clusters do not need or have the proxy set up).
+        #
+        # Note also that this is ok only because in the local client ->
+        # provision head node code path, we have monkey patched
+        # hash_launch_conf() to exclude ssh_proxy_command from the hash
+        # calculation for the head node. Therefore when this current code is
+        # run again on the head, the hash would match the one at head's
+        # creation (otherwise the head node would be stopped and a new one
+        # would be launched).
+        config['auth'].pop('ssh_proxy_command', None)
         # Empty the file_mounts.
         config['file_mounts'] = dict()
         common_utils.dump_yaml(yaml_path, config)
