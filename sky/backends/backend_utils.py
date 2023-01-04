@@ -744,7 +744,7 @@ def write_cluster_config(
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
         ResourceUnavailableError: if the region/zones requested does not appear
-            in the catalog.
+            in the catalog or the ssh proxy command is not available.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
@@ -786,6 +786,8 @@ def write_cluster_config(
     if isinstance(ssh_proxy_command_config, dict):
         ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
         if ssh_proxy_command is None:
+            # Skip this region. The upper layer will handle the failover to
+            # other regions.
             raise exceptions.ResourcesUnavailableError(
                 f'No ssh_proxy_command provided for region {region_name}. Skip.'
             )
