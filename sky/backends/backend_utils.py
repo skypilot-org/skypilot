@@ -792,7 +792,7 @@ def write_cluster_config(
             # Skip this region. The upper layer will handle the failover to
             # other regions.
             raise exceptions.ResourcesUnavailableError(
-                f'No ssh_proxy_command provided for region {region_name}. Skip.'
+                f'No ssh_proxy_command provided for region {region_name}. Skipped.'
             )
         elif not isinstance(ssh_proxy_command, str):
             raise ValueError(
