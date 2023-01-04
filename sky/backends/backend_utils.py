@@ -782,31 +782,23 @@ def write_cluster_config(
 
     # Retrieve the ssh_proxy_command for the given cloud / region.
     ssh_proxy_command_config = skypilot_config.get_nested(
-        ('auth', 'ssh_proxy_command'), None)
+        (str(cloud).lower(), 'ssh_proxy_command'), None)
     if isinstance(ssh_proxy_command_config, dict):
-        cloud_ssh_proxy_command_config = ssh_proxy_command_config.get(
-            str(cloud).lower(), None)
-        if cloud_ssh_proxy_command_config is None:
-            ssh_proxy_command = None
-            logger.warning(f'No ssh_proxy_command found for cloud {cloud}. '
-                           f'Do not use ssh_proxy_command.')
-        elif isinstance(cloud_ssh_proxy_command_config, dict):
-            ssh_proxy_command = cloud_ssh_proxy_command_config.get(
-                region_name, None)
-            if ssh_proxy_command is None:
-                ssh_proxy_command = list(
-                    cloud_ssh_proxy_command_config.values())[0]
-                logger.warning(
-                    f'No ssh_proxy_command found for region {region_name}.'
-                    f' Using default ssh_proxy_command: {ssh_proxy_command!r}')
-        elif isinstance(cloud_ssh_proxy_command_config, str):
-            ssh_proxy_command = cloud_ssh_proxy_command_config
-        else:
+        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
+        if ssh_proxy_command is None:
+            raise exceptions.ResourcesUnavailableError(
+                f'No ssh_proxy_command provided for region {region_name}. Skip.'
+            )
+        elif not isinstance(ssh_proxy_command, str):
             raise ValueError(
                 f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}'
             )
-    else:
+    elif isinstance(ssh_proxy_command_config,
+                    str) or ssh_proxy_command_config is None:
         ssh_proxy_command = ssh_proxy_command_config
+    else:
+        raise ValueError(
+            f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}')
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
