@@ -780,6 +780,20 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
+    # Retrieve the ssh_proxy_command for the given region.
+    ssh_proxy_command_config = skypilot_config.get_nested(
+        ('auth', 'ssh_proxy_command'), None)
+    if isinstance(ssh_proxy_command_config, dict):
+        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
+        if ssh_proxy_command is None:
+            ssh_proxy_command = list(ssh_proxy_command_config.values())[0]
+            logger.warning(
+                f'No ssh_proxy_command found for region {region_name}.'
+                f' Using default ssh_proxy_command: {ssh_proxy_command!r}')
+    else:
+        ssh_proxy_command = ssh_proxy_command_config
+    logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -811,8 +825,7 @@ def write_cluster_config(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
-                'ssh_proxy_command': skypilot_config.get_nested(
-                    ('auth', 'ssh_proxy_command'), None),
+                'ssh_proxy_command': ssh_proxy_command,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
