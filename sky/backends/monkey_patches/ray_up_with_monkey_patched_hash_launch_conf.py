@@ -39,4 +39,4 @@ def monkey_patch_hash_launch_conf(node_conf, auth):
 # Since hash_launch_conf is imported this way, we must patch this imported
 # version.
 sdk.sdk.commands.hash_launch_conf = monkey_patch_hash_launch_conf
-sdk.create_or_update_cluster({ray_yaml_path}, **{kwargs})
+sdk.create_or_update_cluster({ray_yaml_path}, **{ray_up_kwargs})

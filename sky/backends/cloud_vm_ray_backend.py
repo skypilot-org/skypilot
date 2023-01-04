@@ -118,6 +118,29 @@ def _get_cluster_config_template(cloud):
     return cloud_to_template[type(cloud)]
 
 
+def _write_ray_up_script_with_patched_launch_hash_fn(
+    cluster_config_path: str,
+    ray_up_kwargs: Dict[str, bool],
+) -> str:
+    """Writes a Python script that runs `ray up` with our launch hash func.
+
+    Our patched launch hash has one difference from the non-patched version: it
+    does not include any `ssh_proxy_command` under `auth` as part of the hash
+    calculation.
+    """
+    with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH, 'r') as f:
+        ray_up_no_restart_script = f.read().format(
+            ray_yaml_path=repr(cluster_config_path),
+            ray_up_kwargs=ray_up_kwargs)
+    with tempfile.NamedTemporaryFile('w',
+                                     prefix='skypilot_ray_up_',
+                                     suffix='.py',
+                                     delete=False) as f:
+        f.write(ray_up_no_restart_script)
+        logger.debug(f'`ray up` script: {f.name}')
+    return f.name
+
+
 class RayCodeGen:
     """Code generator of a Ray program that executes a sky.Task.
 
@@ -1299,13 +1322,8 @@ class RetryingVmProvisioner(object):
         del stream_logs
 
         def ray_up():
-            # Runs `ray up --no-restart` with our monkey-patched launch hash
+            # Runs `ray up <kwargs>` with our monkey-patched launch hash
             # calculation. See the monkey patch file for why.
-            #
-            # The only other `ray up` in this file inside
-            # _ensure_cluster_ray_started() doesn't need this monkey patch (to
-            # test: launch a cluster; log in and `ray stop`; then launch
-            # again).
             #
             # NOTE: --no-restart solves the following bug.  Without it, if 'ray
             # up' (sky launch) twice on a cluster with >1 node, the worker node
@@ -1316,18 +1334,8 @@ class RetryingVmProvisioner(object):
             # (which may be ok with the semantics of 'sky launch' twice).
             # Tracked in https://github.com/ray-project/ray/issues/20402.
             # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
-            with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH,
-                      'r') as f:
-                ray_up_no_restart_script = f.read().format(
-                    ray_yaml_path=repr(cluster_config_file),
-                    kwargs={'no_restart': True})
-
-            with tempfile.NamedTemporaryFile('w',
-                                             prefix='skypilot_ray_up_',
-                                             suffix='.py',
-                                             delete=False) as f:
-                f.write(ray_up_no_restart_script)
-                logger.debug(f'`ray up` script: {f.name}')
+            script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+                cluster_config_file, ray_up_kwargs={'no_restart': True})
 
             # Redirect stdout/err to the file and streaming (if stream_logs).
             # With stdout/err redirected, 'ray up' will have no color and
@@ -1335,7 +1343,7 @@ class RetryingVmProvisioner(object):
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
             returncode, stdout, stderr = log_lib.run_with_log(
-                [sys.executable, f.name],
+                [sys.executable, script_path],
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at='Shared connection to',
@@ -1553,8 +1561,12 @@ class RetryingVmProvisioner(object):
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 
+        # Runs `ray up <kwargs>` with our monkey-patched launch hash
+        # calculation. See the monkey patch file for why.
+        script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+            handle.cluster_yaml, ray_up_kwargs={'restart_only': True})
         log_lib.run_with_log(
-            ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
+            [sys.executable, script_path],
             log_abs_path,
             stream_logs=False,
             # Use environment variables to disable the ray usage collection
