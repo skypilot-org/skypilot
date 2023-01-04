@@ -91,18 +91,18 @@ class ClusterStatus(enum.Enum):
     # previously succeeded.
     UP = 'UP'
 
-    # Stopped.  This means a `sky stop` _call has previously succeeded.
+    # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
 
     def colored_str(self):
-        color = STATUS_TO_COLOR[self]
+        color = _STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
-STATUS_TO_COLOR = {
+_STATUS_TO_COLOR = {
     ClusterStatus.INIT: colorama.Fore.BLUE,
     ClusterStatus.UP: colorama.Fore.GREEN,
-    ClusterStatus.STOPPED: colorama.Fore.LIGHTWHITE_EX,
+    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
 }
 
 

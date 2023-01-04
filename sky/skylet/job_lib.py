@@ -117,11 +117,11 @@ class JobStatus(enum.Enum):
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
     def colored_str(self):
-        color = JOB_STATUS_TO_COLOR[self]
+        color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
-JOB_STATUS_TO_COLOR = {
+_JOB_STATUS_TO_COLOR = {
     JobStatus.INIT: colorama.Fore.BLUE,
     JobStatus.SETTING_UP: colorama.Fore.BLUE,
     JobStatus.PENDING: colorama.Fore.BLUE,
