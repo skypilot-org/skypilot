@@ -780,18 +780,29 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
-    # Retrieve the ssh_proxy_command for the given region.
-    # TODO(zhwu/zongheng): This may need to distinguish between different
-    # cloud providers, i.e. the dict should take cloud + region as key.
+    # Retrieve the ssh_proxy_command for the given cloud / region.
     ssh_proxy_command_config = skypilot_config.get_nested(
         ('auth', 'ssh_proxy_command'), None)
     if isinstance(ssh_proxy_command_config, dict):
-        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
-        if ssh_proxy_command is None:
-            ssh_proxy_command = list(ssh_proxy_command_config.values())[0]
+        cloud_ssh_proxy_command_config = ssh_proxy_command_config.get(
+            str(cloud).lower(), None)
+        if cloud_ssh_proxy_command_config is None:
+            ssh_proxy_command = None
             logger.warning(
-                f'No ssh_proxy_command found for region {region_name}.'
-                f' Using default ssh_proxy_command: {ssh_proxy_command!r}')
+                    f'No ssh_proxy_command found for cloud {cloud}. '
+                    f'Do not use ssh_proxy_command.')
+        elif isinstance(cloud_ssh_proxy_command_config, dict):
+            ssh_proxy_command = cloud_ssh_proxy_command_config.get(region_name, None)
+            if ssh_proxy_command is None:
+                ssh_proxy_command = list(cloud_ssh_proxy_command_config.values())[0]
+                logger.warning(
+                    f'No ssh_proxy_command found for region {region_name}.'
+                    f' Using default ssh_proxy_command: {ssh_proxy_command!r}')
+        elif isinstance(cloud_ssh_proxy_command_config, str):
+            ssh_proxy_command = cloud_ssh_proxy_command_config
+        else:
+            raise ValueError(
+                f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}')
     else:
         ssh_proxy_command = ssh_proxy_command_config
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
