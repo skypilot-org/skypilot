@@ -744,7 +744,7 @@ def write_cluster_config(
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
         ResourceUnavailableError: if the region/zones requested does not appear
-            in the catalog.
+            in the catalog, or an ssh_proxy_command is specified but not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
@@ -780,6 +780,30 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
+    # Retrieve the ssh_proxy_command for the given cloud / region.
+    ssh_proxy_command_config = skypilot_config.get_nested(
+        (str(cloud).lower(), 'ssh_proxy_command'), None)
+    if (isinstance(ssh_proxy_command_config, str) or
+            ssh_proxy_command_config is None):
+        ssh_proxy_command = ssh_proxy_command_config
+    elif isinstance(ssh_proxy_command_config, dict):
+        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
+        if ssh_proxy_command is None:
+            # Skip this region. The upper layer will handle the failover to
+            # other regions.
+            raise exceptions.ResourcesUnavailableError(
+                f'No ssh_proxy_command provided for region {region_name}. Skipped.'
+            )
+        elif not isinstance(ssh_proxy_command, str):
+            raise ValueError(
+                'Invalid ssh_proxy_command config (expected a str): '
+                f'{ssh_proxy_command_config!r}')
+    else:
+        raise ValueError(
+            'Invalid ssh_proxy_command config (expected a str or a dict with '
+            f'region names as keys): {ssh_proxy_command_config!r}')
+    logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -811,8 +835,7 @@ def write_cluster_config(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
-                'ssh_proxy_command': skypilot_config.get_nested(
-                    ('auth', 'ssh_proxy_command'), None),
+                'ssh_proxy_command': ssh_proxy_command,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
