@@ -1313,7 +1313,7 @@ class GcsStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       '/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb '
+                       '/releases/download/v0.41.10/gcsfuse_0.41.10_amd64.deb '
                        '-O /tmp/gcsfuse.deb && '
                        'sudo dpkg --install /tmp/gcsfuse.deb')
         mount_cmd = ('gcsfuse -o allow_other '

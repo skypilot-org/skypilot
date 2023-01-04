@@ -1,3 +1,4 @@
+include sky/backends/monkey_patches/*.py
 include sky/skylet/*.sh
 include sky/skylet/providers/aws/*
 include sky/skylet/providers/aws/cloudwatch/*

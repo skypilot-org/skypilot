@@ -3,6 +3,7 @@ import itertools
 import json
 import logging
 import os
+import sys
 import time
 from distutils.version import StrictVersion
 from functools import lru_cache, partial
@@ -31,6 +32,11 @@ RAY = "ray-autoscaler"
 DEFAULT_RAY_INSTANCE_PROFILE = RAY + "-v1"
 DEFAULT_RAY_IAM_ROLE = RAY + "-v1"
 SECURITY_GROUP_TEMPLATE = RAY + "-{}"
+
+SKYPILOT = "skypilot"
+DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + "-v1"
+DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
+
 
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
@@ -62,6 +68,9 @@ def key_pair(i, region, key_name):
     If key_name is not None, key_pair will be named after key_name.
     Returns the ith default (aws_key_pair_name, key_pair_path).
     """
+    # SkyPilot: we don't use this, as we explicitly set the key already.
+    # For backwards compatibility, we'll just return the key pair with
+    # the previous name.
     if i == 0:
         key_pair_name = "{}_{}".format(RAY, region) if key_name is None else key_name
         return (
@@ -215,7 +224,7 @@ def log_to_cli(config: Dict[str, Any]) -> None:
     cli_logger.newline()
 
 
-def bootstrap_aws(config):
+def bootstrap_aws(config, skypilot_iam_role: bool = False):
     # create a copy of the input config to modify
     config = copy.deepcopy(config)
 
@@ -231,11 +240,16 @@ def bootstrap_aws(config):
 
     # If NetworkInterfaces are provided, extract the necessary fields for the
     # config stages below.
+    # This basically adds two fields 'SubnetIds', 'SecurityGroupIds' to the
+    # node_config dict.
     config = _configure_from_network_interfaces(config)
 
     # The head node needs to have an IAM role that allows it to create further
     # EC2 instances.
-    config = _configure_iam_role(config)
+    #
+    # If skypilot_iam_role is True, we use our own IAM role for both head and
+    # workers.
+    config = _configure_iam_role(config, skypilot_iam_role=skypilot_iam_role)
 
     # Configure SSH access, using an existing key pair if possible.
     config = _configure_key_pair(config)
@@ -257,17 +271,28 @@ def bootstrap_aws(config):
     return config
 
 
-def _configure_iam_role(config):
+def _configure_iam_role(config, skypilot_iam_role: bool):
+    default_instance_profile = DEFAULT_RAY_INSTANCE_PROFILE
+    default_iam_role = DEFAULT_RAY_IAM_ROLE
+    if skypilot_iam_role:
+        default_instance_profile = DEFAULT_SKYPILOT_INSTANCE_PROFILE
+        default_iam_role = DEFAULT_SKYPILOT_IAM_ROLE
+
     head_node_type = config["head_node_type"]
     head_node_config = config["available_node_types"][head_node_type]["node_config"]
     if "IamInstanceProfile" in head_node_config:
         _set_config_info(head_instance_profile_src="config")
+        if skypilot_iam_role:
+            # SkyPilot: let the workers use the same role as the head node, so that they
+            # can access private S3 buckets.
+            for node_type in config["available_node_types"].values():
+                node_type["node_config"]["IamInstanceProfile"] = head_node_config['IamInstanceProfile']
         return config
     _set_config_info(head_instance_profile_src="default")
 
     instance_profile_name = cwh.resolve_instance_profile_name(
         config["provider"],
-        DEFAULT_RAY_INSTANCE_PROFILE,
+        default_instance_profile,
     )
     profile = _get_instance_profile(instance_profile_name, config)
 
@@ -287,7 +312,7 @@ def _configure_iam_role(config):
     assert profile is not None, "Failed to create instance profile"
 
     if not profile.roles:
-        role_name = cwh.resolve_iam_role_name(config["provider"], DEFAULT_RAY_IAM_ROLE)
+        role_name = cwh.resolve_iam_role_name(config["provider"], default_iam_role)
         role = _get_role(role_name, config)
         if role is None:
             cli_logger.verbose(
@@ -312,6 +337,7 @@ def _configure_iam_role(config):
                     "arn:aws:iam::aws:policy/AmazonS3FullAccess",
                 ],
             )
+            
 
             iam.create_role(
                 RoleName=role_name, AssumeRolePolicyDocument=json.dumps(policy_doc)
@@ -326,11 +352,42 @@ def _configure_iam_role(config):
             for policy_arn in attach_policy_arns:
                 role.attach_policy(PolicyArn=policy_arn)
 
+            # SkyPilot: "PassRole" is required by the head node to pass the role to
+            # the workers, so we can access S3 buckets on the workers. "Resource"
+            # is to limit the role to only able to pass itself to the workers.
+            skypilot_pass_role_policy_doc = {
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "iam:GetRole",
+                            "iam:PassRole",
+                        ],
+                        "Resource": role.arn,
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": "iam:GetInstanceProfile",
+                        "Resource": profile.arn,
+                    }
+                ]
+            }
+            if skypilot_iam_role:       
+                role.Policy("SkyPilotPassRolePolicy").put(
+                    PolicyDocument=json.dumps(skypilot_pass_role_policy_doc)
+                )
+
         profile.add_role(RoleName=role.name)
         time.sleep(15)  # wait for propagation
-    # Add IAM role to "head_node" field so that it is applied only to
-    # the head node -- not to workers with the same node type as the head.
-    config["head_node"]["IamInstanceProfile"] = {"Arn": profile.arn}
+    if skypilot_iam_role:
+        # SkyPilot: let the workers use the same role as the head node, so that they
+        # can access private S3 buckets.
+        for node_type in config["available_node_types"].values():
+            node_type["node_config"]["IamInstanceProfile"] = {"Arn": profile.arn}
+    else:
+        # Add IAM role to "head_node" field so that it is applied only to
+        # the head node -- not to workers with the same node type as the head.
+        config["head_node"]["IamInstanceProfile"] = {"Arn": profile.arn}
 
     return config
 
@@ -466,6 +523,14 @@ def _usable_subnet_ids(
         user_specified_subnet_ids = {s.subnet_id for s in user_specified_subnets}
         return user_specified_subnet_ids - current_subnet_ids
 
+    def _subnet_name_tag_contains(subnet, substr: str) -> bool:
+        tags = subnet.meta.data["Tags"]
+        for tag in tags:
+            if tag["Key"] == "Name":
+                name = tag["Value"]
+                return substr in name
+        return False
+
     try:
         candidate_subnets = (
             user_specified_subnets
@@ -476,12 +541,55 @@ def _usable_subnet_ids(
             candidate_subnets = [
                 s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
             ]
+
         subnets = sorted(
             (
                 s
                 for s in candidate_subnets
                 if s.state == "available"
-                and (use_internal_ips or s.map_public_ip_on_launch)
+                and (
+                    # If using internal IPs, the subnets must not assign public
+                    # IPs. Additionally, requires that each eligible subnet
+                    # contain a name tag which includes the substring
+                    # 'private'. This is a HACK; see below.
+                    #
+                    # Reason: the first two checks alone are not enough. For
+                    # example, the VPC creation helper from AWS will create a
+                    # "public" and a "private" subnet per AZ. However, the
+                    # created "public" subnet by default has
+                    # map_public_ip_on_launch set to False as well. This means
+                    # we could've launched in that subnet, which will make any
+                    # instances not able to send outbound traffic to the
+                    # Internet, due to the way route tables/gateways are set up
+                    # for that public subnet. The "public" subnets are NOT
+                    # intended to host data plane VMs, while the "private"
+                    # subnets are.
+                    #
+                    # An alternative to the subnet name hack is to ensure
+                    # there's a route (dest=0.0.0.0/0, target=nat-*) in the
+                    # subnet's route table so that outbound connections
+                    # work. This seems hard to do, given a ec2.Subnet
+                    # object. (Easy to see in console though.) So we opt for
+                    # the subnet name requirement for now.
+                    (
+                        use_internal_ips
+                        and not s.map_public_ip_on_launch
+                        and _subnet_name_tag_contains(s, "private")
+                    )
+                    or
+                    # Or if using public IPs, the subnets must assign public
+                    # IPs.
+                    (not use_internal_ips and s.map_public_ip_on_launch)
+                    # NOTE: SkyPilot also changes the semantics of
+                    # 'use_internal_ips' through the above two conditions.
+                    # Previously, this flag by itself does not enforce only
+                    # choosing subnets that do not assign public IPs.  Now we
+                    # do so.
+                    #
+                    # In both before and now, this flag makes Ray communicate
+                    # between the client and the head node using the latter's
+                    # private ip.
+                )
             ),
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
@@ -557,7 +665,11 @@ def _configure_subnet(config):
     for node_type in config["available_node_types"].values():
         node_config = node_type["node_config"]
         sg_ids.extend(node_config.get("SecurityGroupIds", []))
-    if sg_ids:
+
+    if "vpc_name" in config["provider"]:
+        # NOTE: This is a new field added by SkyPilot and parsed by our own AWSNodeProvider.
+        vpc_id_of_sg = _get_vpc_id_by_name(config["provider"]["vpc_name"], config)
+    elif sg_ids:
         vpc_id_of_sg = _get_vpc_id_of_sg(sg_ids, config)
     else:
         vpc_id_of_sg = None
@@ -565,7 +677,7 @@ def _configure_subnet(config):
     # map from node type key -> source of SubnetIds field
     subnet_src_info = {}
     _set_config_info(subnet_src=subnet_src_info)
-    all_subnets = list(ec2.subnets.all())
+    all_subnets = list(ec2.subnets.all())  # All subnets of this region.
     # separate node types with and without user-specified subnets
     node_types_subnets = []
     node_types_no_subnets = []
@@ -612,6 +724,38 @@ def _configure_subnet(config):
     return config
 
 
+def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
+    """Returns the VPC ID of the unique VPC with a given name.
+
+    Exits with code 1 if:
+      - No VPC with the given name is found in the current region.
+      - More than 1 VPC with the given name are found in the current region.
+    """
+    ec2 = _resource("ec2", config)
+    # Look in the "Name" tag (shown as Name column in console).
+    filters = [{"Name": "tag:Name", "Values": [vpc_name]}]
+    vpcs = [vpc for vpc in ec2.vpcs.filter(Filters=filters)]
+    if not vpcs:
+        logger.error(
+            f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: No VPC with name {vpc_name!r} is found "
+            f'in {config["provider"]["region"]}. '
+            "To fix: specify a correct VPC name."
+        )
+        # Raising would exit the caller, while exit triggers SkyPilot failover.
+        sys.exit(1)
+    elif len(vpcs) > 1:
+        logger.error(
+            f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: Multiple VPCs with name {vpc_name!r} "
+            f'found in {config["provider"]["region"]}: {vpcs}. '
+            "It is ambiguous as to which VPC to use. To fix: specify a "
+            "VPC name that is uniquely identifying."
+        )
+        # Raising would exit the caller, while exit triggers SkyPilot failover.
+        sys.exit(1)
+    assert len(vpcs) == 1, vpcs
+    return vpcs[0].id
+
+
 def _get_vpc_id_of_sg(sg_ids: List[str], config: Dict[str, Any]) -> str:
     """Returns the VPC id of the security groups with the provided security
     group ids.
@@ -630,7 +774,9 @@ def _get_vpc_id_of_sg(sg_ids: List[str], config: Dict[str, Any]) -> str:
 
     multiple_vpc_msg = (
         "All security groups specified in the cluster config "
-        "should belong to the same VPC."
+        "should belong to the same VPC.\n"
+        f"Security group IDs: {sg_ids}\n"
+        f"Their VPC IDs (expected 1 element): {vpc_ids}\n"
     )
     cli_logger.doassert(len(vpc_ids) <= 1, multiple_vpc_msg)
     assert len(vpc_ids) <= 1, multiple_vpc_msg

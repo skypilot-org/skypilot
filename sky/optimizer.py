@@ -652,15 +652,22 @@ class Optimizer:
                 vcpus = str(int(vcpus))
             else:
                 vcpus = f'{vcpus:.1f}'
+            if resources.zone is None:
+                region_or_zone = resources.region
+            else:
+                region_or_zone = resources.zone
             return [
                 str(cloud),
                 resources.instance_type + spot,
                 vcpus,
                 str(accelerators),
+                str(region_or_zone),
             ]
 
         # Print the list of resouces that the optimizer considered.
-        resource_fields = ['CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS']
+        resource_fields = [
+            'CLOUD', 'INSTANCE', 'vCPUs', 'ACCELERATORS', 'REGION/ZONE'
+        ]
         # Do not print Source or Sink.
         best_plan_rows = [[t, t.num_nodes] + _get_resources_element_list(r)
                           for t, r in ordered_best_plan.items()]
@@ -686,8 +693,25 @@ class Optimizer:
                 f'{colorama.Style.BRIGHT}Considered resources {task_str}'
                 f'({task.num_nodes} node{plural}):'
                 f'{colorama.Style.RESET_ALL}')
-            rows = []
+
+            # Only print 1 row per cloud.
+            best_per_cloud = {}
             for resources, cost in v.items():
+                cloud = str(resources.cloud)
+                if cloud in best_per_cloud:
+                    if cost < best_per_cloud[cloud][1]:
+                        best_per_cloud[cloud] = (resources, cost)
+                else:
+                    best_per_cloud[cloud] = (resources, cost)
+
+            # If the DAG has multiple tasks, the chosen resources may not be
+            # the best resources for the task.
+            chosen_resources = best_plan[task]
+            best_per_cloud[str(chosen_resources.cloud)] = (chosen_resources,
+                                                           v[chosen_resources])
+
+            rows = []
+            for resources, cost in best_per_cloud.values():
                 if minimize_cost:
                     cost = f'{cost:.2f}'
                 else:
@@ -700,7 +724,9 @@ class Optimizer:
                                colorama.Style.RESET_ALL)
                 rows.append(row)
 
-            rows = sorted(rows, key=lambda x: x[-2])
+            # NOTE: we've converted the cost to a string above, so we should
+            # convert it back to float for sorting.
+            rows = sorted(rows, key=lambda x: float(x[-2]))
             # Highlight the chosen resources.
             for row in rows:
                 if row[-1] != '':
@@ -806,6 +832,46 @@ def _cloud_in_list(cloud: clouds.Cloud, lst: List[clouds.Cloud]) -> bool:
     return any(cloud.is_same_cloud(c) for c in lst)
 
 
+def _make_launchables_for_valid_region_zones(
+    launchable_resources: resources_lib.Resources
+) -> List[resources_lib.Resources]:
+    assert launchable_resources.is_launchable()
+    # In principle, all provisioning requests should be made at the granularity
+    # of a single zone. However, for on-demand instances, we batch the requests
+    # to the zones in the same region in order to leverage the region-level
+    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
+    # API calls, and thus the overall failover time. Note that this optimization
+    # does not affect the user cost since the clouds charge the same prices for
+    # on-demand instances in the same region regardless of the zones. On the
+    # other hand, for spot instances, we do not batch the requests because the
+    # "AWS" spot prices may vary across zones.
+
+    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
+    # while we return per-region resources here, the provisioner will still
+    # issue the request for one zone at a time.
+    # NOTE(woosuk): If we support Azure spot instances, we should batch the
+    # requests since Azure spot prices are region-level.
+    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
+    # in the same region and have the same price.
+    # TODO(woosuk): A better design is to implement batching at a higher level
+    # (e.g., in provisioner or optimizer), not here.
+    launchables = []
+    regions = launchable_resources.get_offering_regions_for_launchable()
+    for region in regions:
+        if launchable_resources.use_spot:
+            # Spot instances.
+            # Do not batch the per-zone requests.
+            for zone in region.zones:
+                launchables.append(
+                    launchable_resources.copy(region=region.name,
+                                              zone=zone.name))
+        else:
+            # On-demand instances.
+            # Batch the requests at the granularity of a single region.
+            launchables.append(launchable_resources.copy(region=region.name))
+    return launchables
+
+
 def _filter_out_blocked_launchable_resources(
         launchable_resources: List[resources_lib.Resources],
         blocked_launchable_resources: List[resources_lib.Resources]):
@@ -813,9 +879,9 @@ def _filter_out_blocked_launchable_resources(
     available_resources = []
     for resources in launchable_resources:
         for blocked_resources in blocked_launchable_resources:
-            if resources.is_launchable_fuzzy_equal(blocked_resources):
+            if resources.should_be_blocked_by(blocked_resources):
                 break
-        else:  # non-blokced launchable resources. (no break)
+        else:  # non-blocked launchable resources. (no break)
             available_resources.append(resources)
     return available_resources
 
@@ -852,7 +918,17 @@ def _fill_in_launchable_resources(
                 clouds.GCP.check_accelerator_attachable_to_host(
                     resources.instance_type, resources.accelerators,
                     resources.zone)
-            launchable[resources] = [resources]
+            # If the user has specified a GCP zone and the zone does not support
+            # the host-accelerator combination, then an error will be raised by
+            # the above check_accelerator_attachable_to_host() call.
+            # If the user has not specified any zone, a launchable will be made
+            # for every zone even if some of the zones do not support the
+            # host-accelerator combination. Then the provisioner may try to
+            # launch the instance, and fail over to other zones. We find this
+            # behavior acceptable because this will happen only when the user
+            # requested GCP 4:P100 or 8:K80 with a very large host VM.
+            launchable[resources] = _make_launchables_for_valid_region_zones(
+                resources)
         else:
             clouds_list = [resources.cloud
                           ] if resources.cloud is not None else enabled_clouds
@@ -875,9 +951,11 @@ def _fill_in_launchable_resources(
                 (feasible_resources, fuzzy_candidate_list
                 ) = cloud.get_feasible_launchable_resources(resources)
                 if len(feasible_resources) > 0:
-                    # Assume feasible_resources is sorted by prices and
-                    # only append the cheapest option for each cloud
-                    launchable[resources].append(feasible_resources[0])
+                    # Assume feasible_resources is sorted by prices.
+                    cheapest = feasible_resources[0]
+                    # Generate region/zone-specified resources.
+                    launchable[resources].extend(
+                        _make_launchables_for_valid_region_zones(cheapest))
                     cloud_candidates[cloud] = feasible_resources
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)

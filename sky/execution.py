@@ -26,6 +26,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -439,7 +440,7 @@ def exec(  # pylint: disable=redefined-builtin
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
-        operation='executing tasks on',
+        operation='executing tasks',
         check_cloud_vm_ray_backend=False)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
@@ -512,19 +513,60 @@ def spot_launch(
         common_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
+        vars_to_fill = {
+            'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+            'user_yaml_path': f.name,
+            'user_config_path': None,
+            'spot_controller': controller_name,
+            'cluster_name': name,
+            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+            'logging_user_hash': common_utils.get_user_hash(),
+            'retry_until_up': retry_until_up,
+            'user': os.environ.get('USER', None),
+        }
+        if skypilot_config.loaded():
+            # Look up the contents of the already loaded configs via the
+            # 'skypilot_config' module. Don't simply read the on-disk file as
+            # it may have changed since this process started.
+            #
+            # Pop any proxy command, because the controller would've been
+            # launched behind the proxy, and in general any nodes we launch may
+            # not have or need the proxy setup. (If the controller needs to
+            # launch spot clusters in another region/VPC, the user should
+            # properly set up VPC peering, which will allow the
+            # cross-region/VPC communication. The proxy command is orthogonal
+            # to this scenario.)
+            #
+            # This file will be uploaded to the controller node and will be
+            # used throughout the spot job's recovery attempts (i.e., if it
+            # relaunches due to preemption, we make sure the same config is
+            # used).
+            #
+            # NOTE: suppose that we have a controller in old VPC, then user
+            # changes 'vpc_name' in the config and does a 'spot launch'. In
+            # general, the old controller may not successfully launch the job
+            # in the new VPC. This happens if the two VPCs don’t have peering
+            # set up. Like other places in the code, we assume properly setting
+            # up networking is user's responsibilities.
+            # TODO(zongheng): consider adding a basic check that checks
+            # controller VPC (or name) == the spot job's VPC (or name). It may
+            # not be a sufficient check (as it's always possible that peering
+            # is not set up), but it may catch some obvious errors.
+            config_dict = skypilot_config.pop_nested(
+                ('auth', 'ssh_proxy_command'))
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+                common_utils.dump_yaml(tmpfile.name, config_dict)
+                vars_to_fill.update({
+                    'user_config_path': tmpfile.name,
+                    'env_var_skypilot_config':
+                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                })
+
         yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
-                'is_dev': env_options.Options.IS_DEVELOPER.get(),
-                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': common_utils.get_user_hash(),
-                'retry_until_up': retry_until_up,
-                'user': os.environ.get('USER', None),
-            },
+            spot.SPOT_CONTROLLER_TEMPLATE,
+            vars_to_fill,
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task

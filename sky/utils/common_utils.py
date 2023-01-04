@@ -51,6 +51,8 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+        if user_hash is None:
+            return False
         try:
             int(user_hash, 16)
         except (TypeError, ValueError):
@@ -59,6 +61,7 @@ def get_user_hash(default_value: Optional[str] = None) -> str:
 
     user_hash = default_value
     if _is_valid_user_hash(user_hash):
+        assert user_hash is not None
         return user_hash
 
     if os.path.exists(_USER_HASH_FILE):
@@ -96,7 +99,7 @@ class Backoff:
 
     def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
         self._initial = True
-        self._backoff = None
+        self._backoff = 0.0
         self._inital_backoff = initial_backoff
         self._max_backoff = max_backoff_factor * self._inital_backoff
 
@@ -312,6 +315,20 @@ def class_fullname(cls):
     return f'{cls.__module__}.{cls.__name__}'
 
 
+def format_exception(e: Exception, use_bracket: bool = False) -> str:
+    """Format an exception to a string.
+
+    Args:
+        e: The exception to format.
+
+    Returns:
+        A string that represents the exception.
+    """
+    if use_bracket:
+        return f'[{class_fullname(e.__class__)}]: {e}'
+    return f'{class_fullname(e.__class__)}: {e}'
+
+
 def remove_color(s: str):
     """Remove color from a string.
 
@@ -322,3 +339,16 @@ def remove_color(s: str):
         A string without color.
     """
     return _COLOR_PATTERN.sub('', s)
+
+
+def remove_file_if_exists(path: str):
+    """Delete a file if it exists.
+
+    Args:
+        path: The path to the file.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
+        pass

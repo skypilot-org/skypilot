@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import subprocess
-from typing import Optional, Set, Tuple
+from typing import List, Optional, Set
 import urllib
 
 import numpy as np
@@ -27,8 +27,7 @@ US_REGIONS = [
 ]
 
 
-# To enable all the regions, uncomment the following line.
-def get_regions() -> Tuple[str]:
+def get_regions() -> List[str]:
     """Get all available regions."""
     proc = subprocess.run(
         'az account list-locations  --query "[?not_null(metadata.latitude)] '
@@ -42,7 +41,7 @@ def get_regions() -> Tuple[str]:
         for item in items
         if not item['RegionName'].endswith('stg')
     ]
-    return tuple(regions)
+    return regions
 
 
 # Azure secretly deprecated the M60 family which is still returned by its API.
@@ -78,8 +77,8 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
             print(f'Fetched pricing pages {page}')
         r = requests.get(url)
         r.raise_for_status()
-        content = r.content.decode('ascii')
-        content = json.loads(content)
+        content_str = r.content.decode('ascii')
+        content = json.loads(content_str)
         items = content.get('Items', [])
         if len(items) == 0:
             break
@@ -124,7 +123,7 @@ def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
     return df
 
 
-def get_gpu_name(family: str) -> str:
+def get_gpu_name(family: str) -> Optional[str]:
     gpu_data = {
         'standardNCFamily': 'K80',
         'standardNCSv2Family': 'P100',

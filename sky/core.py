@@ -2,7 +2,7 @@
 import colorama
 import getpass
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import sky
 from sky import dag
@@ -31,7 +31,8 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(refresh: bool = False) -> List[Dict[str, Any]]:
+def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
+           refresh: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster statuses.
 
@@ -87,16 +88,19 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
       latest cluster statuses from the cloud providers.
 
     Args:
+        cluster_names: a list of cluster names to query. If not
+            provided, all clusters will be queried.
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
 
     Returns:
         A list of dicts, with each dict containing the information of a
-        cluster.
+        cluster. If a cluster is found to be terminated or not found, it will
+        be omitted from the returned list.
     """
-    cluster_records = backend_utils.get_clusters(include_reserved=True,
-                                                 refresh=refresh)
-    return cluster_records
+    return backend_utils.get_clusters(include_reserved=True,
+                                      refresh=refresh,
+                                      cluster_names=cluster_names)
 
 
 def _start(

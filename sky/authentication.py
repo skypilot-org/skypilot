@@ -78,7 +78,12 @@ def get_or_generate_keys() -> Tuple[str, str]:
         _save_key_pair(private_key_path, public_key_path, private_key,
                        public_key)
     else:
-        assert os.path.exists(public_key_path)
+        # FIXME(skypilot): ran into failing this assert once, but forgot the
+        # reproduction (has private key; but has not generated public key).
+        #   AssertionError: /home/ubuntu/.ssh/sky-key.pub
+        assert os.path.exists(public_key_path), (
+            'Private key found, but associated public key '
+            f'{public_key_path} does not exist.')
     return private_key_path, public_key_path
 
 
