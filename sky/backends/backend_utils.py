@@ -784,7 +784,7 @@ def write_cluster_config(
     ssh_proxy_command_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'ssh_proxy_command'), None)
     if (isinstance(ssh_proxy_command_config, str) or
-          ssh_proxy_command_config is None):
+            ssh_proxy_command_config is None):
         ssh_proxy_command = ssh_proxy_command_config
     elif isinstance(ssh_proxy_command_config, dict):
         ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
