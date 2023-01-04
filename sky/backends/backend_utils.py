@@ -783,7 +783,10 @@ def write_cluster_config(
     # Retrieve the ssh_proxy_command for the given cloud / region.
     ssh_proxy_command_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'ssh_proxy_command'), None)
-    if isinstance(ssh_proxy_command_config, dict):
+    if (isinstance(ssh_proxy_command_config, str) or
+          ssh_proxy_command_config is None):
+        ssh_proxy_command = ssh_proxy_command_config
+    elif isinstance(ssh_proxy_command_config, dict):
         ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
         if ssh_proxy_command is None:
             # Skip this region. The upper layer will handle the failover to
@@ -795,9 +798,6 @@ def write_cluster_config(
             raise ValueError(
                 f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}'
             )
-    elif isinstance(ssh_proxy_command_config,
-                    str) or ssh_proxy_command_config is None:
-        ssh_proxy_command = ssh_proxy_command_config
     else:
         raise ValueError(
             f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}')
