@@ -800,7 +800,7 @@ def write_cluster_config(
             )
     else:
         raise ValueError(
-            f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}')
+            f'Invalid ssh_proxy_command config (expected a str or a dict with region names as keys): {ssh_proxy_command_config!r}')
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
