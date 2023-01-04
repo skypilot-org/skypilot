@@ -788,13 +788,14 @@ def write_cluster_config(
             str(cloud).lower(), None)
         if cloud_ssh_proxy_command_config is None:
             ssh_proxy_command = None
-            logger.warning(
-                    f'No ssh_proxy_command found for cloud {cloud}. '
-                    f'Do not use ssh_proxy_command.')
+            logger.warning(f'No ssh_proxy_command found for cloud {cloud}. '
+                           f'Do not use ssh_proxy_command.')
         elif isinstance(cloud_ssh_proxy_command_config, dict):
-            ssh_proxy_command = cloud_ssh_proxy_command_config.get(region_name, None)
+            ssh_proxy_command = cloud_ssh_proxy_command_config.get(
+                region_name, None)
             if ssh_proxy_command is None:
-                ssh_proxy_command = list(cloud_ssh_proxy_command_config.values())[0]
+                ssh_proxy_command = list(
+                    cloud_ssh_proxy_command_config.values())[0]
                 logger.warning(
                     f'No ssh_proxy_command found for region {region_name}.'
                     f' Using default ssh_proxy_command: {ssh_proxy_command!r}')
@@ -802,7 +803,8 @@ def write_cluster_config(
             ssh_proxy_command = cloud_ssh_proxy_command_config
         else:
             raise ValueError(
-                f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}')
+                f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}'
+            )
     else:
         ssh_proxy_command = ssh_proxy_command_config
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
