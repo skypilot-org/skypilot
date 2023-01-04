@@ -796,7 +796,7 @@ def write_cluster_config(
             )
         elif not isinstance(ssh_proxy_command, str):
             raise ValueError(
-                f'Invalid ssh_proxy_command config: {ssh_proxy_command_config!r}'
+                f'Invalid ssh_proxy_command config (expected a str): {ssh_proxy_command_config!r}'
             )
     else:
         raise ValueError(
