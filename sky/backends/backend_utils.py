@@ -744,7 +744,7 @@ def write_cluster_config(
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
         ResourceUnavailableError: if the region/zones requested does not appear
-            in the catalog or the ssh proxy command is not available.
+            in the catalog, or an ssh_proxy_command is specified but not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
