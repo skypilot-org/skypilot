@@ -84,7 +84,6 @@ class ClusterStatus(enum.Enum):
     # Initializing.  This means a backend.provision() call has started but has
     # not successfully finished. The cluster may be undergoing setup, may have
     # failed setup, may be live or down.
-
     INIT = 'INIT'
 
     # The cluster is recorded as up.  This means a backend.provision() has
