@@ -446,7 +446,7 @@ def test_job_queue():
     run_one_test(test)
 
 
-def test_n_node_job_queue():
+def test_job_queue_multinode():
     name = _get_cluster_name()
     test = Test(
         'job_queue_multinode',
@@ -913,7 +913,7 @@ def test_spot_recovery():
              f'--filters Name=tag:ray-cluster-name,Values={name}* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 50',
+            'sleep 100',
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
@@ -986,7 +986,7 @@ def test_spot_cancellation():
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
@@ -998,7 +998,7 @@ def test_spot_cancellation():
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-2* '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-2-* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
@@ -1009,10 +1009,10 @@ def test_spot_cancellation():
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 50',
+            'sleep 100',
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-3',
             'sleep 10',
@@ -1021,7 +1021,7 @@ def test_spot_cancellation():
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
             (f's=$(aws ec2 describe-instances --region {region} '
-             f'--filters Name=tag:ray-cluster-name,Values={name}-3* '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
