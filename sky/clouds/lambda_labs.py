@@ -1,4 +1,4 @@
-"""Lambda."""
+"""Lambda Labs."""
 import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
@@ -21,22 +21,37 @@ _CREDENTIAL_FILES = [
 class Lambda(clouds.Cloud):
     """Lambda Labs GPU Cloud."""
 
+    _REPR = 'Lambda'
+    _regions: List[clouds.Region] = []
+
     @classmethod
-    def regions(cls):
-        cls._regions = [
-            clouds.Region('us-east-1'),
-            clouds.Region('us-west-2'),
-            clouds.Region('australia-southeast-1'),
-            clouds.Region('europe-central-1'),
-            clouds.Region('asia-south-1'),
-            clouds.Region('me-west-1'),
-            clouds.Region('europe-south-1'),
-            clouds.Region('asia-northeast-1'),
-            clouds.Region('asia-northeast-2'),
-            clouds.Region('us-west-1'),
-            clouds.Region('us-south-1'),
-        ]
+    def regions(cls) -> List[clouds.Region]:
+        if not cls._regions:
+            cls._regions = [
+                clouds.Region('us-east-1'),
+                clouds.Region('us-west-2'),
+                clouds.Region('australia-southeast-1'),
+                clouds.Region('europe-central-1'),
+                clouds.Region('asia-south-1'),
+                clouds.Region('me-west-1'),
+                clouds.Region('europe-south-1'),
+                clouds.Region('asia-northeast-1'),
+                clouds.Region('asia-northeast-2'),
+                clouds.Region('us-west-1'),
+                clouds.Region('us-south-1'),
+            ]
         return cls._regions
+
+    @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        del instance_type, accelerators, region, zone  # unused
+        if use_spot:
+            return []
+        # All regions have all instance types
+        return cls.regions()
 
     @classmethod
     def region_zones_provision_loop(
@@ -44,24 +59,33 @@ class Lambda(clouds.Cloud):
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del instance_type
-        del use_spot
-        del accelerators  # unused
-
-        for region in cls.regions():
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
+        for region in regions:
             yield region, region.zones
 
-    def instance_type_to_hourly_cost(self, instance_type: str,
-                                     use_spot: bool) -> float:
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
                                                use_spot=use_spot,
+                                               region=region,
+                                               zone=zone,
                                                clouds='lambda')
 
-    def accelerators_to_hourly_cost(self, accelerators,
-                                    use_spot: bool) -> float:
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
+        del accelerators, use_spot, region, zone  # unused
         # Lambda includes accelerators as part of the instance type.
         return 0.0
 
@@ -91,7 +115,7 @@ class Lambda(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='lambda')
 
@@ -102,14 +126,18 @@ class Lambda(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         del zones
+        if region is None:
+            region = self._get_default_region()
+
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
         else:
             custom_resources = None
+
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
@@ -121,7 +149,7 @@ class Lambda(clouds.Cloud):
         # TODO: In some cases, launching a larger VM will be cheaper than
         # launching a smaller VM with the exact requirements on another cloud.
         # This is not implemented yet.
-        fuzzy_candidate_list = []
+        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
@@ -151,9 +179,13 @@ class Lambda(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='lambda')
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='lambda')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
