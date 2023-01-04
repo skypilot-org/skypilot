@@ -781,6 +781,8 @@ def write_cluster_config(
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
     # Retrieve the ssh_proxy_command for the given region.
+    # TODO(zhwu/zongheng): This may need to distinguish between different
+    # cloud providers, i.e. the dict should take cloud + region as key.
     ssh_proxy_command_config = skypilot_config.get_nested(
         ('auth', 'ssh_proxy_command'), None)
     if isinstance(ssh_proxy_command_config, dict):
