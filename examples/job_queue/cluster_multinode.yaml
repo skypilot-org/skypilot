@@ -9,6 +9,6 @@
 
 resources:
   cloud: aws
-  accelerators: K80
+  accelerators: T4
 
 num_nodes: 2
