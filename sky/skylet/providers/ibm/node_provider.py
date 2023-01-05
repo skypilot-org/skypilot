@@ -182,7 +182,7 @@ class IBMVPCNodeProvider(NodeProvider):
             self.endpoint, IAMAuthenticator(self.iam_api_key, url=self.iam_endpoint)
         )
         self.vpc_tags = None
-        self.vpc_provider = IBMVPCProvider(self.resource_group_id, self.region, self.zone ,self.cluster_name)
+        self.vpc_provider = IBMVPCProvider(self.resource_group_id, self.region ,self.cluster_name)
 
         self._load_tags()
 
@@ -278,11 +278,17 @@ class IBMVPCNodeProvider(NodeProvider):
             # validate instance in correct state
             valid_statuses = ["pending", "starting", "running"]
             if node["status"] not in valid_statuses:
-                logger.info(
-                    f"{node['id']} status {node['status']}"
-                    f" not in {valid_statuses}, skipping"
-                )
-                continue
+                with self.lock:
+                    if node["status"] == 'failed':
+                        # non_terminated_nodes is called periodically, lock until node is deleted  
+                        self._delete_node(node["id"])
+                        logger.error("Encountered a failed node. Region might be crowded, Consider retrying later.")
+                    else:                    
+                        logger.debug(
+                            f"{node['id']} status {node['status']}"
+                            f" not in {valid_statuses}, skipping"
+                        )
+                        continue
 
             # validate instance not hanging in pending state
             with self.lock:
@@ -624,7 +630,7 @@ class IBMVPCNodeProvider(NodeProvider):
 
         # Create/fetch a VPC when creating a head node 
         if not self.vpc_tags:
-            self.vpc_tags = self.vpc_provider.create_or_fetch_vpc()
+            self.vpc_tags = self.vpc_provider.create_or_fetch_vpc(self.region, self.zone)
         
         logger.debug(f"""create_node: count: {count}\ntags: {pprint(tags)}\nbase_config:{pprint(base_config)}\n """)
         stopped_nodes_dict = {}
@@ -684,10 +690,11 @@ class IBMVPCNodeProvider(NodeProvider):
         """deletes specified instance. if it's a head node delete its IPs if it was created by Ray. updates caches. """
 
         logger.info("Deleting VM instance {}".format(node_id))
-        
-        # get vpc_id to delete if deleting head node
+        node = self._get_cached_node(node_id)
+
+        # get vpc_id to delete if deleting head node which isn't a failed node
         vpc_id_to_delete = None
-        if self._get_node_type(self._get_cached_node(node_id)['name']) == NODE_KIND_HEAD:
+        if self._get_node_type(node['name']) == NODE_KIND_HEAD and node["status"]!='failed':
             vpc_id_to_delete = self.ibm_vpc_client.get_instance(node_id).get_result()['vpc']['id']
 
         try:
@@ -767,8 +774,8 @@ class IBMVPCNodeProvider(NodeProvider):
 
     def _get_node(self, node_id):
         """Refresh and get info for this node, updating the cache."""
-        self.non_terminated_nodes({})  # Side effect: updates cache
-
+        # self.non_terminated_nodes({})  # Side effect: updates cache
+        self._get_nodes_by_tags({})
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
 
