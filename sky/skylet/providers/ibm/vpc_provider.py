@@ -14,16 +14,27 @@ REQUIRED_RULES.update(INSECURE_RULES)
 
 class IBMVPCProvider():
 
-    def __init__(self, resource_group_id ,region, zone, cluster_name):
+    def __init__(self, resource_group_id, region, cluster_name):
         self.vpc_client = ibm.client(region=region)
         self.search_client = ibm.search_client()
         self.tagging_client = ibm.tagging_client()
         self.resource_group_id = resource_group_id
+        self.cluster_name = cluster_name
+        ## region and zone might change between failovers
+        self.region = None   
+        self.zone = None
+    
+    def create_or_fetch_vpc(self,region,zone):
+        """
+        returns a cluster with tag matching the cluster name if exists, else creates one
+        an entry point (out of 2) to this module. 
+        """
+
+        # refresh client region scope if region changed. 
+        if self.region and self.region!=region:
+            self.vpc_client = ibm.client(region=region)
         self.region = region
         self.zone = zone
-        self.cluster_name = cluster_name
-    
-    def create_or_fetch_vpc(self):
         reused_vpc_data = None
         vpcs_filtered_by_tags_and_region = self.search_client.search(query=f"type:vpc AND tags:{self.cluster_name} AND region:{self.region}",
                     fields=["tags","region","type"], limit = 1000).get_result()['items']  
@@ -161,6 +172,10 @@ class IBMVPCProvider():
             return subnets_attached_to_routing_table
 
     def delete_vpc(self, vpc_id, old_region):
+        """
+        deletes a vpc with the specified id and region.
+        an entry point to this module (alongside create_or_fetch_vpc) 
+        """
         logger.debug(f"Deleting vpc:{vpc_id}")
         tmp_vpc_client = ibm.client(region=old_region)
         vpc_data = self.get_vpc_data(vpc_id, old_region)
