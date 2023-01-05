@@ -2185,11 +2185,12 @@ def _down_or_stop_clusters(
                 assert len(reserved_clusters) == 1, reserved_clusters
                 _hint_for_down_spot_controller(reserved_clusters[0])
 
-                click.confirm('Proceed?',
-                              default=False,
-                              abort=True,
-                              show_default=True)
-                no_confirm = True
+                if not no_confirm:
+                    click.confirm('Proceed?',
+                                  default=False,
+                                  abort=True,
+                                  show_default=True)
+                    no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
@@ -2939,9 +2940,15 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@click.option('--skip-finished',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_queue(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2972,7 +2979,8 @@ def spot_queue(all: bool, refresh: bool):
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
-        job_table = core.spot_queue(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh,
+                                    skip_finished=skip_finished)
     except exceptions.ClusterNotUpError:
         cache = spot_lib.load_job_table_cache()
         if cache is not None:

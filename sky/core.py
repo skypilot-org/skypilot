@@ -15,6 +15,7 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.spot import spot_state
 from sky.usage import usage_lib
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -635,7 +636,7 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
+def spot_queue(refresh: bool, skip_finished: bool) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
@@ -651,7 +652,7 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
                 'end_at': (float) timestamp of end,
                 'duration': (float) duration in seconds,
                 'retry_count': int Number of retries,
-                'status': sky.JobStatus status of the job,
+                'status': spot_state.SpotStatus status of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
             }
@@ -698,6 +699,9 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
         raise RuntimeError(e.error_msg) from e
 
     jobs = spot.load_spot_job_queue(job_table_payload)
+    if skip_finished:
+        jobs = list(
+            filter(lambda job: not job['status'].is_terminal(), jobs))
     return jobs
 
 
