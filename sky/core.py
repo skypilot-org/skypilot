@@ -15,7 +15,6 @@ from sky import spot
 from sky.backends import backend_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.spot import spot_state
 from sky.usage import usage_lib
 from sky.utils import tpu_utils
 from sky.utils import ux_utils
@@ -636,7 +635,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def spot_queue(refresh: bool, skip_finished: bool) -> List[Dict[str, Any]]:
+def spot_queue(refresh: bool,
+               skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
