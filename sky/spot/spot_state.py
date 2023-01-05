@@ -85,6 +85,7 @@ class SpotStatus(enum.Enum):
     def failure_statuses(cls) -> List['SpotStatus']:
         return [cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER]
 
+
 _SPOT_STATUS_TO_COLOR = {
     SpotStatus.PENDING: colorama.Fore.BLUE,
     SpotStatus.SUBMITTED: colorama.Fore.BLUE,
@@ -97,6 +98,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
     SpotStatus.CANCELLED: colorama.Fore.YELLOW,
 }
+
 
 # === Status transition functions ===
 def set_pending(job_id: int, name: str, resources_str: str):

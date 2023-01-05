@@ -700,8 +700,7 @@ def spot_queue(refresh: bool, skip_finished: bool) -> List[Dict[str, Any]]:
 
     jobs = spot.load_spot_job_queue(job_table_payload)
     if skip_finished:
-        jobs = list(
-            filter(lambda job: not job['status'].is_terminal(), jobs))
+        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
     return jobs
 
 
