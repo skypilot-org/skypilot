@@ -15,6 +15,8 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import clouds
 from sky.utils import db_utils
 from sky.utils import common_utils
@@ -90,6 +92,17 @@ class ClusterStatus(enum.Enum):
 
     # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
+
+    def colored_str(self):
+        color = _STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_STATUS_TO_COLOR = {
+    ClusterStatus.INIT: colorama.Fore.BLUE,
+    ClusterStatus.UP: colorama.Fore.GREEN,
+    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
+}
 
 
 class StorageStatus(enum.Enum):
