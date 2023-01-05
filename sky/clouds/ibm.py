@@ -150,9 +150,9 @@ class IBM(clouds.Cloud):
         def _get_profile_resources(instance_profile):
             """returns a dict representing the cpu, memory and gpu of specified instance profile"""
             profile_resources_str = instance_profile.split('-')[1]
-            # gpu number based on profile
+            # gpu count based on profile
             gpu_num = int(profile_resources_str.split('x')[2].split('v')[0]) if len(profile_resources_str.split('x'))==3 else 0
-            # cpu number based on profile
+            # cpu count based on profile
             cpu_num = int(profile_resources_str.split('x')[0])
             # memory GBs on profile
             memory_num = int(profile_resources_str.split('x')[1])
@@ -295,8 +295,8 @@ class IBM(clouds.Cloud):
             return get_cred_file_field('image_id')
 
         client = ibm.client(region=region)
-        # returns default image: "ibm-ubuntu-20-04" with amd architecture
-        return next((img for img in _get_image_objects() if img['name'].startswith("ibm-ubuntu-20-04") \
+        # returns default image: "ibm-ubuntu-22-04" with amd architecture
+        return next((img for img in _get_image_objects() if img['name'].startswith("ibm-ubuntu-22-04") \
             and img['operating_system']['architecture'].startswith('amd')))['id']       
         
     def check_credentials(self) -> Tuple[bool, Optional[str]]:

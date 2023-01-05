@@ -3113,7 +3113,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 for id in instances_ids:
                     vpc_client.delete_instance(id=id).get_result()
                     _poll_instance_exists(id)
-            vpc_provider = IBMVPCProvider(config_provider['resource_group_id'] ,config_provider['region'], config_provider['availability_zone'], handle.cluster_name)
+            vpc_provider = IBMVPCProvider(config_provider['resource_group_id'] ,config_provider['region'], handle.cluster_name)
             vpc_provider.delete_vpc(vpc_id,config_provider['region'])
             # successfully removed cluster
             returncode = 0
