@@ -807,9 +807,8 @@ class RetryingVmProvisioner(object):
         else:
             self._blocked_resources.add(launchable_resources.copy(zone=None))
 
-    
-    def _update_blocklist_on_ibm_error(self, region, zones, stdout, stderr): #IBM-TODO
 
+    def _update_blocklist_on_ibm_error(self, region, zones, stdout, stderr):
         style = colorama.Style
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
@@ -3078,42 +3077,53 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     stream_logs=False,
                     require_outputs=True)
 
-        if isinstance(cloud, clouds.IBM) and terminate and prev_status == global_user_state.ClusterStatus.STOPPED:
+        if (isinstance(cloud, clouds.IBM)
+            and terminate
+            and prev_status == global_user_state.ClusterStatus.STOPPED):
+            # pylint: disable= C0415 W0622 W0703 
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
             from sky.adaptors import ibm
             vpc_client = ibm.client()
             search_client = ibm.search_client()
             vpc_found = False
-            config_provider = common_utils.read_yaml(handle.cluster_yaml)['provider']
+            config_provider = common_utils.read_yaml(
+                handle.cluster_yaml)['provider']
 
             def _poll_instance_exists(instance_id):
                 tries = 20
                 sleep_interval = 3
                 while tries:
                     try:
-                        instance_data = vpc_client.get_instance(instance_id).get_result()
+                        vpc_client.get_instance(instance_id).get_result()
                     except Exception:
                         return True
                     tries -= 1
                     time.sleep(sleep_interval)
-                # Failed to delete instance within expected time frame 
+                # Failed to delete instance within expected time frame
                 return False
 
-            vpcs_filtered_by_tags_and_region = search_client.search(query=f"type:vpc AND tags:{handle.cluster_name} AND region:{config_provider['region']}",
-            fields=["tags","region","type"], limit = 1000).get_result()['items']  
-            try: 
+            vpcs_filtered_by_tags_and_region = search_client.search(
+                query=f"""type:vpc AND tags:{handle.cluster_name}
+                AND region:{config_provider['region']}""",
+            fields=['tags','region','type'], limit = 1000).get_result()['items']
+            try:
+                # pylint: disable=line-too-long
                 vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':',1)[-1]
                 vpc_found = True
             except Exception:
-                logger.critical("failed to locate vpc for ibm cloud")
+                logger.critical('failed to locate vpc for ibm cloud')
                 returncode = -1
             if vpc_found:
+                # pylint: disable=line-too-long
                 instances = vpc_client.list_instances(vpc_id=vpc_id).get_result()['instances']
                 instances_ids = [instance['id'] for instance in instances]
                 for id in instances_ids:
                     vpc_client.delete_instance(id=id).get_result()
                     _poll_instance_exists(id)
-            vpc_provider = IBMVPCProvider(config_provider['resource_group_id'] ,config_provider['region'], handle.cluster_name)
+            vpc_provider = IBMVPCProvider(
+                config_provider['resource_group_id'],
+                config_provider['region'],
+                handle.cluster_name)
             vpc_provider.delete_vpc(vpc_id,config_provider['region'])
             # successfully removed cluster
             returncode = 0

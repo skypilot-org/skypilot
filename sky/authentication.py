@@ -338,48 +338,58 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def setup_ibm_authentication(config):
-    """ registers keys if they do not exist in sky folder and updates config file.
-    
-    keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub' 
+    """ registers keys if they do not exist in sky folder
+    and updates config file.
+    keys default location: '~/.ssh/sky-key' and '~/.ssh/sky-key.pub'
     """
+    # pylint: disable=C0415
     import ibm_cloud_sdk_core
 
     def _get_unique_key_name():
-        SUFFIX_LEN = 10
-        return f"skypilot-key-{str(uuid.uuid4())[:SUFFIX_LEN]}"
+        suffix_len = 10
+        return f'skypilot-key-{str(uuid.uuid4())[:suffix_len]}'
 
     client = ibm.client(region=config['provider']['region'])
     resource_group_id = config['provider']['resource_group_id']
-    
-    private_key_path, public_key_path = get_or_generate_keys()
-    with open(os.path.abspath(os.path.expanduser(public_key_path)), 'r') as file:
+
+    _, public_key_path = get_or_generate_keys()
+    with open(os.path.abspath(
+        os.path.expanduser(public_key_path)),
+        'r',
+        encoding='utf-8') as file:
         ssh_key_data = file.read()
-    try:    
-        res = client.create_key(public_key=ssh_key_data, name=_get_unique_key_name(), resource_group={
-                                            "id": resource_group_id}, type='rsa').get_result()
+    try:
+        res = client.create_key(
+            public_key=ssh_key_data,
+            name=_get_unique_key_name(),
+            resource_group={'id': resource_group_id}, type='rsa').get_result()
         vpc_key_id = res['id']
-        logger.debug(f"Created new key: {res['name']}")   
+        logger.debug(f"Created new key: {res['name']}")
 
     except ibm_cloud_sdk_core.ApiException as e:
-        if "Key with fingerprint already exists" in e.message:
+        if 'Key with fingerprint already exists' in e.message:
             for key in client.list_keys().result['keys']:
-                if ssh_key_data in key['public_key'] or key['public_key'] in ssh_key_data:
+                if (ssh_key_data in key['public_key'] or
+                        key['public_key'] in ssh_key_data):
                     vpc_key_id = key['id']
-                    logger.debug(f"Reusing key: {key['name']}, as it matches public key value.")
+                    logger.debug(f"""Reusing key:{key['name']},
+                     matching existing public key.""")
                     break
-        elif "Key with name already exists" in e.message:
-            raise Exception("a key with chosen name already registered in the specified region")                                      
+        elif 'Key with name already exists' in e.message:
+            raise Exception('''a key with chosen name
+                already registered in the specified region''') from e
         else:
-            raise Exception("Failed to register a key")   
+            raise Exception('Failed to register a key') from e
 
     config['auth']['ssh_private_key'] = PUBLIC_SSH_KEY_PATH.rsplit('.',1)[0]
     config['auth'].update({'ssh_public_key':PUBLIC_SSH_KEY_PATH}) 
     for node_type in config['available_node_types']:
-        config['available_node_types'][node_type]['node_config']['key_id'] = vpc_key_id 
+        # pylint: disable=line-too-long
+        config['available_node_types'][node_type]['node_config']['key_id'] = vpc_key_id
 
     # Add public key path to file mounts
     file_mounts = config['file_mounts']
     file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
     config['file_mounts'] = file_mounts
-    
+
     return config

@@ -1725,13 +1725,13 @@ def _query_status_ibm(
 
     client = ibm.client(region=ray_config['provider']['region'])
     search_client = ibm.search_client()
-    vpcs_filtered_by_tags_and_region = search_client.search(query=f"type:vpc AND tags:{cluster} AND region:{ray_config['provider']['region']}",
-            fields=["tags","region","type"], limit = 1000).get_result()['items']  
+    vpcs_filtered_by_tags_and_region = search_client.search(
+        query=f'type:vpc AND tags:{cluster} AND region:{ray_config["provider"]["region"]}',
+            fields=['tags','region','type'], limit = 1000).get_result()['items']
     vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':',1)[-1]
     instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
 
     return [status_map[instance['status']] for instance in instances]
-    
 
 def _query_status_lambda(
         cluster: str,

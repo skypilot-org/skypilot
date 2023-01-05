@@ -1,3 +1,4 @@
+"""IBM Web Services."""
 import os
 import yaml
 import json
@@ -6,13 +7,12 @@ from sky.clouds import service_catalog
 from sky.adaptors import ibm
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
+from sky.adaptors.ibm import CREDENTIAL_FILE
 
 from sky.clouds.cloud import Region, Zone
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
-
-from sky.adaptors.ibm import CREDENTIAL_FILE
 
 @clouds.CLOUD_REGISTRY.register
 class IBM(clouds.Cloud):
@@ -20,7 +20,7 @@ class IBM(clouds.Cloud):
 
     _REPR = 'IBM'
     _regions: List[clouds.Region] = []
-    
+
     @classmethod
     def regions(cls):
         if not cls._regions:
@@ -71,7 +71,7 @@ class IBM(clouds.Cloud):
                     clouds.Zone('jp-tok-2'),
                     clouds.Zone('jp-tok-3'),
                 ]),
-                
+
             ]
         return cls._regions
 
@@ -85,7 +85,8 @@ class IBM(clouds.Cloud):
     ) -> Iterator[Tuple[Region, List[Zone]]]:
         """Loops over (region, zones) to retry for provisioning.
 
-        returning a single zone list with its region, since ibm cloud currently doesn't  
+        returning a single zone list with its region,
+        since ibm cloud currently doesn't
         support retries for list of zones.
 
         Args:
@@ -102,7 +103,7 @@ class IBM(clouds.Cloud):
         return None
 
     def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
-        
+
         # Currently doesn't support spot instances, hence use_spot set to False.
         return service_catalog.get_hourly_cost(instance_type,
                                                region=None,
@@ -120,8 +121,11 @@ class IBM(clouds.Cloud):
         """Returns the egress cost. Currently true for us-south, i.e. Dallas. 
         based on https://cloud.ibm.com/objectstorage/create#pricing. """
         cost = 0
-        price_thresholds=[{'threshold':150,'price_per_gb':0.05},{'threshold':50,'price_per_gb':0.07},{'threshold':0,'price_per_gb':0.09}]
+        price_thresholds=[{'threshold':150,'price_per_gb':0.05},
+        {'threshold':50,'price_per_gb':0.07},
+        {'threshold':0,'price_per_gb':0.09}]
         for price_threshold in price_thresholds:
+            # pylint: disable=line-too-long
             cost+=(num_gigabytes - price_threshold['threshold']) * price_threshold['price_per_gb']
             num_gigabytes -= (num_gigabytes - price_threshold['threshold'])
         return cost
@@ -148,10 +152,12 @@ class IBM(clouds.Cloud):
           A dictionary of cloud-specific node type variables.
         """
         def _get_profile_resources(instance_profile):
-            """returns a dict representing the cpu, memory and gpu of specified instance profile"""
+            """returns a dict representing the
+             cpu, memory and gpu of specified instance profile"""
             profile_resources_str = instance_profile.split('-')[1]
             # gpu count based on profile
-            gpu_num = int(profile_resources_str.split('x')[2].split('v')[0]) if len(profile_resources_str.split('x'))==3 else 0
+            gpu_num = int(profile_resources_str.split('x')[2].split('v')[0]) if(
+                 len(profile_resources_str.split('x'))==3) else 0
             # cpu count based on profile
             cpu_num = int(profile_resources_str.split('x')[0])
             # memory GBs on profile
@@ -172,7 +178,7 @@ class IBM(clouds.Cloud):
         r = resources
         assert not r.use_spot, \
             'IBM does not currently support spot instances in this framework'
-        
+
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         if acc_dict is not None:
             custom_resources = json.dumps(acc_dict, separators=(',', ':'))
@@ -181,7 +187,8 @@ class IBM(clouds.Cloud):
 
         instance_resources = _get_profile_resources(r.instance_type)
 
-        worker_instance_type = get_cred_file_field("worker_instance_type",r.instance_type)
+        worker_instance_type = get_cred_file_field(
+            'worker_instance_type',r.instance_type)
         worker_instance_resources = _get_profile_resources(worker_instance_type)
 
         if r.image_id is not None:
@@ -210,7 +217,7 @@ class IBM(clouds.Cloud):
         """Returns the number of virtual CPUs that the instance type offers."""
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='ibm')
-    
+
     @classmethod
     def get_accelerators_from_instance_type(
         cls,
@@ -224,7 +231,7 @@ class IBM(clouds.Cloud):
     def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM.
         return get_cred_file_field('instance_profile_name','bx2d-8x32')
- 
+
     def get_feasible_launchable_resources(self, resources):
         """Returns a list of feasible and launchable resources.
 
@@ -269,16 +276,18 @@ class IBM(clouds.Cloud):
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
-                                                     
+
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
         return get_cred_file_field('region','us_south')     
 
     @classmethod
     def get_default_image(cls, region):
-        """ 
-        Returns default image. if user ran the ibm script to creating a gpu image,
-        its id is loaded from local cache, otherwise provides a clean image of ubuntu 20.04.  
+        """
+        Returns default image. 
+        if user ran the ibm script to creating a gpu image,
+        its id is loaded from local cache,
+        otherwise provides a clean image of ubuntu 22-04.
         """
         def _get_image_objects():
             images = []
@@ -286,7 +295,8 @@ class IBM(clouds.Cloud):
             images.extend(res['images'])
 
             while res.get('next'):
-                link_to_next = res['next']['href'].split('start=')[1].split('&limit')[0]
+                link_to_next = res['next']['href'].split(
+                    'start=')[1].split('&limit')[0]
                 res = client.list_images(start=link_to_next).get_result()
                 images.extend(res['images'])
             return images
@@ -296,32 +306,39 @@ class IBM(clouds.Cloud):
 
         client = ibm.client(region=region)
         # returns default image: "ibm-ubuntu-22-04" with amd architecture
-        return next((img for img in _get_image_objects() if img['name'].startswith("ibm-ubuntu-22-04") \
-            and img['operating_system']['architecture'].startswith('amd')))['id']       
-        
+        return next((img for img in _get_image_objects() if
+         img['name'].startswith('ibm-ubuntu-22-04') \
+            and img['operating_system']['architecture'].startswith(
+                'amd')))['id']
+
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         help_str = (
-            ' Run the following command:'
-            f'a configuration script that asks for api key and stores it in {CREDENTIAL_FILE}'
+            f''' Run the following command:
+            a configuration script that asks for
+            api key and stores it in {CREDENTIAL_FILE}'''
         )
         if not os.path.isfile(os.path.expanduser(CREDENTIAL_FILE)):
-            return (False, f'{os.path.expanduser(CREDENTIAL_FILE)} does not exist.' + help_str)
+            return (False, f'''
+            {os.path.expanduser(CREDENTIAL_FILE)} does not exist.''' + help_str)
 
         base_config = _read_credential_file()
         if base_config and 'iam_api_key' in base_config:
             try:
                 ibm.client()
                 return True, None
+            # pylint: disable=W0703
             except Exception as e:
                 return False, str(e)
         else:
-            return False, f"Missing iam_api_key in {os.path.expanduser(CREDENTIAL_FILE)}"
+            return False, f'''Missing iam_api_key in
+             {os.path.expanduser(CREDENTIAL_FILE)}'''
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        """Returns a {remote:local} credential path mapping written to the cluster's file_mounts segment
-             of its yaml file (e.g., ibm-ray.yml.j2)
+        """Returns a {remote:local} credential path mapping
+         written to the cluster's file_mounts segment
+         of its yaml file (e.g., ibm-ray.yml.j2)
         """
         return {CREDENTIAL_FILE:CREDENTIAL_FILE}
 
@@ -342,11 +359,11 @@ class IBM(clouds.Cloud):
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'ibm')
 
-    
 def _read_credential_file():
-    with open(os.path.expanduser(CREDENTIAL_FILE),'r') as f:
+    with open(os.path.expanduser(CREDENTIAL_FILE),'r',encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 def get_cred_file_field(field, default_val=None)->str:
-    """returns a the value of a field from the user's credentials file if exists, else default_val"""
+    """returns a the value of a field from the user's
+     credentials file if exists, else default_val"""
     return _read_credential_file().get(field, default_val)

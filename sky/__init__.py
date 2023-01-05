@@ -35,7 +35,7 @@ optimize = Optimizer.optimize
 
 __all__ = [
     '__version__',
-    'IBM'
+    'IBM',
     'AWS',
     'Azure',
     'GCP',
