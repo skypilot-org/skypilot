@@ -1750,6 +1750,8 @@ def _query_status_lambda(
     status_map = {
         'booting': global_user_state.ClusterStatus.INIT,
         'active': global_user_state.ClusterStatus.UP,
+        'unhealthy': global_user_state.ClusterStatus.UP,
+        'terminated': None,
     }
     # TODO(ewzeng): filter by hash_filter_string to be safe
     vms = lambda_utils.LambdaLabsClient().ls().get('data', [])

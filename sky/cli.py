@@ -710,16 +710,6 @@ def _launch_with_confirm(
             confirm_shown = True
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    # Lambda Labs does not support autostop.
-    # e2e failover from another cloud can get around this check, but
-    # set_autostop in cloud_vm_ray_backend.py also has a Lambda Labs check.
-    if (task.best_resources and
-            task.best_resources.cloud.is_same_cloud(sky.Lambda()) and
-            not down and idle_minutes_to_autostop is not None):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                ('Lambda Labs does not support stopping instances.'))
-
     if node_type is not None:
         if maybe_status != global_user_state.ClusterStatus.UP:
             click.secho(f'Setting up interactive node {cluster}...',

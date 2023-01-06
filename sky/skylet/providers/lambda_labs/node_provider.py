@@ -47,11 +47,7 @@ def synchronized(f):
 class LambdaNodeProvider(NodeProvider):
     """Node Provider for Lambda Labs.
 
-    Lambda credentials must be set up.
-
-    Nodes may be in one of three states: {pending, running, terminated}. Nodes
-    appear immediately once started by ``create_node``, and transition
-    immediately to terminated when ``terminate_node`` is called.
+    This provider assumes Lambda Labs credentials are set.
     """
 
     def __init__(self, provider_config, cluster_name):

@@ -28,17 +28,20 @@ class Lambda(clouds.Cloud):
     def regions(cls) -> List[clouds.Region]:
         if not cls._regions:
             cls._regions = [
+                # Popular US regions
                 clouds.Region('us-east-1'),
                 clouds.Region('us-west-2'),
-                clouds.Region('australia-southeast-1'),
-                clouds.Region('europe-central-1'),
-                clouds.Region('asia-south-1'),
-                clouds.Region('me-west-1'),
-                clouds.Region('europe-south-1'),
-                clouds.Region('asia-northeast-1'),
-                clouds.Region('asia-northeast-2'),
                 clouds.Region('us-west-1'),
                 clouds.Region('us-south-1'),
+
+                # Everyone else
+                clouds.Region('asia-northeast-1'),
+                clouds.Region('asia-northeast-2'),
+                clouds.Region('asia-south-1'),
+                clouds.Region('australia-southeast-1'),
+                clouds.Region('europe-central-1'),
+                clouds.Region('europe-south-1'),
+                clouds.Region('me-west-1'),
             ]
         return cls._regions
 
@@ -148,9 +151,8 @@ class Lambda(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        # TODO: In some cases, launching a larger VM will be cheaper than
-        # launching a smaller VM with the exact requirements on another cloud.
-        # This is not implemented yet.
+        if resources.use_spot:
+            return ([], [])
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
@@ -195,7 +197,7 @@ class Lambda(clouds.Cloud):
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
             lambda_utils.LambdaLabsClient().ls()
-        except (AssertionError, lambda_utils.LambdaLabsError):
+        except (AssertionError, KeyError, lambda_utils.LambdaLabsError):
             return False, ('Failed to access Lambda Labs with credentials. '
                            'To configure credentials, go to:\n    '
                            '  https://cloud.lambdalabs.com/api-keys\n    '

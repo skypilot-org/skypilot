@@ -42,27 +42,21 @@ class Metadata:
             json.dump(self._metadata, f)
 
 
-def raise_lambda_error(response, error_status_codes):
-    """Raise LambdaLabsError if appropriate.
-
-    response: Lambda Labs API response
-    error_status_codes: if response.status_code is in error_status_codes, then
-                        an error has occurred but response.json still exists
-    """
+def raise_lambda_error(response):
+    """Raise LambdaLabsError if appropriate. """
     status_code = response.status_code
     if status_code == 200:
         return
-    if status_code in error_status_codes:
+    if status_code == 429:
+        # https://docs.lambdalabs.com/cloud/rate-limiting/
+        raise LambdaLabsError('Your API requests are being rate limited.')
+    try:
         resp_json = response.json()
         code = resp_json['error']['code']
         message = resp_json['error']['message']
-        raise LambdaLabsError(f'{code}: {message}')
-    elif status_code == 429:
-        # https://docs.lambdalabs.com/cloud/rate-limiting/
-        raise LambdaLabsError('Your API requests are being rate limited.')
-    else:
-        # Error, but no json
+    except (KeyError, json.decoder.JSONDecodeError):
         raise LambdaLabsError(f'Unexpected error. Status code: {status_code}')
+    raise LambdaLabsError(f'{code}: {message}')
 
 
 class LambdaLabsClient:
@@ -72,9 +66,9 @@ class LambdaLabsClient:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
         assert os.path.exists(self.credentials), 'Credentials not found'
         with open(self.credentials, 'r') as f:
-            lines = [line.strip() for line in f.readlines() if '=' in line]
+            lines = [line.strip() for line in f.readlines() if ' = ' in line]
             self._credentials = {
-                line.split('=')[0]: line.split('=')[1]
+                line.split(' = ')[0]: line.split(' = ')[1]
                 for line in lines
             }
         self.api_key = self._credentials['api_key']
@@ -121,7 +115,7 @@ class LambdaLabsClient:
         response = requests.post(f'{API_ENDPOINT}/instance-operations/launch',
                                  data=data,
                                  headers=self.headers)
-        raise_lambda_error(response, [400, 401, 403, 404, 500])
+        raise_lambda_error(response)
         return response.json()
 
     def rm(self, *instance_ids):
@@ -134,13 +128,13 @@ class LambdaLabsClient:
         response = requests.post(f'{API_ENDPOINT}/instance-operations/terminate',
                                  data=data,
                                  headers=self.headers)
-        raise_lambda_error(response, [400, 401, 403, 404, 500])
+        raise_lambda_error(response)
         return response.json()
 
     def ls(self):
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances', headers=self.headers)
-        raise_lambda_error(response, [400, 401, 403, 404])
+        raise_lambda_error(response)
         return response.json()
 
     def set_ssh_key(self, name, pub_key):
@@ -152,7 +146,7 @@ class LambdaLabsClient:
         response = requests.post(f'{API_ENDPOINT}/ssh-keys',
                                  data=data,
                                  headers=self.headers)
-        raise_lambda_error(response, [400, 401, 403])
+        raise_lambda_error(response)
         self.ssh_key_name = name
         with open(self.credentials, 'w') as f:
             f.write(f'api_key={self.api_key}\n')
@@ -162,5 +156,5 @@ class LambdaLabsClient:
         """List offered instances and their availability."""
         response = requests.get(f'{API_ENDPOINT}/instance-types',
                                 headers=self.headers)
-        raise_lambda_error(response, [400, 401, 403])
+        raise_lambda_error(response)
         return response.json()

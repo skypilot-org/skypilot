@@ -196,6 +196,17 @@ def _execute(
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
+
+            # Lambda Labs does not support autostop.
+            # e2e failover from another cloud can get around this check, but
+            # there is another check in backend.set_autostop.
+            if (task.best_resources and
+                    task.best_resources.cloud.is_same_cloud(sky.Lambda()) and
+                    not down):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        ('Lambda Labs does not support stopping instances.'))
+
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
         with ux_utils.print_exception_no_traceback():
