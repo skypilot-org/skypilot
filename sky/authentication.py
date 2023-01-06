@@ -353,18 +353,20 @@ def setup_ibm_authentication(config):
     resource_group_id = config['provider']['resource_group_id']
 
     _, public_key_path = get_or_generate_keys()
-    with open(os.path.abspath(
-        os.path.expanduser(public_key_path)),
-        'r',
-        encoding='utf-8') as file:
+    with open(os.path.abspath(os.path.expanduser(public_key_path)),
+              'r',
+              encoding='utf-8') as file:
         ssh_key_data = file.read()
+    # pylint: disable=E1136
     try:
-        res = client.create_key(
-            public_key=ssh_key_data,
-            name=_get_unique_key_name(),
-            resource_group={'id': resource_group_id}, type='rsa').get_result()
+        res = client.create_key(public_key=ssh_key_data,
+                                name=_get_unique_key_name(),
+                                resource_group={
+                                    'id': resource_group_id
+                                },
+                                type='rsa').get_result()
         vpc_key_id = res['id']
-        logger.debug(f"Created new key: {res['name']}")
+        logger.debug(f'Created new key: {res["name"]}')
 
     except ibm_cloud_sdk_core.ApiException as e:
         if 'Key with fingerprint already exists' in e.message:
@@ -376,16 +378,17 @@ def setup_ibm_authentication(config):
                      matching existing public key.""")
                     break
         elif 'Key with name already exists' in e.message:
-            raise Exception('''a key with chosen name
-                already registered in the specified region''') from e
+            raise Exception("""a key with chosen name
+                already registered in the specified region""") from e
         else:
             raise Exception('Failed to register a key') from e
 
-    config['auth']['ssh_private_key'] = PUBLIC_SSH_KEY_PATH.rsplit('.',1)[0]
-    config['auth'].update({'ssh_public_key':PUBLIC_SSH_KEY_PATH}) 
+    config['auth']['ssh_private_key'] = PUBLIC_SSH_KEY_PATH.rsplit('.', 1)[0]
+    config['auth'].update({'ssh_public_key': PUBLIC_SSH_KEY_PATH})
     for node_type in config['available_node_types']:
         # pylint: disable=line-too-long
-        config['available_node_types'][node_type]['node_config']['key_id'] = vpc_key_id
+        config['available_node_types'][node_type]['node_config'][
+            'key_id'] = vpc_key_id
 
     # Add public key path to file mounts
     file_mounts = config['file_mounts']

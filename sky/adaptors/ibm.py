@@ -7,7 +7,7 @@ import ibm_vpc
 from ibm_platform_services import GlobalSearchV2, GlobalTaggingV1
 import os
 
-CREDENTIAL_FILE ='~/.ibm/credentials.yaml'
+CREDENTIAL_FILE = '~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
 
 
@@ -17,23 +17,26 @@ def get_authenticator():
     return ibm_cloud_sdk_core.authenticators.IAMAuthenticator(
         base_config['iam_api_key'])
 
+
 def client(**kwargs):
     """returns ibm vpc client"""
 
     try:
         vpc_client = ibm_vpc.VpcV1(version='2022-06-30',
-            authenticator=get_authenticator())
+                                   authenticator=get_authenticator())
         if kwargs.get('region'):
             vpc_client.set_service_url(
                 f'https://{kwargs["region"]}.iaas.cloud.ibm.com/v1')
     except Exception:
         logger.error('No registered API key found matching specified value')
-        raise  
+        raise
 
-    return vpc_client # returns either formerly or newly created client
+    return vpc_client  # returns either formerly or newly created client
+
 
 def search_client():
     return GlobalSearchV2(authenticator=get_authenticator())
+
 
 def tagging_client():
     return GlobalTaggingV1(authenticator=get_authenticator())

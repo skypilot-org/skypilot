@@ -1703,6 +1703,7 @@ def _query_status_azure(
     # )
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
+
 def _query_status_ibm(
     cluster: str,
     ray_config: Dict[str, Any],
@@ -1711,6 +1712,7 @@ def _query_status_ibm(
     returns a list of Statuses for each of the cluster's nodes.
     this function gets called when running `sky status` with -r flag and the cluster's head node is either stopped or down.
     """
+    # pylint: disable=C0415
     from sky.adaptors import ibm
     status_map = {
         'pending': global_user_state.ClusterStatus.INIT,
@@ -1725,10 +1727,13 @@ def _query_status_ibm(
 
     client = ibm.client(region=ray_config['provider']['region'])
     search_client = ibm.search_client()
+    # pylint: disable=E1136
     vpcs_filtered_by_tags_and_region = search_client.search(
-        query=f'type:vpc AND tags:{cluster} AND region:{ray_config["provider"]["region"]}',
-            fields=['tags','region','type'], limit = 1000).get_result()['items']
-    vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':',1)[-1]
+        query=
+        f'type:vpc AND tags:{cluster} AND region:{ray_config["provider"]["region"]}',
+        fields=['tags', 'region', 'type'],
+        limit=1000).get_result()['items']
+    vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
     instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
 
     return [status_map[instance['status']] for instance in instances]
@@ -1761,6 +1766,7 @@ _QUERY_STATUS_FUNCS = {
     'Azure': _query_status_azure,
     'Lambda': _query_status_lambda,
     'IBM':_query_status_ibm,
+    'IBM': _query_status_ibm,
 }
 
 
