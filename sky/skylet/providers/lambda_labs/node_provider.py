@@ -6,21 +6,25 @@ from threading import RLock
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
 from sky.authentication import PRIVATE_SSH_KEY_PATH
-from sky.skylet.providers.lambda_labs.lambda_utils import LambdaLabsClient, Metadata
+from sky.skylet.providers.lambda_labs import lambda_utils
 from sky.utils import command_runner
 
 REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
 LOCAL_TAG_PATH_PREFIX = '~/.lambda_labs/metadata'
+IS_REMOTE_FILE = '~/.lambda_labs/.is_remote'  # Created in lambda-ray.yml
 
 logger = logging.getLogger(__name__)
 
 
-def _on_local():
-    return os.path.exists(os.path.expanduser(PRIVATE_SSH_KEY_PATH))
+# TODO(ewzeng): the distinction between remote and local is not absolute
+# as the user can `sky launch` on a remote node. The current implementation
+# does not support this.
+def _on_remote():
+    return os.path.exists(os.path.expanduser(IS_REMOTE_FILE))
 
 
 def _send_tags_file(ip, cluster_name):
-    if not _on_local():
+    if _on_remote():
         return
 
     # Local
@@ -53,12 +57,14 @@ class LambdaNodeProvider(NodeProvider):
     def __init__(self, provider_config, cluster_name):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
-        self.lambda_client = LambdaLabsClient()
+        self.lambda_client = lambda_utils.LambdaLabsClient()
         # Only used for tags
-        if _on_local():
-            self.metadata = Metadata(LOCAL_TAG_PATH_PREFIX, cluster_name)
+        if _on_remote():
+            self.metadata = lambda_utils.Metadata(REMOTE_TAG_PATH_PREFIX,
+                    cluster_name)
         else:
-            self.metadata = Metadata(REMOTE_TAG_PATH_PREFIX, cluster_name)
+            self.metadata = lambda_utils.Metadata(LOCAL_TAG_PATH_PREFIX,
+                    cluster_name)
         # Cache node objects
         self.cached_nodes = {}
 

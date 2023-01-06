@@ -918,6 +918,13 @@ def _fill_in_launchable_resources(
                 clouds.GCP.check_accelerator_attachable_to_host(
                     resources.instance_type, resources.accelerators,
                     resources.zone)
+            if (isinstance(resources.cloud, clouds.Lambda) and
+                (resources.use_spot or task.num_nodes > 1)):
+                # Lambda Labs does not support spot instances or num nodes > 1.
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        'Lambda Labs does not support spot instances or '
+                        '--num-nodes > 1.')
             # If the user has specified a GCP zone and the zone does not support
             # the host-accelerator combination, then an error will be raised by
             # the above check_accelerator_attachable_to_host() call.
@@ -941,8 +948,8 @@ def _fill_in_launchable_resources(
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Local)
                 ]
-            # Lambda Labs does not support spot instances.
-            if resources.use_spot:
+            # Lambda Labs does not support spot instances or num nodes > 1.
+            if resources.use_spot or task.num_nodes > 1:
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Lambda)
                 ]

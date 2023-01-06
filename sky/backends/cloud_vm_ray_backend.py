@@ -809,6 +809,13 @@ class RetryingVmProvisioner(object):
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_regions.add(region.name)
 
+        # Sometimes, LambdaLabsError will list available regions.
+        for e in errors:
+            if e.find('Regions with capacity available:') != -1:
+                for r in clouds.Lambda.regions():
+                    if e.find(r.name) == -1:
+                        self._blocked_regions.add(r.name)
+
     def _update_blocklist_on_local_error(self, region, zones, stdout, stderr):
         del zones  # Unused.
         style = colorama.Style
@@ -3037,6 +3044,16 @@ class CloudVmRayBackend(backends.Backend):
                      down: bool = False,
                      stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
+            # Lambda Labs does not support autostop.
+            # TODO(ewzeng): optimizer should avoid Lambda Labs
+            # if launching with autostop.
+            if (handle.launched_resources.cloud.is_same_cloud(sky.Lambda()) and
+                    not down and idle_minutes_to_autostop >= 0):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        ('Failed to set autostop. Lambda Labs does not '
+                         'support stopping instances.'))
+
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME, down)
             returncode, _, stderr = self.run_on_head(handle,

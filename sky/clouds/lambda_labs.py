@@ -5,7 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.skylet.providers.lambda_labs.lambda_utils import LambdaLabsClient, LambdaLabsError
+from sky.skylet.providers.lambda_labs import lambda_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -47,11 +47,13 @@ class Lambda(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        del instance_type, accelerators, region, zone  # unused
+        del instance_type, accelerators, zone  # unused
         if use_spot:
             return []
-        # All regions have all instance types
-        return cls.regions()
+        regions = cls.regions()
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        return regions
 
     @classmethod
     def region_zones_provision_loop(
@@ -192,8 +194,8 @@ class Lambda(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
-            LambdaLabsClient().ls()
-        except (AssertionError, LambdaLabsError):
+            lambda_utils.LambdaLabsClient().ls()
+        except (AssertionError, lambda_utils.LambdaLabsError):
             return False, ('Failed to access Lambda Labs with credentials. '
                            'To configure credentials, go to:\n    '
                            '  https://cloud.lambdalabs.com/api-keys\n    '

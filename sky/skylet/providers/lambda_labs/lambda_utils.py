@@ -12,10 +12,12 @@ class LambdaLabsError(Exception):
 
 
 class Metadata:
-    """Local metadata for a Lambda Labs instance."""
+    """Per-cluster metadata file."""
 
     def __init__(self, path_prefix, cluster_name):
-        # per cluster metadata file to avoid basic race conditions
+        # TODO(ewzeng): Metadata file is not thread safe. This is fine for
+        # now since SkyPilot uses a per-cluster lock for ray-related
+        # operations, but this should be improved in the future.
         self._metadata_path = os.path.expanduser(
                 f'{path_prefix}-{cluster_name}')
         self._metadata = {}
@@ -30,8 +32,8 @@ class Metadata:
         if value is None:
             if instance_id in self._metadata:
                 self._metadata.pop(instance_id) # del entry
-            if len(self._metadata) == 0 and \
-                    os.path.exists(self._metadata_path):
+            if (len(self._metadata) == 0 and
+                    os.path.exists(self._metadata_path)):
                 os.remove(self._metadata_path)
                 return
         else:
@@ -96,9 +98,15 @@ class LambdaLabsClient:
                 ['regions_with_capacity_available']
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
+            if len(available_regions) > 0:
+                aval_reg = ' '.join(available_regions)
+            else:
+                aval_reg = 'None'
             raise LambdaLabsError(('instance-operations/launch/'
                                    'insufficient-capacity: Not enough '
-                                   'capacity to fulfill launch request.'))
+                                   'capacity to fulfill launch request. '
+                                   'Regions with capacity available: '
+                                   f'{aval_reg}'))
 
         # Try to launch instance
         data = json.dumps({
