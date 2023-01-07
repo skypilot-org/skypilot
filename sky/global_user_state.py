@@ -29,10 +29,17 @@ _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
+def is_wsl() -> bool:
+    """Detect if running under WSL"""
+    import platform
+    return 'microsoft' in platform.uname()[3].lower()
+
+
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
-    conn.execute('PRAGMA journal_mode=WAL')
+    if not is_wsl():
+        conn.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
