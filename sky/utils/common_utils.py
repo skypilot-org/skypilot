@@ -352,3 +352,9 @@ def remove_file_if_exists(path: str):
     except FileNotFoundError:
         logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
         pass
+
+
+def is_wsl() -> bool:
+    """Detect if running under WSL"""
+    import platform
+    return 'microsoft' in platform.uname()[3].lower()
