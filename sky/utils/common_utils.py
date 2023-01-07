@@ -2,11 +2,12 @@
 
 import functools
 import getpass
-import inspect
 import hashlib
+import inspect
 import json
-import random
 import os
+import platform
+import random
 import re
 import socket
 import sys
@@ -356,5 +357,4 @@ def remove_file_if_exists(path: str):
 
 def is_wsl() -> bool:
     """Detect if running under WSL"""
-    import platform
     return 'microsoft' in platform.uname()[3].lower()
