@@ -202,7 +202,7 @@ class Lambda(clouds.Cloud):
                            'To configure credentials, go to:\n    '
                            '  https://cloud.lambdalabs.com/api-keys\n    '
                            'to generate API key and add the line\n    '
-                           '  api_key=[YOUR API KEY]\n    '
+                           '  api_key = [YOUR API KEY]\n    '
                            'to ~/.lambda_labs/lambda_keys')
         return True, None
 
