@@ -24,6 +24,9 @@ class Metadata:
         if os.path.exists(self._metadata_path):
             with open(self._metadata_path, 'r') as f:
                 self._metadata = json.load(f)
+        else:
+            # In case parent directory does not exist
+            os.makedirs(os.path.dirname(self._metadata_path), exist_ok=True)
 
     def __getitem__(self, instance_id):
         return self._metadata.get(instance_id)

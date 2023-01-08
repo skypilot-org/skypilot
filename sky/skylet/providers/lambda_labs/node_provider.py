@@ -10,7 +10,7 @@ from sky.skylet.providers.lambda_labs import lambda_utils
 from sky.utils import command_runner
 
 REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
-LOCAL_TAG_PATH_PREFIX = '~/.lambda_labs/metadata'
+LOCAL_TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
 IS_REMOTE_FILE = '~/.lambda_labs/.is_remote'  # Created in lambda-ray.yml
 
 logger = logging.getLogger(__name__)

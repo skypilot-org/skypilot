@@ -32,6 +32,8 @@ _smoke_test_hash = hashlib.md5(
 # id.
 test_id = str(uuid.uuid4())[-2:]
 
+LAMBDA_TYPE = '--cloud lambda --gpus A100 --instance-type gpu_1x_a100_sxm4'
+
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
@@ -147,6 +149,26 @@ def test_minimal():
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
             f'log_path=$(sky logs {name} 2 --sync-down | grep "Job 2 logs:" | sed -E "s/^.*Job 2 logs: (.*)\\x1b\\[0m/\\1/g") && echo $log_path && test -f $log_path/run.log',
+            # Ensure the raylet process has the correct file descriptor limit.
+            f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
+            f'sky logs {name} 3 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_lambda_minimal():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_minimal',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
@@ -366,6 +388,30 @@ def test_file_mounts():
     run_one_test(test)
 
 
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_lambda_file_mounts():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_using_file_mounts',
+        [
+            'touch ~/tmpfile',
+            'mkdir -p ~/tmp-workdir',
+            'touch ~/tmp-workdir/tmp\ file',
+            'touch ~/tmp-workdir/foo',
+            'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
+            f'sky launch -y -c {name} {LAMBDA_TYPE} --num-nodes 1 examples/using_file_mounts.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+        ],
+        [
+            f'sky down -y {name}',
+            'rm ~/tmpfile',
+            'rm -r ~/tmp-workdir',
+        ],
+        timeout=20 * 60,  # 20 mins
+    )
+    run_one_test(test)
+
+
 # ---------- storage ----------
 def test_storage_mounts():
     name = _get_cluster_name()
@@ -419,6 +465,28 @@ def test_logs():
     run_one_test(test)
 
 
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_lambda_logs():
+    name = _get_cluster_name()
+    timestamp = time.time()
+    test = Test(
+        'lambda_cli_logs',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} "echo {timestamp} 1"',
+            f'sky exec {name} "echo {timestamp} 2"',
+            f'sky exec {name} "echo {timestamp} 3"',
+            f'sky exec {name} "echo {timestamp} 4"',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 4 --sync-down',
+            f'sky logs {name} * --sync-down',
+            f'sky logs {name} 1 | grep "{timestamp} 1"',
+            f'sky logs {name} | grep "{timestamp} 4"',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
 # ---------- Job Queue. ----------
 def test_job_queue():
     name = _get_cluster_name()
@@ -440,6 +508,29 @@ def test_job_queue():
             f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_lambda_job_queue():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_job_queue',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 --cloud lambda --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 --cloud lambda --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 --cloud lambda --gpus A100:0.5 -d examples/job_queue/job.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel {name} 3',
         ],
         f'sky down -y {name}',
     )
@@ -529,6 +620,22 @@ def test_huggingface():
             f'sky launch -y -c {name} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_lambda_huggingface():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_huggingface_glue_imdb_app',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky exec {name} {LAMBDA_TYPE} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -760,6 +867,41 @@ def test_autodown():
     run_one_test(test)
 
 
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_lambda_autodown():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda_autodown',
+        [
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky autostop -y {name} --down -i 1',
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m (down)"',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f'sky status --refresh | grep {name} | grep UP',
+            # Ensure the cluster is terminated.
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down examples/minimal.yaml',
+            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky exec {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky status | grep {name} | grep "1m (down)"',
+            'sleep 200',
+            # Ensure the cluster is terminated.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down examples/minimal.yaml',
+            f'sky autostop -y {name} --cancel',
+            'sleep 200',
+            # Ensure the cluster is still UP.
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=25 * 60,
+    )
+    run_one_test(test)
+
+
 def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = Test(
         f'{cloud}-cancel-task',
@@ -799,6 +941,27 @@ def test_cancel_azure():
 def test_cancel_gcp():
     name = _get_cluster_name()
     test = _get_cancel_task_with_cloud(name, 'gcp')
+    run_one_test(test)
+
+
+# ---------- Testing `sky cancel` on Lambda Labs ----------
+# TODO(ewzeng): nvidia-smi on Lambda Labs works after some setup
+@pytest.mark.xdist_group(name="serial_lambda_labs")
+def test_cancel_lambda():
+    name = _get_cluster_name()
+    test = Test(
+        'lambda-cancel-task',
+        [
+            f'sky launch -y -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky exec {name} -n {name}-1 -d {LAMBDA_TYPE} "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
+            'sleep 20',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky cancel {name} 2',
+            f'sleep 5',
+            f'sky queue {name} | grep {name}-1 | grep CANCELLED',
+        ],
+        f'sky down -y {name}',
+    )
     run_one_test(test)
 
 

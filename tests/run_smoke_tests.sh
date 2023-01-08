@@ -25,4 +25,4 @@ else
     test_spec=tests/test_smoke.py::"${test}"
 fi
 
-pytest -s -n 16 -q --tb=short --disable-warnings "$test_spec"
+pytest -s -n 16 -q --tb=short --dist loadgroup --disable-warnings "$test_spec"
