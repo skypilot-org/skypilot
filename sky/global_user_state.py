@@ -34,7 +34,7 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
-    conn.execute('PRAGMA journal_mode=WAL')
+    cursor.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
