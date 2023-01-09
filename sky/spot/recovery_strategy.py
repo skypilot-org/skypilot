@@ -159,6 +159,9 @@ class StrategyExecutor:
             except exceptions.InvalidClusterNameError as e:
                 # The cluster name is too long.
                 raise exceptions.ResourcesUnavailableError(str(e)) from e
+            except exceptions.ClusterSetUpError as e:
+                # setup error
+                raise exceptions.ClusterSetUpError(str(e)) from e
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
