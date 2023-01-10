@@ -76,6 +76,41 @@ class IBM(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[Region]:
+        """Returns the regions that offer the specified resources.
+
+        The order of the regions follow the order of the regions returned by
+        service_catalog/common.py#get_region_zones().
+        When region or zone is not None, the returned value will be limited to
+        the specified region/zone.
+
+        Returns:
+            A set of `Region`s that have the offerings for the specified
+            resources.
+            For each `Region` in the set, `region.zones` is the list of `Zone`s
+            which have the offerings. For the clouds that do not expose `Zone`s,
+            `region.zones` is an empty list.
+        """
+        del accelerators  # unused
+        if instance_type is None:
+            # Fall back to default regions
+            regions = cls.regions()
+        else:
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'ibm')
+
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
+        return regions
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
@@ -95,13 +130,14 @@ class IBM(clouds.Cloud):
             use_spot: Whether to use spot instances.
         """
         del accelerators  # unused
+        del use_spot  # unsupported
 
         if instance_type is None:
             # fallback to manually specified region/zones
             regions = cls.regions()
         else:
             regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'ibm')
+                instance_type, False, 'ibm')
 
         for region in regions:
             for zone in region.zones:
@@ -111,17 +147,25 @@ class IBM(clouds.Cloud):
     def get_zone_shell_cmd(cls) -> Optional[str]:
         return None
 
-    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool):
-
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         # Currently doesn't support spot instances, hence use_spot set to False.
+        del use_spot
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
                                                use_spot=False,
+                                               region=region,
+                                               zone=zone,
                                                clouds='ibm')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
-        """Returns the hourly on-demand price for accelerators."""
-        # IBM includes accelerators as part of the instance type.
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
+        del accelerators, use_spot, region, zone  # unused
         # Currently Isn't implemented in the same manner by aws and azure.
         return 0
 
@@ -154,7 +198,7 @@ class IBM(clouds.Cloud):
         resources: 'resources_lib.Resources',
         region: Optional['clouds.Region'],
         zones: Optional[List['clouds.Zone']],
-    ) -> Dict[str, str]:
+    ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
 
         These variables are used to fill the node type section (instance type,
@@ -190,7 +234,7 @@ class IBM(clouds.Cloud):
             assert zones is not None, (
                 'Set either both or neither for: region, zones.')
         region_name = region.name
-        zones = [zone.name for zone in zones]
+        zone_names = [zone.name for zone in zones]
 
         r = resources
         assert not r.use_spot, \
@@ -221,11 +265,11 @@ class IBM(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
-            'zones': ','.join(zones),
+            'zones': ','.join(zone_names),
             'image_id': image_id,
             'iam_api_key': get_cred_file_field('iam_api_key'),
             'resource_group_id': get_cred_file_field('resource_group_id'),
-            'disk_size': get_cred_file_field('disk_capacity', 100)
+            'disk_capacity': get_cred_file_field('disk_capacity', 100)
         }
 
     @classmethod
@@ -247,7 +291,7 @@ class IBM(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls) -> str:
         # 8 vCpus, 32 GB RAM.
-        return get_cred_file_field('instance_profile_name', 'bx2d-8x32')
+        return get_cred_file_field('instance_profile_name', 'bx2-8x32')
 
     def get_feasible_launchable_resources(self, resources):
         """Returns a list of feasible and launchable resources.
@@ -296,7 +340,10 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
-        return get_cred_file_field('region', 'us_south')
+        region_name = get_cred_file_field('region', 'us_south')
+
+        return next(
+            region for region in cls.regions() if region.name == region_name)
 
     @classmethod
     def get_default_image(cls, region):
