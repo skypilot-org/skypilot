@@ -1224,6 +1224,7 @@ class RetryingVmProvisioner(object):
                                  if terminate_or_stop else 'Stopping')
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
+            backend = CloudVmRayBackend()
             # If these conditions hold, it *should* be safe to skip the cleanup
             # action.
             #
@@ -1232,19 +1233,26 @@ class RetryingVmProvisioner(object):
             # down the non-existent cluster will itself error out with the same
             # error message.  This was found to be confusing. In that case we
             # skip termination.
-            skip_cleanup = not cluster_exists and definitely_no_nodes_launched
-            if skip_cleanup:
-                continue
-
-            # There may exist partial nodes (e.g., head node) so we must
-            # terminate or stop before moving on to other regions.
             #
-            # NOTE: even HEAD_FAILED could've left a live head node there,
-            # so we must terminate/stop here too. E.g., node is up, and ray
-            # autoscaler proceeds to setup commands, which may fail:
-            #   ERR updater.py:138 -- New status: update-failed
-            CloudVmRayBackend().teardown_no_lock(handle,
-                                                 terminate=terminate_or_stop)
+            # However, we should still call post_teardown_cleanup() to remove
+            # the cluster record from the status table. Otherwise, failover
+            # will soon call _query_status_<cloud>, which calls into
+            # _ray_launch_hash, which calls node provider bootstrapping again,
+            # exiting the whole program.
+            post_teardown_cleanup_only = (not cluster_exists and
+                                          definitely_no_nodes_launched)
+            if post_teardown_cleanup_only:
+                backend.post_teardown_cleanup(handle,
+                                              terminate=terminate_or_stop)
+            else:
+                # There may exist partial nodes (e.g., head node) so we must
+                # terminate or stop before moving on to other regions.
+                #
+                # NOTE: even HEAD_FAILED could've left a live head node there,
+                # so we must terminate/stop here too. E.g., node is up, and ray
+                # autoscaler proceeds to setup commands, which may fail:
+                #   ERR updater.py:138 -- New status: update-failed
+                backend.teardown_no_lock(handle, terminate=terminate_or_stop)
 
         if to_provision.zone is not None:
             message = (
