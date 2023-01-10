@@ -58,10 +58,12 @@ class Local(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del instance_type
-        del use_spot
-        del accelerators  # unused
-        for region in cls.regions():
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
+        for region in regions:
             yield region, region.zones
 
     #### Normal methods ####
