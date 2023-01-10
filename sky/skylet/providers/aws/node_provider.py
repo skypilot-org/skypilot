@@ -97,6 +97,10 @@ def list_ec2_instances(
 
 
 class AWSNodeProvider(NodeProvider):
+    """Deprecated for SkyPilot and kept for backward compatibility.
+    
+    The cluster launch template has been updated to use AWSNodeProviderV2.
+    """
     max_terminate_nodes = 1000
 
     def __init__(self, provider_config, cluster_name):
@@ -662,3 +666,21 @@ class AWSNodeProvider(NodeProvider):
                     + "."
                 )
         return cluster_config
+
+
+class AWSNodeProviderV2(AWSNodeProvider):
+    """Same as V1, except head and workers use a SkyPilot IAM role.
+
+    The new version of the AWS node provider supports AWS SSO 
+    (see #1489), by using a new IAM role with different permissions 
+    than the original ray-autoscaler-v1 for both the head node and 
+    worker nodes.
+
+    We did not overwrite the original AWSNodeProvider class to avoid
+    breaking existing clusters. Otherwise, the existing clusters will
+    have a new launch_hash and will have new node(s) launched, causing
+    the existing nodes to leak.
+    """
+    @staticmethod
+    def bootstrap_config(cluster_config):
+        return bootstrap_aws(cluster_config, skypilot_iam_role=True)

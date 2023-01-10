@@ -2,6 +2,8 @@ auth_enabled: false
 
 server:
   http_listen_port: 9090
+  http_server_read_timeout: 300s
+  http_server_write_timeout: 300s
 
 schema_config:
   configs:
@@ -39,6 +41,9 @@ storage_config:
     shared_store: s3
     cache_location: /loki/boltdb-cache
 
+querier:
+  query_timeout: 10m
+  max_concurrent: 32
 query_scheduler:
   max_outstanding_requests_per_tenant: 4096
 frontend:

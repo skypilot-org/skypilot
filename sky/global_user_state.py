@@ -15,6 +15,8 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import clouds
 from sky.utils import db_utils
 from sky.utils import common_utils
@@ -30,6 +32,9 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
 def create_table(cursor, conn):
+    # Enable WAL mode to avoid locking issues.
+    # See: issue #1441 and PR #1509
+    conn.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
@@ -63,6 +68,7 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'owner', 'TEXT')
     conn.commit()
 
 
@@ -87,6 +93,17 @@ class ClusterStatus(enum.Enum):
     # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
 
+    def colored_str(self):
+        color = _STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_STATUS_TO_COLOR = {
+    ClusterStatus.INIT: colorama.Fore.BLUE,
+    ClusterStatus.UP: colorama.Fore.GREEN,
+    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
+}
+
 
 class StorageStatus(enum.Enum):
     """Storage status as recorded in table 'storage'."""
@@ -108,7 +125,16 @@ def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
                           ready: bool,
                           is_launch: bool = True):
-    """Adds or updates cluster_name -> cluster_handle mapping."""
+    """Adds or updates cluster_name -> cluster_handle mapping.
+
+    Args:
+        cluster_name: Name of the cluster.
+        cluster_handle: Backend.ResourceHandle of the cluster.
+        ready: Whether the cluster is ready to use. If False, the cluster will
+            be marked as INIT, otherwise it will be marked as UP.
+        is_launch: if the cluster is firstly launched. If True, the launched_at
+            and last_use will be updated. Otherwise, use the old value.
+    """
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
@@ -116,7 +142,12 @@ def add_or_update_cluster(cluster_name: str,
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
-        '(name, launched_at, handle, last_use, status, autostop, to_down) '
+        # All the fields need to exist here, even if they don't need
+        # be changed, as the INSERT OR REPLACE statement will replace
+        # the field of the existing row with the default value if not
+        # specified.
+        '(name, launched_at, handle, last_use, status, '
+        'autostop, to_down, metadata, owner) '
         'VALUES ('
         # name
         '?, '
@@ -138,7 +169,15 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old to_down value if it exists, otherwise set it to
         # default 0.
         'COALESCE('
-        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0)'
+        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0), '
+        # Keep the old metadata value if it exists, otherwise set it to
+        # default {}.
+        'COALESCE('
+        '(SELECT metadata FROM clusters WHERE name=?), "{}"),'
+        # Keep the old owner value if it exists, otherwise set it to
+        # default null.
+        'COALESCE('
+        '(SELECT owner FROM clusters WHERE name=?), null)'
         ')',
         (
             # name
@@ -156,8 +195,13 @@ def add_or_update_cluster(cluster_name: str,
             # autostop
             cluster_name,
             ClusterStatus.STOPPED.value,
+            # to_down
             cluster_name,
             ClusterStatus.STOPPED.value,
+            # metadata
+            cluster_name,
+            # owner
+            cluster_name,
         ))
     _DB.conn.commit()
 
@@ -255,31 +299,29 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+def set_owner_identity_for_cluster(cluster_name: str,
+                                   owner_identity: Optional[str]) -> None:
+    if owner_identity is None:
+        return
+    _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
+                       (owner_identity, cluster_name))
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
+
 def get_cluster_from_name(
         cluster_name: Optional[str]) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * FROM clusters WHERE name=(?)',
-                              (cluster_name,))
-    for (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down) in rows:
-        record = {
-            'name': name,
-            'launched_at': launched_at,
-            'handle': pickle.loads(handle),
-            'last_use': last_use,
-            'status': ClusterStatus[status],
-            'autostop': autostop,
-            'to_down': bool(to_down),
-            'metadata': json.loads(metadata),
-        }
-        return record
-
-
-def get_clusters() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute(
-        'select * from clusters order by launched_at desc')
-    records = []
-    for (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down) in rows:
+                              (cluster_name,)).fetchall()
+    for row in rows:
+        # Explicitly specify the number of fields to unpack, so that
+        # we can add new fields to the database in the future without
+        # breaking the previous code.
+        (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down, owner) = row[:9]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -289,6 +331,29 @@ def get_clusters() -> List[Dict[str, Any]]:
             'status': ClusterStatus[status],
             'autostop': autostop,
             'to_down': bool(to_down),
+            'owner': owner,
+            'metadata': json.loads(metadata),
+        }
+        return record
+
+
+def get_clusters() -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'select * from clusters order by launched_at desc').fetchall()
+    records = []
+    for row in rows:
+        (name, launched_at, handle, last_use, status, autostop, metadata,
+         to_down, owner) = row[:9]
+        # TODO: use namedtuple instead of dict
+        record = {
+            'name': name,
+            'launched_at': launched_at,
+            'handle': pickle.loads(handle),
+            'last_use': last_use,
+            'status': ClusterStatus[status],
+            'autostop': autostop,
+            'to_down': bool(to_down),
+            'owner': owner,
             'metadata': json.loads(metadata),
         }
         records.append(record)

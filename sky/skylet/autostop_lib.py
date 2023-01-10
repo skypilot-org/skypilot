@@ -33,7 +33,7 @@ class AutostopConfig:
         self.backend = backend
         self.down = down
 
-    def __set_state__(self, state: dict):
+    def __setstate__(self, state: dict):
         state.setdefault('down', False)
         self.__dict__.update(state)
 
