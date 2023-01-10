@@ -48,6 +48,7 @@ class Local(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         """Local cloud resources are placed in only one region."""
+        del instance_type, accelerators, use_spot, region, zone
         return cls.regions()
 
     @classmethod
@@ -60,7 +61,7 @@ class Local(clouds.Cloud):
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
-                                            use_spot,
+                                            use_spot=use_spot,
                                             region=None,
                                             zone=None)
         for region in regions:
