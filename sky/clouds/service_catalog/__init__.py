@@ -47,27 +47,17 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name, *args, **kwargs):
     return results
 
 
-def get_hourly_price(resource: 'resources.ClusterResources',
+def get_hourly_price(resource: 'resources.VMResources',
                      clouds: CloudFilter = None) -> float:
     return _map_clouds_catalog(clouds, 'get_hourly_price', resource)
 
 
-def get_default_instance_families(clouds: CloudFilter = None) -> List[str]:
-    return _map_clouds_catalog(clouds, 'get_default_instance_families')
-
-
-def is_subset_of(instance_family_a: str,
-                 instance_family_b: str,
-                 clouds: CloudFilter = None) -> bool:
-    return _map_clouds_catalog(clouds, 'is_subset_of', instance_family_a,
-                               instance_family_b)
-
-
-def get_feasible_resources(resource_filter: 'resources.ResourceFilter',
-                           get_smallest_vms: bool,
-                           clouds: CloudFilter = None) -> List:
+def get_feasible_resources(
+    resource_filter: 'resources.ResourceFilter',
+    clouds: CloudFilter = None,
+) -> List['resources.VMResources']:
     return _map_clouds_catalog(clouds, 'get_feasible_resources',
-                               resource_filter, get_smallest_vms)
+                               resource_filter)
 
 
 def list_accelerators(

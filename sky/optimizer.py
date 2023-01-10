@@ -1,33 +1,19 @@
 """Optimizer: assigns best resources to user tasks."""
-import collections
 import enum
-import typing
 from typing import Dict, List, Optional, Tuple
 
 import colorama
-import numpy as np
 import prettytable
 
-from sky import check
-from sky import clouds
-from sky import exceptions
-from sky import global_user_state
-from sky import generator
 from sky import resources
 from sky import sky_logging
-from sky import task as task_lib
-from sky.utils import env_options
 from sky.utils import ux_utils
 from sky.utils import log_utils
 
-if typing.TYPE_CHECKING:
-    from sky import dag as dag_lib
-
 logger = sky_logging.init_logger(__name__)
 
-Task = task_lib.Task
 
-
+# DELETEME
 # Constants: minimize what target?
 class OptimizeTarget(enum.Enum):
     COST = 0
@@ -45,58 +31,54 @@ def _create_table(field_names: List[str]) -> prettytable.PrettyTable:
 
 
 class Optimizer:
-    """Optimizer: assigns best resources to user tasks."""
+
+    @staticmethod
+    def _optimize(
+        feasible_clusters: List[resources.ClusterResources],
+    ) -> Optional[resources.ClusterResources]:
+        # TODO(woosuk): Consider data locality in optimization.
+        if not feasible_clusters:
+            return None
+        chosen_cluster = min(feasible_clusters,
+                               key=lambda c: c.get_hourly_price())
+        return chosen_cluster
 
     @staticmethod
     def optimize(
-        feasible_resources: List[resources.ClusterResources],
-        blocked_resources: List[resources.ClusterResources] = [],
+        feasible_clusters: List[resources.ClusterResources],
         quiet: bool = True,
     ) -> Optional[resources.ClusterResources]:
-        # TODO(woosuk): Consider data locality in optimization.
-        available_resources = []
-        for r in feasible_resources:
-            for b in blocked_resources:
-                if b == r:
-                    # r is blocked.
-                    break
-                if b.is_subset_of(r):
-                    # r is harder to get than b.
-                    break
-            else:
-                available_resources.append(r)
+        chosen_cluster = Optimizer._optimize(feasible_clusters)
+        if quiet:
+            return chosen_cluster
 
-        if not available_resources:
+        # FIXME
+        if chosen_cluster is None:
             return None
 
-        available_resources.sort(key=lambda r: r.get_hourly_price())
-        if quiet:
-            return available_resources[0]
-
-        # Prune.
-        tmp_resources = []
-        while available_resources:
-            x = available_resources.pop(0)
-            available_resources = [
-                r for r in available_resources if not x.is_subset_of(r)
-            ]
-            tmp_resources.append(x)
-        available_resources = tmp_resources
-
-        # Get the best resources per cloud.
+        # Get the best cluster for each cloud.
+        clusters_per_cloud = {}
+        for c in feasible_clusters:
+            cloud = str(c.cloud)
+            if cloud not in clusters_per_cloud:
+                clusters_per_cloud[cloud] = []
+            clusters_per_cloud[cloud].append(c)
         best_per_cloud = {}
-        best_resources = []
-        for r in available_resources:
-            cloud = str(r.cloud)
-            if cloud not in best_per_cloud:
-                best_per_cloud[cloud] = r
-                best_resources.append(r)
-        assert best_resources[0] == available_resources[0]
+        for cloud, clusters in clusters_per_cloud.items():
+            if cloud != str(chosen_cluster.cloud):
+                best_per_cloud[cloud] = Optimizer._optimize(clusters)
+
+        # Sort the best clusters by price.
+        # The chosen cluster should be at the front of the list.
+        best_clusters = sorted(best_per_cloud.values(),
+                               key=lambda c: c.get_hourly_price())
+        best_clusters = [chosen_cluster] + best_clusters
 
         # Diplay the optimization result as a table.
+        # FIXME: Zone -> Region
         columns = [
-            'CLOUD', 'INSTANCE', 'vCPUs', 'MEM(GiB)', 'ACCELERATORS', '$/hr',
-            'CHOSEN'
+            'CLOUD', 'INSTANCE', 'vCPUs', 'MEM(GiB)', 'ACCELERATORS', 'ZONE',
+            '$/hr', 'CHOSEN'
         ]
 
         def _to_str(x: Optional[float]) -> str:
@@ -107,27 +89,28 @@ class Optimizer:
             return f'{x:.1f}'
 
         rows = []
-        for r in best_resources:
-            if r.accelerator is None:
+        for c in best_clusters:
+            if c.accelerator is None:
                 acc = '-'
             else:
-                acc = f'{r.accelerator.name}:{r.accelerator.count}'
+                acc = f'{c.accelerator.name}:{c.accelerator.count}'
             row = [
-                str(r.cloud),
-                r.instance_type,
-                _to_str(r.num_vcpus),
-                _to_str(r.cpu_memory),
+                str(c.cloud),
+                c.instance_type,
+                _to_str(c.num_vcpus),
+                _to_str(c.cpu_memory),
                 acc,
-                f'{r.get_hourly_price():.2f}',
+                c.zone,
+                f'{c.get_hourly_price():.2f}',
                 '',
             ]
             rows.append(row)
 
-        # Use tick sign for the chosen resources.
+        # Use tick sign for the chosen cluster.
         best_row = rows[0]
         best_row[-1] = (colorama.Fore.GREEN + '   ' + u'\u2714' +
                         colorama.Style.RESET_ALL)
-        # Highlight the chosen resources.
+        # Highlight the chosen cluster.
         for i, cell in enumerate(best_row):
             best_row[i] = (f'{colorama.Style.BRIGHT}{cell}'
                            f'{colorama.Style.RESET_ALL}')
@@ -136,10 +119,13 @@ class Optimizer:
         # In addition to the best price, show the worst-case price
         # that the user may have to pay in case of failover.
         # TODO(woosuk): apply a price cap (e.g., 20%) to bound the worst case.
-        best_price = best_resources[0].get_hourly_price()
-        worst_resources = max(available_resources,
-                              key=lambda r: r.get_hourly_price())
-        worst_price = worst_resources.get_hourly_price()
+
+        # This uses the knowledge that the chosen cluster will have the lowest
+        # price among the feasible clusters, which may not be true in the future.
+        best_price = chosen_cluster.get_hourly_price()
+        worst_cluster = max(feasible_clusters,
+                            key=lambda r: r.get_hourly_price())
+        worst_price = worst_cluster.get_hourly_price()
         if best_price == worst_price:
             logger.info(f'Estimated price: ${best_price:.2f}/hr')
         else:
@@ -148,7 +134,7 @@ class Optimizer:
 
         # Print the table.
         # Here we assume that every resource has the same num_nodes.
-        num_nodes = best_resources[0].num_nodes
+        num_nodes = chosen_cluster.num_nodes
         plural = 's' if num_nodes > 1 else ''
         logger.info(f'{colorama.Style.BRIGHT}'
                     f'Best resources ({num_nodes} node{plural}):'
@@ -157,4 +143,4 @@ class Optimizer:
         table.add_rows(rows)
         logger.info(f'{table}\n')
 
-        return best_resources[0]
+        return chosen_cluster

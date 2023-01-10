@@ -237,7 +237,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_hourly_price(cls,
-                         resource: 'resources_lib.ClusterResources') -> float:
+                         resource: 'resources_lib.VMResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='aws')
 
     @classmethod
@@ -255,8 +255,7 @@ class AWS(clouds.Cloud):
     def get_feasible_resources(
         cls,
         resource_filter: 'resources_lib.ResourceFilter',
-        get_smallest_vms: bool,
-    ) -> List['resources_lib.ClusterResources']:
+    ) -> List['resources_lib.VMResources']:
         r = resource_filter.copy()
         # AWS-specific semantic checks.
         if r.image_id is not None:
@@ -265,25 +264,19 @@ class AWS(clouds.Cloud):
         if r.accelerator is not None and r.accelerator.args is not None:
             return []
 
-        # If the user specified the instance type or families,
+        # If the user specified the instance type,
         # directly query the service catalog.
-        if r.instance_type is not None or r.instance_families is not None:
-            return service_catalog.get_feasible_resources(r,
-                                                          get_smallest_vms,
-                                                          clouds='aws')
+        if r.instance_type is not None:
+            return service_catalog.get_feasible_resources(r, clouds='aws')
 
         # If the user specified the accelerator,
         # use it to infer the instance types.
         if r.accelerator is not None:
-            return service_catalog.get_feasible_resources(r,
-                                                          get_smallest_vms,
-                                                          clouds='aws')
+            return service_catalog.get_feasible_resources(r, clouds='aws')
 
-        # Otherwise, use the default instance families.
-        r.instance_families = cls.get_default_instance_families()
-        return service_catalog.get_feasible_resources(r,
-                                                      get_smallest_vms,
-                                                      clouds='aws')
+        # Otherwise, use the default instance type.
+        r.instance_type = cls.get_default_instance_type()
+        return service_catalog.get_feasible_resources(r, clouds='aws')
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):

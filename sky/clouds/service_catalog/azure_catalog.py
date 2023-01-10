@@ -17,41 +17,14 @@ from sky.utils import ux_utils
 _df = common.read_catalog('azure.csv')
 
 
-def _get_instance_family(instance_type: str) -> str:
-    if instance_type.startswith('Basic_A'):
-        return 'basic_a'
-
-    assert instance_type.startswith('Standard_')
-    # Remove the 'Standard_' prefix.
-    instance_type = instance_type[len('Standard_'):]
-    # Remove the '_Promo' suffix if exists.
-    if '_Promo' in instance_type:
-        instance_type = instance_type[:-len('_Promo')]
-
-    # FIXME(woosuk): Use better regex.
-    if '-' in instance_type:
-        x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
-        instance_type = x.group(1) + '_' + x.group(5)
-    else:
-        x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
-        instance_type = x.group(1) + x.group(3)
-    return instance_type
-
-
 def get_feasible_resources(
     resource_filter: resources.ResourceFilter,
-    get_smallest_vms: bool,
-) -> List[resources.ClusterResources]:
+) -> List[resources.VMResources]:
     df = _df
     if 'AvailabilityZone' not in df.columns:
         # TODO(woosuk): Add the 'AvailabilityZone' column to the catalog.
         df['AvailabilityZone'] = df['Region']
-    if 'InstanceFamily' not in df.columns:
-        # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
-        df['InstanceFamily'] = df['InstanceType'].apply(_get_instance_family)
-
-    if resource_filter.use_spot is not None:
-        df = common.filter_spot(df, resource_filter.use_spot)
+    df = common.filter_spot(df, resource_filter.use_spot)
 
     if resource_filter.accelerator is None:
         acc_name = None
@@ -61,20 +34,12 @@ def get_feasible_resources(
         acc_count = resource_filter.accelerator.count
     filters = {
         'InstanceType': resource_filter.instance_type,
-        'InstanceFamily': resource_filter.instance_families,
         'AcceleratorName': acc_name,
         'AcceleratorCount': acc_count,
-        'vCPUs': resource_filter.num_vcpus,
-        'MemoryGiB': resource_filter.cpu_memory,
         'Region': resource_filter.region,
         'AvailabilityZone': resource_filter.zone,
     }
     df = common.apply_filters(df, filters)
-
-    if get_smallest_vms:
-        grouped = df.groupby(['InstanceFamily', 'Region', 'AvailabilityZone'])
-        price_str = 'SpotPrice' if resource_filter.use_spot else 'Price'
-        df = df.loc[grouped[price_str].idxmin()]
     df = df.reset_index(drop=True)
 
     feasible_resources = []
@@ -87,44 +52,22 @@ def get_feasible_resources(
                                         count=int(row.AcceleratorCount),
                                         args=None)
         feasible_resources.append(
-            resources.ClusterResources(
-                num_nodes=resource_filter.num_nodes,
+            resources.VMResources(
                 cloud=azure,
                 region=row.Region,
                 zone=row.AvailabilityZone,
                 instance_type=row.InstanceType,
-                instance_family=row.InstanceFamily,
                 num_vcpus=float(row.vCPUs),
                 cpu_memory=float(row.MemoryGiB),
                 accelerator=acc,
                 use_spot=resource_filter.use_spot,
-                spot_recovery=resource_filter.spot_recovery,
                 disk_size=resource_filter.disk_size,
                 image_id=resource_filter.image_id,
             ))
     return feasible_resources
 
 
-def is_subset_of(instance_family_a: str, instance_family_b: str) -> bool:
-    if instance_family_a == instance_family_b:
-        return True
-    includes_both = lambda l: instance_family_a in l and instance_family_b in l
-    if includes_both(['D_v5', 'E_v5']):
-        return True
-    if includes_both(['Das_v5', 'Eas_v5']):
-        return True
-    # TODO: add more rules.
-    return False
-
-
-def get_default_instance_families() -> List[str]:
-    # These instance families provide the latest x86-64 Intel and AMD CPUs
-    # without any accelerator or optimized storage.
-    default_instance_families = ['D_v5', 'Das_v5', 'E_v5', 'Eas_v5']
-    return [f.lower() for f in default_instance_families]
-
-
-def get_hourly_price(resource: resources.ClusterResources) -> float:
+def get_hourly_price(resource: resources.VMResources) -> float:
     return common.get_hourly_price_impl(_df, resource.instance_type,
                                         resource.zone, resource.use_spot)
 

@@ -78,17 +78,11 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
 }
 
 
-def _get_instance_family(instance_type: Optional[str]) -> Optional[str]:
-    if pd.isna(instance_type):
-        return None
-    return instance_type.split('-')[0].lower()
-
-
 def _is_tpu(acc_name: str) -> bool:
     return acc_name.startswith('tpu-')
 
 
-def _check_host_vm_limit(resource: resources.ClusterResources) -> bool:
+def _check_host_vm_limit(resource: resources.VMResources) -> bool:
     if resource.accelerator is None:
         # No accelerator, no problem.
         return True
@@ -145,19 +139,12 @@ def _get_default_host_size(acc_name: str,
 
 def get_feasible_resources(
     resource_filter: resources.ResourceFilter,
-    get_smallest_vms: bool = False,
-) -> List[resources.ClusterResources]:
+) -> List[resources.VMResources]:
     df = _df
-    if 'InstanceFamily' not in df.columns:
-        # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
-        df['InstanceFamily'] = df['InstanceType'].apply(_get_instance_family)
-
-    if resource_filter.use_spot is not None:
-        df = common.filter_spot(df, resource_filter.use_spot)
+    df = common.filter_spot(df, resource_filter.use_spot)
 
     # Users cannot use A2 machines without A100 GPUs.
-    if (_get_instance_family(resource_filter.instance_type) == 'a2' or
-            resource_filter.instance_families == ['a2']):
+    if (resource_filter.instance_type is not None and resource_filter.startswith('a2-')):
         if resource_filter.accelerator is None:
             return []
 
@@ -186,33 +173,13 @@ def get_feasible_resources(
                 resource_filter.instance_type = instance_type
             elif resource_filter.instance_type != instance_type:
                 return []
-
-            # A100 can be only attached to A2 machines.
-            if resource_filter.instance_families is None:
-                resource_filter.instance_families = ['a2']
-            elif 'a2' in resource_filter.instance_families:
-                resource_filter.instance_families = ['a2']
-            else:
-                return []
         else:
             # TPUs and other GPUs.
-            # These accelerators can be only attached to N1 machines.
-            if resource_filter.instance_families is None:
-                resource_filter.instance_families = ['n1']
-            elif 'n1' in resource_filter.instance_families:
-                resource_filter.instance_families = ['n1']
-            else:
-                return []
-
             if resource_filter.instance_type is None:
                 # If not specified, provide the default host VM size.
-                min_vcpus, min_memory = _get_default_host_size(
-                    acc_name, acc_count)
-                if resource_filter.num_vcpus is None:
-                    resource_filter.num_vcpus = f'{min_vcpus}+' 
-                if resource_filter.cpu_memory is None:
-                    resource_filter.cpu_memory = f'{min_memory}+'
-            elif _get_instance_family(resource_filter.instance_type) != 'n1':
+                resource_filter.instance_type = 'n1-highmem-8' # FIXME
+            elif not resource_filter.instance_type.startswith('n1-'):
+                # These accelerators can be only attached to N1 machines.
                 return []
 
     # Search the host VM.
@@ -225,9 +192,6 @@ def get_feasible_resources(
     else:
         filters = {
             'InstanceType': resource_filter.instance_type,
-            'InstanceFamily': resource_filter.instance_families,
-            'vCPUs': resource_filter.num_vcpus,
-            'MemoryGiB': resource_filter.cpu_memory,
             'Region': resource_filter.region,
             'AvailabilityZone': resource_filter.zone,
         }
@@ -243,7 +207,6 @@ def get_feasible_resources(
             df = acc_df.copy()
             # TODO: Add tpu-vm to the catalog.
             df['InstanceType'] = 'tpu-vm'
-            df['InstanceFamily'] = 'tpu-vm'
             df['vCPUs'] = 96.0
             df['MemoryGiB'] = 624.0
         else:
@@ -256,27 +219,19 @@ def get_feasible_resources(
                 'AcceleratorCount',
             ]]
             df = pd.merge(vm_df, acc_df, on=['Region', 'AvailabilityZone'])
-
-    if get_smallest_vms:
-        grouped = df.groupby(['InstanceFamily', 'Region', 'AvailabilityZone'])
-        price_str = 'SpotPrice' if resource_filter.use_spot else 'Price'
-        df = df.loc[grouped[price_str].idxmin()]
     df = df.reset_index(drop=True)
 
     gcp = sky.GCP()
     feasible_resources = [
-        resources.ClusterResources(
-            num_nodes=resource_filter.num_nodes,
+        resources.VMResources(
             cloud=gcp,
             region=row.Region,
             zone=row.AvailabilityZone,
             instance_type=row.InstanceType,
-            instance_family=row.InstanceFamily,
             num_vcpus=float(row.vCPUs),
             cpu_memory=float(row.MemoryGiB),
             accelerator=resource_filter.accelerator,
             use_spot=resource_filter.use_spot,
-            spot_recovery=resource_filter.spot_recovery,
             disk_size=resource_filter.disk_size,
             image_id=resource_filter.image_id,
         ) for row in df.itertuples()
@@ -286,19 +241,7 @@ def get_feasible_resources(
     return [r for r in feasible_resources if _check_host_vm_limit(r)]
 
 
-def is_subset_of(instance_family_a: str, instance_family_b: str) -> bool:
-    if instance_family_a == instance_family_b:
-        return True
-    return False
-
-
-def get_default_instance_families() -> List[str]:
-    # These instance families provide the latest x86-64 Intel and AMD CPUs
-    # without any accelerator or optimized storage.
-    return ['n2', 'n2d']
-
-
-def get_hourly_price(resource: resources.ClusterResources) -> float:
+def get_hourly_price(resource: resources.VMResources) -> float:
     if resource.instance_type == 'tpu-vm':
         host_price = 0.0
     else:

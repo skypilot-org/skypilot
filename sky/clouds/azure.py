@@ -204,7 +204,7 @@ class Azure(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.ClusterResources') -> float:
+    def get_hourly_price(cls, resource: 'resources.VMResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='azure')
 
     @classmethod
@@ -222,8 +222,7 @@ class Azure(clouds.Cloud):
     def get_feasible_resources(
         cls,
         resource_filter: 'resources.ResourceFilter',
-        get_smallest_vms: bool,
-    ) -> List['resources.ClusterResources']:
+    ) -> List['resources.VMResources']:
         r = resource_filter.copy()
         # Azure-specific semantic check.
         if r.use_spot:
@@ -235,25 +234,19 @@ class Azure(clouds.Cloud):
         if r.accelerator is not None and r.accelerator.args is not None:
             return []
 
-        # If the user specified the instance type or families,
+        # If the user specified the instance type,
         # directly query the service catalog.
-        if r.instance_type is not None or r.instance_families is not None:
-            return service_catalog.get_feasible_resources(r,
-                                                          get_smallest_vms,
-                                                          clouds='azure')
+        if r.instance_type is not None:
+            return service_catalog.get_feasible_resources(r, clouds='azure')
 
         # If the user specified the accelerator,
         # use it to infer the instance types.
         if r.accelerator is not None:
-            return service_catalog.get_feasible_resources(r,
-                                                          get_smallest_vms,
-                                                          clouds='azure')
+            return service_catalog.get_feasible_resources(r, clouds='azure')
 
-        # Otherwise, use the default instance families.
-        r.instance_families = cls.get_default_instance_families()
-        return service_catalog.get_feasible_resources(r,
-                                                      get_smallest_vms,
-                                                      clouds='azure')
+        # Otherwise, use the default instance type.
+        r.instance_type = cls.get_default_instance_type()
+        return service_catalog.get_feasible_resources(r, clouds='azure')
 
     def get_feasible_launchable_resources(self, resources):
         if resources.use_spot:

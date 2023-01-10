@@ -24,8 +24,8 @@ class CandidateGenerator:
         else:
             feasible_clouds = [cloud]
 
-        assert str(cloud) != 'Local'
         # FIXME(woosuk): Exclude local cloud for now.
+        assert str(cloud) != 'Local'
         feasible_clouds = [c for c in feasible_clouds if str(c) != 'Local']
         if feasible_clouds:
             # Found a cloud that matches the filter.
@@ -50,8 +50,7 @@ class CandidateGenerator:
     def get_feasible_resources(
         self,
         resource_filter: resources.ResourceFilter,
-        get_smallest_vms: bool = False,
-    ) -> List[resources.ClusterResources]:
+    ) -> List[resources.VMResources]:
         feasible_clouds = self._get_feasible_clouds(resource_filter.cloud)
         if not feasible_clouds:
             # TODO: Print a warning.
@@ -60,8 +59,7 @@ class CandidateGenerator:
         feasible_resources = []
         for cloud in feasible_clouds:
             # TODO: Support on-prem.
-            feasible_resources += cloud.get_feasible_resources(
-                resource_filter, get_smallest_vms)
+            feasible_resources += cloud.get_feasible_resources(resource_filter)
 
         if feasible_resources:
             # Found resources that match the filter.

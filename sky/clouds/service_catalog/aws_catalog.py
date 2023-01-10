@@ -15,21 +15,11 @@ from sky.clouds.service_catalog import common
 _df = common.read_catalog('aws.csv')
 
 
-def _get_instance_family(instance_type: str) -> str:
-    return instance_type.split('.')[0].lower()
-
-
 def get_feasible_resources(
     resource_filter: resources.ResourceFilter,
-    get_smallest_vms: bool,
-) -> List[resources.ClusterResources]:
+) -> List[resources.VMResources]:
     df = _df
-    if 'InstanceFamily' not in df.columns:
-        # TODO(woosuk): Add the 'InstanceFamily' column to the catalog.
-        df['InstanceFamily'] = df['InstanceType'].apply(_get_instance_family)
-
-    if resource_filter.use_spot is not None:
-        df = common.filter_spot(df, resource_filter.use_spot)
+    df = common.filter_spot(df, resource_filter.use_spot)
 
     if resource_filter.accelerator is None:
         acc_name = None
@@ -39,20 +29,12 @@ def get_feasible_resources(
         acc_count = resource_filter.accelerator.count
     filters = {
         'InstanceType': resource_filter.instance_type,
-        'InstanceFamily': resource_filter.instance_families,
         'AcceleratorName': acc_name,
         'AcceleratorCount': acc_count,
-        'vCPUs': resource_filter.num_vcpus,
-        'MemoryGiB': resource_filter.cpu_memory,
         'Region': resource_filter.region,
         'AvailabilityZone': resource_filter.zone,
     }
     df = common.apply_filters(df, filters)
-
-    if get_smallest_vms:
-        grouped = df.groupby(['InstanceFamily', 'Region', 'AvailabilityZone'])
-        price_str = 'SpotPrice' if resource_filter.use_spot else 'Price'
-        df = df.loc[grouped[price_str].idxmin()]
     df = df.reset_index(drop=True)
 
     feasible_resources = []
@@ -65,43 +47,22 @@ def get_feasible_resources(
                                         count=int(row.AcceleratorCount),
                                         args=None)
         feasible_resources.append(
-            resources.ClusterResources(
-                num_nodes=resource_filter.num_nodes,
+            resources.VMResources(
                 cloud=aws,
                 region=row.Region,
                 zone=row.AvailabilityZone,
                 instance_type=row.InstanceType,
-                instance_family=row.InstanceFamily,
                 num_vcpus=float(row.vCPUs),
                 cpu_memory=float(row.MemoryGiB),
                 accelerator=acc,
                 use_spot=resource_filter.use_spot,
-                spot_recovery=resource_filter.spot_recovery,
                 disk_size=resource_filter.disk_size,
                 image_id=resource_filter.image_id,
             ))
     return feasible_resources
 
 
-def is_subset_of(instance_family_a: str, instance_family_b: str) -> bool:
-    if instance_family_a == instance_family_b:
-        return True
-    includes_both = lambda l: instance_family_a in l and instance_family_b in l
-    if includes_both(['m6i', 'c6i', 'r6i', 'm6id', 'c6id', 'r6id']):
-        return True
-    if includes_both(['m6a', 'c6a', 'r6a', 'm6ad', 'c6ad', 'r6ad']):
-        return True
-    # TODO: add more rules.
-    return False
-
-
-def get_default_instance_families() -> List[str]:
-    # These instance families provide the latest x86-64 Intel and AMD CPUs
-    # without any accelerator or optimized storage.
-    return ['m6i', 'm6a', 'c6i', 'c6a', 'r6i', 'r6a']
-
-
-def get_hourly_price(resource: resources.ClusterResources) -> float:
+def get_hourly_price(resource: resources.VMResources) -> float:
     return common.get_hourly_price_impl(_df, resource.instance_type,
                                         resource.zone, resource.use_spot)
 

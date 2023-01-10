@@ -19,6 +19,7 @@ _CATALOG_DIR = os.path.join(constants.LOCAL_CATALOG_DIR,
 os.makedirs(_CATALOG_DIR, exist_ok=True)
 
 
+# FIXME: rename this.
 def filter_spot(df: pd.DataFrame, use_spot: bool) -> pd.DataFrame:
     if use_spot:
         # For spot instances, the spot price should be non-null.
@@ -33,7 +34,7 @@ def apply_filter(
     key: str,
     val: Union[int, float, str, List[str]],
 ) -> pd.DataFrame:
-    # Exact match.
+    # Case-insensitive match.
     if key in [
             'Region',
             'AvailabilityZone',
@@ -42,23 +43,6 @@ def apply_filter(
         return df[df[key].str.lower() == val.lower()]
     if key in ['AcceleratorName', 'AcceleratorCount']:
         return df[df[key] == val]
-
-    if key == 'InstanceFamily':
-        val = [v.lower() for v in val]
-        return df[df['InstanceFamily'].str.lower().isin(val)]
-
-    # For num_vcpus and cpu_memory, allow searching with lower bound.
-    if key == 'vCPUs':
-        if isinstance(val, str) and val.endswith('+'):
-            return df[df['vCPUs'] >= float(val[:-1])]
-        else:
-            return df[df['vCPUs'] == float(val)]
-    if key == 'MemoryGiB':
-        if isinstance(val, str) and val.endswith('+'):
-            return df[df['MemoryGiB'] >= float(val[:-1])]
-        else:
-            return df[df['MemoryGiB'] == float(val)]
-
     assert False, f'Unknown key: {key}'
 
 

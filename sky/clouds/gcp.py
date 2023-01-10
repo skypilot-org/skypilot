@@ -268,7 +268,7 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.ClusterResources') -> float:
+    def get_hourly_price(cls, resource: 'resources.VMResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='gcp')
 
     @classmethod
@@ -286,22 +286,17 @@ class GCP(clouds.Cloud):
     def get_feasible_resources(
         cls,
         resource_filter: 'resources.ResourceFilter',
-        get_smallest_vms: bool,
-    ) -> List['resources.ClusterResources']:
+    ) -> List['resources.VMResources']:
         r = resource_filter.copy()
         if r.accelerator is None:
-            if r.instance_type is not None or r.instance_families is not None:
-                # If the user specified the instance type or families,
+            if r.instance_type is not None:
+                # If the user specified the instance type,
                 # directly query the service catalog.
-                return service_catalog.get_feasible_resources(r,
-                                                              get_smallest_vms,
-                                                              clouds='gcp')
+                return service_catalog.get_feasible_resources(r, clouds='gcp')
             else:
-                # Otherwise, use the default instance families.
-                r.instance_families = cls.get_default_instance_families()
-                return service_catalog.get_feasible_resources(r,
-                                                              get_smallest_vms,
-                                                              clouds='gcp')
+                # Otherwise, use the default instance type.
+                r.instance_type = cls.get_default_instance_type()
+                return service_catalog.get_feasible_resources(r, clouds='gcp')
 
         if r.accelerator.name.startswith('tpu'):
             # TPU
@@ -317,7 +312,6 @@ class GCP(clouds.Cloud):
                     r.instance_type = 'tpu-vm'
                 elif r.instance_type != 'tpu-vm':
                     return []
-                r.instance_families = None
                 r.accelerator.args['runtime_version'] = 'tpu-vm-base'
             else:
                 # TPU Node
@@ -327,9 +321,7 @@ class GCP(clouds.Cloud):
             # GPU
             if r.accelerator.args is not None:
                 return []
-        return service_catalog.get_feasible_resources(r,
-                                                      get_smallest_vms,
-                                                      clouds='gcp')
+        return service_catalog.get_feasible_resources(r, clouds='gcp')
 
     def get_feasible_launchable_resources(self, resources):
         fuzzy_candidate_list = []
