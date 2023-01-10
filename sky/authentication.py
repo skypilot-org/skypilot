@@ -374,8 +374,8 @@ def setup_ibm_authentication(config):
                 if (ssh_key_data in key['public_key'] or
                         key['public_key'] in ssh_key_data):
                     vpc_key_id = key['id']
-                    logger.debug(f"""Reusing key:{key['name']},
-                     matching existing public key.""")
+                    logger.debug(f'Reusing key:{key["name"]}, '
+                                 f'matching existing public key.')
                     break
         elif 'Key with name already exists' in e.message:
             raise Exception("""a key with chosen name

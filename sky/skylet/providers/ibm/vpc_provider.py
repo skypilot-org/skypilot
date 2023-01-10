@@ -151,7 +151,7 @@ class IBMVPCProvider():
     def create_sg_rules(self, vpc_data):
 
         sg_id = vpc_data['default_security_group']['id']
-        sg_name = f'{self.cluster_name}-{vpc_data["name"]}-sg'
+        sg_name = f'{self.cluster_name}-{str(uuid.uuid4())[:5]}-sg'
 
         # update sg name
         self.vpc_client.update_security_group(
