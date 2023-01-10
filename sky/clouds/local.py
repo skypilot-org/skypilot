@@ -43,6 +43,14 @@ class Local(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        """Local cloud resources are placed in only one region."""
+        return cls.regions()
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
