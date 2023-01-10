@@ -356,5 +356,5 @@ def remove_file_if_exists(path: str):
 
 
 def is_wsl() -> bool:
-    """Detect if running under WSL"""
+    """Detect if running under Windows Subsystem for Linux (WSL)."""
     return 'microsoft' in platform.uname()[3].lower()
