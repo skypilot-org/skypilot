@@ -38,7 +38,7 @@ def create_table(cursor, conn):
     # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
     #  This may cause the database locked problem from WSL issue #1441.
     if not common_utils.is_wsl():
-        conn.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
