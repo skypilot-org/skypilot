@@ -11,6 +11,7 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 _table_created = False
 
+
 @contextlib.contextmanager
 def _safe_cursor():
     """A newly created, auto-commiting, auto-closing cursor."""
