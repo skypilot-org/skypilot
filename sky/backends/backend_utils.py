@@ -1904,10 +1904,11 @@ def _update_cluster_status_no_lock(
         # We have not experienced the above; adding as a safeguard.
         #
         # Since we failed to refresh, warn and return old record.
-        logger.warn(f'Failed to refresh status for cluster {cluster_name!r} '
-                    f'due to {len(node_statuses)} nodes being found with the '
-                    'same name tag, but the cluster should have '
-                    f'{handle.launched_nodes} nodes. Keeping the old status.')
+        logger.warning(
+            f'Failed to refresh status for cluster {cluster_name!r} '
+            f'due to {len(node_statuses)} nodes being found with the '
+            'same name tag, but the cluster should have '
+            f'{handle.launched_nodes} nodes. Keeping the old status.')
         return record
     assert len(node_statuses) <= handle.launched_nodes
 

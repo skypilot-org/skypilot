@@ -3,7 +3,6 @@ import itertools
 import json
 import logging
 import os
-import sys
 import time
 from distutils.version import StrictVersion
 from functools import lru_cache, partial
