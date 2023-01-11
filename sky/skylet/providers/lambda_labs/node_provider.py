@@ -11,20 +11,19 @@ from sky.utils import command_runner
 
 REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
 LOCAL_TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
-IS_REMOTE_FILE = '~/.lambda_labs/.is_remote'  # Created in lambda-ray.yml
+IS_REMOTE_PATH_PREFIX = '~/.lambda_labs/.is_remote'  # Created in lambda-ray.yml
 
 logger = logging.getLogger(__name__)
 
 
-# TODO(ewzeng): the distinction between remote and local is not absolute
-# as the user can `sky launch` on a remote node. The current implementation
-# does not support this.
-def _on_remote():
-    return os.path.exists(os.path.expanduser(IS_REMOTE_FILE))
+def _on_remote(cluster_name):
+    """Returns True if on remote node of cluster_name."""
+    path = os.path.expanduser(f'{IS_REMOTE_PATH_PREFIX}-{cluster_name}')
+    return os.path.exists(path)
 
 
 def _send_tags_file(ip, cluster_name):
-    if _on_remote():
+    if _on_remote(cluster_name):
         return
 
     # Local
@@ -55,7 +54,7 @@ class LambdaNodeProvider(NodeProvider):
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaLabsClient()
         # Only used for tags
-        if _on_remote():
+        if _on_remote(cluster_name):
             self.metadata = lambda_utils.Metadata(REMOTE_TAG_PATH_PREFIX,
                     cluster_name)
         else:
