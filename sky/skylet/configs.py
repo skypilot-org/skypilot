@@ -11,7 +11,6 @@ os.makedirs(pathlib.Path(_DB_PATH).parents[0], exist_ok=True)
 
 _table_created = False
 
-
 @contextlib.contextmanager
 def _safe_cursor():
     """A newly created, auto-commiting, auto-closing cursor."""
@@ -26,7 +25,14 @@ def _safe_cursor():
 
 
 def ensure_table(func: callable):
-    """Ensure the table exists before calling the function."""
+    """Ensure the table exists before calling the function.
+    
+    Since this module will be imported whenever `sky` is imported (due to
+    Python's package importing logic), we should avoid creating the table
+    until it's actually needed to avoid too many concurrent commit to the
+    database.
+    It solves the database locked problem in #1576.
+    """
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
