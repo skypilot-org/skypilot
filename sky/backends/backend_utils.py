@@ -1223,8 +1223,8 @@ def _query_head_ip_with_retries(cluster_yaml: str,
                 f'ray get-head-ip {full_cluster_yaml!r}',
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL).stdout.decode().strip()
-            head_ip = re.findall(IP_ADDR_REGEX, out)
-            if len(head_ip) > 1:
+            head_ip_list = re.findall(IP_ADDR_REGEX, out)
+            if len(head_ip_list) > 1:
                 # This could be triggered if e.g., some logging is added in
                 # skypilot_config, a module that has some code executed
                 # whenever `sky` is imported.
@@ -1233,12 +1233,12 @@ def _query_head_ip_with_retries(cluster_yaml: str,
                     'the `ray get-head-ip` command. This could '
                     'happen if there is extra output from it, '
                     'which should be inspected below.\nProceeding with '
-                    f'the last detected IP ({head_ip[-1]}) as head IP.'
+                    f'the last detected IP ({head_ip_list[-1]}) as head IP.'
                     f'\n== Output ==\n{out}'
                     f'\n== Output ends ==')
-                head_ip = head_ip[-1:]
-            assert 1 == len(head_ip), (out, head_ip)
-            head_ip = head_ip[0]
+                head_ip_list = head_ip_list[-1:]
+            assert 1 == len(head_ip_list), (out, head_ip_list)
+            head_ip = head_ip_list[0]
             break
         except subprocess.CalledProcessError as e:
             if i == max_attempts - 1:
