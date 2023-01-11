@@ -43,6 +43,15 @@ class Local(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        """Local cloud resources are placed in only one region."""
+        del instance_type, accelerators, use_spot, region, zone
+        return cls.regions()
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
@@ -50,10 +59,12 @@ class Local(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del instance_type
-        del use_spot
-        del accelerators  # unused
-        for region in cls.regions():
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot=use_spot,
+                                            region=None,
+                                            zone=None)
+        for region in regions:
             yield region, region.zones
 
     #### Normal methods ####

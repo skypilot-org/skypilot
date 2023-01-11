@@ -10,6 +10,7 @@ import pathlib
 import re
 import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -28,6 +29,7 @@ from sky import global_user_state
 from sky import resources as resources_lib
 from sky import sky_logging
 from sky import optimizer
+from sky import skypilot_config
 from sky import spot as spot_lib
 from sky import task as task_lib
 from sky.data import data_utils
@@ -97,6 +99,13 @@ _MAX_RAY_UP_RETRY = 5
 
 _JOB_ID_PATTERN = re.compile(r'Job ID: ([0-9]+)')
 
+# Path to the monkey-patched ray up script.
+# We don't do import then __file__ because that script needs to be filled in
+# (so import would fail).
+_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
+    pathlib.Path(sky.__file__).resolve().parent / 'backends' /
+    'monkey_patches' / 'ray_up_with_monkey_patched_hash_launch_conf.py')
+
 
 def _get_cluster_config_template(cloud):
     cloud_to_template = {
@@ -106,6 +115,29 @@ def _get_cluster_config_template(cloud):
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
+
+
+def _write_ray_up_script_with_patched_launch_hash_fn(
+    cluster_config_path: str,
+    ray_up_kwargs: Dict[str, bool],
+) -> str:
+    """Writes a Python script that runs `ray up` with our launch hash func.
+
+    Our patched launch hash has one difference from the non-patched version: it
+    does not include any `ssh_proxy_command` under `auth` as part of the hash
+    calculation.
+    """
+    with open(_RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH, 'r') as f:
+        ray_up_no_restart_script = f.read().format(
+            ray_yaml_path=repr(cluster_config_path),
+            ray_up_kwargs=ray_up_kwargs)
+    with tempfile.NamedTemporaryFile('w',
+                                     prefix='skypilot_ray_up_',
+                                     suffix='.py',
+                                     delete=False) as f:
+        f.write(ray_up_no_restart_script)
+        logger.debug(f'`ray up` script: {f.name}')
+    return f.name
 
 
 class RayCodeGen:
@@ -446,7 +478,7 @@ class RayCodeGen:
             rank = job_ip_rank_map[ip]
 
             if len(cluster_ips_to_node_id) == 1: # Single-node task on single-node cluter
-                name_str = '{task_name},' if {task_name!r} is not None else 'task,'
+                name_str = '{task_name},' if {task_name!r} != None else 'task,'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, 'run.log'))
             else: # Single-node or multi-node task on multi-node cluster
                 idx_in_cluster = cluster_ips_to_node_id[ip]
@@ -677,7 +709,12 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'An error occurred' in s.strip()
+            # 'An error occurred': boto3 errors
+            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': skypilot's changes to the AWS
+            #    node provider; for errors prior to provisioning like VPC
+            #    setup.
+            if 'An error occurred' in s or
+            'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' in s
         ]
         # Need to handle boto3 printing error but its retry succeeded:
         #   error occurred (Unsupported) .. not supported in your requested
@@ -702,8 +739,8 @@ class RetryingVmProvisioner(object):
                 raise RuntimeError('Errors occurred during provision; '
                                    'check logs above.')
         if set(zones) == set(region.zones):
-            # The underlying ray autoscaler / boto3 will try all zones of a
-            # region at once.
+            # The underlying AWS NodeProvider will try all specified zones of a
+            # region. (Each boto3 request takes one zone.)
             logger.warning(f'Got error(s) in all zones of {region.name}:')
         else:
             zones_str = ', '.join(z.name for z in zones)
@@ -771,36 +808,59 @@ class RetryingVmProvisioner(object):
         self._blocked_regions.add(region.name)
 
     def _update_blocklist_on_error(self, cloud, region, zones, stdout,
-                                   stderr) -> None:
+                                   stderr) -> bool:
         """Handles cloud-specific errors and updates the block list.
 
         This parses textual stdout/stderr because we don't directly use the
         underlying clouds' SDKs.  If we did that, we could catch proper
         exceptions instead.
+
+        Returns:
+          definitely_no_nodes_launched: bool, True if definitely no nodes
+            launched (e.g., due to VPC errors we have never sent the provision
+            request), False otherwise.
         """
         if stdout is None:
-            # Gang scheduling failure.  Simply block the region.
+            # Gang scheduling failure (head node is definitely up, but some
+            # workers' provisioning failed).  Simply block the region.
             assert stderr is None, stderr
             self._blocked_regions.add(region.name)
-            return
+            return False  # definitely_no_nodes_launched
 
-        if isinstance(cloud, clouds.GCP):
-            return self._update_blocklist_on_gcp_error(region, zones, stdout,
-                                                       stderr)
+        # TODO(zongheng): refactor into Cloud interface?
+        handlers = {
+            clouds.AWS: self._update_blocklist_on_aws_error,
+            clouds.Azure: self._update_blocklist_on_azure_error,
+            clouds.GCP: self._update_blocklist_on_gcp_error,
+            clouds.Local: self._update_blocklist_on_local_error,
+        }
+        cloud_type = type(cloud)
+        if cloud_type not in handlers:
+            raise NotImplementedError(
+                'Cloud {cloud} unknown, or has not added '
+                'support for parsing and handling provision failures.')
+        handler = handlers[cloud_type]
+        handler(region, zones, stdout, stderr)
 
-        if isinstance(cloud, clouds.AWS):
-            return self._update_blocklist_on_aws_error(region, zones, stdout,
-                                                       stderr)
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        # Determining whether head node launch *may* have been requested based
+        # on outputs is tricky. We are conservative here by choosing an "early
+        # enough" output line in the following:
+        # https://github.com/ray-project/ray/blob/03b6bc7b5a305877501110ec04710a9c57011479/python/ray/autoscaler/_private/commands.py#L704-L737  # pylint: disable=line-too-long
+        # This is okay, because we mainly want to use the return value of this
+        # func to skip cleaning up never-launched clusters that encountered VPC
+        # errors; their launch should not have printed any such outputs.
+        head_node_launch_may_have_been_requested = any(
+            'Acquiring an up-to-date head node' in line
+            for line in stdout_splits + stderr_splits)
+        # If head node request has definitely not been sent (this happens when
+        # there are errors during node provider "bootstrapping", e.g.,
+        # VPC-not-found errors), then definitely no nodes are launched.
+        definitely_no_nodes_launched = (
+            not head_node_launch_may_have_been_requested)
 
-        if isinstance(cloud, clouds.Azure):
-            return self._update_blocklist_on_azure_error(
-                region, zones, stdout, stderr)
-
-        if isinstance(cloud, clouds.Local):
-            return self._update_blocklist_on_local_error(
-                region, zones, stdout, stderr)
-
-        assert False, f'Unknown cloud: {cloud}.'
+        return definitely_no_nodes_launched
 
     def _yield_region_zones(self, to_provision: resources_lib.Resources,
                             cluster_name: str, cluster_exists: bool):
@@ -1125,47 +1185,65 @@ class RetryingVmProvisioner(object):
                                 f' existing VM{plural}.{style.RESET_ALL}')
                 return config_dict
 
-            # The cluster is not ready.
+            # The cluster is not ready. We must perform error recording and/or
+            # cleanup.
 
             # If cluster was previously UP or STOPPED, stop it; otherwise
             # terminate.
             # FIXME(zongheng): terminating a potentially live cluster is
             # scary. Say: users have an existing cluster that got into INIT, do
             # sky launch, somehow failed, then we may be terminating it here.
-            need_terminate = not is_prev_cluster_healthy
+            terminate_or_stop = not is_prev_cluster_healthy
+            definitely_no_nodes_launched = False
             if status == self.GangSchedulingStatus.HEAD_FAILED:
                 # ray up failed for the head node.
-                self._update_blocklist_on_error(to_provision.cloud, region,
-                                                zones, stdout, stderr)
+                definitely_no_nodes_launched = self._update_blocklist_on_error(
+                    to_provision.cloud, region, zones, stdout, stderr)
             else:
                 # gang scheduling failed.
                 assert status == self.GangSchedulingStatus.GANG_FAILED, status
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
-                self._update_blocklist_on_error(
+                definitely_no_nodes_launched = self._update_blocklist_on_error(
                     to_provision.cloud,
                     region,
                     # Ignored and block region:
                     zones=None,
                     stdout=None,
                     stderr=None)
+                # GANG_FAILED means head is up, workers failed.
+                assert definitely_no_nodes_launched is False, (
+                    definitely_no_nodes_launched)
 
                 # Only log the errors for GANG_FAILED, since HEAD_FAILED may
                 # not have created any resources (it can happen however) and
                 # HEAD_FAILED can happen in "normal" failover cases.
                 logger.error('*** Failed provisioning the cluster. ***')
-                terminate_str = 'Terminating' if need_terminate else 'Stopping'
+                terminate_str = ('Terminating'
+                                 if terminate_or_stop else 'Stopping')
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
-            # There may exists partial nodes (e.g., head node) so we must
+            # If these conditions hold, it *should* be safe to skip the cleanup
+            # action.
+            #
+            # We want to skip mainly for custom VPC: if users encountered "No
+            # VPC with name 'xxx' is found in <region>.", then going ahead to
+            # down the non-existent cluster will itself error out with the same
+            # error message.  This was found to be confusing. In that case we
+            # skip termination.
+            skip_cleanup = not cluster_exists and definitely_no_nodes_launched
+            if skip_cleanup:
+                continue
+
+            # There may exist partial nodes (e.g., head node) so we must
             # terminate or stop before moving on to other regions.
             #
-            # NOTE: even HEAD_FAILED could've left a live head node there, so
-            # we must terminate/stop here too. E.g., node is up, and ray
+            # NOTE: even HEAD_FAILED could've left a live head node there,
+            # so we must terminate/stop here too. E.g., node is up, and ray
             # autoscaler proceeds to setup commands, which may fail:
             #   ERR updater.py:138 -- New status: update-failed
             CloudVmRayBackend().teardown_no_lock(handle,
-                                                 terminate=need_terminate)
+                                                 terminate=terminate_or_stop)
 
         if to_provision.zone is not None:
             message = (
@@ -1243,26 +1321,29 @@ class RetryingVmProvisioner(object):
         # FIXME: refactor code path to remove use of stream_logs
         del stream_logs
 
-        style = colorama.Style
-
         def ray_up():
+            # Runs `ray up <kwargs>` with our monkey-patched launch hash
+            # calculation. See the monkey patch file for why.
+            #
+            # NOTE: --no-restart solves the following bug.  Without it, if 'ray
+            # up' (sky launch) twice on a cluster with >1 node, the worker node
+            # gets disconnected/killed by ray autoscaler; the whole task will
+            # just freeze.  (Doesn't affect 1-node clusters.)  With this flag,
+            # ray processes no longer restart and this bug doesn't show.
+            # Downside is existing tasks on the cluster will keep running
+            # (which may be ok with the semantics of 'sky launch' twice).
+            # Tracked in https://github.com/ray-project/ray/issues/20402.
+            # Ref: https://github.com/ray-project/ray/blob/releases/2.2.0/python/ray/autoscaler/sdk/sdk.py#L16-L49  # pylint: disable=line-too-long
+            script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+                cluster_config_file, ray_up_kwargs={'no_restart': True})
+
             # Redirect stdout/err to the file and streaming (if stream_logs).
             # With stdout/err redirected, 'ray up' will have no color and
             # different order from directly running in the console. The
             # `--log-style` and `--log-color` flags do not work. To reproduce,
             # `ray up --log-style pretty --log-color true | tee tmp.out`.
-
             returncode, stdout, stderr = log_lib.run_with_log(
-                # NOTE: --no-restart solves the following bug.  Without it, if
-                # 'ray up' (sky launch) twice on a cluster with >1 node, the
-                # worker node gets disconnected/killed by ray autoscaler; the
-                # whole task will just freeze.  (Doesn't affect 1-node
-                # clusters.)  With this flag, ray processes no longer restart
-                # and this bug doesn't show.  Downside is existing tasks on the
-                # cluster will keep running (which may be ok with the semantics
-                # of 'sky launch' twice).
-                # Tracked in https://github.com/ray-project/ray/issues/20402.
-                ['ray', 'up', '-y', '--no-restart', cluster_config_file],
+                [sys.executable, script_path],
                 log_abs_path,
                 stream_logs=False,
                 start_streaming_at='Shared connection to',
@@ -1281,21 +1362,20 @@ class RetryingVmProvisioner(object):
                 require_outputs=True,
                 # Disable stdin to avoid ray outputs mess up the terminal with
                 # misaligned output when multithreading/multiprocessing are used
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
+                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264  # pylint: disable=line-too-long
                 stdin=subprocess.DEVNULL)
             return returncode, stdout, stderr
 
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
-
+        style = colorama.Style
         if isinstance(to_provision_cloud, clouds.Local):
             cluster_name = logging_info['cluster_name']
-            logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
+            logger.info(f'{style.BRIGHT}Launching on local cluster '
                         f'{cluster_name!r}.')
         else:
-            logger.info(
-                f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
-                f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+            logger.info(f'{style.BRIGHT}Launching on {to_provision_cloud} '
+                        f'{region_name}{style.RESET_ALL} ({zone_str})')
         start = time.time()
 
         # Edge case: /tmp/ray does not exist, so autoscaler can't create/store
@@ -1372,7 +1452,7 @@ class RetryingVmProvisioner(object):
         assert ray_up_return_value is not None
         returncode, stdout, stderr = ray_up_return_value
 
-        logger.debug(f'Ray up takes {time.time() - start} seconds with '
+        logger.debug(f'`ray up` takes {time.time() - start:.1f} seconds with '
                      f'{retry_cnt} retries.')
         if returncode != 0:
             return self.GangSchedulingStatus.HEAD_FAILED, stdout, stderr, None
@@ -1481,8 +1561,12 @@ class RetryingVmProvisioner(object):
                 'is installed or running correctly.')
         backend.run_on_head(handle, 'ray stop', use_cached_head_ip=False)
 
+        # Runs `ray up <kwargs>` with our monkey-patched launch hash
+        # calculation. See the monkey patch file for why.
+        script_path = _write_ray_up_script_with_patched_launch_hash_fn(
+            handle.cluster_yaml, ray_up_kwargs={'restart_only': True})
         log_lib.run_with_log(
-            ['ray', 'up', '-y', '--restart-only', handle.cluster_yaml],
+            [sys.executable, script_path],
             log_abs_path,
             stream_logs=False,
             # Use environment variables to disable the ray usage collection
@@ -1732,13 +1816,25 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                 # IPs since the cached IPs are up-to-date.
                 return
 
-            cluster_internal_ips = backend_utils.get_node_ips(
-                self.cluster_yaml,
-                self.launched_nodes,
-                handle=self,
-                head_ip_max_attempts=max_attempts,
-                worker_ip_max_attempts=max_attempts,
-                get_internal_ips=True)
+            is_cluster_aws = (self.launched_resources is not None and
+                              isinstance(self.launched_resources.cloud,
+                                         clouds.AWS))
+            if is_cluster_aws and skypilot_config.get_nested(
+                    keys=('aws', 'use_internal_ips'), default_value=False):
+                # Optimization: if we know use_internal_ips is True (currently
+                # only exposed for AWS), then our AWS NodeProvider is
+                # guaranteed to pick subnets that will not assign public IPs,
+                # thus the first list of IPs returned above are already private
+                # IPs. So skip the second query.
+                cluster_internal_ips = list(cluster_external_ips)
+            else:
+                cluster_internal_ips = backend_utils.get_node_ips(
+                    self.cluster_yaml,
+                    self.launched_nodes,
+                    handle=self,
+                    head_ip_max_attempts=max_attempts,
+                    worker_ip_max_attempts=max_attempts,
+                    get_internal_ips=True)
 
             assert len(cluster_external_ips) == len(cluster_internal_ips), (
                 f'Cluster {self.cluster_name!r}:'
@@ -1755,7 +1851,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
             self.stable_internal_external_ips = stable_internal_external_ips
 
         def internal_ips(self,
-                         max_attempts: int = 1,
+                         max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
                          use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
@@ -1764,7 +1860,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
             return None
 
         def external_ips(self,
-                         max_attempts: int = 1,
+                         max_attempts: int = _FETCH_IP_MAX_ATTEMPTS,
                          use_cached_ips: bool = True) -> Optional[List[str]]:
             if not use_cached_ips:
                 self._update_stable_cluster_ips(max_attempts=max_attempts)
@@ -1978,7 +2074,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                             'Failed to provision all possible launchable '
                             'resources.'
                             f' Relax the task\'s resource requirements: '
-                            f'{task.num_nodes}x {task.resources}')
+                            f'{task.num_nodes}x {list(task.resources)[0]}')
                     if retry_until_up:
                         logger.error(error_message)
                         # Sleep and retry.
@@ -2712,7 +2808,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
             # is safe to skip and return True.
             ux_utils.console_newline()
             logger.warning(
-                f'Cluster {handle.cluster_name!r} is already terminated. Skip.')
+                f'Cluster {handle.cluster_name!r} is already terminated. '
+                'Skipped.')
             return True
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -2810,11 +2907,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                 logger.warning(
                     _TEARDOWN_PURGE_WARNING.format(
                         reason='stopping/terminating cluster nodes'))
-            # This error returns when we call "gcloud delete" with an empty VM
-            # list where no instance exists. Safe to ignore it and do cleanup
-            # locally.
-            # TODO(wei-lin): refactor error handling mechanism.
-            elif 'TPU must be specified.' not in stderr:
+            # 'TPU must be specified.': This error returns when we call "gcloud
+            #   delete" with an empty VM list where no instance exists. Safe to
+            #   ignore it and do cleanup locally. TODO(wei-lin): refactor error
+            #   handling mechanism.
+            #
+            # 'SKYPILOT_ERROR_NO_NODES_LAUNCHED': this indicates nodes are
+            #   never launched and the errors are related to pre-launch
+            #   configurations (such as VPC not found). So it's safe & good UX
+            #   to not print a failure message.
+            elif ('TPU must be specified.' not in stderr and
+                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',

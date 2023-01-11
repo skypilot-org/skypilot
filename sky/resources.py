@@ -98,6 +98,29 @@ class Resources:
         self._try_validate_image_id()
 
     def __repr__(self) -> str:
+        """Returns a string representation for display.
+
+        Examples:
+
+            >>> sky.Resources(accelerators='V100')
+            <Cloud>({'V100': 1})
+
+            >>> sky.Resources(accelerators='V100', use_spot=True)
+            <Cloud>([Spot], {'V100': 1})
+
+            >>> sky.Resources(accelerators='V100',
+            ...     use_spot=True, instance_type='p3.2xlarge')
+            AWS(p3.2xlarge[Spot], {'V100': 1})
+
+            >>> sky.Resources(accelerators='V100', instance_type='p3.2xlarge')
+            AWS(p3.2xlarge, {'V100': 1})
+
+            >>> sky.Resources(instance_type='p3.2xlarge')
+            AWS(p3.2xlarge, {'V100': 1})
+
+            >>> sky.Resources(disk_size=100)
+            <Cloud>(disk_size=100)
+        """
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -123,8 +146,24 @@ class Resources:
         if self.disk_size != _DEFAULT_DISK_SIZE_GB:
             disk_size = f', disk_size={self.disk_size}'
 
-        return (f'{self.cloud}({self._instance_type}{use_spot}'
-                f'{accelerators}{accelerator_args}{image_id}{disk_size})')
+        if self._instance_type is not None:
+            instance_type = f'{self._instance_type}'
+        else:
+            instance_type = ''
+
+        hardware_str = (
+            f'{instance_type}{use_spot}'
+            f'{accelerators}{accelerator_args}{image_id}{disk_size}')
+        # It may have leading ',' (for example, instance_type not set) or empty
+        # spaces.  Remove them.
+        while hardware_str and hardware_str[0] in (',', ' '):
+            hardware_str = hardware_str[1:]
+
+        cloud_str = '<Cloud>'
+        if self.cloud is not None:
+            cloud_str = f'{self.cloud}'
+
+        return f'{cloud_str}({hardware_str})'
 
     @property
     def cloud(self):
