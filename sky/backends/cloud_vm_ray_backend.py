@@ -72,7 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching IP address.
-_FETCH_IP_MAX_ATTEMPTS = 5
+_FETCH_IP_MAX_ATTEMPTS = 3
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
