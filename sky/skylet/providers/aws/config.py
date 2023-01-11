@@ -37,7 +37,6 @@ SKYPILOT = "skypilot"
 DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + "-v1"
 DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
 
-
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
 
@@ -629,7 +628,7 @@ def _usable_subnet_ids(
                 "availability zone or try manually creating an instance in "
                 "your specified region to populate the list of subnets and "
                 "trying this again. If you have set `use_internal_ips`, check "
-                "that this zone has a subnet that (1) has the word 'private' in its name tag "
+                "that this zone has a subnet that (1) has the substring 'private' in its name tag "
                 "and (2) does not assign public IPs (`map_public_ip_on_launch` is False)."
             )
         elif _are_user_subnets_pruned(subnets):
@@ -727,15 +726,13 @@ def _configure_subnet(config):
 
 
 def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
-    """Log an error message then sys.exit(1) to trigger failover.
+    """Logs an message then raises a specific RuntimeError to trigger failover.
 
-    This is mainly used for handling VPC/subnet errors before nodes are launched.
+    Mainly used for handling VPC/subnet errors before nodes are launched.
     """
     # NOTE: keep. The backend looks for this to know no nodes are launched.
     prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
-    logger.error(prefix + error)
-    # Raising would exit the caller, while exit triggers SkyPilot failover.
-    sys.exit(1)
+    raise RuntimeError(prefix + error)
 
 
 def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
