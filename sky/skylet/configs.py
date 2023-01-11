@@ -27,7 +27,7 @@ def _safe_cursor():
 
 def ensure_table(func: callable):
     """Ensure the table exists before calling the function.
-    
+
     Since this module will be imported whenever `sky` is imported (due to
     Python's package importing logic), we should avoid creating the table
     until it's actually needed to avoid too many concurrent commit to the
