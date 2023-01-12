@@ -262,9 +262,7 @@ def _get_autostop(cluster_status):
 
 
 def _get_price(cluster_status):
-    handle = cluster_status['handle']
-    hourly_cost = (handle.launched_resources.get_cost(3600) *
-                   handle.launched_nodes)
+    hourly_cost = cluster_status['handle'].get_hourly_price()
     price_str = f'$ {hourly_cost:.3f}'
     return price_str
 

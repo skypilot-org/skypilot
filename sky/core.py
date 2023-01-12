@@ -641,7 +641,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
+def spot_queue(refresh: bool,
+               skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
@@ -704,6 +705,8 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
         raise RuntimeError(e.error_msg) from e
 
     jobs = spot.load_spot_job_queue(job_table_payload)
+    if skip_finished:
+        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
     return jobs
 
 

@@ -1868,6 +1868,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayBackend.ResourceHandle']):
                 return [ips[1] for ips in self.stable_internal_external_ips]
             return None
 
+        def get_hourly_price(self) -> float:
+            hourly_cost = (self.launched_resources.get_cost(3600) *
+                           self.launched_nodes)
+            return hourly_cost
+
         @property
         def cluster_yaml(self):
             return os.path.expanduser(self._cluster_yaml)
