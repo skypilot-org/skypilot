@@ -843,7 +843,7 @@ class RetryingVmProvisioner(object):
                 'Cloud {cloud} unknown, or has not added '
                 'support for parsing and handling provision failures.')
         handler = handlers[cloud_type]
-        handler(region, zones, stdout, stderr)
+        handler(launchable_resources, region, zones, stdout, stderr)
 
         stdout_splits = stdout.split('\n')
         stderr_splits = stderr.split('\n')
