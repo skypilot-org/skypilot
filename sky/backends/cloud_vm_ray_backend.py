@@ -1225,7 +1225,7 @@ class RetryingVmProvisioner(object):
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
             # If these conditions hold, it *should* be safe to skip the cleanup
-            # action.
+            # action. This is a UX optimization.
             #
             # We want to skip mainly for VPC/subnets errors thrown during node
             # provider bootstrapping: if users encountered "No VPC with name
