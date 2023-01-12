@@ -3,7 +3,6 @@ import itertools
 import json
 import logging
 import os
-import sys
 import time
 from distutils.version import StrictVersion
 from functools import lru_cache, partial
@@ -36,7 +35,6 @@ SECURITY_GROUP_TEMPLATE = RAY + "-{}"
 SKYPILOT = "skypilot"
 DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + "-v1"
 DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
-
 
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
@@ -286,7 +284,9 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
             # SkyPilot: let the workers use the same role as the head node, so that they
             # can access private S3 buckets.
             for node_type in config["available_node_types"].values():
-                node_type["node_config"]["IamInstanceProfile"] = head_node_config['IamInstanceProfile']
+                node_type["node_config"]["IamInstanceProfile"] = head_node_config[
+                    "IamInstanceProfile"
+                ]
         return config
     _set_config_info(head_instance_profile_src="default")
 
@@ -337,7 +337,6 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
                     "arn:aws:iam::aws:policy/AmazonS3FullAccess",
                 ],
             )
-            
 
             iam.create_role(
                 RoleName=role_name, AssumeRolePolicyDocument=json.dumps(policy_doc)
@@ -369,10 +368,10 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
                         "Effect": "Allow",
                         "Action": "iam:GetInstanceProfile",
                         "Resource": profile.arn,
-                    }
+                    },
                 ]
             }
-            if skypilot_iam_role:       
+            if skypilot_iam_role:
                 role.Policy("SkyPilotPassRolePolicy").put(
                     PolicyDocument=json.dumps(skypilot_pass_role_policy_doc)
                 )
@@ -456,7 +455,7 @@ def _configure_key_pair(config):
             break
 
     if not key:
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             "No matching local key file for any of the key pairs in this "
             "account with ids from 0..{}. "
             "Consider deleting some unused keys pairs from your account.",
@@ -599,16 +598,16 @@ def _usable_subnet_ids(
         raise exc
 
     if not subnets:
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             f"No usable subnets found for node type {node_type_key}, try "
             "manually creating an instance in your specified region to "
-            "populate the list of subnets and trying this again.\n"
+            "populate the list of subnets and trying this again. "
             "Note that the subnet must map public IPs "
             "on instance launch unless you set `use_internal_ips: true` in "
             "the `provider` config."
         )
     elif _are_user_subnets_pruned(subnets):
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             f"The specified subnets for node type {node_type_key} are not "
             f"usable: {_get_pruned_subnets(subnets)}"
         )
@@ -622,18 +621,20 @@ def _usable_subnet_ids(
             if s.availability_zone == az
         ]
         if not subnets:
-            cli_logger.abort(
+            _skypilot_log_error_and_exit_for_failover(
                 f"No usable subnets matching availability zone {azs} found "
-                f"for node type {node_type_key}.\nChoose a different "
+                f"for node type {node_type_key}. Choose a different "
                 "availability zone or try manually creating an instance in "
                 "your specified region to populate the list of subnets and "
-                "trying this again."
+                "trying this again. If you have set `use_internal_ips`, check "
+                "that this zone has a subnet that (1) has the substring 'private' in its name tag "
+                "and (2) does not assign public IPs (`map_public_ip_on_launch` is False)."
             )
         elif _are_user_subnets_pruned(subnets):
-            cli_logger.abort(
+            _skypilot_log_error_and_exit_for_failover(
                 f"MISMATCH between specified subnets and Availability Zones! "
                 "The following Availability Zones were specified in the "
-                f"`provider section`: {azs}.\n The following subnets for node "
+                f"`provider section`: {azs}. The following subnets for node "
                 f"type `{node_type_key}` have no matching availability zone: "
                 f"{list(_get_pruned_subnets(subnets))}."
             )
@@ -647,11 +648,10 @@ def _usable_subnet_ids(
     subnets = [s.subnet_id for s in subnets if s.vpc_id == subnets[0].vpc_id]
     if _are_user_subnets_pruned(subnets):
         subnet_vpcs = {s.subnet_id: s.vpc_id for s in user_specified_subnets}
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             f"Subnets specified in more than one VPC for node type `{node_type_key}`! "
             f"Please ensure that all subnets share the same VPC and retry your "
-            "request. Subnet VPCs: {}",
-            subnet_vpcs,
+            f"request. Subnet VPCs: {subnet_vpcs}"
         )
     return subnets, first_subnet_vpc_id
 
@@ -724,6 +724,16 @@ def _configure_subnet(config):
     return config
 
 
+def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
+    """Logs an message then raises a specific RuntimeError to trigger failover.
+
+    Mainly used for handling VPC/subnet errors before nodes are launched.
+    """
+    # NOTE: keep. The backend looks for this to know no nodes are launched.
+    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
+    raise RuntimeError(prefix + error)
+
+
 def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
     """Returns the VPC ID of the unique VPC with a given name.
 
@@ -736,22 +746,18 @@ def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
     filters = [{"Name": "tag:Name", "Values": [vpc_name]}]
     vpcs = [vpc for vpc in ec2.vpcs.filter(Filters=filters)]
     if not vpcs:
-        logger.error(
-            f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: No VPC with name {vpc_name!r} is found "
+        _skypilot_log_error_and_exit_for_failover(
+            f"No VPC with name {vpc_name!r} is found "
             f'in {config["provider"]["region"]}. '
             "To fix: specify a correct VPC name."
         )
-        # Raising would exit the caller, while exit triggers SkyPilot failover.
-        sys.exit(1)
     elif len(vpcs) > 1:
-        logger.error(
-            f"SKYPILOT_ERROR_NO_NODES_LAUNCHED: Multiple VPCs with name {vpc_name!r} "
+        _skypilot_log_error_and_exit_for_failover(
+            f"Multiple VPCs with name {vpc_name!r} "
             f'found in {config["provider"]["region"]}: {vpcs}. '
             "It is ambiguous as to which VPC to use. To fix: specify a "
             "VPC name that is uniquely identifying."
         )
-        # Raising would exit the caller, while exit triggers SkyPilot failover.
-        sys.exit(1)
     assert len(vpcs) == 1, vpcs
     return vpcs[0].id
 
@@ -838,7 +844,7 @@ def _check_ami(config):
         node_ami = node_config.get("ImageId", "").lower()
         if node_ami in ["", "latest_dlami"]:
             if not default_ami:
-                cli_logger.abort(
+                _skypilot_log_error_and_exit_for_failover(
                     f"Node type `{key}` has no ImageId in its node_config "
                     f"and no default AMI is available for the region `{region}`. "
                     "ImageId will need to be set manually in your cluster config."

@@ -76,5 +76,5 @@ def canonicalize_accelerator_name(accelerator: str) -> str:
     # different names (e.g., A10g and A10G).
     assert len(names) > 1
     with ux_utils.print_exception_no_traceback():
-        raise ValueError(f'Accelerator name {accelerator} is ambiguous. '
+        raise ValueError(f'Accelerator name {accelerator!r} is ambiguous. '
                          f'Please choose one of {names}.')
