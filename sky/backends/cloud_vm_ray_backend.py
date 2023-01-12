@@ -773,7 +773,7 @@ class RetryingVmProvisioner(object):
                 resources_lib.Resources(cloud=clouds.Azure()))
         else:
             self._blocked_launchable_resources.add(
-                    launchable_resources.copy(zone=None))
+                launchable_resources.copy(zone=None))
 
     def _update_blocklist_on_local_error(
             self, launchable_resources: 'resources_lib.Resources', region,
