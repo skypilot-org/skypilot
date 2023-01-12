@@ -1227,11 +1227,12 @@ class RetryingVmProvisioner(object):
             # If these conditions hold, it *should* be safe to skip the cleanup
             # action.
             #
-            # We want to skip mainly for custom VPC: if users encountered "No
-            # VPC with name 'xxx' is found in <region>.", then going ahead to
-            # down the non-existent cluster will itself error out with the same
-            # error message.  This was found to be confusing. In that case we
-            # skip termination.
+            # We want to skip mainly for VPC/subnets errors thrown during node
+            # provider bootstrapping: if users encountered "No VPC with name
+            # 'xxx' is found in <region>.", then going ahead to down the
+            # non-existent cluster will itself print out a (caught, harmless)
+            # error with the same message.  This was found to be
+            # confusing. Thus we skip termination.
             skip_cleanup = not cluster_exists and definitely_no_nodes_launched
             if skip_cleanup:
                 continue

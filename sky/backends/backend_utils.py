@@ -1603,7 +1603,8 @@ def _ray_launch_hash(cluster_name: str,
         # TODO(zongheng): is this safe? Could it be node(s) are live but somehow a
         # separate status refresh hits such errors?
         if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
-            logger.error(e)
+            logger.error('Error found when refreshing cluster status: ' +
+                         str(e))
             return None
         raise e
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
