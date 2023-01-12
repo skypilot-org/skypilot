@@ -2288,11 +2288,11 @@ def _down_or_stop_clusters(
                     core.down(name, purge=purge)
                 else:
                     core.stop(name, purge=purge)
-            except RuntimeError:
+            except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    'Please check the logs and try again.'
-                    f'{colorama.Style.RESET_ALL}')
+                    f'{colorama.Style.RESET_ALL}'
+                    f'\n\tReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
