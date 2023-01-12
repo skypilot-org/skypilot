@@ -574,7 +574,7 @@ class RetryingVmProvisioner(object):
     def __init__(self, log_dir: str, dag: 'dag.Dag',
                  optimize_target: OptimizeTarget,
                  local_wheel_path: pathlib.Path, wheel_hash: str):
-        self._blocked_launchable_resources = set()
+        self._blocked_resources = set()
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
@@ -623,12 +623,12 @@ class RetryingVmProvisioner(object):
                         # This skip is only correct if we implement "first
                         # retry the region/zone of an existing cluster with the
                         # same name" correctly.
-                        self._blocked_launchable_resources.add(
+                        self._blocked_resources.add(
                             launchable_resources.copy(region=None, zone=None))
                     else:
                         # Per region.  Ex: Quota 'CPUS' exceeded.  Limit: 24.0
                         # in region us-west1.
-                        self._blocked_launchable_resources.add(
+                        self._blocked_resources.add(
                             launchable_resources.copy(zone=None))
                 elif code in [
                         'ZONE_RESOURCE_POOL_EXHAUSTED',
@@ -639,17 +639,17 @@ class RetryingVmProvisioner(object):
                     # However, UNSUPPORTED_OPERATION is observed empirically
                     # when VM is preempted during creation.  This seems to be
                     # not documented by GCP.
-                    self._blocked_launchable_resources.add(
+                    self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
                 elif code in ['RESOURCE_NOT_READY']:
                     # This code is returned when the VM is still STOPPING.
-                    self._blocked_launchable_resources.add(
+                    self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
                 elif code == 8:
                     # Error code 8 means TPU resources is out of
                     # capacity. Example:
                     # {'code': 8, 'message': 'There is no more capacity in the zone "europe-west4-a"; you can try in another zone where Cloud TPU Nodes are offered (see https://cloud.google.com/tpu/docs/regions) [EID: 0x1bc8f9d790be9142]'} # pylint: disable=line-too-long
-                    self._blocked_launchable_resources.add(
+                    self._blocked_resources.add(
                         launchable_resources.copy(zone=zone.name))
                 else:
                     assert False, error
@@ -658,14 +658,14 @@ class RetryingVmProvisioner(object):
             if ('Requested disk size cannot be smaller than the image size'
                     in httperror_str[0]):
                 logger.info('Skipping all regions due to disk size issue.')
-                self._blocked_launchable_resources.add(
+                self._blocked_resources.add(
                     launchable_resources.copy(region=None, zone=None))
             else:
                 # Parse HttpError for unauthorized regions. Example:
                 # googleapiclient.errors.HttpError: <HttpError 403 when requesting ... returned "Location us-east1-d is not found or access is unauthorized.". # pylint: disable=line-too-long
                 # Details: "Location us-east1-d is not found or access is
                 # unauthorized.">
-                self._blocked_launchable_resources.add(
+                self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
         else:
             # No such structured error response found.
@@ -675,7 +675,7 @@ class RetryingVmProvisioner(object):
                 # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
                 # was not found.
                 logger.warning(f'Got \'resource not found\' in {zone.name}.')
-                self._blocked_launchable_resources.add(
+                self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
             else:
                 logger.info('====== stdout ======')
@@ -737,7 +737,7 @@ class RetryingVmProvisioner(object):
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         for zone in zones:
-            self._blocked_launchable_resources.add(
+            self._blocked_resources.add(
                 launchable_resources.copy(zone=zone.name))
 
     def _update_blocklist_on_azure_error(
@@ -769,11 +769,10 @@ class RetryingVmProvisioner(object):
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         if any('(ReadOnlyDisabledSubscription)' in s for s in errors):
-            self._blocked_launchable_resources.add(
+            self._blocked_resources.add(
                 resources_lib.Resources(cloud=clouds.Azure()))
         else:
-            self._blocked_launchable_resources.add(
-                launchable_resources.copy(zone=None))
+            self._blocked_resources.add(launchable_resources.copy(zone=None))
 
     def _update_blocklist_on_local_error(
             self, launchable_resources: 'resources_lib.Resources', region,
@@ -801,8 +800,8 @@ class RetryingVmProvisioner(object):
         logger.warning('Got error(s) on local cluster:')
         messages = '\n\t'.join(errors)
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-        self._blocked_launchable_resources.add(
-            launchable_resources.copy(region=region.name))
+        self._blocked_resources.add(
+            launchable_resources.copy(region=region.name, zone=None))
 
     def _update_blocklist_on_error(
             self, launchable_resources: 'resources_lib.Resources', region,
@@ -825,7 +824,7 @@ class RetryingVmProvisioner(object):
             # workers' provisioning failed).  Simply block the zones.
             assert stderr is None, stderr
             for zone in zones:
-                self._blocked_launchable_resources.add(
+                self._blocked_resources.add(
                     launchable_resources.copy(zone=zone.name))
             return False  # definitely_no_nodes_launched
 
@@ -1649,7 +1648,7 @@ class RetryingVmProvisioner(object):
             if not cluster_exists:
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
-                self._blocked_launchable_resources.add(to_provision)
+                self._blocked_resources.add(to_provision)
             else:
                 logger.info('Retrying provisioning with requested resources '
                             f'{task.num_nodes}x {task.resources}')
@@ -1665,10 +1664,9 @@ class RetryingVmProvisioner(object):
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
-            self._dag = sky.optimize(
-                self._dag,
-                minimize=self._optimize_target,
-                blocked_launchable_resources=self._blocked_launchable_resources)
+            self._dag = sky.optimize(self._dag,
+                                     minimize=self._optimize_target,
+                                     blocked_resources=self._blocked_resources)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
