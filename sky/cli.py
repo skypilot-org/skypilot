@@ -1618,23 +1618,23 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             f'{bold}sky queue{reset}.')
     try:
         core.cancel(cluster, all, jobs)
-    except ValueError as e:
-        if 'Cancelling jobs is not allowed' in str(e):
-            # Friendly message for usage like 'sky cancel <spot controller>
-            # -a/<job id>'.
-            if all:
-                arg_str = '--all'
-            else:
-                arg_str = ' '.join(map(str, jobs))
-            error_str = (
-                'Cancelling the spot controller\'s jobs is not allowed.'
-                f'\nTo cancel spot jobs, use: {bold}sky spot cancel <spot '
-                f'job IDs> [--all]{reset}'
-                f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+    except exceptions.NotSupportedError:
+        # Friendly message for usage like 'sky cancel <spot controller> -a/<job
+        # id>'.
+        if all:
+            arg_str = '--all'
         else:
-            error_str = str(e)
-        raise click.UsageError(error_str)
-    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+            arg_str = ' '.join(map(str, jobs))
+        error_str = (
+            'Cancelling the spot controller\'s jobs is not allowed.'
+            f'\nTo cancel spot jobs, use: sky spot cancel <spot '
+            f'job IDs> [--all]'
+            f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        click.echo(error_str)
+        sys.exit(1)
+    except ValueError as e:
+        raise click.UsageError(str(e))
+    except exceptions.ClusterNotUpError as e:
         click.echo(str(e))
         sys.exit(1)
 

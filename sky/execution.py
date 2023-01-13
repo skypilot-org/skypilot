@@ -427,6 +427,8 @@ def exec(  # pylint: disable=redefined-builtin
     Raises:
         ValueError: if the specified cluster does not exist or is not in UP
             status.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+            reserved cluster that does not support this operation.
     """
     entrypoint = task
     if isinstance(entrypoint, sky.Dag):
