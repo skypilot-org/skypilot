@@ -44,7 +44,7 @@ class SpotController:
         #   Example value: sky-2022-10-04-22-46-52-467694_id-17
         task_envs = self._task.envs or {}
         job_id_env_var = common_utils.get_global_job_id(
-            self._backend.run_timestamp, 'spot', self._job_id)
+            self._backend.run_timestamp, 'spot', str(self._job_id))
         task_envs[constants.JOB_ID_ENV_VAR] = job_id_env_var
         self._task.set_envs(task_envs)
 
@@ -179,7 +179,7 @@ class SpotController:
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
             logger.error('Unexpected error occurred: '
-                         f'{common_utils.class_fullname(e.__class__)}: {e}')
+                         f'{common_utils.format_exception(e)}')
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)

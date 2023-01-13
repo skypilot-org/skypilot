@@ -7,6 +7,8 @@ import sqlite3
 import time
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import sky_logging
 from sky.backends import backend_utils
 
@@ -68,14 +70,34 @@ class SpotStatus(enum.Enum):
     def is_failed(self) -> bool:
         return self in self.failure_statuses()
 
+    def colored_str(self):
+        color = _SPOT_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
-        return (cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
-                cls.FAILED_CONTROLLER, cls.CANCELLED)
+        return [
+            cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER, cls.CANCELLED
+        ]
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
-        return (cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER)
+        return [cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER]
+
+
+_SPOT_STATUS_TO_COLOR = {
+    SpotStatus.PENDING: colorama.Fore.BLUE,
+    SpotStatus.SUBMITTED: colorama.Fore.BLUE,
+    SpotStatus.STARTING: colorama.Fore.BLUE,
+    SpotStatus.RUNNING: colorama.Fore.GREEN,
+    SpotStatus.RECOVERING: colorama.Fore.CYAN,
+    SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
+    SpotStatus.FAILED: colorama.Fore.RED,
+    SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
+    SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
+    SpotStatus.CANCELLED: colorama.Fore.YELLOW,
+}
 
 
 # === Status transition functions ===
@@ -265,3 +287,4 @@ def get_latest_job_id() -> Optional[int]:
         SELECT job_id FROM spot ORDER BY submitted_at DESC LIMIT 1""")
     for (job_id,) in rows:
         return job_id
+    return None

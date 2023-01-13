@@ -2,7 +2,7 @@
 import colorama
 import getpass
 import sys
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from sky import dag
 from sky import task
@@ -30,7 +30,8 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def status(refresh: bool = False) -> List[Dict[str, Any]]:
+def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
+           refresh: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster statuses.
 
@@ -86,16 +87,19 @@ def status(refresh: bool = False) -> List[Dict[str, Any]]:
       latest cluster statuses from the cloud providers.
 
     Args:
+        cluster_names: a list of cluster names to query. If not
+            provided, all clusters will be queried.
         refresh: whether to query the latest cluster statuses from the cloud
             provider(s).
 
     Returns:
         A list of dicts, with each dict containing the information of a
-        cluster.
+        cluster. If a cluster is found to be terminated or not found, it will
+        be omitted from the returned list.
     """
-    cluster_records = backend_utils.get_clusters(include_reserved=True,
-                                                 refresh=refresh)
-    return cluster_records
+    return backend_utils.get_clusters(include_reserved=True,
+                                      refresh=refresh,
+                                      cluster_names=cluster_names)
 
 
 def _start(
@@ -629,7 +633,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
+def spot_queue(refresh: bool,
+               skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
@@ -692,6 +697,8 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
         raise RuntimeError(e.error_msg) from e
 
     jobs = spot.load_spot_job_queue(job_table_payload)
+    if skip_finished:
+        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
     return jobs
 
 

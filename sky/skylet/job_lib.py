@@ -10,6 +10,7 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
 import filelock
 
 from sky import sky_logging
@@ -73,6 +74,7 @@ _CONN = _DB.conn
 
 class JobStatus(enum.Enum):
     """Job status"""
+
     # 3 in-flux states: each can transition to any state below it.
     # The `job_id` has been generated, but the generated ray program has
     # not started yet. skylet can transit the state from INIT to FAILED
@@ -114,6 +116,21 @@ class JobStatus(enum.Enum):
     def __lt__(self, other):
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
+    def colored_str(self):
+        color = _JOB_STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_JOB_STATUS_TO_COLOR = {
+    JobStatus.INIT: colorama.Fore.BLUE,
+    JobStatus.SETTING_UP: colorama.Fore.BLUE,
+    JobStatus.PENDING: colorama.Fore.BLUE,
+    JobStatus.RUNNING: colorama.Fore.GREEN,
+    JobStatus.SUCCEEDED: colorama.Fore.GREEN,
+    JobStatus.FAILED: colorama.Fore.RED,
+    JobStatus.FAILED_SETUP: colorama.Fore.RED,
+    JobStatus.CANCELLED: colorama.Fore.YELLOW,
+}
 
 _RAY_TO_JOB_STATUS_MAP = {
     # These are intentionally set to one status before, because:
@@ -488,7 +505,7 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
                                              job['end_at'],
                                              absolute=True),
             job['resources'],
-            job['status'].value,
+            job['status'].colored_str(),
             job['log_path'],
         ])
     return job_table

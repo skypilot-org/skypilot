@@ -15,6 +15,8 @@ import time
 import typing
 from typing import Any, Dict, List, Optional
 
+import colorama
+
 from sky import clouds
 from sky.utils import db_utils
 from sky.utils import common_utils
@@ -32,7 +34,11 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
-    conn.execute('PRAGMA journal_mode=WAL')
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if not common_utils.is_wsl():
+        cursor.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (
@@ -90,6 +96,17 @@ class ClusterStatus(enum.Enum):
 
     # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
+
+    def colored_str(self):
+        color = _STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_STATUS_TO_COLOR = {
+    ClusterStatus.INIT: colorama.Fore.BLUE,
+    ClusterStatus.UP: colorama.Fore.GREEN,
+    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
+}
 
 
 class StorageStatus(enum.Enum):

@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
+from sky import sky_logging
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.utils import common_utils
@@ -15,6 +16,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import resources
 
+logger = sky_logging.init_logger(__name__)
+
 # Minimum set of files under ~/.azure that grant Azure access.
 _CREDENTIAL_FILES = [
     'azureProfile.json',
@@ -22,6 +25,8 @@ _CREDENTIAL_FILES = [
     'config',
     'msal_token_cache.json',
 ]
+
+_MAX_IDENTITY_FETCH_RETRY = 10
 
 
 def _run_output(cmd):
@@ -40,13 +45,23 @@ class Azure(clouds.Cloud):
     _REPR = 'Azure'
     _regions: List[clouds.Region] = []
 
-    def instance_type_to_hourly_cost(self, instance_type, use_spot):
+    def instance_type_to_hourly_cost(self,
+                                     instance_type: str,
+                                     use_spot: bool,
+                                     region: Optional[str] = None,
+                                     zone: Optional[str] = None) -> float:
         return service_catalog.get_hourly_cost(instance_type,
-                                               region=None,
                                                use_spot=use_spot,
+                                               region=region,
+                                               zone=zone,
                                                clouds='azure')
 
-    def accelerators_to_hourly_cost(self, accelerators, use_spot):
+    def accelerators_to_hourly_cost(self,
+                                    accelerators: Dict[str, int],
+                                    use_spot: bool,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> float:
+        del accelerators, use_spot, region, zone  # unused
         # Azure includes accelerators as part of the instance type.
         # Implementing this is also necessary for e.g., the instance may have 4
         # GPUs, while the task specifies to use 1 GPU.
@@ -136,21 +151,39 @@ class Azure(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        del accelerators  # unused
+        if instance_type is None:
+            # Fall back to default regions
+            regions = cls.regions()
+        else:
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'azure')
+
+        if region is not None:
+            regions = [r for r in regions if r.name == region]
+        if zone is not None:
+            for r in regions:
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
+        return regions
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del accelerators  # unused
-
-        if instance_type is None:
-            # fallback to manually specified region/zones
-            regions = cls.regions()
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, clouds='azure')
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=None,
+                                            zone=None)
         for region in regions:
             yield region, region.zones
 
@@ -169,7 +202,7 @@ class Azure(clouds.Cloud):
     def get_vcpus_from_instance_type(
         cls,
         instance_type: str,
-    ) -> float:
+    ) -> Optional[float]:
         return service_catalog.get_vcpus_from_instance_type(instance_type,
                                                             clouds='azure')
 
@@ -180,15 +213,13 @@ class Azure(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         if region is None:
             assert zones is None, (
                 'Set either both or neither for: region, zones.')
             region = self._get_default_region()
 
         region_name = region.name
-        # Azure does not support specific zones.
-        zones = []
 
         r = resources
         assert not r.use_spot, \
@@ -208,7 +239,8 @@ class Azure(clouds.Cloud):
             'custom_resources': custom_resources,
             'use_spot': r.use_spot,
             'region': region_name,
-            'zones': zones,
+            # Azure does not support specific zones.
+            'zones': None,
             **image_config
         }
 
@@ -246,9 +278,13 @@ class Azure(clouds.Cloud):
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
-        ) = service_catalog.get_instance_type_for_accelerator(acc,
-                                                              acc_count,
-                                                              clouds='azure')
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            use_spot=resources.use_spot,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='azure')
         if instance_list is None:
             return ([], fuzzy_candidate_list)
         return (_make(instance_list), fuzzy_candidate_list)
@@ -275,11 +311,8 @@ class Azure(clouds.Cloud):
         except subprocess.CalledProcessError:
             return False, (
                 # TODO(zhwu): Change the installation hint to from PyPI.
-                'Azure CLI returned error. Run the following commands in the SkyPilot codebase:'
-                '\n      $ pip install skypilot[azure]  # if installed from '
-                'PyPI'
-                '\n    Or:'
-                '\n      $ pip install .[azure]  # if installed from source'
+                'Azure CLI returned error. Run the following commands:'
+                '\n      $ pip install skypilot[azure]'
                 '\n    Credentials may also need to be set.' + help_str)
         # If Azure is properly logged in, this will return the account email
         # address + subscription ID.
@@ -311,21 +344,38 @@ class Azure(clouds.Cloud):
     def get_current_user_identity(self) -> Optional[str]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].
+        retry_cnt = 0
+        while True:
+            retry_cnt += 1
+            try:
+                import knack  # pylint: disable=import-outside-toplevel
+                account_email = azure.get_current_account_user()
+                break
+            except (FileNotFoundError, knack.util.CLIError) as e:
+                error = exceptions.CloudUserIdentityError(
+                    'Failed to get activated Azure account.\n'
+                    '  Reason: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
+                if retry_cnt <= _MAX_IDENTITY_FETCH_RETRY:
+                    logger.debug(f'{error}.\nRetrying...')
+                    continue
+                with ux_utils.print_exception_no_traceback():
+                    raise error from None
+            except Exception as e:  # pylint: disable=broad-except
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.CloudUserIdentityError(
+                        'Failed to get Azure user identity with unknown '
+                        f'exception.\n'
+                        '  Reason: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}'
+                    ) from e
         try:
-            import knack  # pylint: disable=import-outside-toplevel
-            account_email = azure.get_current_account_user()
-        except (FileNotFoundError, knack.util.CLIError):
+            project_id = self.get_project_id()
+        except (ModuleNotFoundError, RuntimeError) as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.CloudUserIdentityError(
-                    'Failed to get activated Azure account.') from None
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.CloudUserIdentityError(
-                    'Failed to get Azure user identity with unknown '
-                    f'exception.\n'
-                    f'  Reason: [{common_utils.class_fullname(e.__class__)}] '
-                    f'{e}') from e
-        return f'{account_email} [subscription_id={self.get_project_id()}]'
+                    'Failed to get Azure project ID.') from e
+        return f'{account_email} [subscription_id={project_id}]'
 
     @classmethod
     def get_project_id(cls, dryrun: bool = False) -> str:

@@ -1558,8 +1558,8 @@ def logs(
 
     if len(job_ids) > 1 and not sync_down:
         raise click.UsageError(
-            f'Cannot stream logs of multiple jobs {job_ids}. '
-            'Set --sync-down to download them.')
+            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
+            '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
 
@@ -1602,20 +1602,39 @@ def logs(
               is_flag=True,
               required=False,
               help='Cancel all jobs on the specified cluster.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
     bold = colorama.Style.BRIGHT
     reset = colorama.Style.RESET_ALL
     if not jobs and not all:
-        # Friendly message for usage like 'sky cancel 1'.
+        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
         raise click.UsageError(
             f'Use {bold}sky cancel <cluster> <job ID>{reset} '
             f'or {bold}sky cancel <cluster> --all{reset} to cancel one '
             'or all jobs on a cluster. Job IDs can be looked up by '
             f'{bold}sky queue{reset}.')
+
+    if not yes:
+        job_ids = ' '.join(map(str, jobs))
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = f'job{plural} with ID{plural} {job_ids}'
+        if all:
+            job_identity_str = 'all managed spot jobs'
+        job_identity_str += f' on {cluster}'
+        click.confirm(f'Cancelling {job_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
+
     try:
         core.cancel(cluster, all, jobs)
     except exceptions.NotSupportedError:
@@ -1625,11 +1644,10 @@ def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefin
             arg_str = '--all'
         else:
             arg_str = ' '.join(map(str, jobs))
-        error_str = (
-            'Cancelling the spot controller\'s jobs is not allowed.'
-            f'\nTo cancel spot jobs, use: sky spot cancel <spot '
-            f'job IDs> [--all]'
-            f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
+                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
+                     f'job IDs> [--all]'
+                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
         click.echo(error_str)
         sys.exit(1)
     except ValueError as e:
@@ -2208,11 +2226,12 @@ def _down_or_stop_clusters(
                 assert len(reserved_clusters) == 1, reserved_clusters
                 _hint_for_down_spot_controller(reserved_clusters[0])
 
-                click.confirm('Proceed?',
-                              default=False,
-                              abort=True,
-                              show_default=True)
-                no_confirm = True
+                if not no_confirm:
+                    click.confirm('Proceed?',
+                                  default=False,
+                                  abort=True,
+                                  show_default=True)
+                    no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
@@ -2962,9 +2981,15 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@click.option('--skip-finished',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_queue(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2995,7 +3020,8 @@ def spot_queue(all: bool, refresh: bool):
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
     try:
-        job_table = core.spot_queue(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh,
+                                    skip_finished=skip_finished)
     except exceptions.ClusterNotUpError:
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
