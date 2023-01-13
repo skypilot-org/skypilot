@@ -1,7 +1,7 @@
 resources:
   cloud: gcp
   image_id: 
-    us-central1: skypilot:cpu-debian-10 
+    us-central1: skypilot:cpu-debian-10
     us-east2: projects/centos-cloud/global/images/centos-7-v20221206
 
 

@@ -85,9 +85,13 @@ class Resources:
 
         self._image_id = image_id
         if isinstance(image_id, str):
-            self._image_id = {self._region: image_id}
-        elif isinstance(image_id, dict) and None in image_id:
-            self._image_id = {self._region: image_id[None]}
+            self._image_id = {self._region: image_id.strip()}
+        elif isinstance(image_id, dict):
+            image_id = {k.strip(): v.strip() for k, v in image_id.items()}
+            if None in image_id:
+                self._image_id = {self._region: image_id[None]}
+            else:
+                self._image_id = image_id
 
         self._set_accelerators(accelerators, accelerator_args)
 
