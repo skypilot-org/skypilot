@@ -1099,11 +1099,12 @@ class RetryingVmProvisioner(object):
             for zone in zones:
                 for blocked_resources in self._blocked_resources:
                     if to_provision.copy(region=region.name,
-                                         zone=zone.name).should_be_blocked_by(
-                                             blocked_resources):
+                                        zone=zone.name).should_be_blocked_by(
+                                            blocked_resources):
                         filtered_zones.remove(zone)
                         break
-            if not filtered_zones:
+            if zones and not filtered_zones:
+                # Skip the region if all zones are blocked.
                 continue
             zones = filtered_zones
 
