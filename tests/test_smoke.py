@@ -35,10 +35,12 @@ test_id = str(uuid.uuid4())[-2:]
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
     'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
-    'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
+    'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
+    'touch ~/.ssh/id_rsa.pub'
 ]
 
 # TODO(zhwu): make the spot controller on GCP.
+
 
 class Test(NamedTuple):
     name: str
@@ -184,7 +186,7 @@ def test_gcp_region():
             f'sky launch -y -c {name} --region us-central1 --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
+            f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -231,7 +233,7 @@ def test_gcp_zone():
         'gcp_zone',
         [
             f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --zone us-central1-a tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
         ],
@@ -316,10 +318,10 @@ def test_gcp_image_id_dict():
 
 
 @pytest.mark.aws
-def test_image_id_dict_with_region():
+def test_aws_image_id_dict_region():
     name = _get_cluster_name()
     test = Test(
-        'image_id_dict_with_region',
+        'aws_image_id_dict_region',
         [
             # Use region to filter image_id dict.
             f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml && exit 1 || true',
@@ -349,10 +351,10 @@ def test_image_id_dict_with_region():
 
 
 @pytest.mark.gcp
-def test_image_id_dict_with_region():
+def test_gcp_image_id_dict_region():
     name = _get_cluster_name()
     test = Test(
-        'gcp_image_id_dict_with_region',
+        'gcp_image_id_dict_region',
         [
             # Use region to filter image_id dict.
             f'sky launch -y -c {name} --region us-east1 tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
@@ -382,10 +384,10 @@ def test_image_id_dict_with_region():
 
 
 @pytest.mark.aws
-def test_image_id_dict_with_zone():
+def test_aws_image_id_dict_zone():
     name = _get_cluster_name()
     test = Test(
-        'image_id_dict_with_zone',
+        'aws_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
             f'sky launch -y -c {name} --zone us-east-2b examples/per_region_images.yaml && exit 1 || true',
@@ -416,10 +418,10 @@ def test_image_id_dict_with_zone():
 
 
 @pytest.mark.gcp
-def test_gcp_image_id_dict_with_zone():
+def test_gcp_image_id_dict_zone():
     name = _get_cluster_name()
     test = Test(
-        'gcp_image_id_dict_with_zone',
+        'gcp_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
             f'sky launch -y -c {name} --zone us-east1-a tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
@@ -524,7 +526,7 @@ def test_gcp_stale_job_manual_restart():
     query_cmd = (f'gcloud compute instances list --filter='
                  f'\\(labels.ray-cluster-name={name}\\) '
                  f'--zones={zone} --format=value\\(name\\)')
-    stop_cmd = (f'gcloud compute instances delete --zone={zone}'
+    stop_cmd = (f'gcloud compute instances stop --zone={zone}'
                 f' --quiet $({query_cmd})')
     test = Test(
         'gcp_stale_job_manual_restart',
@@ -671,10 +673,10 @@ def test_job_queue(generic_cloud: str):
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
             f'sky queue {name} | grep {name}-2 | grep RUNNING',
             f'sky queue {name} | grep {name}-3 | grep PENDING',
-            f'sky cancel {name} 2',
+            f'sky cancel -y {name} 2',
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel {name} 3',
+            f'sky cancel -y {name} 3',
             f'sky exec {name} --gpus K80:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
@@ -700,15 +702,15 @@ def test_job_queue_multinode(generic_cloud: str):
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
             'sleep 90',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
-            f'sky cancel {name} 1',
+            f'sky cancel -y {name} 1',
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel {name} 1 2 3',
+            f'sky cancel -y {name} 1 2 3',
             f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
-            f'sky cancel {name} 4',
+            f'sky cancel -y {name} 4',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
             f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus T4:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
@@ -730,7 +732,7 @@ def test_large_job_queue(generic_cloud: str):
         [
             f'sky launch -y -c {name} --cloud {generic_cloud}',
             f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
-            f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
+            f'sky cancel -y {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 20',
             # Each job takes 0.5 CPU and the default VM has 8 CPUs, so there should be 8 / 0.5 = 16 jobs running.
             # The first 16 jobs are canceled, so there should be 75 - 32 = 43 jobs PENDING.
@@ -1021,7 +1023,7 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
             'sleep 60',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky cancel {name} 1',
+            f'sky cancel -y {name} 1',
             'sleep 60',
             # check if the python job is gone.
             f'sky exec {name} "! nvidia-smi | grep python"',
@@ -1067,7 +1069,7 @@ def test_cancel_pytorch(generic_cloud: str):
             'sleep 90',
             f'sky exec {name} "nvidia-smi | grep python"',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky cancel {name} 1',
+            f'sky cancel -y {name} 1',
             'sleep 60',
             f'sky exec {name} "(nvidia-smi | grep \'No running process\') || '
             # Ensure Xorg is the only process running.
@@ -1237,7 +1239,7 @@ def test_aws_spot_recovery_multi_node():
 def test_gcp_spot_recovery_multi_node():
     """Test managed spot recovery."""
     name = _get_cluster_name()
-    zone = 'us-central1-a'
+    zone = 'us-west2-a'
     query_cmd = (
         f'gcloud compute instances list --filter='
         f'\\(\\(labels.ray-cluster-name={name}\\) AND \\(labels.ray-node-type=worker\\)\\) '
@@ -1247,7 +1249,7 @@ def test_gcp_spot_recovery_multi_node():
     test = Test(
         'gcp_spot_recovery_multi_node',
         [
-            f'sky spot launch --cloud aws --zone {zone} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
+            f'sky spot launch --cloud gcp --zone {zone} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
@@ -1327,7 +1329,7 @@ def test_aws_spot_cancellation():
 @pytest.mark.gcp
 def test_gcp_spot_cancellation():
     name = _get_cluster_name()
-    zone = 'us-east2-b'
+    zone = 'us-east5-b'
     query_state_cmd = ('gcloud compute instances list '
                        f'--filter="(labels.ray-cluster-name={name})" '
                        '--format="value(status)"')
