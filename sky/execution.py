@@ -120,6 +120,7 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     # Internal only:
+    # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
     """Execute a entrypoint.
@@ -312,6 +313,7 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
     # Internal only:
+    # pylint: disable=invalid-name
     _is_launched_by_spot_controller: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
