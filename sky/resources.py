@@ -775,19 +775,19 @@ class Resources:
         if version is None:
             version = -1
         if version < 0:
-            cloud = state.pop('cloud')
+            cloud = state.pop('cloud', None)
             state['_cloud'] = cloud
 
-            instance_type = state.pop('instance_type')
+            instance_type = state.pop('instance_type', None)
             state['_instance_type'] = instance_type
 
-            use_spot = state.pop('use_spot')
+            use_spot = state.pop('use_spot', False)
             state['_use_spot'] = use_spot
 
-            accelerator_args = state.pop('accelerator_args')
+            accelerator_args = state.pop('accelerator_args', None)
             state['_accelerator_args'] = accelerator_args
 
-            disk_size = state.pop('disk_size')
+            disk_size = state.pop('disk_size', _DEFAULT_DISK_SIZE_GB)
             state['_disk_size'] = disk_size
 
         if version < 2:
@@ -803,12 +803,16 @@ class Resources:
             self._zone = None
 
         if version < 6:
-            accelerators = state.pop('_accelerators')
+            accelerators = state.pop('_accelerators', None)
             if accelerators is not None:
                 accelerators = {
                     accelerator_registry.canonicalize_accelerator_name(acc):
                     acc_count for acc, acc_count in accelerators.items()
                 }
             state['_accelerators'] = accelerators
+
+        image_id = state.pop('_image_id', None)
+        if isinstance(image_id, str):
+            state['_image_id'] = {state.get('_region', None): image_id}
 
         self.__dict__.update(state)
