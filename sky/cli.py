@@ -1617,19 +1617,21 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
     reset = colorama.Style.RESET_ALL
     if not jobs and not all:
         # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
-        raise click.UsageError(
-            f'Use {bold}sky cancel <cluster> <job ID>{reset} '
-            f'or {bold}sky cancel <cluster> --all{reset} to cancel one '
-            'or all jobs on a cluster. Job IDs can be looked up by '
-            f'{bold}sky queue{reset}.')
+        message = textwrap.dedent(f"""\
+          Use:
+            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
+            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
+
+          Job IDs can be looked up by {bold}sky queue{reset}.""")
+        raise click.UsageError(message)
 
     if not yes:
         job_ids = ' '.join(map(str, jobs))
         plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} with ID{plural} {job_ids}'
+        job_identity_str = f'job{plural} {job_ids}'
         if all:
-            job_identity_str = 'all managed spot jobs'
-        job_identity_str += f' on {cluster}'
+            job_identity_str = 'all jobs'
+        job_identity_str += f' on cluster {cluster!r}'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
