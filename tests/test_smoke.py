@@ -359,7 +359,7 @@ def test_gcp_image_id_dict_region():
             # Use region to filter image_id dict.
             f'sky launch -y -c {name} --region us-east1 tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --region us-east5 tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky launch -y -c {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the region.
             f'sky launch -c {name} --image-id projects/centos-cloud/global/images/centos-7-v20221206 tests/test_yamls/minimal.yaml',
             f'sky exec {name} --image-id projects/centos-cloud/global/images/centos-7-v20221206 tests/test_yamls/minimal.yaml',
@@ -367,11 +367,11 @@ def test_gcp_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-east5',  # Ensure the region is correct.
+            f'sky status --all | grep {name} | grep us-west3',  # Ensure the region is correct.
             # Ensure exec works.
-            f'sky exec {name} --region us-east5 tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky exec {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
-            f'sky exec {name} --cloud gcp --region us-east5 "ls ~"',
+            f'sky exec {name} --cloud gcp --region us-west3 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -1329,7 +1329,7 @@ def test_aws_spot_cancellation():
 @pytest.mark.gcp
 def test_gcp_spot_cancellation():
     name = _get_cluster_name()
-    zone = 'us-east5-b'
+    zone = 'us-west3-b'
     query_state_cmd = ('gcloud compute instances list '
                        f'--filter="(labels.ray-cluster-name={name})" '
                        '--format="value(status)"')
