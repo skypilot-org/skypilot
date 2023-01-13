@@ -1092,15 +1092,16 @@ class RetryingVmProvisioner(object):
             # Filter out zones that are blocked, if any.
             # This optimize the provision loop by skipping zones that are
             # indicated to be unavailable from previous provision attempts.
-            # It can happen for the provisioning on GCP, as the yield_region_zones
-            # will return zones from a region one by one, but the optimizer that
-            # does the filtering will not be involved until the next region.
+            # It can happen for the provisioning on GCP, as the
+            # yield_region_zones will return zones from a region one by one,
+            # but the optimizer that does the filtering will not be involved
+            # until the next region.
             filtered_zones = copy.deepcopy(zones)
             for zone in zones:
                 for blocked_resources in self._blocked_resources:
                     if to_provision.copy(region=region.name,
-                                        zone=zone.name).should_be_blocked_by(
-                                            blocked_resources):
+                                         zone=zone.name).should_be_blocked_by(
+                                             blocked_resources):
                         filtered_zones.remove(zone)
                         break
             if zones and not filtered_zones:
