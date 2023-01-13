@@ -8,26 +8,75 @@ import textwrap
 # to mark a test as slow and to skip by default.
 # https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 
+clouds = ['aws', 'gcp', 'azure']
+
 
 def pytest_addoption(parser):
     parser.addoption('--runslow',
                      action='store_true',
                      default=False,
                      help='run slow tests')
+    for cloud in clouds:
+        parser.addoption(f'--{cloud}',
+                         action='store_true',
+                         default=True,
+                         help=f'use {cloud.upper()} for tests')
+        parser.addoption(f'--no-{cloud}',
+                         action='store_false',
+                         dest=cloud,
+                         help=f'do not use {cloud.upper()} for tests')
+    parser.addoption('--all-clouds',
+                     action='store_true',
+                     default=False,
+                     help='use all clouds for tests')
+    parser.addoption('--generic-cloud',
+                     type=str,
+                     default='gcp',
+                     choices=clouds,
+                     help='generic cloud to use for tests')
+    parser.addoption('--generic-spot-cloud',
+                     type=str,
+                     default='gcp',
+                     choices=clouds,
+                     help='generic spot cloud to use for tests')
 
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
+    for cloud in clouds:
+        config.addinivalue_line('markers',
+                                f'{cloud}: mark test as {cloud} specific')
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption('--runslow'):
-        # --runslow given in cli: do not skip slow tests
-        return
     skip_slow = pytest.mark.skip(reason='need --runslow option to run')
+    skip_aws = pytest.mark.skip(reason='--no-aws is set, skip to run aws tests')
+    skip_gcp = pytest.mark.skip(reason='--no-gcp is set, skip to run gcp tests')
+    skip_azure = pytest.mark.skip(
+        reason='--no-azure is set, skip to run azure tests')
+
     for item in items:
-        if 'slow' in item.keywords:
+        if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_slow)
+        if 'aws' in item.keywords and not config.getoption(
+                '--aws') and not config.getoption('--all-clouds'):
+            item.add_marker(skip_aws)
+        if 'gcp' in item.keywords and not config.getoption(
+                '--gcp') and not config.getoption('--all-clouds'):
+            item.add_marker(skip_gcp)
+        if 'azure' in item.keywords and not config.getoption(
+                '--azure') and not config.getoption('--all-clouds'):
+            item.add_marker(skip_azure)
+
+
+@pytest.fixture
+def generic_cloud(request) -> str:
+    return request.config.getoption('--generic-cloud')
+
+
+@pytest.fixture
+def generic_spot_cloud(request) -> str:
+    return request.config.getoption('--generic-spot-cloud')
 
 
 def pytest_sessionstart(session):

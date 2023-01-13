@@ -1,7 +1,8 @@
 resources:
   cloud: aws
+  instance_type: g4dn.xlarge
   image_id: 
-    us-east-1: ami-0729d913a335efca7 # Ubuntu 20.04 
+    us-west-2: ami-0fe5af21074ad2a10  # Deep learning AMI with CUDA 11.6 without conda installed
     us-west-1: skypilot:gpu-ubuntu-1804
 
 
@@ -10,3 +11,4 @@ setup: |
 
 run: |
   conda env list
+  nvidia-smi

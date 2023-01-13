@@ -26,10 +26,10 @@ pip install -r requirements-dev.txt
 ### Testing
 To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 ```
-bash tests/run_smoke_tests.sh
+pytest tests/test_smoke.py
 
 # Run one of the smoke tests
-bash tests/run_smoke_tests.sh test_minimal
+pytest tests/test_smoke.py::test_minimal
 ```
 
 For profiling code, use:

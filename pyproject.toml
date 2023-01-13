@@ -16,6 +16,7 @@ env = [
     "SKYPILOT_DEBUG=1",
     "SKYPILOT_DISABLE_USAGE_COLLECTION=1"
 ]
+addopts = "-s -n 16 -q --tb=short --disable-warnings --no-aws"
 
 [tool.mypy]
 python_version = "3.8"
