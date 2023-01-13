@@ -2995,26 +2995,42 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
+    no_jobs_found_str = '  No jobs found.'
     try:
         job_table = core.spot_queue(refresh=refresh,
                                     skip_finished=skip_finished)
     except exceptions.ClusterNotUpError:
+        # TODO(mehul): respect skip_finished here?
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
+            if not cache[1].strip():
+                table_str = no_jobs_found_str
+                cached_hint = ''
+            else:
+                table_str = cache[1]
+                # Show a helpful hint at the end, if cached table is non-empty.
+                cached_hint = ('\n\nNOTE: displaying the cached job status table '
+                               f'[last updated: {readable_time}]')
             table_message = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
-                f'{cache[1]}\n')
+                f'{table_str}{cached_hint}')
         else:
             table_message = 'No cached job status table found.'
         click.echo(table_message)
         return
     job_table = spot_lib.format_job_table(job_table, all)
 
-    # Dump cache
     spot_lib.dump_job_table_cache(job_table)
-    click.echo(f'Managed spot jobs:\n{job_table}')
+
+    if not skip_finished:
+        in_progress_only_hint = ''
+    else:
+        in_progress_only_hint = ' (showing in-progress jobs only)'
+    if not job_table:
+        job_table = no_jobs_found_str
+    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{job_table}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)

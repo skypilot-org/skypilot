@@ -119,6 +119,8 @@ def _execute(
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
+    # Internal only:
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     """Execute a entrypoint.
 
@@ -167,6 +169,16 @@ def _execute(
             raise ValueError(
                 'Spot recovery is specified in the task. To launch the '
                 'managed spot job, please use: sky spot launch')
+    if task.use_spot and not _is_launched_by_spot_controller:
+        yellow = colorama.Fore.YELLOW
+        bold = colorama.Style.BRIGHT
+        reset = colorama.Style.RESET_ALL
+        logger.info(
+            f'{yellow}Launching an unmanaged spot task, which does not '
+            f'automatically recover from preemptions.{reset}\n{yellow}To get '
+            'automatic recovery, use managed spot instead: '
+            f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
+            f'{bold}sky.spot_launch(){reset}.')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -299,6 +311,8 @@ def launch(
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
+    # Internal only:
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task.
@@ -373,6 +387,7 @@ def launch(
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
+        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
     )
 
 
