@@ -595,13 +595,13 @@ def test_aws_storage_mounts():
         test_commands = [
             *storage_setup_commands,
             f'sky launch -y -c {name}-aws --cloud aws {file_path}',
-            f'sky logs {name}-aws 1 --status',  # Ensure job succeeded.
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
         ]
         test = Test(
             'aws_storage_mounts',
             test_commands,
-            f'sky down -y {name}-aws; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
@@ -621,14 +621,14 @@ def test_aws_storage_mounts():
         file_path = f.name
         test_commands = [
             *storage_setup_commands,
-            f'sky launch -y -c {name}-gcp --cloud gcp {file_path}',
-            f'sky logs {name}-gcp 1 --status',  # Ensure job succeeded.
+            f'sky launch -y -c {name} --cloud gcp {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'gsutil ls gs://{storage_name}/hello.txt',
         ]
         test = Test(
             'gcp_storage_mounts',
             test_commands,
-            f'sky down -y {name}-gcp; sky storage delete {storage_name}',
+            f'sky down -y {name}; sky storage delete {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         run_one_test(test)
