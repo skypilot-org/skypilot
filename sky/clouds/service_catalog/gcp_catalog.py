@@ -462,5 +462,5 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
 
 def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
-    del region # Unused.
+    del region  # Unused.
     return common.is_image_tag_valid_impl(_image_df, tag, None)
