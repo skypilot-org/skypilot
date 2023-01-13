@@ -38,7 +38,7 @@ assert version.StrictVersion(boto3.__version__) >= version.StrictVersion(
 logging.getLogger('botocore').setLevel(logging.WARNING)
 
 
-def bootstrap_aws(config):
+def bootstrap(config):
     # create a copy of the input config to modify
     config = copy.deepcopy(config)
 

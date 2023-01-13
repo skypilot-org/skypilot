@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html
 
 
-def _describe_instances(region: str) -> Dict:
+def describe_instances(region: str) -> Dict:
     # overhead: 658 ms ± 65.3 ms
     return utils.create_ec2_client(region).describe_instances()
 
