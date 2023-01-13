@@ -38,6 +38,7 @@ storage_setup_commands = [
     'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
 ]
 
+# TODO(zhwu): make the spot controller on GCP.
 
 class Test(NamedTuple):
     name: str
@@ -421,22 +422,22 @@ def test_gcp_image_id_dict_with_zone():
         'gcp_image_id_dict_with_zone',
         [
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --zone us-east1 tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --zone us-east1-a tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --zone us-east2 tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky launch -y -c {name} --zone us-central1-a tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the zone.
-            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
             # Fail due to image id mismatch.
-            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 tests/test_yamls/minimal.yaml && exit 1 || true',
+            f'sky exec {name} --image-id skypilot:gpu-debian-10 tests/test_yamls/minimal.yaml && exit 1 || true',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-east2',  # Ensure the zone is correct.
+            f'sky status --all | grep {name} | grep us-central1',  # Ensure the zone is correct.
             # Ensure exec works.
-            f'sky exec {name} --zone us-east2 tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky exec {name} --zone us-central1-a tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
-            f'sky exec {name} --cloud gcp --region us-east2 "ls ~"',
+            f'sky exec {name} --cloud gcp --region us-central1 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
