@@ -489,7 +489,7 @@ class Resources:
                 region_str = f' ({region})' if region else ''
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Image tag {image_id} is not valid, please make sure'
+                        f'Image tag {image_id!r} is not valid, please make sure'
                         f' the tag exists in {self._cloud}{region_str}.')
 
             if (self._cloud.is_same_cloud(clouds.AWS()) and
