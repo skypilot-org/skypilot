@@ -811,7 +811,7 @@ class Resources:
                 }
             state['_accelerators'] = accelerators
 
-        image_id = state.pop('_image_id', None)
+        image_id = state.get('_image_id', None)
         if isinstance(image_id, str):
             state['_image_id'] = {state.get('_region', None): image_id}
 
