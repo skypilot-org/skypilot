@@ -1463,7 +1463,7 @@ def test_inline_spot_env(generic_spot_cloud: str):
         [
             f'sky spot launch -n {name} -y --cloud {generic_spot_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             'sleep 20',
-            f's=$(sky spot queue) && echo "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',
     )
