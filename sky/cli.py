@@ -3000,7 +3000,9 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
         job_table = core.spot_queue(refresh=refresh,
                                     skip_finished=skip_finished)
     except exceptions.ClusterNotUpError:
-        # TODO(mehul): respect skip_finished here?
+        # TODO(mehul): handle skip_finished for the cached case. E.g., change
+        # {load,dump}_job_table_cache() to use structured data, and let
+        # format_job_table() to take skip_finished.
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])

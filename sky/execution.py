@@ -170,16 +170,6 @@ def _execute(
             raise ValueError(
                 'Spot recovery is specified in the task. To launch the '
                 'managed spot job, please use: sky spot launch')
-    if task.use_spot and not _is_launched_by_spot_controller:
-        yellow = colorama.Fore.YELLOW
-        bold = colorama.Style.BRIGHT
-        reset = colorama.Style.RESET_ALL
-        logger.info(
-            f'{yellow}Launching an unmanaged spot task, which does not '
-            f'automatically recover from preemptions.{reset}\n{yellow}To get '
-            'automatic recovery, use managed spot instead: '
-            f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
-            f'{bold}sky.spot_launch(){reset}.')
 
     cluster_exists = False
     if cluster_name is not None:
@@ -216,18 +206,31 @@ def _execute(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and Stage.OPTIMIZE in stages:
-        if task.best_resources is None:
-            # TODO: fix this for the situation where number of requested
-            # accelerators is not an integer.
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # TODO: adding this check because docker backend on a
-                # no-credential machine should not enter optimize(), which
-                # would directly error out ('No cloud is enabled...').  Fix by
-                # moving `sky check` checks out of optimize()?
-                dag = sky.optimize(dag, minimize=optimize_target)
-                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                assert task.best_resources is not None, task
+    if not cluster_exists:
+        if (Stage.PROVISION in stages and task.use_spot and
+                not _is_launched_by_spot_controller):
+            yellow = colorama.Fore.YELLOW
+            bold = colorama.Style.BRIGHT
+            reset = colorama.Style.RESET_ALL
+            logger.info(
+                f'{yellow}Launching an unmanaged spot task, which does not '
+                f'automatically recover from preemptions.{reset}\n{yellow}To '
+                'get automatic recovery, use managed spot instead: '
+                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
+                f'{bold}sky.spot_launch(){reset}.')
+
+        if Stage.OPTIMIZE in stages:
+            if task.best_resources is None:
+                # TODO: fix this for the situation where number of requested
+                # accelerators is not an integer.
+                if isinstance(backend, backends.CloudVmRayBackend):
+                    # TODO: adding this check because docker backend on a
+                    # no-credential machine should not enter optimize(), which
+                    # would directly error out ('No cloud is enabled...').  Fix
+                    # by moving `sky check` checks out of optimize()?
+                    dag = sky.optimize(dag, minimize=optimize_target)
+                    task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                    assert task.best_resources is not None, task
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
