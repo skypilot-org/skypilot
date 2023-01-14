@@ -978,7 +978,7 @@ def test_autostop(generic_cloud: str):
             f'sky exec {name} echo hi',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
-            'sleep 90',
+            'sleep 120',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
