@@ -2,7 +2,7 @@ resources:
   cloud: gcp
   image_id: 
     us-central1: skypilot:cpu-debian-10
-    us-west3: projects/centos-cloud/global/images/centos-7-v20221206
+    us-west3: projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112
 
 
 setup: |

@@ -361,8 +361,8 @@ def test_gcp_image_id_dict_region():
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
             f'sky launch -y -c {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the region.
-            f'sky launch -c {name} --image-id projects/centos-cloud/global/images/centos-7-v20221206 tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --image-id projects/centos-cloud/global/images/centos-7-v20221206 tests/test_yamls/minimal.yaml',
+            f'sky launch -c {name} --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
             f'sky exec {name} --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml && exit 1 || true',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
