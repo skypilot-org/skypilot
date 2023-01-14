@@ -97,12 +97,15 @@ setup_commands:
   # Line 'mkdir -p ..': disable host key check
   # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
   # This also kills the service that is holding the lock on dpkg (problem only exists on aws/azure, not gcp)
-  - sudo systemctl stop unattended-upgrades || true;
+  - function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
+    sudo systemctl stop unattended-upgrades || true;
     sudo systemctl disable unattended-upgrades || true;
     sudo sed -i 's/Unattended-Upgrade "1"/Unattended-Upgrade "0"/g' /etc/apt/apt.conf.d/20auto-upgrades || true;
-    sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
-    sudo pkill -9 apt-get;
+    p=$(mylsof "/var/lib/dpkg/lock-frontend"); echo "$p";
+    sudo kill -9 `echo "$p" | tail -n 1` || true;
+    sudo rm /var/lib/dpkg/lock-frontend;
     sudo pkill -9 dpkg;
+    sudo pkill -9 apt-get;
     sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
