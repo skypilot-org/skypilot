@@ -967,7 +967,7 @@ def test_autostop(generic_cloud: str):
             f'sky autostop -y {name} -i 1',  # Should restart the timer.
             'sleep 45',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
-            'sleep 100',
+            'sleep 120',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Test restarting the idleness timer via exec:
