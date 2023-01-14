@@ -2864,10 +2864,9 @@ class CloudVmRayBackend(backends.Backend):
                     terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
                         cluster_name, zone, log_abs_path)
                 else:
-                    query_cmd = (
-                        f'gcloud compute instances list --filter='
-                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                        f'--zones={zone} --format=value\\(name\\)')
+                    query_cmd = (f'gcloud compute instances list --filter='
+                                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                                 f'--zones={zone} --format=value\\(name\\)')
                     terminate_cmd = (
                         f'gcloud compute instances delete --zone={zone}'
                         f' --quiet $({query_cmd})')

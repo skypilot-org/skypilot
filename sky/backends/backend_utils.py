@@ -1355,8 +1355,8 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                 f'--zone={zone} --format=value\\(name\\)')
+                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                 f'--zone={zone} --format="value(name)"')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       '/dev/null',
                                                       shell=True,
@@ -1678,6 +1678,9 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
+    # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
+    # fails to filter labels with "=".
+    # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
     launch_hashes = _ray_launch_hash(cluster, ray_config)
     assert launch_hashes is not None
     hash_filter_str = ' '.join(launch_hashes)
@@ -1702,8 +1705,8 @@ def _query_status_gcp(
         tpu_utils.check_gcp_cli_include_tpu_vm()
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
-                     f'--filter="(labels.ray-cluster-name={cluster} AND '
-                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     f'--filter="(labels.ray-cluster-name:{cluster} AND '
+                     f'labels.ray-launch-config:{hash_filter_str})" '
                      '--format="value(state)"')
     else:
         status_map = {
@@ -1722,8 +1725,8 @@ def _query_status_gcp(
         # TODO(zhwu): The status of the TPU attached to the cluster should also
         # be checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
-                     f'--filter="(labels.ray-cluster-name={cluster} AND '
-                     f'labels.ray-launch-config=({hash_filter_str}))" '
+                     f'--filter="(labels.ray-cluster-name:{cluster} AND '
+                     f'labels.ray-launch-config:{hash_filter_str})" '
                      '--format="value(status)"')
     status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
                                      status_map)

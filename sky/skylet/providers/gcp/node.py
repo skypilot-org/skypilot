@@ -386,7 +386,7 @@ class GCPCompute(GCPResource):
                 "("
                 + " AND ".join(
                     [
-                        "(labels.{key} = {value})".format(key=key, value=value)
+                        "(labels.{key}:{value})".format(key=key, value=value)
                         for key, value in label_filters.items()
                     ]
                 )
@@ -399,14 +399,14 @@ class GCPCompute(GCPResource):
             "("
             + " OR ".join(
                 [
-                    "(status = {status})".format(status=status)
+                    "(status:{status})".format(status=status)
                     for status in status_filter
                 ]
             )
             + ")"
         )
 
-        cluster_name_filter_expr = "(labels.{key} = {value})".format(
+        cluster_name_filter_expr = "(labels.{key}:{value})".format(
             key=TAG_RAY_CLUSTER_NAME, value=self.cluster_name
         )
 
