@@ -140,6 +140,7 @@ setup_commands:
     sudo kill -9 `sudo lsof /var/lib/dpkg/lock-frontend | awk '{print $2}' | tail -n 1` || true;
     sudo pkill -9 apt-get;
     sudo pkill -9 dpkg;
+    sudo dpkg --configure -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
@@ -157,7 +158,6 @@ setup_commands:
     mkdir -p ~/.ssh; (grep -Pzo -q "Host \*\n  StrictHostKeyChecking no" ~/.ssh/config) || printf "Host *\n  StrictHostKeyChecking no\n" >> ~/.ssh/config;
     python3 -c "from sky.skylet.ray_patches import patch; patch()" || exit 1;
     [ -f /etc/fuse.conf ] && sudo sed -i 's/#user_allow_other/user_allow_other/g' /etc/fuse.conf || (sudo sh -c 'echo "user_allow_other" > /etc/fuse.conf');
-    sudo dpkg --configure -a;
 
 # Command to start ray on the head node. You don't need to change this.
 # NOTE: these are very performance-sensitive. Each new item opens/closes an SSH
