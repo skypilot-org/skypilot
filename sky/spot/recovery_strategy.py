@@ -163,7 +163,7 @@ class StrategyExecutor:
                 # If the launch fails, it will be recovered by the following
                 # code.
                 logger.info('Failed to launch the spot cluster with error: '
-                            f'{common_utils.class_fullname(e)}: {e})')
+                            f'{common_utils.format_exception(e)})')
                 import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
                 retry_launch = True
