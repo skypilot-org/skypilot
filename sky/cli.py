@@ -2972,12 +2972,6 @@ def spot_launch(
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
-@click.option('--wait-until-available',
-              '-w',
-              default=False,
-              is_flag=True,
-              required=False,
-              help='Wait until the spot controller is available.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def spot_queue(all: bool, refresh: bool, skip_finished: bool):
