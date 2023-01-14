@@ -1182,7 +1182,8 @@ def launch(
 
     # A basic check. Programmatic calls will have a proper (but less
     # informative) error from optimizer.
-    if cloud.lower() == 'azure' and use_spot:
+    if (cloud is not None and cloud.lower() == 'azure' and
+            use_spot is not None and use_spot):
         raise click.UsageError(
             'SkyPilot currently has not implemented '
             'support for spot instances on Azure. Please file '
