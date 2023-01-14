@@ -1242,8 +1242,8 @@ def test_gcp_spot_recovery_multi_node():
     zone = 'us-west2-a'
     query_cmd = (
         f'gcloud compute instances list --filter='
-        f'\\(\\(labels.ray-cluster-name={name}\\) AND \\(labels.ray-node-type=worker\\)\\) '
-        f'--zones={zone} --format=value\\(name\\)')
+        f'"(labels.ray-cluster-name={name} AND labels.ray-node-type=worker)" '
+        f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
@@ -1394,12 +1394,12 @@ def test_spot_storage(generic_spot_cloud: str):
         f.flush()
         file_path = f.name
         test = Test(
-            'managed-spot-storage',
+            'spot_storage',
             [
                 *storage_setup_commands,
                 f'sky spot launch -n {name} --cloud {generic_spot_cloud} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
-                f'sky spot queue | grep {name} | grep SUCCEEDED',
+                f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             f'sky spot cancel -y -n {name}',
