@@ -1180,6 +1180,14 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
+    # A basic check. Programmatic calls will have a proper (but less
+    # informative) error from optimizer.
+    if cloud.lower() == 'azure' and use_spot:
+        raise click.UsageError(
+            'SkyPilot currently has not implemented '
+            'support for spot instances on Azure. Please file '
+            'an issue if you need this feature.')
+
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
