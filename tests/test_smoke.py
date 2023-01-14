@@ -76,7 +76,7 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    if len(test_name) > 23:
+    if len(test_name) > 20:
         assert len(test_name) < 46
         test_name = 'test' + test_name[len('test')::2]
     return f'{test_name}-{_smoke_test_hash}-{test_id}'
