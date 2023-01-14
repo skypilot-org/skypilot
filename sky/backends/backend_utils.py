@@ -1706,7 +1706,7 @@ def _query_status_gcp(
         query_cmd = ('gcloud compute tpus tpu-vm list '
                      f'--zone {zone} '
                      f'--filter="(labels.ray-cluster-name:{cluster} AND '
-                     f'labels.ray-launch-config:{hash_filter_str})" '
+                     f'labels.ray-launch-config:({hash_filter_str}))" '
                      '--format="value(state)"')
     else:
         status_map = {
@@ -1726,7 +1726,7 @@ def _query_status_gcp(
         # be checked, since TPUs are not part of the VMs.
         query_cmd = ('gcloud compute instances list '
                      f'--filter="(labels.ray-cluster-name:{cluster} AND '
-                     f'labels.ray-launch-config:{hash_filter_str})" '
+                     f'labels.ray-launch-config:({hash_filter_str}))" '
                      '--format="value(status)"')
     status_list = _process_cli_query('GCP', cluster, query_cmd, '\n',
                                      status_map)
