@@ -164,7 +164,7 @@ class StrategyExecutor:
                 # code.
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.class_fullname(e)}: {e})')
-                import traceback # pylint: disable=import-outside-toplevel
+                import traceback  # pylint: disable=import-outside-toplevel
                 logger.info(f'  Traceback: {traceback.format_exc()}')
                 retry_launch = True
                 exception = e
