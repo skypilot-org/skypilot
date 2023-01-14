@@ -3,7 +3,6 @@ import itertools
 import json
 import logging
 import textwrap
-
 import time
 from distutils import version
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -28,6 +27,8 @@ DEFAULT_RAY_INSTANCE_PROFILE = RAY + '-v1'
 DEFAULT_RAY_IAM_ROLE = RAY + '-v1'
 SECURITY_GROUP_TEMPLATE = RAY + '-{}'
 BOTO_MAX_RETRIES = 12
+# Hash of the node launch config, used to identify out-of-date nodes
+TAG_RAY_LAUNCH_CONFIG = 'ray-launch-config'
 
 # todo: cli_logger should handle this assert properly
 # this should probably also happens somewhere else

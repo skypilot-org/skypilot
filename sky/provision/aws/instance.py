@@ -1,7 +1,8 @@
 """The module for AWS"""
+from typing import Dict, List, Any
+
 import copy
 import logging
-from typing import Dict, List, Any
 
 import botocore
 from sky.provision.aws import utils
@@ -12,12 +13,6 @@ BOTO_CREATE_MAX_RETRIES = 5
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 # Tag for the name of the node
 TAG_RAY_NODE_NAME = 'ray-node-name'
-# Tag for the kind of node (e.g. Head, Worker). For legacy reasons, the tag
-# value says 'type' instead of 'kind'.
-TAG_RAY_NODE_KIND = 'ray-node-type'
-NODE_KIND_HEAD = 'head'
-NODE_KIND_WORKER = 'worker'
-NODE_KIND_UNMANAGED = 'unmanaged'
 
 # Tag for user defined node types (e.g., m4xl_spot). This is used for multi
 # node type clusters.
@@ -31,9 +26,6 @@ STATUS_SYNCING_FILES = 'syncing-files'
 STATUS_SETTING_UP = 'setting-up'
 STATUS_UPDATE_FAILED = 'update-failed'
 STATUS_UP_TO_DATE = 'up-to-date'
-
-# Hash of the node launch config, used to identify out-of-date nodes
-TAG_RAY_LAUNCH_CONFIG = 'ray-launch-config'
 
 # Hash of the node runtime config, used to determine if updates are needed
 TAG_RAY_RUNTIME_CONFIG = 'ray-runtime-config'
@@ -98,10 +90,7 @@ def create_instances(region: str, cluster_name: str, node_config: Dict[str,
                      tags: Dict[str, str], count: int) -> Dict[str, Any]:
     ec2_fail_fast = utils.create_ec2_resource(region=region, max_attempts=0)
 
-    if TAG_RAY_NODE_NAME in tags:
-        tags['Name'] = tags.pop(TAG_RAY_NODE_NAME)
-    tags = {TAG_RAY_CLUSTER_NAME: cluster_name, **tags}
-
+    tags = {'Name': cluster_name, TAG_RAY_CLUSTER_NAME: cluster_name, **tags}
     conf = node_config.copy()
 
     tag_specs = [{
@@ -161,14 +150,6 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
             'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name],
         },
-        {
-            'Name': f'tag:{TAG_RAY_NODE_KIND}',
-            'Values': [tags[TAG_RAY_NODE_KIND]],
-        },
-        {
-            'Name': f'tag:{TAG_RAY_LAUNCH_CONFIG}',
-            'Values': [tags[TAG_RAY_LAUNCH_CONFIG]],
-        },
     ]
     # This tag may not always be present.
     if TAG_RAY_USER_NODE_TYPE in tags:
@@ -192,10 +173,10 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
     return {n.id: n for n in reuse_nodes}
 
 
-def create_or_start_instances(region: str, cluster_name: str,
-                              node_config: Dict[str, Any], tags: Dict[str, str],
-                              count: int,
-                              start_stopped_nodes: bool) -> Dict[str, Any]:
+def create_or_resume_instances(region: str, cluster_name: str,
+                               node_config: Dict[str, Any],
+                               tags: Dict[str, str], count: int,
+                               start_stopped_nodes: bool) -> Dict[str, Any]:
     """Creates instances.
 
     Returns dict mapping instance id to ec2.Instance object for the created
@@ -247,3 +228,46 @@ def terminate_instances(region: str, cluster_name: str):
     ]
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
     ec2.instances.filter(Filters=filters).terminate()
+
+
+def wait_instances(region: str, cluster_name: str, state: str):
+    # possible exceptions: https://github.com/boto/boto3/issues/176
+    ec2 = utils.create_ec2_resource(region=region)
+    client = ec2.meta.client
+
+    filters = [
+        {
+            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Values': [cluster_name],
+        },
+    ]
+
+    if state == 'running':
+        waiter = client.get_waiter("instance_running")
+    elif state == 'stopped':
+        waiter = client.get_waiter("instance_stopped")
+    elif state == 'terminated':
+        waiter = client.get_waiter("instance_terminated")
+    else:
+        raise ValueError(f'Unsupported state to wait: {state}')
+    # See https://github.com/boto/botocore/blob/develop/botocore/waiter.py
+    waiter.wait(WaiterConfig={"Delay": 5}, Filters=filters)
+
+
+def get_instance_ips(region: str, cluster_name: str, public_ips: bool):
+    ec2 = utils.create_ec2_resource(region=region)
+    filters = [
+        {
+            'Name': 'instance-state-name',
+            'Values': ['running'],
+        },
+        {
+            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Values': [cluster_name],
+        },
+    ]
+    instances = ec2.instances.filter(Filters=filters)
+    if public_ips:
+        return [inst.public_ip_address for inst in instances]
+    else:
+        return [inst.private_ip_address for inst in instances]
