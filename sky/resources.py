@@ -83,6 +83,8 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
+        # self._image_id is a dict of {region: image_id}.
+        # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id}
