@@ -1004,14 +1004,14 @@ def test_autodown(generic_cloud: str):
             # Ensure the cluster is terminated.
             'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} --cloud aws examples/minimal.yaml',
+            f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 240',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 240',
             # Ensure the cluster is still UP.
