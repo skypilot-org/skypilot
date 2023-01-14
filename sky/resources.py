@@ -51,23 +51,22 @@ class ResourceFilter:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
+        spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
         image_id: Optional[str] = None, # FIXME: image_id can be a dictionary.
     ) -> None:
-        # The below fields are configured by the generator and the optimizer.
         self.cloud = cloud
         self.region = region
         self.zone = zone
         self.instance_type = instance_type
         self._accelerators = accelerators
-
-        # Configured by the user.
         self._accelerator_args = accelerator_args
         self.use_spot = use_spot
+        self.spot_recovery = spot_recovery
         self.disk_size = disk_size
         self.image_id = image_id
 
-        # These fields can be set by canonicalization.
+        # Set by canonicalization.
         self.accelerator: Optional[Accelerator] = None
 
         self._check_syntax()
@@ -85,6 +84,11 @@ class ResourceFilter:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify accelerator_args without accelerators.')
+        if ((self.use_spot is None or not self.use_spot) and
+                self.spot_recovery is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify spot_recovery for non-spot instances.')
 
     def _check_type(self, field: str, expected_type) -> None:
         val = getattr(self, field)
@@ -108,6 +112,7 @@ class ResourceFilter:
         self._check_type('_accelerators', (str, dict))
         self._check_type('_accelerator_args', dict)
         self._check_type('use_spot', bool)
+        self._check_type('spot_recovery', str)
         self._check_type('disk_size', int)
         self._check_type('image_id', str)
 
@@ -122,6 +127,8 @@ class ResourceFilter:
         if self.instance_type is not None:
             # NOTE: Some azure instance types use uppercase letters.
             self.instance_type = self.instance_type.lower()
+        if self.spot_recovery is not None:
+            self.spot_recovery = self.spot_recovery.upper()
 
         if self._accelerators is None:
             return
@@ -163,12 +170,19 @@ class ResourceFilter:
             self.use_spot = False
         if self.disk_size is None:
             self.disk_size = _DEFAULT_DISK_SIZE_GB
+        if self.use_spot and self.spot_recovery is None:
+            self.spot_recovery = spot.SPOT_DEFAULT_STRATEGY
 
     def _check_semantics(self) -> None:
         if self.disk_size < 50:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('OS disk size must be larger than 50GB. '
                                  f'Got {self.disk_size} GB.')
+        if (self.spot_recovery is not None and
+                self.spot_recovery not in spot.SPOT_STRATEGIES):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Invalid spot_recovery strategy: {self.spot_recovery}.')
 
     @classmethod
     def from_yaml_config(cls, config: Dict[str, str]) -> 'ResourceFilter':
@@ -229,6 +243,7 @@ class VMResources:
         cpu_memory: float,
         accelerator: Optional[Accelerator],
         use_spot: bool,
+        spot_recovery: Optional[str],
         disk_size: int,
         image_id: Optional[str],
     ) -> None:
@@ -242,20 +257,22 @@ class VMResources:
         self.cpu_memory = cpu_memory
         self.accelerator = accelerator
         self.use_spot = use_spot
+        self.spot_recovery = spot_recovery
         self.disk_size = disk_size
         self.image_id = image_id
 
     def get_hourly_price(self) -> float:
-        # TODO: include the disk price.
         return self.cloud.get_hourly_price(self)
 
     def __eq__(self, other: 'VMResources') -> bool:
         if not self.cloud.is_same_cloud(other.cloud):
             return False
-        return (self.region == other.region and self.zone == other.zone and
+        return (self.region == other.region and
+                self.zone == other.zone and
                 self.instance_type == other.instance_type and
                 self.accelerator == other.accelerator and
                 self.use_spot == other.use_spot and
+                self.spot_recovery == other.spot_recovery and
                 self.disk_size == other.disk_size and
                 self.image_id == other.image_id)
 
@@ -277,7 +294,6 @@ class ClusterResources:
     def __init__(
         self,
         vm_resources: List[VMResources],
-        spot_recovery: Optional[str] = None,
     ) -> None:
         assert vm_resources, 'vm_resources cannot be empty.'
         self.num_nodes = len(vm_resources)
@@ -293,23 +309,9 @@ class ClusterResources:
         self.cpu_memory = vm_resources[0].cpu_memory
         self.accelerator = vm_resources[0].accelerator
         self.use_spot = vm_resources[0].use_spot
+        self.spot_recovery = vm_resources[0].spot_recovery
         self.disk_size = vm_resources[0].disk_size
         self.image_id = vm_resources[0].image_id
-
-        # Spot recovery strategy is defined at a cluster level.
-        self.spot_recovery = spot_recovery
-        # TODO: move the check below to a separate method.
-        if not self.use_spot and self.spot_recovery is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify spot_recovery for non-spot instances.')
-        if self.use_spot:
-            if self.spot_recovery is None:
-                self.spot_recovery = spot.SPOT_DEFAULT_STRATEGY
-            elif self.spot_recovery not in spot.SPOT_STRATEGIES:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Invalid spot_recovery strategy: {self.spot_recovery}.')
 
     def get_hourly_price(self) -> float:
         return sum(vm.get_hourly_price() for vm in self.vm_resources)
