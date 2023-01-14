@@ -301,17 +301,18 @@ class ClusterResources:
 
         # Currently, we assume that all VMs in a cluster are identical.
         # TODO(woosuk): support heterogeneous clusters.
-        self.cloud = vm_resources[0].cloud
-        self.region = vm_resources[0].region
-        self.zone = vm_resources[0].zone
-        self.instance_type = vm_resources[0].instance_type
-        self.num_vcpus = vm_resources[0].num_vcpus
-        self.cpu_memory = vm_resources[0].cpu_memory
-        self.accelerator = vm_resources[0].accelerator
-        self.use_spot = vm_resources[0].use_spot
-        self.spot_recovery = vm_resources[0].spot_recovery
-        self.disk_size = vm_resources[0].disk_size
-        self.image_id = vm_resources[0].image_id
+        head_node = vm_resources[0]
+        self.cloud = head_node.cloud
+        self.region = head_node.region
+        self.zone = head_node.zone
+        self.instance_type = head_node.instance_type
+        self.num_vcpus = head_node.num_vcpus
+        self.cpu_memory = head_node.cpu_memory
+        self.accelerator = head_node.accelerator
+        self.use_spot = head_node.use_spot
+        self.spot_recovery = head_node.spot_recovery
+        self.disk_size = head_node.disk_size
+        self.image_id = head_node.image_id
 
     def get_hourly_price(self) -> float:
         return sum(vm.get_hourly_price() for vm in self.vm_resources)
