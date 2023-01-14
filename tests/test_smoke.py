@@ -361,9 +361,9 @@ def test_gcp_image_id_dict_region():
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
             f'sky launch -y -c {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the region.
-            f'sky launch -c {name} --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
-            f'sky exec {name} --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml && exit 1 || true',
+            f'sky launch -c {name} --cloud gcp --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --cloud gcp --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
+            f'sky exec {name} --cloud gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml && exit 1 || true',
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
@@ -1083,13 +1083,13 @@ def test_cancel_pytorch(generic_cloud: str):
 
 # ---------- Testing use-spot option ----------
 @pytest.mark.generic_spot
-def test_use_spot(generic_cloud_spot: str):
+def test_use_spot(generic_spot_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} --cloud {generic_cloud_spot} tests/test_yamls/minimal.yaml --use-spot -y',
+            f'sky launch -c {name} --cloud {generic_spot_cloud} tests/test_yamls/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
@@ -1101,7 +1101,7 @@ def test_use_spot(generic_cloud_spot: str):
 
 # ---------- Testing managed spot ----------
 @pytest.mark.generic_spot
-def test_spot(generic_cloud_spot: str):
+def test_spot(generic_spot_cloud: str):
     """Test the spot yaml."""
     name = _get_cluster_name()
     cancel_command = (
@@ -1109,8 +1109,8 @@ def test_spot(generic_cloud_spot: str):
     test = Test(
         'managed-spot',
         [
-            f'sky spot launch -n {name}-1 --cloud {generic_cloud_spot} examples/managed_spot.yaml -y -d',
-            f'sky spot launch -n {name}-2 --cloud {generic_cloud_spot} examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-1 --cloud {generic_spot_cloud} examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-2 --cloud {generic_spot_cloud} examples/managed_spot.yaml -y -d',
             'sleep 5',
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
@@ -1127,12 +1127,12 @@ def test_spot(generic_cloud_spot: str):
 
 # ---------- Testing managed spot recovery ----------
 @pytest.mark.aws
-def test_aws_spot_recovery():
+def test_spot_recovery_aws():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
-        'managed-aws-spot-recovery',
+        'spot_recovery_aws',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 360',
@@ -1157,7 +1157,7 @@ def test_aws_spot_recovery():
 
 
 @pytest.mark.gcp
-def test_gcp_spot_recovery():
+def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     zone = 'us-west2-a'
@@ -1167,7 +1167,7 @@ def test_gcp_spot_recovery():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'managed-gcp-spot-recovery',
+        'spot_recovery_gcp',
         [
             f'sky spot launch --cloud gcp --zone {zone} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 360',
@@ -1205,12 +1205,12 @@ def test_spot_recovery_default_resources(generic_spot_cloud: str):
 
 
 @pytest.mark.aws
-def test_aws_spot_recovery_multi_node():
+def test_spot_recovery_multi_node_aws():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
-        'aws_spot_recovery_multi_node',
+        'spot_recovery_multi_node_aws',
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
@@ -1236,7 +1236,7 @@ def test_aws_spot_recovery_multi_node():
 
 
 @pytest.mark.gcp
-def test_gcp_spot_recovery_multi_node():
+def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     zone = 'us-west2-a'
@@ -1247,7 +1247,7 @@ def test_gcp_spot_recovery_multi_node():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'gcp_spot_recovery_multi_node',
+        'spot_recovery_multi_node_gcp',
         [
             f'sky spot launch --cloud gcp --zone {zone} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
@@ -1268,11 +1268,11 @@ def test_gcp_spot_recovery_multi_node():
 
 
 @pytest.mark.aws
-def test_aws_spot_cancellation():
+def test_spot_cancellation_aws():
     name = _get_cluster_name()
     region = 'us-east-2'
     test = Test(
-        'aws_spot_cancellation',
+        'spot_cancellation_aws',
         [
             # Test cancellation during spot cluster being launched.
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
@@ -1327,7 +1327,7 @@ def test_aws_spot_cancellation():
 
 
 @pytest.mark.gcp
-def test_gcp_spot_cancellation():
+def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     zone = 'us-west3-b'
     query_state_cmd = ('gcloud compute instances list '
@@ -1339,7 +1339,7 @@ def test_gcp_spot_cancellation():
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
     test = Test(
-        'gcp_spot_cancellation',
+        'spot_cancellation_gcp',
         [
             # Test cancellation during spot cluster being launched.
             f'sky spot launch --cloud gcp --zone {zone} -n {name} "sleep 1000"  -y -d',
