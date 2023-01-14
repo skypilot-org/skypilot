@@ -39,6 +39,15 @@ storage_setup_commands = [
     'touch ~/.ssh/id_rsa.pub'
 ]
 
+# Wait until the spot controller is not in INIT state.
+# This is a workaround for the issue that when multiple spot tests
+# are running in parallel, the spot controller may be in INIT and
+# the spot queue command will return staled table.
+_SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
+                    'until [ `echo "$s" | grep INIT | wc -l` -eq 0 ]; '
+                    'do echo "Waiting for spot queue to be ready..."; '
+                    'sleep 5; s=$(sky spot queue); done; echo "$s"; '
+                    'echo; echo; echo "$s"')
 # TODO(zhwu): make the spot controller on GCP.
 
 
@@ -1112,13 +1121,13 @@ def test_spot(generic_spot_cloud: str):
             f'sky spot launch -n {name}-1 --cloud {generic_spot_cloud} examples/managed_spot.yaml -y -d',
             f'sky spot launch -n {name}-2 --cloud {generic_spot_cloud} examples/managed_spot.yaml -y -d',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
             f'sky spot cancel -y -n {name}-1',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep CANCELLED',
             'sleep 200',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         cancel_command,
     )
@@ -1136,7 +1145,7 @@ def test_spot_recovery_aws():
         [
             f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 360',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -1145,9 +1154,9 @@ def test_spot_recovery_aws():
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 100',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
@@ -1171,14 +1180,14 @@ def test_spot_recovery_gcp():
         [
             f'sky spot launch --cloud gcp --zone {zone} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 360',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             terminate_cmd,
             'sleep 100',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
@@ -1196,7 +1205,7 @@ def test_spot_recovery_default_resources(generic_spot_cloud: str):
         [
             f'sky spot launch -n {name} --cloud {generic_spot_cloud} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             'sleep 360',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
         f'sky spot cancel -y -n {name}',
         timeout=20 * 60,
@@ -1214,7 +1223,7 @@ def test_spot_recovery_multi_node_aws():
         [
             f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
@@ -1224,9 +1233,9 @@ def test_spot_recovery_multi_node_aws():
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 50',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 420',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
@@ -1251,14 +1260,14 @@ def test_spot_recovery_multi_node_gcp():
         [
             f'sky spot launch --cloud gcp --zone {zone} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
             'sleep 400',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the worker manually.
             terminate_cmd,
             'sleep 50',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 420',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
@@ -1277,10 +1286,10 @@ def test_spot_cancellation_aws():
             # Test cancellation during spot cluster being launched.
             f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "STARTING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
             f'sky spot cancel -y -n {name}',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-* '
@@ -1292,7 +1301,7 @@ def test_spot_cancellation_aws():
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$(aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}-2-* '
@@ -1302,7 +1311,7 @@ def test_spot_cancellation_aws():
             # Test cancellation during spot job is recovering.
             f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
@@ -1310,10 +1319,10 @@ def test_spot_cancellation_aws():
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
             'sleep 100',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-3',
             'sleep 10',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
             # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
@@ -1344,10 +1353,10 @@ def test_spot_cancellation_gcp():
             # Test cancellation during spot cluster being launched.
             f'sky spot launch --cloud gcp --zone {zone} -n {name} "sleep 1000"  -y -d',
             'sleep 60',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "STARTING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "STARTING"',
             f'sky spot cancel -y -n {name}',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "CANCELLED"',
             'sleep 100',
             f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "STOPPING" ]]'  # GCP shows STOPPING when shutting down
             ,
@@ -1356,21 +1365,21 @@ def test_spot_cancellation_gcp():
             'sleep 300',
             f'sky spot cancel -y -n {name}-2',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "CANCELLED"',
             'sleep 100',
             (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "STOPPING" ]]'
             ),
             # Test cancellation during spot job is recovering.
             f'sky spot launch --cloud gcp --zone {zone} -n {name}-3 "sleep 1000"  -y -d',
             'sleep 300',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RUNNING"',
             # Terminate the cluster manually.
             terminate_cmd,
             'sleep 100',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "RECOVERING"',
             f'sky spot cancel -y -n {name}-3',
             'sleep 10',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name}-3 | head -n1 | grep "CANCELLED"',
             'sleep 90',
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
             # there can be multiple VM with the same name due to the recovery.
@@ -1399,7 +1408,7 @@ def test_spot_storage(generic_spot_cloud: str):
                 *storage_setup_commands,
                 f'sky spot launch -n {name} --cloud {generic_spot_cloud} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
-                f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | grep SUCCEEDED',
+                f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             f'sky spot cancel -y -n {name}',
@@ -1417,9 +1426,9 @@ def test_spot_tpu():
         [
             f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
             'sleep 5',
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep STARTING',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep STARTING',
             'sleep 600',  # TPU takes a while to launch
-            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}',
     )
