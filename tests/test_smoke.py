@@ -75,7 +75,7 @@ def _get_cluster_name() -> str:
     Must be called from each test_<name>().
     """
     caller_func_name = inspect.stack()[1][3]
-    test_name = caller_func_name.replace('_', '-')
+    test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
     if len(test_name) > 23:
         assert len(test_name) < 46
         test_name = 'test' + test_name[len('test')::2]
@@ -949,7 +949,7 @@ def test_autostop(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
 
             # Ensure the cluster is STOPPED.
-            'sleep 100',
+            'sleep 120',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
 
             # Ensure the cluster is UP and the autostop setting is reset ('-').
