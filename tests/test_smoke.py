@@ -610,7 +610,7 @@ def test_aws_storage_mounts():
 
 
 @pytest.mark.gcp
-def test_aws_storage_mounts():
+def test_gcp_storage_mounts():
     name = _get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
     template_str = pathlib.Path(
