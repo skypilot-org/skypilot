@@ -29,12 +29,8 @@ def pytest_addoption(parser):
             help=f'enable {cloud.upper()} for tests, default: True')
         parser.addoption(f'--disable-{cloud}',
                          action='store_false',
-                         dest=cloud,
+                         dest=f'enable_{cloud}',
                          help=f'disable {cloud.upper()} for tests')
-    parser.addoption('--all-clouds',
-                     action='store_true',
-                     default=False,
-                     help='use all clouds for tests')
     parser.addoption('--generic-cloud',
                      type=str,
                      default='gcp',
@@ -65,13 +61,13 @@ def pytest_collection_modifyitems(config, items):
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_slow)
         if 'aws' in item.keywords and not config.getoption(
-                '--aws') and not config.getoption('--all-clouds'):
+                '--enable-aws'):
             item.add_marker(skip_aws)
         if 'gcp' in item.keywords and not config.getoption(
-                '--gcp') and not config.getoption('--all-clouds'):
+                '--enable-gcp'):
             item.add_marker(skip_gcp)
         if 'azure' in item.keywords and not config.getoption(
-                '--azure') and not config.getoption('--all-clouds'):
+                '--enable-azure'):
             item.add_marker(skip_azure)
 
 
