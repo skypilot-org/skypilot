@@ -1,6 +1,4 @@
 """Google Cloud Platform."""
-from sky.skylet.providers.gcp.config import SKYPILOT_VPC_NAME
-
 import json
 import os
 import subprocess
@@ -528,38 +526,6 @@ class GCP(clouds.Cloud):
             print('\nHint: Enabled GCP API(s) may take a few minutes to take '
                   'effect. If any SkyPilot commands/calls failed, retry after '
                   'some time.')
-
-        vpc_name = SKYPILOT_VPC_NAME
-        ret_name = _run_output(
-            'gcloud compute networks list --format "value(name)" '
-            f'--filter="name={vpc_name}"')
-        if ret_name == '':
-            print(f'\nCreating a default VPC network, {vpc_name}...')
-            proj_name = _run_output(
-                'gcloud config list --format "value(core.project)"')
-            proj_name = proj_name.strip()
-
-            vpc_cmd = (f'gcloud compute networks create {vpc_name} '
-                       f'--project={proj_name} --subnet-mode=auto --mtu=1460 '
-                       '--bgp-routing-mode=global')
-            _run_output(vpc_cmd)
-
-            custom_cmd = (
-                f'gcloud compute firewall-rules create skypilot-allow-custom '
-                f'--project={proj_name} '
-                f'--network=projects/{proj_name}/global/networks/{vpc_name} '
-                '--direction=INGRESS --priority=65534 '
-                '--source-ranges=10.128.0.0/9 '
-                '--action=ALLOW --rules=all')
-            _run_output(custom_cmd)
-
-            ssh_cmd = (
-                'gcloud compute firewall-rules create skypilot-allow-ssh '
-                f'--project={proj_name} '
-                f'--network=projects/{proj_name}/global/networks/{vpc_name} '
-                '--direction=INGRESS --priority=65534 '
-                '--source-ranges=0.0.0.0/0 --action=ALLOW --rules=tcp:22')
-            _run_output(ssh_cmd)
 
         return True, None
 

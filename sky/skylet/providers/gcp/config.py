@@ -510,8 +510,47 @@ def _configure_subnet(config, compute):
     subnets = _list_subnets(config, compute, filter=f'(name="{SKYPILOT_VPC_NAME}")')
 
     if not subnets:
-        raise RuntimeError(
-            "SkyPilot VPC not found. Run `sky check` to create a default VPC.")
+        # Create a default VPC network and firewall rules
+        proj_id = config["provider"]["project_id"]
+
+        logger.info(f'Creating a default VPC network, {SKYPILOT_VPC_NAME}...')
+        vpc_network_body = {
+            "name": SKYPILOT_VPC_NAME,
+            "selfLink": f"projects/{proj_id}/global/networks/{SKYPILOT_VPC_NAME}",
+            "autoCreateSubnetworks": True,
+            "mtu": 1460,
+            "routingConfig": {"routingMode": "GLOBAL"},
+        }
+        _create_vpcnet(config, compute, vpc_network_body)
+
+        firewall_body = {
+            "name": f"{SKYPILOT_VPC_NAME}-allow-custom",
+            "network": f"projects/{proj_id}/global/networks/{SKYPILOT_VPC_NAME}",
+            "selfLink": f"projects/{proj_id}/global/firewalls/{SKYPILOT_VPC_NAME}-allow-custom",
+            "direction": "INGRESS",
+            "priority": 65534,
+            "allowed": [{"IPProtocol": "all"}],
+            "sourceRanges": ["10.128.0.0/9"],
+        }
+        _create_firewall_rule(config, compute, firewall_body)
+
+        firewall_body = {
+            "name": f"{SKYPILOT_VPC_NAME}-allow-ssh",
+            "network": f"projects/{proj_id}/global/networks/{SKYPILOT_VPC_NAME}",
+            "selfLink": f"projects/{proj_id}/global/firewalls/{SKYPILOT_VPC_NAME}-allow-ssh",
+            "direction": "INGRESS",
+            "priority": 65534,
+            "allowed": [{
+                "IPProtocol": "tcp",
+                "ports": ["22"],
+            }],
+            "sourceRanges": ["0.0.0.0/0"],
+        }
+        _create_firewall_rule(config, compute, firewall_body)
+
+        logger.info(f'A VPC network {SKYPILOT_VPC_NAME} created.')
+
+        subnets = _list_subnets(config, compute, filter=f'(name="{SKYPILOT_VPC_NAME}")')
 
     # TODO: make sure that we have usable subnet. Maybe call
     # compute.subnetworks().listUsable? For some reason it didn't
@@ -542,6 +581,30 @@ def _configure_subnet(config, compute):
             node_config["networkConfig"].pop("accessConfigs")
 
     return config
+
+
+def _create_firewall_rule(config, compute, body):
+    operation = (
+        compute.firewalls()
+        .insert(project=config["provider"]["project_id"], body=body)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
+
+
+def _create_vpcnet(config, compute, body):
+    operation = (
+        compute.networks()
+        .insert(project=config["provider"]["project_id"], body=body)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
 
 
 def _list_subnets(config, compute, filter=None):
