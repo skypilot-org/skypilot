@@ -3013,8 +3013,11 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
                 table_str = cache[1]
                 # Show a helpful hint at the end, if cached table is non-empty.
                 cached_hint = (
-                    '\n\nNOTE: displaying the cached job status table '
-                    f'[last updated: {readable_time}]')
+                    '\n\nNOTE: cached job table is being shown '
+                    f'[last updated: {readable_time}].\nUse '
+                    f'{colorama.Style.BRIGHT}--refresh / -r'
+                    f'{colorama.Style.RESET_ALL} to restart the spot '
+                    'controller and see the latest job table.')
             table_message = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
