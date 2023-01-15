@@ -22,10 +22,11 @@ def pytest_addoption(parser):
     # which cloud to use with `--generic-cloud` for generic tests and
     # `--generic-spot-cloud` for generic spot tests.
     for cloud in clouds:
-        parser.addoption(f'--enable-{cloud}',
-                         action='store_true',
-                         default=True,
-                         help=f'enable {cloud.upper()} for tests, default: True')
+        parser.addoption(
+            f'--enable-{cloud}',
+            action='store_true',
+            default=True,
+            help=f'enable {cloud.upper()} for tests, default: True')
         parser.addoption(f'--disable-{cloud}',
                          action='store_false',
                          dest=cloud,

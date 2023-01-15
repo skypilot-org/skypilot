@@ -35,7 +35,8 @@ def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get cluster statuses.
 
-    If cluster_names is given, return those clusters. Otherwise, return all clusters.
+    If cluster_names is given, return those clusters. Otherwise, return all
+    clusters.
 
     Each returned value has the following fields:
 
