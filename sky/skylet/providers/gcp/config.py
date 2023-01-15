@@ -555,10 +555,7 @@ def _list_subnets(config, compute, filter=None):
         .execute()
     )
 
-    if "items" not in response:
-        return []
-
-    return response["items"]
+    return response["items"] if "items" in response else []
 
 
 def _get_subnet(config, subnet_id, compute):
