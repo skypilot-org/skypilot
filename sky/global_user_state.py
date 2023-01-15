@@ -4,7 +4,7 @@ Concepts:
 - Cluster name: a user-supplied or auto-generated unique name to identify a
   cluster.
 - Cluster handle: (non-user facing) an opaque backend handle for us to
-  interact with a cluster.
+  interact with a cluster. 
 """
 import enum
 import json
