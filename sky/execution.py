@@ -26,6 +26,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -97,6 +98,8 @@ class Stage(enum.Enum):
 
 def _execute(
     dag: sky.Dag,
+    num_nodes: int = 1,
+    resource_filter: Optional[resources_lib.ResourceFilter] = None,
     dryrun: bool = False,
     down: bool = False,
     stream_logs: bool = True,
@@ -147,7 +150,8 @@ def _execute(
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
-    if task.need_spot_recovery:
+    if (resource_filter is not None and
+            resource_filter.spot_recovery is not None):
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
                 'Spot recovery is specified in the task. To launch the '
@@ -189,17 +193,21 @@ def _execute(
                 f'{backends.CloudVmRayBackend.NAME}')
 
     if not cluster_exists and Stage.OPTIMIZE in stages:
-        if task.best_resources is None:
-            # TODO: fix this for the situation where number of requested
-            # accelerators is not an integer.
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # TODO: adding this check because docker backend on a
-                # no-credential machine should not enter optimize(), which
-                # would directly error out ('No cloud is enabled...').  Fix by
-                # moving `sky check` checks out of optimize()?
-                dag = sky.optimize(dag, minimize=optimize_target)
-                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                assert task.best_resources is not None, task
+        # TODO: fix this for the situation where number of requested
+        # accelerators is not an integer.
+        if isinstance(backend, backends.CloudVmRayBackend):
+            # TODO: adding this check because docker backend on a
+            # no-credential machine should not enter optimize(), which
+            # would directly error out ('No cloud is enabled...').  Fix by
+            # moving `sky check` checks out of optimize()?
+            resource_mapper = resources_lib.ResourceMapper()
+            candidate_vms = resource_mapper.map_feasible_resources(
+                resource_filter)
+            candidate_clusters = [
+                resources_lib.ClusterResources(vm_resources=[vm] * num_nodes)
+                for vm in candidate_vms
+            ]
+            chosen_cluster = sky.optimize(candidate_clusters)
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
@@ -273,6 +281,7 @@ def _execute(
 @usage_lib.entrypoint
 def launch(
     dag: sky.Dag,
+    resources: Optional[resources_lib.ResourceFilter] = None,
     cluster_name: Optional[str] = None,
     retry_until_up: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
@@ -332,6 +341,7 @@ def launch(
                                                   operation_str='sky.launch')
     _execute(
         dag=dag,
+        resources=resources,
         dryrun=dryrun,
         down=down,
         stream_logs=stream_logs,

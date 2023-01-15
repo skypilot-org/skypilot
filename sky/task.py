@@ -2,7 +2,6 @@
 import inspect
 import os
 import re
-import typing
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import yaml
@@ -12,15 +11,13 @@ from sky import check
 from sky import clouds
 from sky import exceptions
 from sky import global_user_state
+from sky import resources
 from sky.backends import backend_utils
 from sky.data import storage as storage_lib
 from sky.data import data_utils
 from sky.skylet import constants
 from sky.utils import schemas
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky import resources as resources_lib
 
 # A lambda generating commands (node rank_i, node addrs -> cmd_i).
 CommandGen = Callable[[int, List[str]], Optional[str]]
@@ -80,7 +77,7 @@ class Task:
         run: Optional[CommandOrCommandGen] = None,
         envs: Optional[Dict[str, str]] = None,
         workdir: Optional[str] = None,
-        num_nodes: Optional[int] = None,
+        job_resources: Optional[resources.JobResources] = None,
         # Advanced:
         docker_image: Optional[str] = None,
     ):
@@ -109,10 +106,6 @@ class Task:
             will be synced to a location on the remote VM(s), and 'setup' and
             'run' commands will be run under that location (thus, they can rely
             on relative paths when invoking binaries).
-          num_nodes: The number of nodes to provision for this Task.  If None,
-            treated as 1 node.  If > 1, each node will execute its own
-            setup/run command; 'run' can either be a str, meaning all nodes get
-            the same command, or a lambda, as documented above.
           docker_image: The base docker image that this Task will be built on.
             In effect when LocalDockerBackend is used.  Defaults to
             'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04'.
@@ -126,23 +119,20 @@ class Task:
         self.workdir = workdir
         self.docker_image = (docker_image if docker_image else
                              'gpuci/miniforge-cuda:11.4-devel-ubuntu18.04')
-        self.num_nodes = num_nodes
+        self.job_resources = job_resources
 
         self.inputs = None
         self.outputs = None
         self.estimated_inputs_size_gigabytes = None
         self.estimated_outputs_size_gigabytes = None
-        # Default to CPUNode
-        self.resources = {sky.Resources()}
         self.time_estimator_func = None
+
         self.file_mounts = None
 
         # Only set when 'self' is a spot controller task: 'self.spot_task' is
         # the underlying managed spot task (Task object).
         self.spot_task = None
 
-        # Filled in by the optimizer.  If None, this Task is not planned.
-        self.best_resources = None
         # Check if the task is legal.
         self._validate()
 
@@ -288,10 +278,6 @@ class Task:
             task.set_outputs(outputs=outputs,
                              estimated_size_gigabytes=estimated_size_gigabytes)
 
-        resources = config.pop('resources', None)
-        resources = sky.Resources.from_yaml_config(resources)
-
-        task.set_resources({resources})
         assert not config, f'Invalid task args: {config.keys()}'
         return task
 
@@ -304,12 +290,6 @@ class Task:
                 config[key] = value
 
         add_if_not_none('name', self.name)
-
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
-            add_if_not_none('resources', resources.to_yaml_config())
-        add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
             add_if_not_none('inputs',
@@ -335,10 +315,6 @@ class Task:
                 for mount_path, storage in self.storage_mounts.items()
             })
         return config
-
-    @property
-    def num_nodes(self) -> int:
-        return self._num_nodes
 
     @property
     def envs(self) -> Dict[str, str]:
@@ -369,20 +345,6 @@ class Task:
                     'envs must be List[Tuple[str, str]] or Dict[str, str]: '
                     f'{envs}')
         self._envs = envs
-
-    @property
-    def need_spot_recovery(self) -> bool:
-        return any(r.spot_recovery is not None for r in self.resources)
-
-    @num_nodes.setter
-    def num_nodes(self, num_nodes: Optional[int]) -> None:
-        if num_nodes is None:
-            num_nodes = 1
-        if not isinstance(num_nodes, int) or num_nodes <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'num_nodes should be a positive int. Got: {num_nodes}')
-        self._num_nodes = num_nodes
 
     # E.g., 's3://bucket', 'gs://bucket', or None.
     def set_inputs(self, inputs, estimated_size_gigabytes):
@@ -417,23 +379,6 @@ class Task:
 
     def get_estimated_outputs_size_gigabytes(self):
         return self.estimated_outputs_size_gigabytes
-
-    def set_resources(self, resources: Union['resources_lib.Resources',
-                                             Set['resources_lib.Resources']]):
-        """Sets the required resources to execute this task.
-
-        Args:
-          resources: either a sky.Resources, or a set of them.  The latter case
-            indicates the user intent "pick any one of these resources" to run
-            a task.
-        """
-        if isinstance(resources, sky.Resources):
-            resources = {resources}
-        self.resources = resources
-        return self
-
-    def get_resources(self):
-        return self.resources
 
     def set_time_estimator(self, func):
         """Sets a func mapping resources to estimated time (secs)."""
@@ -717,10 +662,4 @@ class Task:
             s += f'\n  inputs: {self.inputs}'
         if self.outputs is not None:
             s += f'\n  outputs: {self.outputs}'
-        if self.num_nodes > 1:
-            s += f'\n  nodes: {self.num_nodes}'
-        if len(self.resources) > 1 or not list(self.resources)[0].is_empty():
-            s += f'\n  resources: {self.resources}'
-        else:
-            s += '\n  resources: default instances'
         return s
