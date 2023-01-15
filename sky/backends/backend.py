@@ -37,7 +37,7 @@ class Backend:
     @usage_lib.messages.usage.update_runtime('provision')
     def provision(self,
                   task: 'task_lib.Task',
-                  to_provision: Optional['resources.Resources'],
+                  to_provision: Optional['resources.ClusterResources'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None,
@@ -105,7 +105,7 @@ class Backend:
     # --- Implementations of the APIs ---
     def _provision(self,
                    task: 'task_lib.Task',
-                   to_provision: Optional['resources.Resources'],
+                   to_provision: Optional['resources.ClusterResources'],
                    dryrun: bool,
                    stream_logs: bool,
                    cluster_name: str,
