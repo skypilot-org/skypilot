@@ -93,7 +93,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     NAME = 'localdocker'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = LocalDockerResourceHandle
+    ResourceHandle = LocalDockerResourceHandle  # pylint: disable=invalid-name
 
     # Define the Docker-in-Docker mount
     _dind_mount = {

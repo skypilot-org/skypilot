@@ -1909,7 +1909,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     NAME = 'cloudvmray'
 
     # Backward compatibility, with the old name of the handle.
-    ResourceHandle = CloudVmRayResourceHandle
+    ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
 
     def __init__(self):
         self.run_timestamp = backend_utils.get_run_timestamp()
