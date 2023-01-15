@@ -320,3 +320,57 @@ class ClusterResources:
     def get_cost(self, seconds: float) -> float:
         hours = seconds / 3600.0
         return hours * self.get_hourly_price()
+
+
+# User-facing class.
+class JobResources:
+
+    def __init__(
+        self,
+        num_nodes: Optional[int] = None,
+        num_gpus: Union[None, int, float] = None,
+    ) -> None:
+        self.num_nodes = num_nodes
+        self.num_gpus = num_gpus
+
+        self._check_input_types()
+        self._canonicalize()
+        self._assign_defaults()
+        self._check_semantics()
+
+    def _check_type(self, field: str, expected_type) -> None:
+        # FIXME(woosuk): The same code as in ResourceFilter. Refactor.
+        val = getattr(self, field)
+        if val is not None and not isinstance(val, expected_type):
+            if field.startswith('_'):
+                field = field[1:]
+            if isinstance(expected_type, tuple):
+                expected_type = ' or '.join([t.__name__ for t in expected_type])
+            else:
+                expected_type = expected_type.__name__
+            with ux_utils.print_exception_no_traceback():
+                raise TypeError(f'Expected JobResources.{field} to be '
+                                f'{expected_type}, found {type(val)}.')
+
+    def _check_input_types(self) -> None:
+        self._check_type('num_nodes', (int))
+        self._check_type('num_gpus', (int, float))
+
+    def _canonicalize(self) -> None:
+        if self.num_gpus is not None:
+            self.num_gpus = float(self.num_gpus)
+
+    def _assign_defaults(self) -> None:
+        if self.num_nodes is None:
+            self.num_nodes = 1
+        if self.num_gpus is None:
+            self.num_gpus = 0.0
+
+    def _check_semantics(self) -> None:
+        if self.num_nodes < 1:
+            raise ValueError('num_nodes must be at least 1.')
+        if self.num_gpus < 0:
+            raise ValueError('num_gpus must be non-negative.')
+        elif self.num_gpus > 1:
+            if not self.num_gpus.is_integer():
+                raise ValueError('num_gpus must be an integer if > 1.')
