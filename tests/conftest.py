@@ -60,14 +60,11 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_slow)
-        if 'aws' in item.keywords and not config.getoption(
-                '--enable-aws'):
+        if 'aws' in item.keywords and not config.getoption('--enable-aws'):
             item.add_marker(skip_aws)
-        if 'gcp' in item.keywords and not config.getoption(
-                '--enable-gcp'):
+        if 'gcp' in item.keywords and not config.getoption('--enable-gcp'):
             item.add_marker(skip_gcp)
-        if 'azure' in item.keywords and not config.getoption(
-                '--enable-azure'):
+        if 'azure' in item.keywords and not config.getoption('--enable-azure'):
             item.add_marker(skip_azure)
 
 
