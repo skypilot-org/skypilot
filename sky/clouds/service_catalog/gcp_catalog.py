@@ -138,13 +138,13 @@ def _get_default_host_size(acc_name: str,
 
 
 def get_feasible_resources(
-    resource_filter: resources.ResourceFilter,
-) -> List[resources.VMResources]:
+    resource_filter: resources.ResourceFilter) -> List[resources.VMResources]:
     df = _df
     df = common.filter_spot(df, resource_filter.use_spot)
 
     # Users cannot use A2 machines without A100 GPUs.
-    if (resource_filter.instance_type is not None and resource_filter.startswith('a2-')):
+    if (resource_filter.instance_type is not None and
+            resource_filter.startswith('a2-')):
         if resource_filter.accelerator is None:
             return []
 
@@ -177,7 +177,7 @@ def get_feasible_resources(
             # TPUs and other GPUs.
             if resource_filter.instance_type is None:
                 # If not specified, provide the default host VM size.
-                resource_filter.instance_type = 'n1-highmem-8' # FIXME
+                resource_filter.instance_type = 'n1-highmem-8'  # FIXME
             elif not resource_filter.instance_type.startswith('n1-'):
                 # These accelerators can be only attached to N1 machines.
                 return []

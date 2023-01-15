@@ -16,8 +16,7 @@ _df = common.read_catalog('aws.csv')
 
 
 def get_feasible_resources(
-    resource_filter: resources.ResourceFilter,
-) -> List[resources.VMResources]:
+    resource_filter: resources.ResourceFilter) -> List[resources.VMResources]:
     df = _df
     df = common.filter_spot(df, resource_filter.use_spot)
 
