@@ -2,7 +2,9 @@
 import copy
 from typing import Dict, List, Optional, Union
 
+from sky import check
 from sky import clouds
+from sky import global_user_state
 from sky import sky_logging
 from sky import spot
 from sky.backends import backend_utils
@@ -40,7 +42,7 @@ class Accelerator:
 
 
 class ResourceFilter:
-    """A user-specified resource filter."""
+    """A user-specified resource requirement."""
 
     def __init__(
         self,
@@ -53,7 +55,7 @@ class ResourceFilter:
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
         disk_size: Optional[int] = None,
-        image_id: Optional[str] = None, # FIXME: image_id can be a dictionary.
+        image_id: Optional[str] = None,
     ) -> None:
         self.cloud = cloud
         self.region = region
@@ -139,6 +141,8 @@ class ResourceFilter:
                     raise ValueError(
                         'Accelerators must be specified as a single '
                         'accelerator name and count.')
+            # TODO: Check that acc_name is string and acc_count is int
+            # in _check_input_types.
             acc_name, acc_count = list(self._accelerators.items())[0]
         else:
             assert isinstance(self._accelerators, str)
@@ -148,8 +152,8 @@ class ResourceFilter:
             else:
                 splits = self._accelerators.split(':')
                 parse_error = ('The "accelerators" field must be '
-                            'either <name> or <name>:<cnt>. '
-                            f'Found: {self._accelerators!r}')
+                               'either <name> or <name>:<cnt>. '
+                               f'Found: {self._accelerators!r}')
                 if len(splits) != 2:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(parse_error)
@@ -208,8 +212,8 @@ class ResourceFilter:
         # TODO: implement this.
         config = {}
         for field in [
-                'cloud', 'region', 'zone', 'instance_type',
-                'use_spot', 'disk_size', 'image_id'
+                'cloud', 'region', 'zone', 'instance_type', 'use_spot',
+                'disk_size', 'image_id'
         ]:
             val = getattr(self, field)
             if val is not None:
@@ -267,8 +271,7 @@ class VMResources:
     def __eq__(self, other: 'VMResources') -> bool:
         if not self.cloud.is_same_cloud(other.cloud):
             return False
-        return (self.region == other.region and
-                self.zone == other.zone and
+        return (self.region == other.region and self.zone == other.zone and
                 self.instance_type == other.instance_type and
                 self.accelerator == other.accelerator and
                 self.use_spot == other.use_spot and
@@ -391,3 +394,70 @@ class JobResources:
         elif self.num_gpus > 1:
             if not self.num_gpus.is_integer():
                 raise ValueError('num_gpus must be an integer if > 1.')
+
+
+class ResourceMapper:
+
+    def __init__(self) -> None:
+        self.enabled_clouds = global_user_state.get_enabled_clouds()
+        self.retry = True
+
+    def _get_feasible_clouds(
+            self, cloud: Optional[clouds.Cloud]) -> List[clouds.Cloud]:
+        if cloud is None:
+            feasible_clouds = self.enabled_clouds
+        else:
+            feasible_clouds = [cloud]
+
+        # FIXME(woosuk): Exclude local cloud for now.
+        assert str(cloud) != 'Local'
+        feasible_clouds = [c for c in feasible_clouds if str(c) != 'Local']
+        if feasible_clouds:
+            # Found a cloud that matches the filter.
+            return feasible_clouds
+
+        if not self.retry:
+            # No matching cloud found.
+            return []
+
+        # Run `sky check` and try again.
+        check.check(quiet=True)
+        self.retry = False
+        self.enabled_clouds = global_user_state.get_enabled_clouds()
+
+        for c in self.enabled_clouds:
+            if cloud is None:
+                feasible_clouds.append(c)
+            elif cloud.is_same_cloud(c):
+                feasible_clouds.append(c)
+        return feasible_clouds
+
+    def map_feasible_resources(
+        self, resource_filter: ResourceFilter) -> List[VMResources]:
+        feasible_clouds = self._get_feasible_clouds(resource_filter.cloud)
+        if not feasible_clouds:
+            # TODO: Print a warning.
+            return []
+
+        feasible_resources = []
+        for cloud in feasible_clouds:
+            # TODO: Support on-prem.
+            feasible_resources += cloud.get_feasible_resources(resource_filter)
+
+        if feasible_resources:
+            # Found resources that match the filter.
+            return feasible_resources
+
+        return []
+
+        # No feasible resources found. Try to find a fuzzy match.
+        fuzzy_match_resources = []
+        for cloud in feasible_clouds:
+            fuzzy_match_resources += cloud.get_fuzzy_match_resources(
+                resource_filter)
+        logger.info(f'No resource satisfying {resource_filter} found.')
+        logger.info(f'Did you mean: '
+                    f'{colorama.Fore.CYAN}'
+                    f'{sorted(fuzzy_match_resources)}'
+                    f'{colorama.Style.RESET_ALL}')
+        return []
