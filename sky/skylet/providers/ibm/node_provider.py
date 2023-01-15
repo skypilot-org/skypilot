@@ -33,7 +33,7 @@ from ibm_vpc import VpcV1
 from typing import Any, Dict, List, Optional
 
 from ray.autoscaler._private.cli_logger import cli_logger
-from ray.autoscaler._private.util import hash_runtime_conf
+from ray.autoscaler._private.util import hash_runtime_conf, hash_launch_conf
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
     NODE_KIND_HEAD,
@@ -41,6 +41,11 @@ from ray.autoscaler.tags import (
     TAG_RAY_CLUSTER_NAME,
     TAG_RAY_NODE_KIND,
     TAG_RAY_NODE_NAME,
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_RUNTIME_CONFIG,
+    TAG_RAY_USER_NODE_TYPE,
+    TAG_RAY_NODE_STATUS,
+    TAG_RAY_FILE_MOUNTS_CONTENTS
 )
 from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
 from sky.skylet.providers.ibm.utils import get_logger
@@ -152,21 +157,31 @@ class IBMVPCNodeProvider(NodeProvider):
                 if node:
                     logger.debug(f"{name} is node in vpc")
 
-                    # reads the cluster's config file
+                    # remote head node will calculate 2 hash values below
                     ray_bootstrap_config = Path.home() / "ray_bootstrap_config.yaml"
                     config = json.loads(ray_bootstrap_config.read_text())
                     (runtime_hash, mounts_contents_hash) = hash_runtime_conf(
                         config["file_mounts"], None, config
                     )
 
+                    # launch_hash is used to verify the head node belongs
+                    # to the cluster. e.g. checked when running --restart-only
+                    head_node_config = {}
+                    head_node_type = config.get("head_node_type")
+                    if head_node_type:
+                        head_config = config["available_node_types"][head_node_type]
+                        head_node_config.update(head_config["node_config"])
+                    launch_hash = hash_launch_conf(head_node_config, config["auth"])
+
                     head_tags = {
                         TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
-                        "ray-node-name": name,
-                        "ray-node-status": "up-to-date",
-                        "ray-cluster-name": self.cluster_name,
-                        "ray-user-node-type": config["head_node_type"],
-                        "ray-runtime-config": runtime_hash,
-                        "ray-file-mounts-contents": mounts_contents_hash,
+                        TAG_RAY_NODE_NAME: name,
+                        TAG_RAY_NODE_STATUS: "up-to-date",
+                        TAG_RAY_CLUSTER_NAME: self.cluster_name,
+                        TAG_RAY_USER_NODE_TYPE: config["head_node_type"],
+                        TAG_RAY_RUNTIME_CONFIG: runtime_hash,
+                        TAG_RAY_LAUNCH_CONFIG: launch_hash,
+                        TAG_RAY_FILE_MOUNTS_CONTENTS: mounts_contents_hash,
                     }
 
                     logger.debug(f"Setting HEAD node tags {head_tags}")
