@@ -97,9 +97,13 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
             autostop_minutes = spot.SPOT_CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'{reserved_group_name}{colorama.Style.RESET_ALL}'
-                       f'{colorama.Style.DIM} (will be autostopped if idle for '
+                       f'{colorama.Style.DIM} (autostopped if idle for '
                        f'{autostop_minutes}min)'
                        f'{colorama.Style.RESET_ALL}')
+            reset = backend_utils.RESET_BOLD
+            click.echo('Use spot jobs CLI: '
+                       f'{colorama.Style.BRIGHT}sky spot --help{reset}')
+
         else:
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
@@ -263,10 +267,14 @@ _get_launched = (lambda cluster_status: log_utils.readable_time_duration(
     cluster_status['launched_at']))
 _get_region = (
     lambda clusters_status: clusters_status['handle'].launched_resources.region)
-_get_status = (lambda cluster_status: cluster_status['status'].value)
 _get_command = (lambda cluster_status: cluster_status['last_use'])
 _get_duration = (lambda cluster_status: log_utils.readable_time_duration(
     0, cluster_status['duration'], absolute=True))
+
+
+def _get_status(cluster_status):
+    status = cluster_status['status']
+    return status.colored_str()
 
 
 def _get_resources(cluster_status):
@@ -325,7 +333,7 @@ def _get_autostop(cluster_status):
     if autostop_str == '':
         autostop_str = '-'
     return autostop_str
-
+  
 
 def get_cost_report(cluster_status: str,) -> float:
     cost = cluster_status['total_cost']
@@ -342,6 +350,7 @@ def _get_total_cost(cluster_status):
         cost_str = f'$ {cost:.3f}'
         return cost_str
     return '-'
+
 
 
 def _is_pending_autostop(cluster_status):

@@ -12,6 +12,9 @@ resources:
 
 file_mounts:
   {{remote_user_yaml_prefix}}/{{cluster_name}}.yaml: {{user_yaml_path}}
+{% if user_config_path is not none %}
+  {{remote_user_yaml_prefix}}/{{cluster_name}}.config_yaml: {{user_config_path}}
+{% endif %}
 
 setup: |
   # Install cli dependencies
@@ -39,6 +42,12 @@ run: |
 
 envs:
   SKYPILOT_USAGE_USER_ID: {{logging_user_hash}}
+  # skip cloud identity check for spot controller to avoid the overhead.
+  SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK: 1
+  SKYPILOT_USER: {{user}}
+{% if user_config_path is not none %}
+  {{env_var_skypilot_config}}: {{remote_user_yaml_prefix}}/{{cluster_name}}.config_yaml
+{% endif %}
 {% if is_dev %}
   SKYPILOT_DEV: 1
 {% endif %}
