@@ -277,7 +277,7 @@ class VMResources:
                 self.image_id == other.image_id)
 
     def __repr__(self) -> str:
-        return (f'VMResources('
+        return ('VMResources('
                 f'cloud={self.cloud}, '
                 f'region={self.region}, '
                 f'zone={self.zone}, '
@@ -299,9 +299,9 @@ class ClusterResources:
         self.num_nodes = len(vm_resources)
         self.vm_resources = vm_resources
 
-        # Currently, we assume that all VMs in a cluster are identical.
+        # NOTE: Currently, we assume that all VMs in a cluster are identical.
         # TODO(woosuk): support heterogeneous clusters.
-        head_node = vm_resources[0]
+        head_node = self.get_head_node()
         self.cloud = head_node.cloud
         self.region = head_node.region
         self.zone = head_node.zone
@@ -314,12 +314,29 @@ class ClusterResources:
         self.disk_size = head_node.disk_size
         self.image_id = head_node.image_id
 
+    def get_head_node(self) -> VMResources:
+        return self.vm_resources[0]
+
     def get_hourly_price(self) -> float:
         return sum(vm.get_hourly_price() for vm in self.vm_resources)
 
     def get_cost(self, seconds: float) -> float:
         hours = seconds / 3600.0
         return hours * self.get_hourly_price()
+
+    def __eq__(self, other: 'ClusterResources') -> bool:
+        if self.num_nodes != other.num_nodes:
+            return False
+        # NOTE: this relies on the assumption that all VMs in a cluster are
+        # identical.
+        head_node = self.get_head_node()
+        other_head_node = other.get_head_node()
+        return head_node == other_head_node
+
+    def __repr__(self) -> str:
+        return ('ClusterResources('
+                f'num_nodes={self.num_nodes}, '
+                f'head_node={self.get_head_node()})')
 
 
 # User-facing class.
