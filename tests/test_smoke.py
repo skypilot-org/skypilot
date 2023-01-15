@@ -1254,9 +1254,10 @@ def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
     zone = 'us-west2-a'
+    # Use ':' to match as the cluster name will contain the suffix with job id
     query_cmd = (
         f'gcloud compute instances list --filter='
-        f'"(labels.ray-cluster-name={name} AND labels.ray-node-type=worker)" '
+        f'"(labels.ray-cluster-name:{name} AND labels.ray-node-type=worker)" '
         f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
@@ -1345,10 +1346,10 @@ def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     zone = 'us-west3-b'
     query_state_cmd = ('gcloud compute instances list '
-                       f'--filter="(labels.ray-cluster-name={name})" '
+                       f'--filter="(labels.ray-cluster-name:{name})" '
                        '--format="value(status)"')
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name={name})" '
+                 f'"(labels.ray-cluster-name:{name})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
