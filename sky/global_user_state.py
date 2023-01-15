@@ -452,28 +452,7 @@ def get_cluster_from_name(
         }
         return record
 
-
-def update_cost_of_clusters():
-    rows = _DB.cursor.execute(
-        'select * from clusters order by launched_at desc')
-    status_time = int(time.time())
-    for (name, launched_at, handle, _, status, _, metadata, _) in rows:
-        handle = pickle.loads(handle)
-        metadata = json.loads(metadata)
-
-        if handle and metadata:
-            cost_before_start = metadata['cost_before_start']
-            cost_from_start_to_now = 0
-            if ClusterStatus[status] == ClusterStatus.UP:
-                cost_from_start_to_now = get_cost_for_time_interval(
-                    handle, launched_at, status_time)
-            latest_cost = cost_before_start + cost_from_start_to_now
-            metadata['latest_queried_cost'] = latest_cost
-            set_cluster_metadata(name, metadata)
-
-
 def get_clusters() -> List[Dict[str, Any]]:
-    update_cost_of_clusters()
     rows = _DB.cursor.execute(
         'SELECT * from clusters order by launched_at desc').fetchall()
 
@@ -641,15 +620,3 @@ def get_storage() -> List[Dict[str, Any]]:
             'status': StorageStatus[status],
         })
     return records
-
-
-def get_cost_for_time_interval(
-        handle: Optional['backends.Backend.ResourceHandle'], start_time: str,
-        end_time: str) -> float:
-
-    start_time, end_time = int(start_time), int(end_time)
-    interval_duration = end_time - start_time
-    cost = (handle.launched_resources.get_cost(interval_duration) *
-            handle.launched_nodes)
-
-    return cost
