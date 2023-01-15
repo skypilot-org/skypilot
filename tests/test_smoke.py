@@ -1,3 +1,6 @@
+# Smoke tests for SkyPilot
+# Default options are set in pyproject.toml
+
 import hashlib
 import inspect
 import pathlib
