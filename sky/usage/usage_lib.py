@@ -35,9 +35,7 @@ def _get_current_timestamp_ns() -> int:
 def _get_user_hash():
     """Returns a unique user-machine specific hash as a user id for logging."""
     user_id = os.getenv(constants.USAGE_USER_ENV)
-    if user_id and len(user_id) == 8:
-        return user_id
-    return common_utils.get_user_hash()
+    return common_utils.get_user_hash(default_value=user_id)
 
 
 class MessageType(enum.Enum):
@@ -77,7 +75,7 @@ class UsageMessageToReport(MessageToReport):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
         # Message identifier.
         self.user: str = _get_user_hash()
-        self.run_id: str = common_utils.get_run_id()
+        self.run_id: str = common_utils.get_usage_run_id()
         self.sky_version: str = sky.__version__
 
         # Entry

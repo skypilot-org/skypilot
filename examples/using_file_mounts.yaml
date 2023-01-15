@@ -57,6 +57,7 @@ file_mounts:
 
   # Relative paths are under ~/ (after sync, ~/relative_dir/ exists).
   relative_dir: ~/tmp-workdir
+  ./dotslash_relative_dir: ~/tmp-workdir
 
   #############################################
   #  Sync from Google Cloud Storage (gsutil)  #
@@ -68,6 +69,9 @@ file_mounts:
   ~/data/train-00001-of-01024: gs://cloud-tpu-test-datasets/fake_imagenet/train-00001-of-01024
 
   /s3-data-test: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0
+  /s3-data-file: s3://fah-public-data-covid19-cryptic-pockets/human/il6/PROJ14534/RUN999/CLONE0/results0/frame0.xtc
+  # Test access to private bucket
+  # /my-bucket: s3://sky-detectron2-outputs
   # /test-my-gcs: gs://cloud-storage-test-zhwu-2
 
   # If a source path points to a "directory", its contents will be recursively
@@ -102,8 +106,9 @@ run: |
   ls -lthr ~/.ssh/
 
   ls -lthr ~/
-  ls -lthr ~/relative_dir
-  ls -lthr ~/relative_dir/
+  ls -lthr ~/sky_workdir/relative_dir
+  ls -lthr ~/sky_workdir/relative_dir/
+  ls -lthr ~/sky_workdir/dotslash_relative_dir/
 
   du -schL /train-00001-of-01024
   wc -l /train-00001-of-01024
@@ -111,6 +116,7 @@ run: |
   ls -l ~/data/train-00001-of-01024
 
   ls -l /s3-data-test
+  cat /s3-data-file > /dev/null
 
   # ls -lH /data/fake_imagenet | head -n10
 

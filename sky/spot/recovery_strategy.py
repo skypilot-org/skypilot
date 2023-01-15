@@ -1,7 +1,7 @@
 """The strategy to handle launching/recovery/termination of spot clusters."""
 import time
 import typing
-from typing import Callable, Optional
+from typing import Optional, Tuple
 
 import sky
 from sky import exceptions
@@ -34,8 +34,7 @@ class StrategyExecutor:
     RETRY_INIT_GAP_SECONDS = 60
 
     def __init__(self, cluster_name: str, backend: 'backends.Backend',
-                 task: 'task_lib.Task', retry_until_up: bool,
-                 signal_handler: Callable) -> None:
+                 task: 'task_lib.Task', retry_until_up: bool) -> None:
         """Initialize the strategy executor.
 
         Args:
@@ -43,15 +42,12 @@ class StrategyExecutor:
             backend: The backend to use. Only CloudVMRayBackend is supported.
             task: The task to execute.
             retry_until_up: Whether to retry until the cluster is up.
-            signal_handler: The signal handler that will raise an exception if a
-                SkyPilot signal is received.
         """
         self.dag = sky.Dag()
         self.dag.add(task)
         self.cluster_name = cluster_name
         self.backend = backend
         self.retry_until_up = retry_until_up
-        self.signal_handler = signal_handler
 
     def __init_subclass__(cls, name: str, default: bool = False):
         SPOT_STRATEGIES[name] = cls
@@ -63,12 +59,11 @@ class StrategyExecutor:
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
-             task: 'task_lib.Task', retry_until_up: bool,
-             signal_handler: Callable) -> 'StrategyExecutor':
+             task: 'task_lib.Task', retry_until_up: bool) -> 'StrategyExecutor':
         """Create a strategy from a task."""
-        resources = task.resources
-        assert len(resources) == 1, 'Only one resource is supported.'
-        resources: 'sky.Resources' = list(resources)[0]
+        task_resources = task.resources
+        assert len(task_resources) == 1, 'Only one resource is supported.'
+        resources: 'sky.Resources' = list(task_resources)[0]
 
         spot_recovery = resources.spot_recovery
         assert spot_recovery is not None, (
@@ -77,7 +72,7 @@ class StrategyExecutor:
         # will be handled by the strategy class.
         task.set_resources({resources.copy(spot_recovery=None)})
         return SPOT_STRATEGIES[spot_recovery](cluster_name, backend, task,
-                                              retry_until_up, signal_handler)
+                                              retry_until_up)
 
     def launch(self) -> Optional[float]:
         """Launch the spot cluster for the first time.
@@ -123,14 +118,16 @@ class StrategyExecutor:
     def _try_cancel_all_jobs(self):
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
+        if handle is None:
+            return
         try:
             self.backend.cancel_jobs(handle, jobs=None)
         except Exception as e:  # pylint: disable=broad-except
             # Ignore the failure as the cluster can be totally stopped, and the
             # job canceling can get connection error.
-            logger.info(
-                f'Ignoring the job cancellation failure (Exception: {e}); '
-                'the spot cluster is likely completely stopped.')
+            logger.info('Ignoring the job cancellation failure; '
+                        'the spot cluster is likely completely stopped.'
+                        f'\n  Detailed exception: {e}')
 
     def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
         """Implementation of launch().
@@ -141,22 +138,24 @@ class StrategyExecutor:
         Args:
             max_retry: The maximum number of retries. If None, retry forever.
             raise_on_failure: Whether to raise an exception if the launch fails.
+
+        Returns:
+            The job's start timestamp, or None if failed to start and
+            raise_on_failure is False.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
         backoff = common_utils.Backoff(self.RETRY_INIT_GAP_SECONDS)
         while True:
             retry_cnt += 1
-            # Check the signal every time to be more responsive to user
-            # signals, such as Cancel.
-            self.signal_handler()
             retry_launch = False
             exception = None
             try:
                 usage_lib.messages.usage.set_internal()
                 sky.launch(self.dag,
                            cluster_name=self.cluster_name,
-                           detach_run=True)
+                           detach_run=True,
+                           _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
             except exceptions.InvalidClusterNameError as e:
                 # The cluster name is too long.
@@ -222,8 +221,7 @@ class StrategyExecutor:
                     continue
 
                 # Check the job status until it is not in initialized status
-                if status not in (None, job_lib.JobStatus.INIT,
-                                  job_lib.JobStatus.PENDING):
+                if status is not None and job_lib.JobStatus.PENDING < status:
                     try:
                         launch_time = spot_utils.get_job_timestamp(
                             self.backend, self.cluster_name, get_end_time=False)
@@ -260,6 +258,28 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
 
+    def __init__(self, cluster_name: str, backend: 'backends.Backend',
+                 task: 'task_lib.Task', retry_until_up: bool) -> None:
+        super().__init__(cluster_name, backend, task, retry_until_up)
+        # Note down the cloud/region of the launched cluster, so that we can
+        # first retry in the same cloud/region. (Inside recover() we may not
+        # rely on cluster handle, as it can be None if the cluster is
+        # preempted.)
+        self._launched_cloud_region: Optional[Tuple['sky.clouds.Cloud',
+                                                    'sky.clouds.Region']] = None
+
+    def _launch(self, max_retry=3, raise_on_failure=True) -> Optional[float]:
+        launch_time = super()._launch(max_retry, raise_on_failure)
+        if launch_time is not None:
+            # Only record the cloud/region if the launch is successful.
+            handle = global_user_state.get_handle_from_cluster_name(
+                self.cluster_name)
+            assert handle is not None, 'Cluster should be launched.'
+            launched_resources = handle.launched_resources
+            self._launched_cloud_region = (launched_resources.cloud,
+                                           launched_resources.region)
+        return launch_time
+
     def recover(self) -> float:
         # 1. Cancel the jobs and launch the cluster with the STOPPED status,
         #    so that it will try on the current region first until timeout.
@@ -273,29 +293,29 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
         # Retry the entire block until the cluster is up, so that the ratio of
         # the time spent in the current region and the time spent in the other
         # region is consistent during the retry.
-        handle = global_user_state.get_handle_from_cluster_name(
-            self.cluster_name)
         while True:
             # Add region constraint to the task, to retry on the same region
-            # first.
-            task = self.dag.tasks[0]
-            resources = list(task.resources)[0]
-            original_resources = resources
+            # first (if valid).
+            if self._launched_cloud_region is not None:
+                task = self.dag.tasks[0]
+                resources = list(task.resources)[0]
+                original_resources = resources
 
-            launched_cloud = handle.launched_resources.cloud
-            launched_region = handle.launched_resources.region
-            new_resources = resources.copy(cloud=launched_cloud,
-                                           region=launched_region)
-            task.set_resources({new_resources})
-            # Not using self.launch to avoid the retry until up logic.
-            launched_time = self._launch(raise_on_failure=False)
-            # Restore the original dag, i.e. reset the region constraint.
-            task.set_resources({original_resources})
-            if launched_time is not None:
-                return launched_time
+                launched_cloud, launched_region = self._launched_cloud_region
+                new_resources = resources.copy(cloud=launched_cloud,
+                                               region=launched_region)
+                task.set_resources({new_resources})
+                # Not using self.launch to avoid the retry until up logic.
+                launched_time = self._launch(raise_on_failure=False)
+                # Restore the original dag, i.e. reset the region constraint.
+                task.set_resources({original_resources})
+                if launched_time is not None:
+                    return launched_time
 
             # Step 2
-            logger.debug('Terminating unhealthy spot cluster.')
+            logger.debug('Terminating unhealthy spot cluster and '
+                         'reset cloud region.')
+            self._launched_cloud_region = None
             self.terminate_cluster()
 
             # Step 3

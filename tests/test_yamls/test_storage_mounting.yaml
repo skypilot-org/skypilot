@@ -1,0 +1,42 @@
+file_mounts:
+  # Mounting public buckets
+  /mount_public_s3:
+    source: s3://digitalcorpora
+    mode: MOUNT
+
+  # Mounting public buckets
+  /mount_public_gcp:
+    source: gs://gcp-public-data-sentinel-2
+    mode: MOUNT
+
+  # Mounting private buckets in COPY mode
+  /mount_private_copy:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    mode: COPY
+
+  # Mounting private buckets in MOUNT mode
+  /mount_private_mount:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    mode: MOUNT
+
+run: |
+  set -ex
+  
+  # Check public bucket contents
+  ls -ltr /mount_public_s3/corpora
+  ls -ltr /mount_public_gcp/tiles
+  
+  # Check private bucket contents
+  ls -ltr /mount_private_copy/foo
+  ls -ltr /mount_private_copy/tmp\ file
+  ls -ltr /mount_private_mount/foo
+  ls -ltr /mount_private_mount/tmp\ file
+  
+  # Symlinks are not copied to buckets
+  ! ls /mount_private_copy/circle-link
+  ! ls /mount_private_mount/circle-link
+  
+  # Write to private bucket in MOUNT mode should pass
+  echo "hello" > /mount_private_mount/hello.txt

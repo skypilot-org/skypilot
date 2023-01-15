@@ -1,36 +1,39 @@
 import copy
-import threading
-from collections import defaultdict, OrderedDict
 import logging
+import threading
 import time
+from collections import defaultdict, OrderedDict
 from typing import Any, Dict, List
 
 import botocore
+from boto3.resources.base import ServiceResource
 
-from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import (
-    TAG_RAY_CLUSTER_NAME,
-    TAG_RAY_NODE_NAME,
-    TAG_RAY_LAUNCH_CONFIG,
-    TAG_RAY_NODE_KIND,
-    TAG_RAY_USER_NODE_TYPE,
+try:
+    import ray._private.ray_constants as ray_constants
+except ImportError:
+    # SkyPilot: for local ray version lower than 2.0.1
+    import ray.ray_constants as ray_constants
+from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
+    CloudwatchHelper,
+    CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
+    CLOUDWATCH_AGENT_INSTALLED_TAG,
 )
-from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
 from sky.skylet.providers.aws.config import bootstrap_aws
-from ray.autoscaler._private.log_timer import LogTimer
-
 from sky.skylet.providers.aws.utils import (
     boto_exception_handler,
     resource_cache,
     client_cache,
 )
 from ray.autoscaler._private.cli_logger import cli_logger, cf
-import ray.ray_constants as ray_constants
-
-from sky.skylet.providers.aws.cloudwatch.cloudwatch_helper import (
-    CloudwatchHelper,
-    CLOUDWATCH_AGENT_INSTALLED_AMI_TAG,
-    CLOUDWATCH_AGENT_INSTALLED_TAG,
+from ray.autoscaler._private.constants import BOTO_MAX_RETRIES, BOTO_CREATE_MAX_RETRIES
+from ray.autoscaler._private.log_timer import LogTimer
+from ray.autoscaler.node_provider import NodeProvider
+from ray.autoscaler.tags import (
+    TAG_RAY_CLUSTER_NAME,
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_KIND,
+    TAG_RAY_NODE_NAME,
+    TAG_RAY_USER_NODE_TYPE,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,7 +59,7 @@ def from_aws_format(tags):
     return tags
 
 
-def make_ec2_client(region, max_retries, aws_credentials=None):
+def make_ec2_resource(region, max_retries, aws_credentials=None):
     """Make client, retrying requests up to `max_retries`."""
     aws_credentials = aws_credentials or {}
     return resource_cache("ec2", region, max_retries, **aws_credentials)
@@ -67,7 +70,7 @@ def list_ec2_instances(
 ) -> List[Dict[str, Any]]:
     """Get all instance-types/resources available in the user's AWS region.
     Args:
-        region (str): the region of the AWS provider. e.g., "us-west-2".
+        region: the region of the AWS provider. e.g., "us-west-2".
     Returns:
         final_instance_types: a list of instances. An example of one element in
         the list:
@@ -94,6 +97,11 @@ def list_ec2_instances(
 
 
 class AWSNodeProvider(NodeProvider):
+    """Deprecated for SkyPilot and kept for backward compatibility.
+
+    The cluster launch template has been updated to use AWSNodeProviderV2.
+    """
+
     max_terminate_nodes = 1000
 
     def __init__(self, provider_config, cluster_name):
@@ -101,12 +109,12 @@ class AWSNodeProvider(NodeProvider):
         self.cache_stopped_nodes = provider_config.get("cache_stopped_nodes", True)
         aws_credentials = provider_config.get("aws_credentials")
 
-        self.ec2 = make_ec2_client(
+        self.ec2 = make_ec2_resource(
             region=provider_config["region"],
             max_retries=BOTO_MAX_RETRIES,
             aws_credentials=aws_credentials,
         )
-        self.ec2_fail_fast = make_ec2_client(
+        self.ec2_fail_fast = make_ec2_resource(
             region=provider_config["region"],
             max_retries=0,
             aws_credentials=aws_credentials,
@@ -494,7 +502,6 @@ class AWSNodeProvider(NodeProvider):
         # asyncrhonous or error, which would result in a use after free error.
         # If this leak becomes bad, we can garbage collect the tag cache when
         # the node cache is updated.
-        pass
 
     def _check_ami_cwa_installation(self, config):
         response = self.ec2.meta.client.describe_images(ImageIds=[config["ImageId"]])
@@ -660,3 +667,22 @@ class AWSNodeProvider(NodeProvider):
                     + "."
                 )
         return cluster_config
+
+
+class AWSNodeProviderV2(AWSNodeProvider):
+    """Same as V1, except head and workers use a SkyPilot IAM role.
+
+    The new version of the AWS node provider supports AWS SSO
+    (see #1489), by using a new IAM role with different permissions
+    than the original ray-autoscaler-v1 for both the head node and
+    worker nodes.
+
+    We did not overwrite the original AWSNodeProvider class to avoid
+    breaking existing clusters. Otherwise, the existing clusters will
+    have a new launch_hash and will have new node(s) launched, causing
+    the existing nodes to leak.
+    """
+
+    @staticmethod
+    def bootstrap_config(cluster_config):
+        return bootstrap_aws(cluster_config, skypilot_iam_role=True)

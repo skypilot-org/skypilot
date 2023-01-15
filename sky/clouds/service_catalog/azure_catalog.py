@@ -3,18 +3,17 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
-import re
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
 import sky
 from sky import resources
-from sky.clouds import cloud
+from sky import clouds as cloud_lib
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
-_df = common.read_catalog('azure.csv')
+_df = common.read_catalog('azure/vms.csv')
 
 
 def get_feasible_resources(
@@ -75,7 +74,9 @@ def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
 
 
-def validate_region_zone(region: Optional[str], zone: Optional[str]):
+def validate_region_zone(
+        region: Optional[str],
+        zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
@@ -86,17 +87,24 @@ def accelerator_in_region_or_zone(acc_name: str,
                                   acc_count: int,
                                   region: Optional[str] = None,
                                   zone: Optional[str] = None) -> bool:
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure does not support zones.')
     return common.accelerator_in_region_or_zone_impl(_df, acc_name, acc_count,
                                                      region, zone)
 
 
 def get_hourly_cost(instance_type: str,
+                    use_spot: bool = False,
                     region: Optional[str] = None,
-                    use_spot: bool = False) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+                    zone: Optional[str] = None) -> float:
     # Ref: https://azure.microsoft.com/en-us/support/legal/offer-details/
     assert not use_spot, 'Current Azure subscription does not support spot.'
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure does not support zones.')
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
@@ -109,18 +117,28 @@ def get_accelerators_from_instance_type(
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
+        acc_name: str,
+        acc_count: int,
+        use_spot: bool = False,
+        region: Optional[str] = None,
+        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
+    if zone is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Azure does not support zones.')
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
-                                                         acc_count=acc_count)
+                                                         acc_count=acc_count,
+                                                         use_spot=use_spot,
+                                                         region=region,
+                                                         zone=zone)
 
 
-def get_region_zones_for_instance_type(instance_type: str,
-                                       use_spot: bool) -> List[cloud.Region]:
+def get_region_zones_for_instance_type(
+        instance_type: str, use_spot: bool) -> List[cloud_lib.Region]:
     df = _df[_df['InstanceType'] == instance_type]
     return common.get_region_zones(df, use_spot)
 

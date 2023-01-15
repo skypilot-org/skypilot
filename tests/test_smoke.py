@@ -6,9 +6,11 @@ import sys
 import tempfile
 import time
 from typing import Dict, List, NamedTuple, Optional, Tuple
+import urllib.parse
 import uuid
 
 import colorama
+import jinja2
 import pytest
 
 import sky
@@ -29,6 +31,12 @@ _smoke_test_hash = hashlib.md5(
 # from the different spot launch with the same cluster name but a different job
 # id.
 test_id = str(uuid.uuid4())[-2:]
+
+storage_setup_commands = [
+    'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
+    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/foo',
+    'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link'
+]
 
 
 class Test(NamedTuple):
@@ -75,6 +83,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             shell=True,
+            executable='/bin/bash',
         )
         try:
             proc.wait(timeout=test.timeout)
@@ -130,11 +139,14 @@ def test_minimal():
     test = Test(
         'minimal',
         [
-            f'sky launch -y -c {name} examples/minimal.yaml',
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
             f'sky launch -y -c {name} examples/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
+            # Check the logs downloading
+            f'log_path=$(sky logs {name} 2 --sync-down | grep "Job 2 logs:" | sed -E "s/^.*Job 2 logs: (.*)\\x1b\\[0m/\\1/g") && echo $log_path && test -f $log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
@@ -153,6 +165,7 @@ def test_region():
             f'sky launch -y -c {name} --region us-west-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+            f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -170,6 +183,107 @@ def test_zone():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky status --all | grep {name} | grep us-west-2b',  # Ensure the zone is correct.
         ],
+        f'sky down -y {name} {name}-2 {name}-3',
+    )
+    run_one_test(test)
+
+
+def test_image_id_dict():
+    name = _get_cluster_name()
+    test = Test(
+        'image_id_dict',
+        [
+            # Use image id dict.
+            f'sky launch -y -c {name} examples/per_region_images.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} "ls ~"',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+        ],
+        f'sky down -y {name} {name}-2 {name}-3',
+    )
+    run_one_test(test)
+
+
+def test_image_id_dict_with_region():
+    name = _get_cluster_name()
+    test = Test(
+        'image_id_dict_with_region',
+        [
+            # Use region to filter image_id dict.
+            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml && exit 1 || true',
+            f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
+            f'sky launch -y -c {name} --region us-west-1 examples/per_region_images.yaml',
+            # Should success because the image id match for the region.
+            f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+            f'sky status --all | grep {name} | grep us-west-1',  # Ensure the region is correct.
+            # Ensure exec works.
+            f'sky exec {name} --region us-west-1 examples/per_region_images.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} --cloud aws --region us-west-1 "ls ~"',
+            f'sky exec {name} "ls ~"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_image_id_dict_with_zone():
+    name = _get_cluster_name()
+    test = Test(
+        'image_id_dict_with_zone',
+        [
+            # Use zone to filter image_id dict.
+            f'sky launch -y -c {name} --zone us-west-2b examples/per_region_images.yaml && exit 1 || true',
+            f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
+            f'sky launch -y -c {name} --zone us-west-1a examples/per_region_images.yaml',
+            # Should success because the image id match for the zone.
+            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            # Fail due to image id mismatch.
+            f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
+            f'sky logs {name} 1 --status',
+            f'sky logs {name} 2 --status',
+            f'sky logs {name} 3 --status',
+            f'sky status --all | grep {name} | grep us-west-1a',  # Ensure the zone is correct.
+            # Ensure exec works.
+            f'sky exec {name} --zone us-west-1a examples/per_region_images.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} --cloud aws --region us-west-1 "ls ~"',
+            f'sky exec {name} "ls ~"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    run_one_test(test)
+
+
+def test_image_no_conda():
+    name = _get_cluster_name()
+    test = Test(
+        'image_no_conda',
+        [
+            # Use image id dict.
+            f'sky launch -y -c {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky logs {name} 1 --status',
+            f'sky stop {name} -y',
+            f'sky start {name} -y',
+            f'sky exec {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky logs {name} 2 --status',
+        ],
         f'sky down -y {name}',
     )
     run_one_test(test)
@@ -186,7 +300,7 @@ def test_stale_job():
             'sleep 100',  # Ensure this is large enough, else GCP leaks.
             f'sky start {name} -y',
             f'sky logs {name} 1 --status',
-            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
     )
@@ -197,7 +311,7 @@ def test_stale_job_manual_restart():
     name = _get_cluster_name()
     region = 'us-west-2'
     test = Test(
-        'stale-job',
+        'stale-job-manual-restart',
         [
             f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
@@ -214,7 +328,7 @@ def test_stale_job_manual_restart():
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
             f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
-            f's=$(sky queue {name}); printf "$s"; echo; echo; printf "$s" | grep FAILED',
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
     )
@@ -227,7 +341,7 @@ def test_env_check():
     test = Test(
         'env_check',
         [
-            f'sky launch -y -c {name} examples/env_check.yaml',
+            f'sky launch -y -c {name} --detach-setup examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -238,21 +352,49 @@ def test_env_check():
 # ---------- file_mounts ----------
 def test_file_mounts():
     name = _get_cluster_name()
+    test_commands = [
+        *storage_setup_commands,
+        f'sky launch -y -c {name} examples/using_file_mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
     test = Test(
         'using_file_mounts',
-        [
-            'touch ~/tmpfile',
-            'mkdir -p ~/tmp-workdir',
-            'touch ~/tmp-workdir/tmp\ file',
-            'touch ~/tmp-workdir/foo',
-            'ln -f -s ~/tmp-workdir/ ~/tmp-workdir/circle-link',
-            f'sky launch -y -c {name} examples/using_file_mounts.yaml',
-            f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-        ],
+        test_commands,
         f'sky down -y {name}',
         timeout=20 * 60,  # 20 mins
     )
     run_one_test(test)
+
+
+# ---------- storage ----------
+def test_storage_mounts():
+    name = _get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *storage_setup_commands,
+            f'sky launch -y -c {name}-aws --cloud aws {file_path}',
+            f'sky logs {name}-aws 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls {storage_name}/hello.txt',
+            f'sky storage delete {storage_name}',  # Prepare for next cloud
+            f'sky launch -y -c {name}-gcp --cloud gcp {file_path}',
+            f'sky logs {name}-gcp 1 --status',  # Ensure job succeeded.
+            f'gsutil ls gs://{storage_name}/hello.txt',
+        ]
+        test = Test(
+            'storage_mounts',
+            test_commands,
+            f'sky down -y {name}-aws {name}-gcp; sky storage delete {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        run_one_test(test)
 
 
 # ---------- CLI logs ----------
@@ -284,29 +426,56 @@ def test_job_queue():
         'job_queue',
         [
             f'sky launch -y -c {name} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky exec {name} -d examples/job_queue/job.yaml',
-            f'sky logs {name} 2',
-            f'sky queue {name}',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
+            f'sky queue {name} | grep {name}-1 | grep RUNNING',
+            f'sky queue {name} | grep {name}-2 | grep RUNNING',
+            f'sky queue {name} | grep {name}-3 | grep PENDING',
+            f'sky cancel {name} 2',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel {name} 3',
+            f'sky exec {name} --gpus K80:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus K80:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 4 --status',
+            f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
     )
     run_one_test(test)
 
 
-def test_n_node_job_queue():
+def test_job_queue_multinode():
     name = _get_cluster_name()
     test = Test(
         'job_queue_multinode',
         [
             f'sky launch -y -c {name} examples/job_queue/cluster_multinode.yaml',
-            f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
+            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
+            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
+            'sleep 90',
+            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
             f'sky cancel {name} 1',
-            f'sky logs {name} 2',
-            f'sky queue {name}',
+            'sleep 5',
+            f'sky queue {name} | grep {name}-3 | grep RUNNING',
+            f'sky cancel {name} 1 2 3',
+            f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            # Test the job status is correctly set to SETTING_UP, during the setup is running,
+            # and the job can be cancelled during the setup.
+            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
+            f'sky cancel {name} 4',
+            f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
+            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus T4:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky logs {name} 5 --status',
+            f'sky logs {name} 6 --status',
+            f'sky logs {name} 7 --status',
         ],
         f'sky down -y {name}',
     )
@@ -318,7 +487,7 @@ def test_large_job_queue():
     test = Test(
         'large_job_queue',
         [
-            f'sky launch -y -c {name} --cloud gcp ""',
+            f'sky launch -y -c {name} --cloud gcp',
             f'for i in `seq 1 75`; do sky exec {name} -d "echo $i; sleep 100000000"; done',
             f'sky cancel {name} 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16',
             'sleep 20',
@@ -394,7 +563,7 @@ def test_tpu_vm():
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky stop -y {name}',
-            f'sky status --refresh | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',  # Ensure the cluster is STOPPED.
             # Use retry: guard against transient errors observed for
             # just-stopped TPU VMs (#962).
             f'sky start --retry-until-up -y {name}',
@@ -409,14 +578,12 @@ def test_tpu_vm():
 
 
 # ---------- TPU VM Pod. ----------
-# Mark slow because it's expensive to run.
-@pytest.mark.slow
 def test_tpu_vm_pod():
     name = _get_cluster_name()
     test = Test(
         'tpu_pod',
         [
-            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32',
+            f'sky launch -y -c {name} examples/tpu/tpuvm_mnist.yaml --gpus tpu-v2-32 --use-spot --zone europe-west4-a',
             f'sky logs {name} 1',  # Ensure the job finished.
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         ],
@@ -511,15 +678,46 @@ def test_autostop():
         [
             f'sky launch -y -d -c {name} --num-nodes 2 examples/minimal.yaml',
             f'sky autostop -y {name} -i 1',
+
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m"',
-            'sleep 180',
+
+            # Ensure the cluster is not stopped early.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+
             # Ensure the cluster is STOPPED.
-            f'sky status --refresh | grep {name} | grep STOPPED',
+            'sleep 100',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+
+            # Ensure the cluster is UP and the autostop setting is reset ('-').
             f'sky start -y {name}',
-            f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+
+            # Ensure the job succeeded.
             f'sky exec {name} examples/minimal.yaml',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 2 --status',
+
+            # Test restarting the idleness timer via cancel + reset:
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky autostop -y {name} --cancel',
+            f'sky autostop -y {name} -i 1',  # Should restart the timer.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
+            'sleep 100',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+
+            # Test restarting the idleness timer via exec:
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky exec {name} echo hi',  # Should restart the timer.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+            'sleep 90',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -533,25 +731,28 @@ def test_autodown():
     test = Test(
         'autodown',
         [
-            f'sky launch -y -d -c {name} --num-nodes 2 --cloud gcp examples/minimal.yaml',
+            f'sky launch -y -d -c {name} --num-nodes 2 --cloud aws examples/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
-            'sleep 240',
+            # Ensure the cluster is not terminated early.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo $s | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo $s | grep {name} && exit 1 || exit 0; }}',
+            'sleep 200',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud aws examples/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 240',
             # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo $s | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo $s | grep {name} && exit 1 || exit 0; }}',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud aws --num-nodes 2 --down examples/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 240',
             # Ensure the cluster is still UP.
-            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo $s | grep {name} | grep UP',
+            f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && echo "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
         timeout=20 * 60,
@@ -645,26 +846,37 @@ def test_use_spot():
 def test_spot():
     """Test the spot yaml."""
     name = _get_cluster_name()
+    cancel_command = (
+        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2')
     test = Test(
         'managed-spot',
         [
             f'sky spot launch -n {name}-1 examples/managed_spot.yaml -y -d',
             f'sky spot launch -n {name}-2 examples/managed_spot.yaml -y -d',
             'sleep 5',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
             f'sky spot cancel -y -n {name}-1',
+            'sleep 5',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
             'sleep 200',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-1 | head -n1 | grep CANCELLED',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            # Test autostop. This assumes no regular spot jobs are running.
+            # This will not work if there are other spot jobs running.
+            # cancel_command,
+            # 'sleep 720',  # Sleep for a bit more than the default 10m.
+            # 'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
+            # 'sky start "sky-spot-controller-*" -y',
+            # # Ensures it's up and the autostop setting is restored.
+            # 'sky status | grep sky-spot-controller- | grep UP | grep 10m',
         ],
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        cancel_command,
     )
     run_one_test(test)
 
 
 # ---------- Testing managed spot ----------
-def test_gcp_spot():
+def test_spot_gcp():
     """Test managed spot on GCP."""
     name = _get_cluster_name()
     test = Test(
@@ -674,9 +886,9 @@ def test_gcp_spot():
             'sleep 5',
             # Captures & prints the table for easier debugging. Two echo's to
             # separate the table from the grep output.
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep STARTING',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep STARTING',
             'sleep 200',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep RUNNING',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep RUNNING',
         ],
         f'sky spot cancel -y -n {name}',
     )
@@ -691,24 +903,129 @@ def test_spot_recovery():
     test = Test(
         'managed-spot-recovery',
         [
-            f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_RUN_ID: $SKYPILOT_RUN_ID; sleep 1000"  -y -d',
-            'sleep 300',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
-            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_RUN_ID | cut -d: -f2); echo $RUN_ID',
+            f'sky spot launch --cloud aws --region {region} -n {name} "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
+            'sleep 360',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
             # Terminate the cluster manually.
             (f'aws ec2 terminate-instances --region {region} --instance-ids $('
              f'aws ec2 describe-instances --region {region} '
              f'--filters Name=tag:ray-cluster-name,Values={name}* '
              f'--query Reservations[].Instances[].InstanceId '
              '--output text)'),
-            'sleep 50',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            'sleep 100',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
             'sleep 200',
-            f's=$(sky spot status); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "RUNNING"',
-            f'sky spot logs -n {name} --no-follow | grep SKYPILOT_RUN_ID | grep "$RUN_ID"',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
     )
+    run_one_test(test)
+
+
+def test_spot_recovery_default_resources():
+    """Test managed spot recovery for default resources."""
+    name = _get_cluster_name()
+    test = Test(
+        'managed-spot-recovery-default-resources',
+        [
+            f'sky spot launch -n {name} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            'sleep 360',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_spot_recovery_multi_node():
+    """Test managed spot recovery."""
+    name = _get_cluster_name()
+    region = 'us-west-2'
+    test = Test(
+        'managed-spot-recovery-multi',
+        [
+            f'sky spot launch --cloud aws --region {region} -n {name} --num-nodes 2 "echo SKYPILOT_JOB_ID: \$SKYPILOT_JOB_ID; sleep 1800"  -y -d',
+            'sleep 400',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            # Terminate the worker manually.
+            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}* '
+             'Name=tag:ray-node-type,Values=worker '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
+            'sleep 50',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RECOVERING"',
+            'sleep 420',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING"',
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+def test_spot_cancellation():
+    name = _get_cluster_name()
+    region = 'us-east-2'
+    test = Test(
+        'managed-spot-cancellation',
+        [
+            # Test cancellation during spot cluster being launched.
+            f'sky spot launch --cloud aws --region {region} -n {name} "sleep 1000"  -y -d',
+            'sleep 60',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "STARTING"',
+            f'sky spot cancel -y -n {name}',
+            'sleep 5',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "CANCELLED"',
+            'sleep 100',
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
+            # Test cancelling the spot cluster during spot job being setup.
+            f'sky spot launch --cloud aws --region {region} -n {name}-2 tests/test_yamls/test_long_setup.yaml  -y -d',
+            'sleep 300',
+            f'sky spot cancel -y -n {name}-2',
+            'sleep 5',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | head -n1 | grep "CANCELLED"',
+            'sleep 100',
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-2-* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+            ),
+            # Test cancellation during spot job is recovering.
+            f'sky spot launch --cloud aws --region {region} -n {name}-3 "sleep 1000"  -y -d',
+            'sleep 300',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RUNNING"',
+            # Terminate the cluster manually.
+            (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+             f'aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
+             f'--query Reservations[].Instances[].InstanceId '
+             '--output text)'),
+            'sleep 100',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'sky spot cancel -y -n {name}-3',
+            'sleep 10',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | head -n1 | grep "CANCELLED"',
+            'sleep 90',
+            # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
+            # there can be multiple VM with the same name due to the recovery.
+            (f's=$(aws ec2 describe-instances --region {region} '
+             f'--filters Name=tag:ray-cluster-name,Values={name}-3-* '
+             f'--query Reservations[].Instances[].State[].Name '
+             '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
+            ),
+        ])
     run_one_test(test)
 
 
@@ -727,14 +1044,33 @@ def test_spot_storage():
         test = Test(
             'managed-spot-storage',
             [
+                *storage_setup_commands,
                 f'sky spot launch -n {name} {file_path} -y',
-                'sleep 60',  # Wait the spot status to be updated
-                f'sky spot status | grep {name} | grep SUCCEEDED',
+                'sleep 60',  # Wait the spot queue to be updated
+                f'sky spot queue | grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             f'sky spot cancel -y -n {name}',
         )
         run_one_test(test)
+
+
+# ---------- Testing spot TPU ----------
+def test_spot_tpu():
+    """Test managed spot on TPU."""
+    name = _get_cluster_name()
+    test = Test(
+        'test-spot-tpu',
+        [
+            f'sky spot launch -n {name} examples/tpu/tpuvm_mnist.yaml -y -d',
+            'sleep 5',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep STARTING',
+            'sleep 600',  # TPU takes a while to launch
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
+        ],
+        f'sky spot cancel -y -n {name}',
+    )
+    run_one_test(test)
 
 
 # ---------- Testing env ----------
@@ -744,9 +1080,9 @@ def test_inline_env():
     test = Test(
         'test-inline-env',
         [
-            f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky launch -c {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 1 --status',
-            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
+            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
@@ -761,9 +1097,9 @@ def test_inline_spot_env():
     test = Test(
         'test-inline-spot-env',
         [
-            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKY_NODE_IPS\\" ]] && [[ ! -z \\"\$SKY_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 10',
-            f's=$(sky spot status) && printf "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
+            f'sky spot launch -n {name} -y --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            'sleep 20',
+            f's=$(sky spot queue) && echo "$s" && echo "$s"  | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',
     )
@@ -876,6 +1212,15 @@ class TestStorageWithCredentials:
                                              source=tmp_source)
 
     @pytest.fixture
+    def tmp_local_list_storage_obj(self, tmp_bucket_name, tmp_source):
+        # Creates a temp storage object which uses a list of paths as source.
+        # Stores must be added in the test. After upload, the bucket should
+        # have two files - /tmp-file and /tmp-source/tmp-file
+        list_source = [tmp_source, tmp_source + '/tmp-file']
+        yield from self.yield_storage_object(name=tmp_bucket_name,
+                                             source=list_source)
+
+    @pytest.fixture
     def tmp_copy_mnt_existing_storage_obj(self, tmp_scratch_storage_obj):
         # Creates a copy mount storage which reuses an existing storage object.
         tmp_scratch_storage_obj.add_store(storage_lib.StoreType.S3)
@@ -928,6 +1273,29 @@ class TestStorageWithCredentials:
         # Run sky storage ls to check if storage object is deleted
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
+
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    def test_bucket_bulk_deletion(self, store_type):
+        # Create a temp folder with over 256 files and folders, upload
+        # files and folders to a new bucket, then delete bucket.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.check_output(f'mkdir -p {tmpdir}/folder{{000..255}}',
+                                    shell=True)
+            subprocess.check_output(f'touch {tmpdir}/test{{000..255}}.txt',
+                                    shell=True)
+            subprocess.check_output(
+                f'touch {tmpdir}/folder{{000..255}}/test.txt', shell=True)
+
+            timestamp = str(time.time()).replace('.', '')
+            store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
+                                            source=tmpdir)
+            store_obj.add_store(store_type)
+
+        subprocess.check_output(['sky', 'storage', 'delete', store_obj.name])
+
+        output = subprocess.check_output(['sky', 'storage', 'ls'])
+        assert store_obj.name not in output.decode('utf-8')
 
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
@@ -995,16 +1363,27 @@ class TestStorageWithCredentials:
         # Attempts to access private buckets not belonging to the user.
         # These buckets are known to be private, but may need to be updated if
         # they are removed by their owners.
-        with pytest.raises(sky.exceptions.StorageBucketGetError,
-                           match='the bucket name is taken'):
+        private_bucket_name = urllib.parse.urlsplit(private_bucket).netloc
+        with pytest.raises(
+                sky.exceptions.StorageBucketGetError,
+                match=storage_lib._BUCKET_FAIL_TO_CONNECT_MESSAGE.format(
+                    name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
     @staticmethod
-    def cli_ls_cmd(store_type, bucket_name):
+    def cli_ls_cmd(store_type, bucket_name, suffix=''):
         if store_type == storage_lib.StoreType.S3:
-            return ['aws', 's3', 'ls', f's3://{bucket_name}']
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            return ['aws', 's3', 'ls', url]
         if store_type == storage_lib.StoreType.GCS:
-            return ['gsutil', 'ls', f'gs://{bucket_name}']
+            if suffix:
+                url = f'gs://{bucket_name}/{suffix}'
+            else:
+                url = f'gs://{bucket_name}'
+            return ['gsutil', 'ls', url]
 
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
@@ -1046,6 +1425,28 @@ class TestStorageWithCredentials:
         # Check `sky storage ls` to ensure storage object exists
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
+
+    @pytest.mark.parametrize(
+        'store_type', [storage_lib.StoreType.S3, storage_lib.StoreType.GCS])
+    def test_list_source(self, tmp_local_list_storage_obj, store_type):
+        # Uses a list in the source field to specify a file and a directory to
+        # be uploaded to the storage object.
+        tmp_local_list_storage_obj.add_store(store_type)
+
+        # Check if tmp-file exists in the bucket root using cli
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name))
+        assert 'tmp-file' in out.decode('utf-8'), \
+            'File not found in bucket - output was : {}'.format(out.decode
+                                                                ('utf-8'))
+
+        # Check if tmp-file exists in the bucket/tmp-source using cli
+        out = subprocess.check_output(
+            self.cli_ls_cmd(store_type, tmp_local_list_storage_obj.name,
+                            'tmp-source/'))
+        assert 'tmp-file' in out.decode('utf-8'), \
+            'File not found in bucket - output was : {}'.format(out.decode
+                                                                ('utf-8'))
 
 
 # ---------- Testing YAML Specs ----------

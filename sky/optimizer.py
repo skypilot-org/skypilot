@@ -7,7 +7,6 @@ import prettytable
 
 from sky import resources
 from sky import sky_logging
-from sky.utils import ux_utils
 from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -55,6 +54,8 @@ class Optimizer:
         # FIXME
         if chosen_cluster is None:
             return None
+
+        logger.info('== Optimizer ==')
 
         # Get the best cluster for each cloud.
         clusters_per_cloud = {}

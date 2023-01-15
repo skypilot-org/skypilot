@@ -1,3 +1,4 @@
+include sky/backends/monkey_patches/*.py
 include sky/skylet/*.sh
 include sky/skylet/providers/aws/*
 include sky/skylet/providers/aws/cloudwatch/*
@@ -6,5 +7,5 @@ include sky/skylet/providers/gcp/*
 include sky/skylet/ray_patches/*.patch
 include sky/templates/*
 include sky/setup_files/*
-include sky/utils/*
 include sky/skylet/LICENCE
+exclude sky/clouds/service_catalog/data_fetchers/analyze.py

@@ -1,0 +1,4 @@
+147c147
+<             kwargs["timeout"] = 10
+---
+>             kwargs["timeout"] = 30
