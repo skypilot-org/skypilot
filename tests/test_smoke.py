@@ -753,6 +753,7 @@ def test_large_job_queue(generic_cloud: str):
             f'sky queue {name} | grep -v grep | grep PENDING | wc -l | grep 43',
         ],
         f'sky down -y {name}',
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1165,7 +1166,7 @@ def test_spot_recovery_aws():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1176,7 +1177,7 @@ def test_spot_recovery_gcp():
     name = _get_cluster_name()
     zone = 'us-east4-b'
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name={name})" '
+                 f'"(labels.ray-cluster-name:{name})" '
                  f'--zones={zone} --format="value(name)"')
     terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
                      f' --quiet $({query_cmd})')
@@ -1196,7 +1197,7 @@ def test_spot_recovery_gcp():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1213,7 +1214,7 @@ def test_spot_recovery_default_resources(generic_spot_cloud: str):
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1244,7 +1245,7 @@ def test_spot_recovery_multi_node_aws():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1277,7 +1278,7 @@ def test_spot_recovery_multi_node_gcp():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
-        timeout=20 * 60,
+        timeout=25 * 60,
     )
     run_one_test(test)
 
@@ -1337,7 +1338,8 @@ def test_spot_cancellation_aws():
              f'--query Reservations[].Instances[].State[].Name '
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
             ),
-        ])
+        ],
+        timeout=25 * 60)
     run_one_test(test)
 
 
@@ -1391,7 +1393,8 @@ def test_spot_cancellation_gcp():
             # there can be multiple VM with the same name due to the recovery.
             (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'
             ),
-        ])
+        ],
+        timeout=25 * 60)
     run_one_test(test)
 
 

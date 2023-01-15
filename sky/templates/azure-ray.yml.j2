@@ -106,7 +106,7 @@ setup_commands:
     sudo rm /var/lib/dpkg/lock-frontend;
     sudo pkill -9 dpkg;
     sudo pkill -9 apt-get;
-    sudo dpkg --configure -a;
+    sudo dpkg --configure --force-overwrite -a;
     mkdir -p ~/.ssh; touch ~/.ssh/config;
     pip3 --version > /dev/null 2>&1 || (curl -sSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.py && echo "PATH=$HOME/.local/bin:$PATH" >> ~/.bashrc);
     (type -a python | grep -q python3) || echo 'alias python=python3' >> ~/.bashrc;
