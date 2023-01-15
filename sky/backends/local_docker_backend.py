@@ -331,7 +331,7 @@ class LocalDockerBackend(backends.Backend):
         for c in containers:
             # Extract container/image metadata
             metadata = {}
-            for k, v in c.labels.items():
+            for k, v in c.labels.items()=
                 if k.startswith(_DOCKER_LABEL_PREFIX):
                     # Remove 'skymeta_' from key
                     metadata[k[len(_DOCKER_LABEL_PREFIX):]] = v

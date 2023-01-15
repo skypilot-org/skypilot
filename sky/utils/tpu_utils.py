@@ -78,7 +78,7 @@ def terminate_tpu_vm_cluster_cmd(cluster_name: str,
                                  log_path: str = os.devnull) -> str:
     check_gcp_cli_include_tpu_vm()
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                 f'"(labels.ray-cluster-name={cluster_name})" '
                  f'--zone={zone} --format="value(name)"')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       log_path,
