@@ -44,7 +44,9 @@ storage_setup_commands = [
 # are running in parallel, the spot controller may be in INIT and
 # the spot queue command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
-                    'until [ `echo "$s" | grep INIT | wc -l` -eq 0 ]; '
+                    'until [ `echo "$s" '
+                    '| grep "Please wait for the controller to be ready" '
+                    '| wc -l` -eq 0 ]; '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
                     'echo; echo; echo "$s"')
@@ -77,8 +79,7 @@ def _get_cluster_name() -> str:
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
     if len(test_name) > 20:
-        assert len(test_name) < 46
-        test_name = 'test' + test_name[len('test')::2]
+        test_name = test_name[:20] + hashlib.md5(test_name.encode()).hexdigest()[:3]
     return f'{test_name}-{_smoke_test_hash}-{test_id}'
 
 
@@ -471,7 +472,7 @@ def test_image_no_conda():
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
-            f'sky exec {name} tests/test_yamls/no_conda_ami.yaml',
+            f'sky exec {name} examples/per_region_images.yaml',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',

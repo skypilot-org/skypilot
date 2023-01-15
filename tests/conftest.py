@@ -16,15 +16,20 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='run slow tests')
+    # All markers (cluods/generic) except for `slow` are enabled by default.
+    # To disable a cloud, use `--disable-<cloud>`. The generic tests are
+    # cloud agnostic and can be run on any cloud, it is possible to specify
+    # which cloud to use with `--generic-cloud` for generic tests and
+    # `--generic-spot-cloud` for generic spot tests.
     for cloud in clouds:
-        parser.addoption(f'--{cloud}',
+        parser.addoption(f'--enable-{cloud}',
                          action='store_true',
                          default=True,
-                         help=f'use {cloud.upper()} for tests')
-        parser.addoption(f'--no-{cloud}',
+                         help=f'enable {cloud.upper()} for tests, default: True')
+        parser.addoption(f'--disable-{cloud}',
                          action='store_false',
                          dest=cloud,
-                         help=f'do not use {cloud.upper()} for tests')
+                         help=f'disable {cloud.upper()} for tests')
     parser.addoption('--all-clouds',
                      action='store_true',
                      default=False,
@@ -33,12 +38,12 @@ def pytest_addoption(parser):
                      type=str,
                      default='gcp',
                      choices=clouds,
-                     help='generic cloud to use for tests')
+                     help='cloud to use for generic tests')
     parser.addoption('--generic-spot-cloud',
                      type=str,
                      default='gcp',
                      choices=clouds,
-                     help='generic spot cloud to use for tests')
+                     help='cloud to use for generic spot tests')
 
 
 def pytest_configure(config):
@@ -53,7 +58,7 @@ def pytest_collection_modifyitems(config, items):
     skip_aws = pytest.mark.skip(reason='--no-aws is set, skip to run aws tests')
     skip_gcp = pytest.mark.skip(reason='--no-gcp is set, skip to run gcp tests')
     skip_azure = pytest.mark.skip(
-        reason='--no-azure is set, skip to run azure tests')
+        reason='--no-azure is set, skipped run azure tests')
 
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):

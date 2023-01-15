@@ -2922,6 +2922,11 @@ class CloudVmRayBackend(backends.Backend):
             #   never launched and the errors are related to pre-launch
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
+            #
+            # '(ResourceGroupNotFound)': this indicates the resource group on
+            #   Azure is not found. That means the cluster is already deleted
+            #   on the cloud. So it's safe & good UX to not print a failure
+            #   message.
             elif ('TPU must be specified.' not in stderr and
                   'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
                   '(ResourceGroupNotFound)' not in stderr):

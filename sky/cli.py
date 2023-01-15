@@ -1369,6 +1369,8 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
+    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
+
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
     command.
