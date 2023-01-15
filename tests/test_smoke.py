@@ -81,8 +81,8 @@ def _get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
-    if len(test_name) > 20:
-        test_name = test_name[:20] + hashlib.md5(
+    if len(test_name) > 18:
+        test_name = test_name[:18] + hashlib.md5(
             test_name.encode()).hexdigest()[:3]
     return f'{test_name}-{_smoke_test_hash}-{test_id}'
 
