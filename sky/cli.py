@@ -1448,7 +1448,7 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
               required=False,
               help='Show all information in full.')
 @usage_lib.entrypoint
-def report(all: bool):  # pylint: disable=redefined-builtin
+def cost_report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show cost reports for each cluster.
 
