@@ -129,22 +129,26 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                                     task: 'task_lib.Task') -> None:
         pass
 
-    def _provision(self,
-                   task: 'task_lib.Task',
-                   to_provision: Optional['resources.Resources'],
-                   dryrun: bool,
-                   stream_logs: bool,
-                   cluster_name: str,
-                   retry_until_up: bool = False) -> LocalDockerResourceHandle:
+    def _provision(
+            self,
+            task: 'task_lib.Task',
+            to_provision: Optional['resources.Resources'],
+            dryrun: bool,
+            stream_logs: bool,
+            cluster_name: str,
+            retry_until_up: bool = False
+    ) -> Optional[LocalDockerResourceHandle]:
         """
         Builds docker image for the task and returns the cluster name as handle.
 
         Since resource demands are ignored, There's no provisioning in local
         docker.
         """
-        del to_provision, dryrun  # Unused
+        del to_provision  # Unused
         assert task.name is not None, ('Task name cannot be None - have you '
                                        'specified a task name?')
+        if dryrun:
+            return None
         if retry_until_up:
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
