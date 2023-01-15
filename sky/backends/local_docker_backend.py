@@ -30,7 +30,21 @@ _DOCKER_LABEL_PREFIX = 'skymeta_'
 _DOCKER_HANDLE_PREFIX = 'skydocker-'
 
 
-class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
+class LocalDockerResourceHandle(str, backends.ResourceHandle):
+    """The name of the cluster/container prefixed with the handle prefix."""
+
+    def __new__(cls, s, **kw):
+        if s.startswith(_DOCKER_HANDLE_PREFIX):
+            prefixed_str = s
+        else:
+            prefixed_str = _DOCKER_HANDLE_PREFIX + s
+        return str.__new__(cls, prefixed_str, **kw)
+
+    def get_cluster_name(self):
+        return self.lstrip(_DOCKER_HANDLE_PREFIX)
+
+
+class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
     """Local docker backend for debugging.
 
     Ignores resource demands when allocating. Optionally uses GPU if required.
@@ -78,18 +92,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
 
     NAME = 'localdocker'
 
-    class ResourceHandle(str, backends.Backend.ResourceHandle):
-        """The name of the cluster/container prefixed with the handle prefix."""
-
-        def __new__(cls, s, **kw):
-            if s.startswith(_DOCKER_HANDLE_PREFIX):
-                prefixed_str = s
-            else:
-                prefixed_str = _DOCKER_HANDLE_PREFIX + s
-            return str.__new__(cls, prefixed_str, **kw)
-
-        def get_cluster_name(self):
-            return self.lstrip(_DOCKER_HANDLE_PREFIX)
+    # Backward compatibility, with the old name of the handle.
+    ResourceHandle = LocalDockerResourceHandle
 
     # Define the Docker-in-Docker mount
     _dind_mount = {
@@ -110,19 +114,18 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
         """
         self._use_gpu = backend_utils.check_local_gpus() if use_gpu == 'auto' \
             else use_gpu
-        self.volume_mounts: Dict[LocalDockerBackend.ResourceHandle, Dict[
-            str, Any]] = {}  # Stores the ResourceHandle->volume mounts map
-        self.images: Dict[LocalDockerBackend.ResourceHandle, Tuple[str, Dict[
-            str,
-            str]]] = {}  # Stores the ResourceHandle->[image_tag, metadata] map
-        self.containers: Dict[LocalDockerBackend.ResourceHandle, Any] = {}
+        self.volume_mounts: Dict[LocalDockerResourceHandle, Dict[str, Any]] = {
+        }  # Stores the LocalDockerResourceHandle->volume mounts map
+        self.images: Dict[LocalDockerResourceHandle, Tuple[str, Dict[
+            str, str]]] = {
+            }  # Stores the LocalDockerResourceHandle->[image_tag, metadata] map
+        self.containers: Dict[LocalDockerResourceHandle, Any] = {}
         self.client = docker.from_env()
         self._update_state()
 
     # --- Implementation of Backend APIs ---
 
-    def check_resources_fit_cluster(self,
-                                    handle: 'LocalDockerBackend.ResourceHandle',
+    def check_resources_fit_cluster(self, handle: 'LocalDockerResourceHandle',
                                     task: 'task_lib.Task') -> None:
         pass
 
@@ -132,7 +135,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
                    dryrun: bool,
                    stream_logs: bool,
                    cluster_name: str,
-                   retry_until_up: bool = False) -> ResourceHandle:
+                   retry_until_up: bool = False) -> LocalDockerResourceHandle:
         """
         Builds docker image for the task and returns the cluster name as handle.
 
@@ -150,7 +153,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '
                 'Build logs will be shown on failure.')
-        handle = LocalDockerBackend.ResourceHandle(cluster_name)
+        handle = LocalDockerResourceHandle(cluster_name)
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
         with console.status('[bold cyan]Building Docker image[/]'):
@@ -163,7 +166,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
                                                 ready=False)
         return handle
 
-    def _sync_workdir(self, handle: ResourceHandle, workdir: Path) -> None:
+    def _sync_workdir(self, handle: LocalDockerResourceHandle,
+                      workdir: Path) -> None:
         """Workdir is sync'd by adding to the docker image.
 
         This happens in the execute step.
@@ -175,7 +179,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
 
     def _sync_file_mounts(
         self,
-        handle: ResourceHandle,
+        handle: LocalDockerResourceHandle,
         all_file_mounts: Dict[Path, Path],
         storage_mounts: Dict[Path, storage_lib.Storage],
     ) -> None:
@@ -196,7 +200,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
                 }
         self.volume_mounts[handle] = docker_mounts
 
-    def _setup(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def _setup(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
                detach_setup: bool) -> None:
         """Launches a container and runs a sleep command on it.
 
@@ -254,7 +258,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
                                                 cluster_handle=handle,
                                                 ready=True)
 
-    def _execute(self, handle: ResourceHandle, task: 'task_lib.Task',
+    def _execute(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
                  detach_run: bool) -> None:
         """ Launches the container."""
 
@@ -274,7 +278,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
 
         self._execute_task_one_node(handle, task)
 
-    def _post_execute(self, handle: ResourceHandle, down: bool) -> None:
+    def _post_execute(self, handle: LocalDockerResourceHandle,
+                      down: bool) -> None:
         del down  # unused
         colorama.init()
         style = colorama.Style
@@ -298,7 +303,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
             f'{container.image.tags[0]} /bin/bash{style.RESET_ALL}')
 
     def _teardown(self,
-                  handle: ResourceHandle,
+                  handle: LocalDockerResourceHandle,
                   terminate: bool,
                   purge: bool = False):
         """Teardown kills the container."""
@@ -344,7 +349,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerBackend.ResourceHandle']):
             self.images[c.name] = [c.image, metadata]
             self.containers[c.name] = c
 
-    def _execute_task_one_node(self, handle: ResourceHandle,
+    def _execute_task_one_node(self, handle: LocalDockerResourceHandle,
                                task: 'task_lib.Task') -> None:
         container = self.containers[handle]
         _, image_metadata = self.images[handle]

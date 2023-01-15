@@ -108,7 +108,7 @@ def _start(
     retry_until_up: bool = False,
     down: bool = False,  # pylint: disable=redefined-outer-name
     force: bool = False,
-) -> backends.CloudVmRayBackend.ResourceHandle:
+) -> backends.CloudVmRayResourceHandle:
 
     cluster_status, handle = backend_utils.refresh_cluster_status_handle(
         cluster_name)
@@ -366,6 +366,11 @@ def autostop(
         cluster_name,
         operation=operation,
     )
+    backend = backend_utils.get_backend_from_handle(handle)
+    if not isinstance(backend, backends.CloudVmRayBackend):
+        raise exceptions.NotSupportedError(
+            f'{operation} cluster {cluster_name!r} with backend '
+            f'{backend.__class__.__name__!r} is not supported.')
 
     if tpu_utils.is_tpu_vm_pod(handle.launched_resources):
         # Reference:
@@ -374,7 +379,6 @@ def autostop(
             f'{operation} cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
 
-    backend = backend_utils.get_backend_from_handle(handle)
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.set_autostop(handle, idle_minutes, down)
 
@@ -611,7 +615,7 @@ def job_status(cluster_name: str,
         raise exceptions.NotSupportedError(
             f'Getting job status is not supported for cluster {cluster_name!r} '
             f'of type {backend.__class__.__name__!r}.')
-    assert isinstance(handle, backends.CloudVmRayBackend.ResourceHandle), handle
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
     if job_ids is not None and len(job_ids) == 0:
         return {}
@@ -784,7 +788,7 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     controller_status, handle = spot.is_spot_controller_up(
         'Please restart the spot controller with '
         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
-    assert isinstance(handle, backends.CloudVmRayBackend.ResourceHandle), handle
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:

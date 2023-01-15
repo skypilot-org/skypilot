@@ -126,14 +126,14 @@ class StorageStatus(enum.Enum):
 
 
 def add_or_update_cluster(cluster_name: str,
-                          cluster_handle: 'backends.Backend.ResourceHandle',
+                          cluster_handle: 'backends.ResourceHandle',
                           ready: bool,
                           is_launch: bool = True):
     """Adds or updates cluster_name -> cluster_handle mapping.
 
     Args:
         cluster_name: Name of the cluster.
-        cluster_handle: Backend.ResourceHandle of the cluster.
+        cluster_handle: backends.ResourceHandle of the cluster.
         ready: Whether the cluster is ready to use. If False, the cluster will
             be marked as INIT, otherwise it will be marked as UP.
         is_launch: if the cluster is firstly launched. If True, the launched_at
@@ -240,7 +240,7 @@ def remove_cluster(cluster_name: str, terminate: bool):
 
 
 def get_handle_from_cluster_name(
-        cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
+        cluster_name: str) -> Optional['backends.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
     rows = _DB.cursor.execute('SELECT handle FROM clusters WHERE name=(?)',
                               (cluster_name,))

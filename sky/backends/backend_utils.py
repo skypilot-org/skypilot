@@ -1250,14 +1250,13 @@ def _query_head_ip_with_retries(cluster_yaml: str,
 
 
 @timeline.event
-def get_node_ips(
-        cluster_yaml: str,
-        expected_num_nodes: int,
-        handle: Optional[
-            'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle'] = None,
-        head_ip_max_attempts: int = 1,
-        worker_ip_max_attempts: int = 1,
-        get_internal_ips: bool = False) -> List[str]:
+def get_node_ips(cluster_yaml: str,
+                 expected_num_nodes: int,
+                 handle: Optional[
+                     'cloud_vm_ray_backend.CloudVmRayResourceHandle'] = None,
+                 head_ip_max_attempts: int = 1,
+                 worker_ip_max_attempts: int = 1,
+                 get_internal_ips: bool = False) -> List[str]:
     """Returns the IPs of all nodes in the cluster, with head node at front."""
     # When ray up launches TPU VM Pod, Pod workers (except for the head)
     # won't be connected to Ray cluster. Thus "ray get-worker-ips"
@@ -1424,7 +1423,7 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
 
 @timeline.event
 def get_head_ip(
-    handle: 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle',
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
     use_cached_head_ip: bool = True,
     max_attempts: int = 1,
 ) -> str:
@@ -1734,7 +1733,7 @@ def check_owner_identity(cluster_name: str) -> None:
     if record is None:
         return
     handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return
 
     cloud = handle.launched_resources.cloud
@@ -1762,7 +1761,7 @@ def check_owner_identity(cluster_name: str) -> None:
 
 
 def _get_cluster_status_via_cloud_cli(
-    handle: 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> List[global_user_state.ClusterStatus]:
     """Returns the status of the cluster."""
     resources: sky.Resources = handle.launched_resources
@@ -1777,7 +1776,7 @@ def _update_cluster_status_no_lock(
     if record is None:
         return None
     handle = record['handle']
-    if not isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return record
 
     cluster_name = handle.cluster_name
@@ -1979,7 +1978,7 @@ def _refresh_cluster_record(
     check_owner_identity(cluster_name)
 
     handle = record['handle']
-    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
         use_spot = handle.launched_resources.use_spot
         has_autostop = (
             record['status'] != global_user_state.ClusterStatus.STOPPED and
@@ -1998,7 +1997,7 @@ def refresh_cluster_status_handle(
     force_refresh: bool = False,
     acquire_per_cluster_status_lock: bool = True,
 ) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
+           Optional[backends.ResourceHandle]]:
     """Refresh the cluster, and return the possibly updated status and handle.
 
     This is a wrapper of refresh_cluster_record, which returns the status and
@@ -2020,7 +2019,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[True] = True,
-) -> 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle':
+) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
     ...
 
 
@@ -2030,7 +2029,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: Literal[False],
-) -> backends.Backend.ResourceHandle:
+) -> backends.ResourceHandle:
     ...
 
 
@@ -2039,7 +2038,7 @@ def check_cluster_available(
     *,
     operation: str,
     check_cloud_vm_ray_backend: bool = True,
-) -> backends.Backend.ResourceHandle:
+) -> backends.ResourceHandle:
     """Check if the cluster is available.
 
     Raises:
@@ -2176,7 +2175,7 @@ def get_clusters(
 
     def _is_local_cluster(record):
         handle = record['handle']
-        if isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+        if isinstance(handle, backends.LocalDockerResourceHandle):
             return False
         cluster_resources = handle.launched_resources
         return isinstance(cluster_resources.cloud, clouds.Local)
@@ -2260,28 +2259,28 @@ def get_clusters(
 
 @typing.overload
 def get_backend_from_handle(
-    handle: 'cloud_vm_ray_backend.CloudVmRayBackend.ResourceHandle'
+    handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle'
 ) -> 'cloud_vm_ray_backend.CloudVmRayBackend':
     ...
 
 
 @typing.overload
 def get_backend_from_handle(
-    handle: 'local_docker_backend.LocalDockerBackend.ResourceHandle'
+    handle: 'local_docker_backend.LocalDockerResourceHandle'
 ) -> 'local_docker_backend.LocalDockerBackend':
     ...
 
 
 def get_backend_from_handle(
-        handle: backends.Backend.ResourceHandle) -> backends.Backend:
+        handle: backends.ResourceHandle) -> backends.Backend:
     """Gets a Backend object corresponding to a handle.
 
     Inspects handle type to infer the backend used for the resource.
     """
     backend: backends.Backend
-    if isinstance(handle, backends.CloudVmRayBackend.ResourceHandle):
+    if isinstance(handle, backends.CloudVmRayResourceHandle):
         backend = backends.CloudVmRayBackend()
-    elif isinstance(handle, backends.LocalDockerBackend.ResourceHandle):
+    elif isinstance(handle, backends.LocalDockerResourceHandle):
         backend = backends.LocalDockerBackend()
     else:
         raise NotImplementedError(
@@ -2445,3 +2444,24 @@ def check_public_cloud_enabled():
             raise RuntimeError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
+
+
+def run_command_and_handle_ssh_failure(runner: command_runner.SSHCommandRunner,
+                                       command: str,
+                                       failure_message: str) -> str:
+    """Runs command remotely and returns output with proper error handling."""
+    rc, stdout, stderr = runner.run(command,
+                                    require_outputs=True,
+                                    stream_logs=False)
+    if rc == 255:
+        # SSH failed
+        raise RuntimeError(
+            f'SSH with user {runner.ssh_user} and key {runner.ssh_private_key} '
+            f'to {runner.ip} failed. This is most likely due to incorrect '
+            'credentials or incorrect permissions for the key file. Check '
+            'your credentials and try again.')
+    subprocess_utils.handle_returncode(rc,
+                                       command,
+                                       failure_message,
+                                       stderr=stderr)
+    return stdout
