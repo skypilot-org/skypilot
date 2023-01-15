@@ -40,7 +40,7 @@ class Optimizer:
         if not feasible_clusters:
             return None
         chosen_cluster = min(feasible_clusters,
-                               key=lambda c: c.get_hourly_price())
+                             key=lambda c: c.get_hourly_price())
         return chosen_cluster
 
     @staticmethod
