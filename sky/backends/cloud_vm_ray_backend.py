@@ -3082,11 +3082,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # pylint: disable= C0415 W0622 W0703
             from sky.skylet.providers.ibm.vpc_provider import IBMVPCProvider
             from sky.adaptors import ibm
-            vpc_client = ibm.client()
-            search_client = ibm.search_client()
-            vpc_found = False
+
             config_provider = common_utils.read_yaml(
                 handle.cluster_yaml)['provider']
+            region = config_provider['region']
+            cluster_name = handle.cluster_name
+            vpc_client = ibm.client(region=region)
+            search_client = ibm.search_client()
+            vpc_found = False
 
             def _poll_instance_exists(instance_id):
                 tries = 20
@@ -3103,7 +3106,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # pylint: disable=line-too-long E1136
             vpcs_filtered_by_tags_and_region = search_client.search(
                 query=
-                f'type:vpc AND tags:{handle.cluster_name} AND region:{config_provider["region"]}',
+                f'type:vpc AND tags:{cluster_name} AND region:{region}',
                 fields=['tags', 'region', 'type'],
                 limit=1000).get_result()['items']
             try:
@@ -3123,9 +3126,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     vpc_client.delete_instance(id=id).get_result()
                     _poll_instance_exists(id)
             vpc_provider = IBMVPCProvider(config_provider['resource_group_id'],
-                                          config_provider['region'],
-                                          handle.cluster_name)
-            vpc_provider.delete_vpc(vpc_id, config_provider['region'])
+                                          region,
+                                          cluster_name)
+            vpc_provider.delete_vpc(vpc_id, region)
             # successfully removed cluster
             returncode = 0
 

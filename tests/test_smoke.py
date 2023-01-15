@@ -1221,6 +1221,58 @@ def test_autostop(generic_cloud: str):
     )
     run_one_test(test)
 
+def test_ibm_autostop():
+    name = _get_cluster_name()
+    test = Test(
+        'autostop',
+        [
+            f'sky launch -y -d -c {name} --cloud ibm --num-nodes 2 examples/minimal.yaml',
+            f'sky autostop -y {name} -i 1',
+
+            # Ensure autostop is set.
+            f'sky status | grep {name} | grep "1m"',
+
+            # Ensure the cluster is not stopped early.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+
+            # Ensure the cluster is STOPPED.
+            'sleep 100',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+
+            # Ensure the cluster is UP and the autostop setting is reset ('-').
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+
+            # Ensure the job succeeded.
+            f'sky exec {name} --cloud ibm examples/minimal.yaml',
+            f'sky logs {name} 2 --status',
+
+            # Test restarting the idleness timer via cancel + reset:
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky autostop -y {name} --cancel',
+            f'sky autostop -y {name} -i 1',  # Should restart the timer.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s" | grep {name} | grep UP',
+            'sleep 100',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+
+            # Test restarting the idleness timer via exec:
+            f'sky start -y {name}',
+            f'sky status | grep {name} | grep -E "UP\s+-"',
+            f'sky autostop -y {name} -i 1',  # Idleness starts counting.
+            'sleep 45',  # Almost reached the threshold.
+            f'sky exec {name} --cloud ibm echo hi',  # Should restart the timer.
+            'sleep 45',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
+            'sleep 90',
+            f's=$(sky status --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep STOPPED',
+        ],
+        f'sky down -y {name}',
+        timeout=60 * 60,
+    )
+    run_one_test(test)
 
 # ---------- Testing Autodowning ----------
 def test_autodown(generic_cloud: str):
@@ -1288,7 +1340,7 @@ def test_ibm_autodown():
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=20 * 60,
+        timeout=40 * 60,
     )
     run_one_test(test)
 

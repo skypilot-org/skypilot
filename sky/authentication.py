@@ -384,7 +384,9 @@ def setup_ibm_authentication(config):
             raise Exception('Failed to register a key') from e
 
     config['auth']['ssh_private_key'] = PUBLIC_SSH_KEY_PATH.rsplit('.', 1)[0]
-    config['auth'].update({'ssh_public_key': PUBLIC_SSH_KEY_PATH})
+    # Currently cannot add ssh_public_key. it will impact the
+    # calculation of launch_hash by ray.
+    # config['auth'].update({'ssh_public_key': PUBLIC_SSH_KEY_PATH})
     for node_type in config['available_node_types']:
         # pylint: disable=line-too-long
         config['available_node_types'][node_type]['node_config'][
