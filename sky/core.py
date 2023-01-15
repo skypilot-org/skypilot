@@ -1,8 +1,9 @@
 """SDK functions for cluster/job management."""
-import colorama
 import getpass
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Union
+
+import colorama
 
 from sky import dag
 from sky import task
@@ -788,7 +789,6 @@ def spot_tail_logs(name: Optional[str], job_id: Optional[int],
     controller_status, handle = spot.is_spot_controller_up(
         'Please restart the spot controller with '
         f'`sky start {spot.SPOT_CONTROLLER_NAME}`.')
-    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     if handle is None or handle.head_ip is None:
         msg = 'All jobs finished.'
         if controller_status == global_user_state.ClusterStatus.INIT:
