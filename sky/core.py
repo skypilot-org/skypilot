@@ -291,6 +291,7 @@ def down(cluster_name: str, purge: bool = False) -> None:
 
     Raises:
         ValueError: the specified cluster does not exist.
+        RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
           spot controller.
     """

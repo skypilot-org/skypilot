@@ -2606,8 +2606,8 @@ class CloudVmRayBackend(backends.Backend):
             with filelock.FileLock(
                     lock_path,
                     backend_utils.CLUSTER_STATUS_LOCK_TIMEOUT_SECONDS):
-                success = self.teardown_no_lock(handle, terminate, purge)
-            if success and terminate:
+                self.teardown_no_lock(handle, terminate, purge)
+            if terminate:
                 common_utils.remove_file_if_exists(lock_path)
         except filelock.Timeout as e:
             raise RuntimeError(
@@ -2793,7 +2793,7 @@ class CloudVmRayBackend(backends.Backend):
                          terminate: bool,
                          purge: bool = False,
                          post_teardown_cleanup: bool = True,
-                         refresh_cluster_status: bool = True) -> bool:
+                         refresh_cluster_status: bool = True) -> None:
         """Teardown the cluster without acquiring the cluster status lock.
 
         NOTE: This method should not be called without holding the cluster
@@ -2801,6 +2801,9 @@ class CloudVmRayBackend(backends.Backend):
 
         refresh_cluster_status is only used internally in the status refresh
         process, and should not be set to False in other cases.
+
+        Raises:
+            RuntimeError: If the cluster fails to terminate.
         """
         if refresh_cluster_status:
             prev_status, _ = backend_utils.refresh_cluster_status_handle(
@@ -2924,22 +2927,20 @@ class CloudVmRayBackend(backends.Backend):
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
             elif ('TPU must be specified.' not in stderr and
-                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
-                logger.error(
+                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
+                  '(ResourceGroupNotFound)' not in stderr):
+                raise RuntimeError(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
                         cluster_name=handle.cluster_name,
                         stdout=stdout,
                         stderr=stderr))
-                return False
 
         # No need to clean up if the cluster is already terminated
         # (i.e., prev_status is None), as the cleanup has already been done
         # if the cluster is removed from the status table.
         if post_teardown_cleanup:
             return self.post_teardown_cleanup(handle, terminate, purge)
-        else:
-            return True
 
     def post_teardown_cleanup(self,
                               handle: ResourceHandle,
