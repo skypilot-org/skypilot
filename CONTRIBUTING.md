@@ -33,6 +33,12 @@ pytest --lf
 
 # Run one of the smoke tests
 pytest tests/test_smoke.py::test_minimal
+
+# Enable test for AWS
+pytest tests/test_smoke.py --enable-aws
+
+# Change cloud for generic tests to aws
+pytest tests/test_smoke.py --generic-cloud aws
 ```
 
 For profiling code, use:
