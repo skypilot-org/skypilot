@@ -28,7 +28,7 @@ To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 ```
 pytest tests/test_smoke.py
 
-# Re-run failed tests
+# Re-run last failed tests
 pytest --lf
 
 # Run one of the smoke tests
