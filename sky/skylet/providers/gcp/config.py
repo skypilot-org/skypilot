@@ -46,6 +46,7 @@ HAS_TPU_PROVIDER_FIELD = "_has_tpus"
 # NOTE: iam.serviceAccountUser allows the Head Node to create worker nodes
 # with ServiceAccounts.
 
+SKYPILOT_VPC_NAME = "skypilot-vpc"
 
 def get_node_type(node: dict) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
@@ -506,10 +507,11 @@ def _configure_subnet(config, compute):
     ):
         return config
 
-    subnets = _list_subnets(config, compute)
+    subnets = _list_subnets(config, compute, filter=f'(name="{SKYPILOT_VPC_NAME}")')
 
     if not subnets:
-        raise NotImplementedError("Should be able to create subnet.")
+        raise RuntimeError(
+            "SkyPilot VPC not found. Run `sky check` to create a default VPC.")
 
     # TODO: make sure that we have usable subnet. Maybe call
     # compute.subnetworks().listUsable? For some reason it didn't
@@ -542,15 +544,19 @@ def _configure_subnet(config, compute):
     return config
 
 
-def _list_subnets(config, compute):
+def _list_subnets(config, compute, filter=None):
     response = (
         compute.subnetworks()
         .list(
             project=config["provider"]["project_id"],
             region=config["provider"]["region"],
+            filter=filter,
         )
         .execute()
     )
+
+    if "items" not in response:
+        return []
 
     return response["items"]
 
