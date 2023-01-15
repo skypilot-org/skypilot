@@ -177,7 +177,8 @@ class Cloud:
 
     @classmethod
     def get_feasible_resources(
-            cls, resource_filter: 'resources.ResourceFilter') -> List['resources.VMResources']:
+        cls, resource_filter: 'resources.ResourceFilter'
+    ) -> List['resources.VMResources']:
         raise NotImplementedError
 
     def get_feasible_launchable_resources(self, resources):

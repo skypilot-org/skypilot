@@ -236,8 +236,7 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls,
-                         resource: 'resources_lib.VMResources') -> float:
+    def get_hourly_price(cls, resource: 'resources_lib.VMResources') -> float:
         return service_catalog.get_hourly_price(resource, clouds='aws')
 
     @classmethod
