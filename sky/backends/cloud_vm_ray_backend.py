@@ -1066,9 +1066,9 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
+        cloud_user_identity: str,
         cluster_exists: bool = False,
     ):
-
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore

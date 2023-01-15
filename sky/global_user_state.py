@@ -96,10 +96,10 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
-    
+
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
-    
+
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'owner', 'TEXT')
     conn.commit()
 
@@ -338,7 +338,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
     _DB.conn.commit()
 
 
-
 def get_handle_from_cluster_name(
         cluster_name: str) -> Optional['backends.Backend.ResourceHandle']:
     assert cluster_name is not None, 'cluster_name cannot be None'
@@ -449,25 +448,27 @@ def _set_cluster_usage_intervals(cluster_hash: str,
             pickle.dumps(usage_intervals),
             cluster_hash,
         ))
-    
+
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
     if count == 0:
-       raise ValueError(f'Cluster hash {cluster_hash} not found.')
-        
+        raise ValueError(f'Cluster hash {cluster_hash} not found.')
+
+
 def set_owner_identity_for_cluster(cluster_name: str,
                                    owner_identity: Optional[str]) -> None:
     if owner_identity is None:
         return
     _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
                        (owner_identity, cluster_name))
-    
+
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
     if count == 0:
-      raise ValueError(f'Cluster {cluster_name} not found.')
+        raise ValueError(f'Cluster {cluster_name} not found.')
+
 
 def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
     rows = _DB.cursor.execute(
@@ -518,6 +519,7 @@ def get_cluster_from_name(
             'cluster_hash': cluster_hash,
         }
         return record
+
 
 def get_clusters() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute(
