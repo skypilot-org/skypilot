@@ -29,6 +29,8 @@ available_node_types:
   ray_head_default:
     resources: {}
     node_config:
+      labels:
+        skypilot-user: {{ user }}
 {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
@@ -67,6 +69,8 @@ available_node_types:
     max_workers: {{num_nodes - 1}}
     resources: {}
     node_config:
+      labels:
+        skypilot-user: {{ user }}
   {%- if tpu_vm %}
       acceleratorType: {{tpu_type}}
       runtimeVersion: {{runtime_version}}
