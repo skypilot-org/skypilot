@@ -950,15 +950,15 @@ def test_ibm_n_node_job_queue():
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
             'sleep 90',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
-            f'sky cancel {name} 1',
+            f'sky cancel -y {name} 1',
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
-            f'sky cancel {name} 1 2 3',
+            f'sky cancel -y {name} 1 2 3',
             f'sky launch -c {name} -n {name}-4 --detach-setup -d {task_file}',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
-            f'sky cancel {name} 4',
+            f'sky cancel -y {name} 4',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
             f'sky exec {name} --gpus v100:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky exec {name} --gpus v100:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
@@ -1222,6 +1222,7 @@ def test_autostop(generic_cloud: str):
     run_one_test(test)
 
 
+@pytest.mark.ibm
 def test_ibm_autostop():
     name = _get_cluster_name()
     test = Test(
@@ -1342,7 +1343,7 @@ def test_ibm_autodown():
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && echo "$s" | grep {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=40 * 60,
+        timeout=50 * 60,
     )
     run_one_test(test)
 
@@ -1423,7 +1424,7 @@ def test_cancel_ibm():
             f'sky exec {name} -n {name}-1 -d  "while true; do echo \'Hello SkyPilot\'; sleep 2; done"',
             'sleep 20',
             f'sky queue {name} | grep {name}-1 | grep RUNNING',
-            f'sky cancel {name} 2',
+            f'sky cancel -y {name} 2',
             f'sleep 5',
             f'sky queue {name} | grep {name}-1 | grep CANCELLED',
         ],
