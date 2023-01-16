@@ -875,6 +875,24 @@ def test_spot():
     run_one_test(test)
 
 
+def test_spot_failed_setup():
+    """Test managed spot job with failed setup."""
+    name = _get_cluster_name()
+    test = Test(
+        'spot-failed-setup',
+        [
+            f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup.yaml',
+            'sleep 200',
+            # Make sure the job failed quickly.
+            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "FAILED"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
 # ---------- Testing managed spot ----------
 def test_spot_gcp():
     """Test managed spot on GCP."""
