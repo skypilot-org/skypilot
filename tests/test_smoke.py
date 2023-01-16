@@ -26,7 +26,7 @@ from sky.utils import subprocess_utils
 # For uniquefying users on shared-account cloud providers. Used as part of the
 # cluster names.
 _smoke_test_hash = hashlib.md5(
-    common_utils.user_and_hostname_hash().encode()).hexdigest()[:8]
+    common_utils.user_and_hostname_hash().encode()).hexdigest()[:4]
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_spot_recovery to make sure the manual
