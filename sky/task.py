@@ -253,7 +253,6 @@ class Task:
             run=config.pop('run', None),
             workdir=config.pop('workdir', None),
             setup=config.pop('setup', None),
-            num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
         )
 
@@ -605,6 +604,8 @@ class Task:
         #  2. cloud specified in the task resources.
         #  3. the first enabled cloud.
         # This should be refactored and moved to the optimizer.
+
+        # FIXME(woosuk): This code will not work.
         assert len(self.resources) == 1, self.resources
         storage_cloud = None
         if self.best_resources is not None:
@@ -722,12 +723,6 @@ class Task:
                 config[key] = value
 
         add_if_not_none('name', self.name)
-
-        if self.resources is not None:
-            assert len(self.resources) == 1
-            resources = list(self.resources)[0]
-            add_if_not_none('resources', resources.to_yaml_config())
-        add_if_not_none('num_nodes', self.num_nodes)
 
         if self.inputs is not None:
             add_if_not_none('inputs',
