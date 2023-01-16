@@ -1734,9 +1734,9 @@ def _query_status_ibm(
         fields=['tags', 'region', 'type'],
         limit=1000).get_result()['items']
     if not vpcs_filtered_by_tags_and_region:
-        logger.error('No instances were found for a vpc in' 
-        f' in {ray_config["provider"]["region"]}'
-        f'with tag: {cluster}')
+        logger.error('No instances were found for a vpc in'
+                     f' in {ray_config["provider"]["region"]}'
+                     f'with tag: {cluster}')
     vpc_id = vpcs_filtered_by_tags_and_region[0]['crn'].rsplit(':', 1)[-1]
     instances = client.list_instances(vpc_id=vpc_id).get_result()['instances']
 

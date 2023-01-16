@@ -1221,6 +1221,7 @@ def test_autostop(generic_cloud: str):
     )
     run_one_test(test)
 
+
 def test_ibm_autostop():
     name = _get_cluster_name()
     test = Test(
@@ -1273,6 +1274,7 @@ def test_ibm_autostop():
         timeout=60 * 60,
     )
     run_one_test(test)
+
 
 # ---------- Testing Autodowning ----------
 def test_autodown(generic_cloud: str):
