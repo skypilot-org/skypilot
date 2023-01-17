@@ -277,11 +277,11 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/no_conda_ami.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
-            f'sky exec {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky exec {name} tests/test_yamls/no_conda_ami.yaml',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
