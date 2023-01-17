@@ -79,7 +79,7 @@ To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky
 What are the required IAM permissons on GCP for SkyPilot?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To use SkyPilot, your GCP account needs to be granted the following IAM roles.
+To use SkyPilot, your GCP account needs to be granted the following IAM roles:
 
 .. code-block:: yaml
 
@@ -96,7 +96,7 @@ If you want to use TPUs, an additional role
 
   roles/tpu.admin
 
-is required. You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
+You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
 
 
 (Advanced) How to make SkyPilot use all global regions?
