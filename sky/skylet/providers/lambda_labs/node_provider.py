@@ -21,8 +21,7 @@ from sky.backends import backend_utils
 from sky.skylet.providers.lambda_labs import lambda_utils
 from sky.utils import common_utils
 
-REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
-LOCAL_TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
+TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
 IS_REMOTE_PATH_PREFIX = '~/.lambda_labs/.is_remote'  # Created in lambda-ray.yml
 
 logger = logging.getLogger(__name__)
@@ -55,42 +54,34 @@ class LambdaNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaLabsClient()
-        # Only used for tags
-        if _on_remote(cluster_name):
-            self.metadata = lambda_utils.Metadata(REMOTE_TAG_PATH_PREFIX,
-                    cluster_name)
+        self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
 
-            # If tag file does not exist, create it and add some basic tags.
-            # TODO(ewzeng): change when Lambda Labs adds tag support.
-            if not os.path.exists(self.metadata.path):
-                # Compute launch hash
-                ray_yaml_path = os.path.expanduser(
-                        '~/ray_bootstrap_config.yaml')
-                config = common_utils.read_yaml(ray_yaml_path)
-                head_node_config = config.get('head_node', {})
-                head_node_type = config.get('head_node_type')
-                if head_node_type:
-                    head_config = config['available_node_types']\
-                            [head_node_type]
-                    head_node_config.update(head_config["node_config"])
-                launch_hash = hash_launch_conf(head_node_config,
-                        config['auth'])
+        # If tag file does not exist on head, create it and add basic tags.
+        # TODO(ewzeng): change when Lambda Labs adds tag support.
+        if _on_remote(cluster_name) and not os.path.exists(self.metadata.path):
+            # Compute launch hash
+            ray_yaml_path = os.path.expanduser(
+                    '~/ray_bootstrap_config.yaml')
+            config = common_utils.read_yaml(ray_yaml_path)
+            head_node_config = config.get('head_node', {})
+            head_node_type = config.get('head_node_type')
+            if head_node_type:
+                head_config = config['available_node_types'][head_node_type]
+                head_node_config.update(head_config["node_config"])
+            launch_hash = hash_launch_conf(head_node_config, config['auth'])
+            # Populate tags
+            vms = self.lambda_client.ls().get('data', [])
+            for node in vms:
+                self.metadata[node['id']] = {'tags':
+                    {
+                        TAG_RAY_CLUSTER_NAME: cluster_name,
+                        TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
+                        TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
+                        TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
+                        TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
+                        TAG_RAY_LAUNCH_CONFIG: launch_hash,
+                    }}
 
-                # Populate tags
-                vms = self.lambda_client.ls().get('data', [])
-                for node in vms:
-                    self.metadata[node['id']] = {'tags':
-                        {
-                            TAG_RAY_CLUSTER_NAME: cluster_name,
-                            TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
-                            TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
-                            TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
-                            TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
-                            TAG_RAY_LAUNCH_CONFIG: launch_hash,
-                        }}
-        else:
-            self.metadata = lambda_utils.Metadata(LOCAL_TAG_PATH_PREFIX,
-                    cluster_name)
         # Cache node objects
         self.cached_nodes = {}
 
