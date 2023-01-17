@@ -158,6 +158,8 @@ def test_minimal():
     run_one_test(test)
 
 
+# We run Lambda Labs tests serially because Lambda Labs rate limits the API
+# to one launch every 10 seconds.
 @pytest.mark.xdist_group(name="serial_lambda_labs")
 def test_lambda_minimal():
     name = _get_cluster_name()

@@ -50,10 +50,16 @@ class Lambda(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        del instance_type, accelerators, zone  # unused
+        del accelerators, zone  # unused
         if use_spot:
             return []
-        regions = cls.regions()
+        if instance_type is None:
+            # Fall back to default regions
+            regions = cls.regions()
+        else:
+            regions = service_catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'lambda')
+
         if region is not None:
             regions = [r for r in regions if r.name == region]
         return regions
