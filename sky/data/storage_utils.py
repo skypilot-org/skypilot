@@ -39,6 +39,6 @@ def format_storage_table(storages: List[Dict[str, Any]]) -> str:
             row['status'].value,
         ])
     if storages:
-        return storage_table
+        return str(storage_table)
     else:
         return 'No existing storage.'

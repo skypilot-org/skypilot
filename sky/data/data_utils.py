@@ -94,7 +94,7 @@ def _group_files_by_dir(
     Args:
         source_list: List[str]; List of paths to group
     """
-    grouped_files = {}
+    grouped_files: Dict[str, List[str]] = {}
     dirs = []
     for source in source_list:
         source = os.path.abspath(os.path.expanduser(source))
@@ -170,6 +170,7 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                           stdout=subprocess.DEVNULL,
                           shell=True) as process:
         stderr = []
+        assert process.stderr is not None  # for mypy
         while True:
             line = process.stderr.readline()
             if not line:
@@ -186,9 +187,9 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
                         'the bucket is public.')
         returncode = process.wait()
         if returncode != 0:
-            stderr = '\n'.join(stderr)
+            stderr_str = '\n'.join(stderr)
             with ux_utils.print_exception_no_traceback():
-                logger.error(stderr)
+                logger.error(stderr_str)
                 raise exceptions.StorageUploadError(
                     f'Upload to bucket failed for store {bucket_name}. '
                     'Please check the logs.')

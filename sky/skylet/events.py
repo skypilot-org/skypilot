@@ -130,18 +130,24 @@ class AutostopEvent(SkyletEvent):
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
             self._replace_yaml_for_stopping(self._ray_yaml_path,
                                             autostop_config.down)
+
             # `ray up` is required to reset the upscaling speed and min/max
             # workers. Otherwise, `ray down --workers-only` will continuously
             # scale down and up.
+            logger.info('Running ray up.')
             subprocess.run([
                 'ray', 'up', '-y', '--restart-only', '--disable-usage-stats',
                 self._ray_yaml_path
             ],
                            check=True)
+
+            logger.info('Running ray down.')
             # Stop the workers first to avoid orphan workers.
             subprocess.run(
                 ['ray', 'down', '-y', '--workers-only', self._ray_yaml_path],
                 check=True)
+
+            logger.info('Running final ray down.')
             subprocess.run(['ray', 'down', '-y', self._ray_yaml_path],
                            check=True)
         else:
@@ -160,6 +166,18 @@ class AutostopEvent(SkyletEvent):
         config = yaml.safe_load(yaml_str)
         # Set the private key with the existed key on the remote instance.
         config['auth']['ssh_private_key'] = '~/ray_bootstrap_key.pem'
+        # NOTE: We must do this, otherwise with ssh_proxy_command still under
+        # 'auth:', `ray up ~/.sky/sky_ray.yaml` on the head node will fail (in
+        # general, the clusters do not need or have the proxy set up).
+        #
+        # Note also that this is ok only because in the local client ->
+        # provision head node code path, we have monkey patched
+        # hash_launch_conf() to exclude ssh_proxy_command from the hash
+        # calculation for the head node. Therefore when this current code is
+        # run again on the head, the hash would match the one at head's
+        # creation (otherwise the head node would be stopped and a new one
+        # would be launched).
+        config['auth'].pop('ssh_proxy_command', None)
         # Empty the file_mounts.
         config['file_mounts'] = dict()
         common_utils.dump_yaml(yaml_path, config)

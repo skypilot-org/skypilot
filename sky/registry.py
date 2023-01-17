@@ -34,7 +34,7 @@ def _filter_out_blocked_launchable_resources(
     available_resources = []
     for resources in launchable_resources:
         for blocked_resources in blocked_launchable_resources:
-            if resources.is_launchable_fuzzy_equal(blocked_resources):
+            if resources.should_be_blocked_by(blocked_resources):
                 break
         else:  # non-blokced launchable resources. (no break)
             available_resources.append(resources)

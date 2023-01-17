@@ -972,7 +972,7 @@ class S3Store(AbstractStore):
             # accessible.
             self.client.head_bucket(Bucket=self.name)
             return bucket, False
-        except aws.client_exception() as e:
+        except aws.botocore_exceptions().ClientError as e:
             error_code = e.response['Error']['Code']
             # AccessDenied error for buckets that are private and not owned by
             # user.
@@ -1044,7 +1044,7 @@ class S3Store(AbstractStore):
                 s3_client.create_bucket(Bucket=bucket_name,
                                         CreateBucketConfiguration=location)
                 logger.info(f'Created S3 bucket {bucket_name} in {region}')
-        except aws.client_exception() as e:
+        except aws.botocore_exceptions().ClientError as e:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'Attempted to create a bucket '
@@ -1313,7 +1313,7 @@ class GcsStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
-                       '/releases/download/v0.41.2/gcsfuse_0.41.2_amd64.deb '
+                       '/releases/download/v0.41.10/gcsfuse_0.41.10_amd64.deb '
                        '-O /tmp/gcsfuse.deb && '
                        'sudo dpkg --install /tmp/gcsfuse.deb')
         mount_cmd = ('gcsfuse -o allow_other '

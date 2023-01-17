@@ -43,29 +43,42 @@ class Local(clouds.Cloud):
         return cls._regions
 
     @classmethod
+    def regions_with_offering(cls, instance_type: Optional[str],
+                              accelerators: Optional[Dict[str, int]],
+                              use_spot: bool, region: Optional[str],
+                              zone: Optional[str]) -> List[clouds.Region]:
+        """Local cloud resources are placed in only one region."""
+        del instance_type, accelerators, use_spot, region, zone
+        return cls.regions()
+
+    @classmethod
     def region_zones_provision_loop(
         cls,
         *,
         instance_type: Optional[str] = None,
         accelerators: Optional[Dict[str, int]] = None,
-        use_spot: bool,
+        use_spot: bool = False,
     ) -> Iterator[Tuple[clouds.Region, List[clouds.Zone]]]:
-        del instance_type
-        del use_spot
-        del accelerators  # unused
-        for region in cls.regions():
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot=use_spot,
+                                            region=None,
+                                            zone=None)
+        for region in regions:
             yield region, region.zones
 
     #### Normal methods ####
 
-    def instance_type_to_hourly_cost(self, instance_type: str,
-                                     use_spot: bool) -> float:
+    def instance_type_to_hourly_cost(self, instance_type: str, use_spot: bool,
+                                     region: Optional[str],
+                                     zone: Optional[str]) -> float:
         # On-prem machines on Sky are assumed free
         # (minus electricity/utility bills).
         return 0.0
 
-    def accelerators_to_hourly_cost(self, accelerators,
-                                    use_spot: bool) -> float:
+    def accelerators_to_hourly_cost(self, accelerators, use_spot: bool,
+                                    region: Optional[str],
+                                    zone: Optional[str]) -> float:
         # Hourly cost of accelerators is 0 for local cloud.
         return 0.0
 
@@ -103,7 +116,7 @@ class Local(clouds.Cloud):
     def make_deploy_resources_variables(
             self, resources: 'resources_lib.Resources',
             region: Optional['clouds.Region'],
-            zones: Optional[List['clouds.Zone']]) -> Dict[str, str]:
+            zones: Optional[List['clouds.Zone']]) -> Dict[str, Optional[str]]:
         return {}
 
     def get_feasible_launchable_resources(self,

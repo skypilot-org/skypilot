@@ -30,7 +30,6 @@ each other.
 import copy
 import datetime
 import functools
-import getpass
 import os
 import shlex
 import subprocess
@@ -606,7 +605,7 @@ def _default_interactive_node_name(node_type: str):
     # same-username user.  E.g., sky-gpunode-ubuntu.  Not a problem on AWS
     # which is the current cloud for interactive nodes.
     assert node_type in _INTERACTIVE_NODE_TYPES, node_type
-    return f'sky-{node_type}-{getpass.getuser()}'
+    return f'sky-{node_type}-{backend_utils.get_cleaned_username()}'
 
 
 def _infer_interactive_node_type(resources: sky.Resources):
@@ -1181,6 +1180,15 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
+    # A basic check. Programmatic calls will have a proper (but less
+    # informative) error from optimizer.
+    if (cloud is not None and cloud.lower() == 'azure' and
+            use_spot is not None and use_spot):
+        raise click.UsageError(
+            'SkyPilot currently has not implemented '
+            'support for spot instances on Azure. Please file '
+            'an issue if you need this feature.')
+
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
@@ -1476,12 +1484,15 @@ def queue(clusters: Tuple[str], skip_finished: bool, all_users: bool):
     for cluster in clusters:
         try:
             job_table = core.queue(cluster, skip_finished, all_users)
-        except exceptions.NotSupportedError as e:
-            unsupported_clusters.append(cluster)
-            click.echo(str(e))
-            continue
-        except (RuntimeError, exceptions.ClusterNotUpError) as e:
-            click.echo(str(e))
+        except (RuntimeError, exceptions.NotSupportedError,
+                exceptions.ClusterNotUpError, exceptions.CloudUserIdentityError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
+            if isinstance(e, exceptions.NotSupportedError):
+                unsupported_clusters.append(cluster)
+            click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
+                       f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
+                       f'  {common_utils.class_fullname(e.__class__)}: '
+                       f'{common_utils.remove_color(str(e))}')
             continue
         job_table = job_lib.format_job_queue(job_table)
         click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
@@ -1556,8 +1567,8 @@ def logs(
 
     if len(job_ids) > 1 and not sync_down:
         raise click.UsageError(
-            f'Cannot stream logs of multiple jobs {job_ids}. '
-            'Set --sync-down to download them.')
+            f'Cannot stream logs of multiple jobs (IDs: {", ".join(job_ids)}).'
+            '\nPass -s/--sync-down to download the logs instead.')
 
     job_ids = None if not job_ids else job_ids
 
@@ -1600,11 +1611,28 @@ def logs(
               is_flag=True,
               required=False,
               help='Cancel all jobs on the specified cluster.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
+    if not yes:
+        job_ids = ' '.join(map(str, jobs))
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = f'job{plural} with ID{plural} {job_ids}'
+        if all:
+            job_identity_str = 'all managed spot jobs'
+        job_identity_str += f' on {cluster}'
+        click.confirm(f'Cancelling {job_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
     try:
         core.cancel(cluster, all, jobs)
     except ValueError as e:
@@ -1990,9 +2018,11 @@ def start(
                        retry_until_up,
                        down=down,
                        force=force)
-        except exceptions.NotSupportedError as e:
+        except (exceptions.NotSupportedError,
+                exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
-        click.secho(f'Cluster {name} started.', fg='green')
+        else:
+            click.secho(f'Cluster {name} started.', fg='green')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2181,11 +2211,12 @@ def _down_or_stop_clusters(
                 assert len(reserved_clusters) == 1, reserved_clusters
                 _hint_for_down_spot_controller(reserved_clusters[0])
 
-                click.confirm('Proceed?',
-                              default=False,
-                              abort=True,
-                              show_default=True)
-                no_confirm = True
+                if not no_confirm:
+                    click.confirm('Proceed?',
+                                  default=False,
+                                  abort=True,
+                                  show_default=True)
+                    no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
@@ -2266,12 +2297,13 @@ def _down_or_stop_clusters(
                     core.down(name, purge=purge)
                 else:
                     core.stop(name, purge=purge)
-            except RuntimeError:
+            except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    'Please check the logs and try again.'
-                    f'{colorama.Style.RESET_ALL}')
-            except exceptions.NotSupportedError as e:
+                    f'{colorama.Style.RESET_ALL}'
+                    f'\n\tReason: {common_utils.format_exception(e)}.')
+            except (exceptions.NotSupportedError,
+                    exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
             else:  # no exception raised
                 message = (
@@ -2805,27 +2837,6 @@ def admin_deploy(clusterspec_yaml: str):
                 fg='green')
 
 
-# Managed Spot CLIs
-def _is_spot_controller_up(
-    stopped_message: str,
-) -> Tuple[Optional[global_user_state.ClusterStatus],
-           Optional[backends.Backend.ResourceHandle]]:
-    controller_status, handle = backend_utils.refresh_cluster_status_handle(
-        spot_lib.SPOT_CONTROLLER_NAME, force_refresh=True)
-    if controller_status is None:
-        click.echo('No managed spot job has been run.')
-    elif controller_status != global_user_state.ClusterStatus.UP:
-        msg = (f'Spot controller {spot_lib.SPOT_CONTROLLER_NAME} '
-               f'is {controller_status.value}.')
-        if controller_status == global_user_state.ClusterStatus.STOPPED:
-            msg += f'\n{stopped_message}'
-        if controller_status == global_user_state.ClusterStatus.INIT:
-            msg += '\nPlease wait for the controller to be ready.'
-        click.echo(msg)
-        handle = None
-    return controller_status, handle
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def spot():
     """Commands for managed spot jobs."""
@@ -2955,9 +2966,15 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@click.option('--skip-finished',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_queue(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2987,25 +3004,48 @@ def spot_queue(all: bool, refresh: bool):
       watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
+    no_jobs_found_str = '  No jobs found.'
     try:
-        job_table = core.spot_queue(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh,
+                                    skip_finished=skip_finished)
     except exceptions.ClusterNotUpError:
+        # TODO(mehul): handle skip_finished for the cached case. E.g., change
+        # {load,dump}_job_table_cache() to use structured data, and let
+        # format_job_table() to take skip_finished.
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
+            if not cache[1].strip():
+                table_str = no_jobs_found_str
+                cached_hint = ''
+            else:
+                table_str = cache[1]
+                # Show a helpful hint at the end, if cached table is non-empty.
+                cached_hint = (
+                    '\n\nNOTE: cached job table is being shown '
+                    f'[last updated: {readable_time}].\nUse '
+                    f'{colorama.Style.BRIGHT}--refresh / -r'
+                    f'{colorama.Style.RESET_ALL} to restart the spot '
+                    'controller and see the latest job table.')
             table_message = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
-                f'{cache[1]}\n')
+                f'{table_str}{cached_hint}')
         else:
             table_message = 'No cached job status table found.'
         click.echo(table_message)
         return
     job_table = spot_lib.format_job_table(job_table, all)
 
-    # Dump cache
     spot_lib.dump_job_table_cache(job_table)
-    click.echo(f'Managed spot jobs:\n{job_table}')
+
+    if not skip_finished:
+        in_progress_only_hint = ''
+    else:
+        in_progress_only_hint = ' (showing in-progress jobs only)'
+    if not job_table:
+        job_table = no_jobs_found_str
+    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{job_table}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
@@ -3049,7 +3089,7 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 
     """
 
-    _, handle = _is_spot_controller_up(
+    _, handle = spot_lib.is_spot_controller_up(
         'All managed spot jobs should have finished.')
     if handle is None:
         return
