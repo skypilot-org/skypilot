@@ -2341,8 +2341,8 @@ class CloudVmRayBackend(backends.Backend):
                                                        command=setup_cmd,
                                                        error_msg=error_message)
                 except exceptions.CommandError as e:
-            with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ClusterSetUpError(str(e)) from e
+                    with ux_utils.print_exception_no_traceback():
+                        raise exceptions.ClusterSetUpError(str(e)) from e
 
             num_nodes = len(ip_list)
             plural = 's' if num_nodes > 1 else ''
