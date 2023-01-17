@@ -1622,22 +1622,48 @@ def logs(
 def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
+    bold = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if not jobs and not all:
+        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
+        message = textwrap.dedent(f"""\
+          Use:
+            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
+            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
+
+          Job IDs can be looked up by {bold}sky queue{reset}.""")
+        raise click.UsageError(message)
+
     if not yes:
         job_ids = ' '.join(map(str, jobs))
         plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} with ID{plural} {job_ids}'
+        job_identity_str = f'job{plural} {job_ids}'
         if all:
-            job_identity_str = 'all managed spot jobs'
-        job_identity_str += f' on {cluster}'
+            job_identity_str = 'all jobs'
+        job_identity_str += f' on cluster {cluster!r}'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
+
     try:
         core.cancel(cluster, all, jobs)
+    except exceptions.NotSupportedError:
+        # Friendly message for usage like 'sky cancel <spot controller> -a/<job
+        # id>'.
+        if all:
+            arg_str = '--all'
+        else:
+            arg_str = ' '.join(map(str, jobs))
+        error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
+                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
+                     f'job IDs> [--all]'
+                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        click.echo(error_str)
+        sys.exit(1)
     except ValueError as e:
         raise click.UsageError(str(e))
-    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+    except exceptions.ClusterNotUpError as e:
         click.echo(str(e))
         sys.exit(1)
 

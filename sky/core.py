@@ -454,12 +454,10 @@ def cancel(cluster_name: str,
     Please refer to the sky.cli.cancel for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported or the
-          cluster does not exist.
-        ValueError: if the cluster does not exist.
+        ValueError: if arguments are invalid, or the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+          reserved cluster that does not support this operation.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
