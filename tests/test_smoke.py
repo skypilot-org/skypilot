@@ -884,7 +884,7 @@ def test_spot_failed_setup():
             f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 200',
             # Make sure the job failed quickly.
-            f's=$(sky spot queue -r); printf "$s"; echo; echo; printf "$s" | grep {name} | head -n1 | grep "FAILED"',
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "FAILED"',
         ],
         f'sky spot cancel -y -n {name}',
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
