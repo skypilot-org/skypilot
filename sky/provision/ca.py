@@ -2,6 +2,9 @@
 from typing import Tuple
 
 import datetime
+import functools
+import os
+import pathlib
 import uuid
 
 from cryptography import x509
@@ -9,6 +12,13 @@ from cryptography.hazmat import backends
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509 import oid
+
+KEY_DIR = pathlib.Path.home() / '.sky' / 'certs'
+KEY_DIR.mkdir(parents=True, exist_ok=True)
+CLIENT_KEY_PATH = KEY_DIR / 'client.key'
+CLIENT_CERT_PATH = KEY_DIR / 'client.crt'
+SERVER_KEY_PATH = KEY_DIR / 'server.key'
+SERVER_CERT_PATH = KEY_DIR / 'server.crt'
 
 VALID_DAYS = datetime.timedelta(365 * 100, 0, 0)
 ONE_DAY = datetime.timedelta(1, 0, 0)
@@ -23,7 +33,7 @@ ISSUER_NAME = x509.Name([
 ])
 
 
-def generate_ca() -> Tuple[bytes, bytes]:
+def _generate_ca() -> Tuple[bytes, bytes]:
     private_key = rsa.generate_private_key(public_exponent=65537,
                                            key_size=2048,
                                            backend=backends.default_backend())
@@ -54,6 +64,24 @@ def generate_ca() -> Tuple[bytes, bytes]:
     return ca_key, ca_crt
 
 
+def _write_with_chmod(data: bytes, target: pathlib.Path):
+    with open(target, 'wb', opener=functools.partial(os.open, mode=0o600)) as f:
+        f.write(data)
+
+
+def generate_cert_file(overwrite_if_exists: bool = False):
+    if (not CLIENT_KEY_PATH.exists() or not CLIENT_CERT_PATH.exists() or
+            overwrite_if_exists):
+        ca_key, ca_crt = _generate_ca()
+        _write_with_chmod(ca_key, CLIENT_KEY_PATH)
+        _write_with_chmod(ca_crt, CLIENT_CERT_PATH)
+    if (not SERVER_KEY_PATH.exists() or not SERVER_CERT_PATH.exists() or
+            overwrite_if_exists):
+        ca_key, ca_crt = _generate_ca()
+        _write_with_chmod(ca_key, SERVER_KEY_PATH)
+        _write_with_chmod(ca_crt, SERVER_CERT_PATH)
+
+
 if __name__ == '__main__':
-    ca_key, ca_crt = generate_ca()
+    ca_key, ca_crt = _generate_ca()
     print(f'{ca_key.decode("ascii")}\n\n{ca_crt.decode("ascii")}')
