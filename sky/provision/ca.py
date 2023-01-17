@@ -44,10 +44,12 @@ def generate_ca() -> Tuple[bytes, bytes]:
                                backend=backends.default_backend())
     assert isinstance(certificate, x509.Certificate)
 
+    # To encrypt the private key,
+    #  use `serialization.BestAvailableEncryption(b"skypilot")`
     ca_key = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.TraditionalOpenSSL,
-        encryption_algorithm=serialization.BestAvailableEncryption(b"skypilot"))
+        encryption_algorithm=serialization.NoEncryption())
     ca_crt = certificate.public_bytes(encoding=serialization.Encoding.PEM)
     return ca_key, ca_crt
 
