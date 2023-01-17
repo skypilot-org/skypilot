@@ -2,7 +2,6 @@ import getpass
 import os
 import pathlib
 import time
-import urllib3
 import uuid
 from packaging import version
 
@@ -30,7 +29,7 @@ def test_provision():
     region = 'us-east-1'
     availability_zone = 'us-east-1f'
     instance_type = aws_cloud.AWS.get_default_instance_type()
-    num_nodes = 1
+    num_nodes = 8
     content = template.render(
         cluster_name=cluster_name,
         region=region,
