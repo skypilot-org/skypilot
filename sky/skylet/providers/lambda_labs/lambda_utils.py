@@ -18,15 +18,14 @@ class Metadata:
         # TODO(ewzeng): Metadata file is not thread safe. This is fine for
         # now since SkyPilot uses a per-cluster lock for ray-related
         # operations, but this should be improved in the future.
-        self._metadata_path = os.path.expanduser(
-                f'{path_prefix}-{cluster_name}')
+        self.path = os.path.expanduser(f'{path_prefix}-{cluster_name}')
         self._metadata = {}
-        if os.path.exists(self._metadata_path):
-            with open(self._metadata_path, 'r') as f:
+        if os.path.exists(self.path):
+            with open(self.path, 'r') as f:
                 self._metadata = json.load(f)
         else:
             # In case parent directory does not exist
-            os.makedirs(os.path.dirname(self._metadata_path), exist_ok=True)
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
     def __getitem__(self, instance_id):
         return self._metadata.get(instance_id)
@@ -36,12 +35,12 @@ class Metadata:
             if instance_id in self._metadata:
                 self._metadata.pop(instance_id) # del entry
             if (len(self._metadata) == 0 and
-                    os.path.exists(self._metadata_path)):
-                os.remove(self._metadata_path)
+                    os.path.exists(self.path)):
+                os.remove(self.path)
                 return
         else:
             self._metadata[instance_id] = value
-        with open(self._metadata_path, 'w') as f:
+        with open(self.path, 'w') as f:
             json.dump(self._metadata, f)
 
 

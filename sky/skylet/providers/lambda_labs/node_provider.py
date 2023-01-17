@@ -4,10 +4,22 @@ import time
 from threading import RLock
 
 from ray.autoscaler.node_provider import NodeProvider
-from ray.autoscaler.tags import TAG_RAY_CLUSTER_NAME
+from ray.autoscaler.tags import (
+    TAG_RAY_CLUSTER_NAME,
+    TAG_RAY_USER_NODE_TYPE,
+    TAG_RAY_NODE_NAME,
+    TAG_RAY_LAUNCH_CONFIG,
+    TAG_RAY_NODE_STATUS,
+    STATUS_UP_TO_DATE,
+    TAG_RAY_NODE_KIND,
+    NODE_KIND_WORKER,
+    NODE_KIND_HEAD,
+)
+from ray.autoscaler._private.util import hash_launch_conf
 from sky.authentication import PRIVATE_SSH_KEY_PATH
+from sky.backends import backend_utils
 from sky.skylet.providers.lambda_labs import lambda_utils
-from sky.utils import command_runner
+from sky.utils import common_utils
 
 REMOTE_TAG_PATH_PREFIX = '/home/ubuntu/.lambda-metadata'
 LOCAL_TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
@@ -20,16 +32,6 @@ def _on_remote(cluster_name):
     """Returns True if on remote node of cluster_name."""
     path = os.path.expanduser(f'{IS_REMOTE_PATH_PREFIX}-{cluster_name}')
     return os.path.exists(path)
-
-
-def _send_tags_file(ip, cluster_name):
-    if _on_remote(cluster_name):
-        return
-
-    # Local
-    path = os.path.expanduser(f'{LOCAL_TAG_PATH_PREFIX}-{cluster_name}')
-    runner = command_runner.SSHCommandRunner(ip, 'ubuntu', PRIVATE_SSH_KEY_PATH)
-    runner.rsync(path, f'{REMOTE_TAG_PATH_PREFIX}-{cluster_name}', up=True)
 
 
 def synchronized(f):
@@ -57,6 +59,35 @@ class LambdaNodeProvider(NodeProvider):
         if _on_remote(cluster_name):
             self.metadata = lambda_utils.Metadata(REMOTE_TAG_PATH_PREFIX,
                     cluster_name)
+
+            # If tag file does not exist, create it and add some basic tags.
+            # TODO(ewzeng): change when Lambda Labs adds tag support.
+            if not os.path.exists(self.metadata.path):
+                # Compute launch hash
+                ray_yaml_path = os.path.expanduser(
+                        '~/ray_bootstrap_config.yaml')
+                config = common_utils.read_yaml(ray_yaml_path)
+                head_node_config = config.get('head_node', {})
+                head_node_type = config.get('head_node_type')
+                if head_node_type:
+                    head_config = config['available_node_types']\
+                            [head_node_type]
+                    head_node_config.update(head_config["node_config"])
+                launch_hash = hash_launch_conf(head_node_config,
+                        config['auth'])
+
+                # Populate tags
+                vms = self.lambda_client.ls().get('data', [])
+                for node in vms:
+                    self.metadata[node['id']] = {'tags':
+                        {
+                            TAG_RAY_CLUSTER_NAME: cluster_name,
+                            TAG_RAY_NODE_STATUS: STATUS_UP_TO_DATE,
+                            TAG_RAY_NODE_KIND: NODE_KIND_HEAD,
+                            TAG_RAY_USER_NODE_TYPE: 'ray_head_default',
+                            TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
+                            TAG_RAY_LAUNCH_CONFIG: launch_hash,
+                        }}
         else:
             self.metadata = lambda_utils.Metadata(LOCAL_TAG_PATH_PREFIX,
                     cluster_name)
@@ -111,11 +142,11 @@ class LambdaNodeProvider(NodeProvider):
 
     def is_running(self, node_id):
         """Return whether the specified node is running."""
-        return self._get_node(node_id=node_id) is not None
+        return self._get_cached_node(node_id=node_id) is not None
 
     def is_terminated(self, node_id):
         """Return whether the specified node is terminated."""
-        return self._get_node(node_id=node_id) is None
+        return self._get_cached_node(node_id=node_id) is None
 
     def node_tags(self, node_id):
         """Returns the tags of the given node (string dict)."""
@@ -130,12 +161,8 @@ class LambdaNodeProvider(NodeProvider):
         return self._get_cached_node(node_id=node_id)['internal_ip']
 
     def create_node(self, node_config, tags, count):
-        assert count == 1, count   # Only support 1-node clusters for now
-        self._create_node(node_config, tags, count)
-
-    def _create_node(self, node_config, tags, count):
         """Creates a number of nodes within the namespace."""
-        del count  # unused
+        assert count == 1, count   # Only support 1-node clusters for now
 
         # get the tags
         config_tags = node_config.get('tags', {}).copy()
@@ -160,24 +187,15 @@ class LambdaNodeProvider(NodeProvider):
             vms = self.lambda_client.ls().get('data', [])
             for vm in vms:
                 if vm['id'] == vm_id and vm['status'] == 'active':
-                    # Hack: send a copy of metadata file to the head node.
-                    # This is because autodown runs `ray up` and `ray down`
-                    # there.
-                    # TODO(ewzeng): remove when Lambda Labs adds tag support.
-                    _send_tags_file(vm['ip'], self.cluster_name)
                     return
             time.sleep(10)
 
     @synchronized
     def set_node_tags(self, node_id, tags):
         """Sets the tag values (string dict) for the specified node."""
-        node = self._get_cached_node(node_id)
+        node = self._get_node(node_id)
         node['tags'].update(tags)
         self.metadata[node_id] = {'tags': node['tags']}
-
-        # TODO(ewzeng): only send to head node when multi-node.
-        # Remove when Lambda Labs adds tag support.
-        _send_tags_file(node['external_ip'], self.cluster_name)
 
     def terminate_node(self, node_id):
         """Terminates the specified node."""
