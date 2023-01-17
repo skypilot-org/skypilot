@@ -176,7 +176,7 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
 def create_or_resume_instances(region: str, cluster_name: str,
                                node_config: Dict[str, Any],
                                tags: Dict[str, str], count: int,
-                               start_stopped_nodes: bool) -> Dict[str, Any]:
+                               resume_stopped_nodes: bool) -> Dict[str, Any]:
     """Creates instances.
 
     Returns dict mapping instance id to ec2.Instance object for the created
@@ -187,7 +187,7 @@ def create_or_resume_instances(region: str, cluster_name: str,
 
     all_created_nodes = {}
     # Try to reuse previously stopped nodes with compatible configs
-    if start_stopped_nodes:
+    if resume_stopped_nodes:
         all_created_nodes = resume_instances(region, cluster_name, tags, count)
 
     remaining_count = count - len(all_created_nodes)

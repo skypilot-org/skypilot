@@ -79,7 +79,7 @@ def test_provision():
         node_config=bootstrapped_config["node_config"],
         tags={},
         count=num_nodes,
-        start_stopped_nodes=True)
+        resume_stopped_nodes=True)
     print(f'Start cluster (trigger) duration = {time.time() - start:.3f}s')
 
     start = time.time()
