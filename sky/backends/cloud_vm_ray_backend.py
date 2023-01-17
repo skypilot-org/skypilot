@@ -1096,18 +1096,18 @@ class RetryingVmProvisioner(object):
             # yield_region_zones will return zones from a region one by one,
             # but the optimizer that does the filtering will not be involved
             # until the next region.
-            filtered_zones = copy.deepcopy(zones)
+            remaining_unblocked_zones = copy.deepcopy(zones)
             for zone in zones:
                 for blocked_resources in self._blocked_resources:
                     if to_provision.copy(region=region.name,
                                          zone=zone.name).should_be_blocked_by(
                                              blocked_resources):
-                        filtered_zones.remove(zone)
+                        remaining_unblocked_zones.remove(zone)
                         break
-            if zones and not filtered_zones:
+            if zones and not remaining_unblocked_zones:
                 # Skip the region if all zones are blocked.
                 continue
-            zones = filtered_zones
+            zones = remaining_unblocked_zones
 
             if not zones:
                 # For Azure, zones is always an empty list.
