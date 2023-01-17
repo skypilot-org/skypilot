@@ -90,13 +90,13 @@ To use SkyPilot, your GCP account needs to be granted the following IAM roles.
   roles/serviceusage.serviceUsageConsumer
   roles/storage.admin
 
-If you want to use TPUs, an additional role
+Optionally, to use TPUs, add the following role:
 
 .. code-block:: yaml
 
   roles/tpu.admin
 
-is required. You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
+You can grant those accesses via the `GCP IAM console <https://console.cloud.google.com/iam-admin/iam>`_.
 
 
 (Advanced) How to make SkyPilot use all global regions?
