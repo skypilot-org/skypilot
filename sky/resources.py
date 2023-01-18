@@ -17,7 +17,7 @@ logger = sky_logging.init_logger(__name__)
 _DEFAULT_DISK_SIZE_GB = 256
 
 
-class Accelerators:
+class AcceleratorsSpec:
 
     def __init__(self, name: str, count: int,
                  args: Optional[Dict[str, str]]) -> None:
@@ -27,9 +27,9 @@ class Accelerators:
         # TODO(woosuk): Add more fields such as memory, interconnect, etc.
 
     def __repr__(self) -> str:
-        return f'<Accelerators: {self.count}x{self.name}>'
+        return f'<AcceleratorsSpec: {self.count}x{self.name}>'
 
-    def __eq__(self, other: 'Accelerators') -> bool:
+    def __eq__(self, other: 'AcceleratorsSpec') -> bool:
         return self.name == other.name and \
                self.count == other.count and \
                self.args == other.args
@@ -67,7 +67,7 @@ class ResourceRequirements:
         self.image_id = image_id
 
         # Set by canonicalization.
-        self.accelerators: Optional[Accelerators] = None
+        self.accelerators: Optional[AcceleratorsSpec] = None
 
         self._check_syntax()
         self._check_input_types()
@@ -164,9 +164,9 @@ class ResourceRequirements:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(parse_error) from None
 
-        self.accelerators = Accelerators(name=acc_name,
-                                         count=acc_count,
-                                         args=self._accelerator_args)
+        self.accelerators = AcceleratorsSpec(name=acc_name,
+                                             count=acc_count,
+                                             args=self._accelerator_args)
 
     def _assign_defaults(self) -> None:
         if self.use_spot is None:
@@ -244,7 +244,7 @@ class VMSpec:
         instance_type: str,
         cpu: float,
         memory: float,
-        accelerators: Optional[Accelerators],
+        accelerators: Optional[AcceleratorsSpec],
         use_spot: bool,
         disk_size: int,
         image_id: Optional[str],
@@ -416,7 +416,7 @@ class JobResources:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(parse_error) from None
 
-        # NEVER use Accelerators class here.
+        # NEVER use AcceleratorsSpec class here.
         self.acc_name = accelerator_registry.canonicalize_accelerator_name(
             acc_name)
         self.acc_count = acc_count

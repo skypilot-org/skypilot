@@ -90,9 +90,9 @@ def get_suitable_vms(
         if pd.isna(row.AcceleratorName) or pd.isna(row.AcceleratorCount):
             acc = None
         else:
-            acc = resources.Accelerators(name=row.AcceleratorName,
-                                         count=int(row.AcceleratorCount),
-                                         args=None)
+            acc = resources.AcceleratorsSpec(name=row.AcceleratorName,
+                                             count=int(row.AcceleratorCount),
+                                             args=None)
         feasible_resources.append(
             resources.VMSpec(
                 cloud=aws,
