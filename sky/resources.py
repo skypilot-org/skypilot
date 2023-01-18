@@ -243,8 +243,8 @@ class VMResources:
         region: str,
         zone: Optional[str],
         instance_type: str,
-        num_vcpus: float,
-        cpu_memory: float,
+        cpu: float,
+        memory: float,
         accelerator: Optional[Accelerator],
         use_spot: bool,
         spot_recovery: Optional[str],
@@ -257,8 +257,8 @@ class VMResources:
         self.region = region
         self.zone = zone
         self.instance_type = instance_type
-        self.num_vcpus = num_vcpus
-        self.cpu_memory = cpu_memory
+        self.cpu = cpu
+        self.memory = memory
         self.accelerator = accelerator
         self.use_spot = use_spot
         self.spot_recovery = spot_recovery
@@ -274,6 +274,8 @@ class VMResources:
         return (self.region == other.region and \
                 self.zone == other.zone and
                 self.instance_type == other.instance_type and
+                self.cpu == other.cpu and \
+                self.memory == other.memory and
                 self.accelerator == other.accelerator and
                 self.use_spot == other.use_spot and
                 self.spot_recovery == other.spot_recovery and
@@ -286,6 +288,8 @@ class VMResources:
                 f'region={self.region}, '
                 f'zone={self.zone}, '
                 f'instance_type={self.instance_type}, '
+                f'cpu={self.cpu}, '
+                f'memory={self.memory}, '
                 f'accelerator={self.accelerator}, '
                 f'use_spot={self.use_spot}, '
                 f'spot_recovery={self.spot_recovery}, '
@@ -311,8 +315,8 @@ class ClusterResources:
         self.region = head_node.region
         self.zone = head_node.zone
         self.instance_type = head_node.instance_type
-        self.num_vcpus = head_node.num_vcpus
-        self.cpu_memory = head_node.cpu_memory
+        self.cpu = head_node.cpu
+        self.memory = head_node.memory
         self.accelerator = head_node.accelerator
         self.use_spot = head_node.use_spot
         self.spot_recovery = head_node.spot_recovery

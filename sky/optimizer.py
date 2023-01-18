@@ -98,8 +98,8 @@ class Optimizer:
             row = [
                 str(c.cloud),
                 c.instance_type,
-                _to_str(c.num_vcpus),
-                _to_str(c.cpu_memory),
+                _to_str(c.cpu),
+                _to_str(c.memory),
                 acc,
                 c.zone,
                 f'{c.get_hourly_price():.2f}',

@@ -155,9 +155,9 @@ def _check_host_vm_limit(resource: resources.VMResources) -> bool:
             max_cpus = 64
             max_memory = 208
 
-    if resource.num_vcpus > max_cpus:
+    if resource.cpu > max_cpus:
         return False
-    if resource.cpu_memory > max_memory:
+    if resource.memory > max_memory:
         return False
     return True
 
@@ -277,8 +277,8 @@ def get_feasible_resources(
             region=row.Region,
             zone=row.AvailabilityZone,
             instance_type=row.InstanceType,
-            num_vcpus=float(row.vCPUs),
-            cpu_memory=float(row.MemoryGiB),
+            cpu=float(row.vCPUs),
+            memory=float(row.MemoryGiB),
             accelerator=resource_filter.accelerator,
             use_spot=resource_filter.use_spot,
             spot_recovery=resource_filter.spot_recovery,
