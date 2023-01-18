@@ -22,15 +22,9 @@ from sky.skylet.providers.lambda_labs import lambda_utils
 from sky.utils import common_utils
 
 TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
-IS_REMOTE_PATH_PREFIX = '~/.lambda_labs/.is_remote'  # Created in lambda-ray.yml
+REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
 
 logger = logging.getLogger(__name__)
-
-
-def _on_remote(cluster_name):
-    """Returns True if on remote node of cluster_name."""
-    path = os.path.expanduser(f'{IS_REMOTE_PATH_PREFIX}-{cluster_name}')
-    return os.path.exists(path)
 
 
 def synchronized(f):
@@ -54,15 +48,19 @@ class LambdaNodeProvider(NodeProvider):
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaLabsClient()
+        self.cached_nodes = {}
         self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
 
         # If tag file does not exist on head, create it and add basic tags.
         # TODO(ewzeng): change when Lambda Labs adds tag support.
-        if _on_remote(cluster_name) and not os.path.exists(self.metadata.path):
-            # Compute launch hash
-            ray_yaml_path = os.path.expanduser(
-                    '~/ray_bootstrap_config.yaml')
+        ray_yaml_path = os.path.expanduser(REMOTE_RAY_YAML)
+        if os.path.exists(ray_yaml_path) and not os.path.exists(
+                self.metadata.path):
             config = common_utils.read_yaml(ray_yaml_path)
+            # Ensure correct cluster so sky launch on head node works correctly
+            if config['cluster_name'] != cluster_name:
+                return
+            # Compute launch hash
             head_node_config = config.get('head_node', {})
             head_node_type = config.get('head_node_type')
             if head_node_type:
@@ -81,9 +79,6 @@ class LambdaNodeProvider(NodeProvider):
                         TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
                         TAG_RAY_LAUNCH_CONFIG: launch_hash,
                     }}
-
-        # Cache node objects
-        self.cached_nodes = {}
 
     @synchronized
     def _get_filtered_nodes(self, tag_filters):
