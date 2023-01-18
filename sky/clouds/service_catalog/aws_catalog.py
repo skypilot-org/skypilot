@@ -5,7 +5,6 @@ instance types and pricing information for AWS.
 """
 import colorama
 import os
-import typing
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -16,9 +15,6 @@ from sky import sky_logging
 from sky.clouds import cloud
 from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
-
-if typing.TYPE_CHECKING:
-    from sky.clouds import cloud
 
 logger = sky_logging.init_logger(__name__)
 
