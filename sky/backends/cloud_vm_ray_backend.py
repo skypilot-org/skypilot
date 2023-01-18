@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -1060,14 +1060,17 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self,
-                            to_provision: resources_lib.Resources,
-                            num_nodes: int,
-                            dryrun: bool,
-                            stream_logs: bool,
-                            cluster_name: str,
-                            cloud_user_identity: Optional[str],
-                            cluster_exists: bool = False):
+    def _retry_region_zones(
+        self,
+        to_provision: resources_lib.Resources,
+        num_nodes: int,
+        requested_resources: Set[resources_lib.Resources],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        cloud_user_identity: str,
+        cluster_exists: bool = False,
+    ):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -1150,9 +1153,13 @@ class RetryingVmProvisioner(object):
                 global_user_state.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
-            global_user_state.add_or_update_cluster(cluster_name,
-                                                    cluster_handle=handle,
-                                                    ready=False)
+            global_user_state.add_or_update_cluster(
+                cluster_name,
+                cluster_handle=handle,
+                requested_resources=requested_resources,
+                ready=False,
+            )
+
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
@@ -1630,6 +1637,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
+                    requested_resources=task.resources,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -2204,9 +2212,12 @@ class CloudVmRayBackend(backends.Backend):
                     stdout + stderr)
 
             with timeline.Event('backend.provision.post_process'):
-                global_user_state.add_or_update_cluster(cluster_name,
-                                                        handle,
-                                                        ready=True)
+                global_user_state.add_or_update_cluster(
+                    cluster_name,
+                    handle,
+                    task.resources,
+                    ready=True,
+                )
                 usage_lib.messages.usage.update_final_cluster_status(
                     global_user_state.ClusterStatus.UP)
                 auth_config = common_utils.read_yaml(
@@ -3012,6 +3023,7 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
+
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
 

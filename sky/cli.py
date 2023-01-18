@@ -1450,6 +1450,50 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def cost_report(all: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show cost reports for each cluster.
+
+    The following fields for each cluster are recorded: cluster name,
+    resources, launched time, duration that cluster was up,
+    and total cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until the call
+    to status. This means if the cluster is UP, successive calls to report
+    will show increasing price. The estimated cost is calculated based on
+    the local cache of the cluster status, and may not be accurate for
+    the cluster with autostop/use_spot set or terminated/stopped
+    on the cloud console.
+    """
+
+    cluster_records = core.cost_report()
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
+
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        status_utils.show_cost_report_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
+
+
+@cli.command()
 @click.option('--all-users',
               '-a',
               default=False,
@@ -2340,6 +2384,7 @@ def _down_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
+
         progress.stop()
         click.echo(message)
         if success_progress:
