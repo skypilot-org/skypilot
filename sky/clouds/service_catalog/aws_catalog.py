@@ -69,12 +69,12 @@ def get_feasible_resources(
     df = _df
     df = common.filter_spot(df, resource_filter.use_spot)
 
-    if resource_filter.accelerator is None:
+    if resource_filter.accelerators is None:
         acc_name = None
         acc_count = None
     else:
-        acc_name = resource_filter.accelerator.name
-        acc_count = resource_filter.accelerator.count
+        acc_name = resource_filter.accelerators.name
+        acc_count = resource_filter.accelerators.count
     filters = {
         'InstanceType': resource_filter.instance_type,
         'AcceleratorName': acc_name,
@@ -91,9 +91,9 @@ def get_feasible_resources(
         if pd.isna(row.AcceleratorName) or pd.isna(row.AcceleratorCount):
             acc = None
         else:
-            acc = resources.Accelerator(name=row.AcceleratorName,
-                                        count=int(row.AcceleratorCount),
-                                        args=None)
+            acc = resources.Accelerators(name=row.AcceleratorName,
+                                         count=int(row.AcceleratorCount),
+                                         args=None)
         feasible_resources.append(
             resources.VMResources(
                 cloud=aws,

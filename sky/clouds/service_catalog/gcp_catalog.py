@@ -131,12 +131,12 @@ def _is_tpu(acc_name: str) -> bool:
 
 
 def _check_host_vm_limit(resource: resources.VMResources) -> bool:
-    if resource.accelerator is None:
+    if resource.accelerators is None:
         # No accelerator, no problem.
         return True
 
-    acc_name = resource.accelerator.name
-    acc_count = resource.accelerator.count
+    acc_name = resource.accelerators.name
+    acc_count = resource.accelerators.count
 
     if _is_tpu(acc_name):
         # TODO: Investigate the host VM limits for TPU Nodes.
@@ -194,14 +194,14 @@ def get_feasible_resources(
     # Users cannot use A2 machines without A100 GPUs.
     if (resource_filter.instance_type is not None and
             resource_filter.startswith('a2-')):
-        if resource_filter.accelerator is None:
+        if resource_filter.accelerators is None:
             return []
 
     # Search the accelerator first.
     acc_df = None
-    if resource_filter.accelerator is not None:
-        acc_name = resource_filter.accelerator.name
-        acc_count = resource_filter.accelerator.count
+    if resource_filter.accelerators is not None:
+        acc_name = resource_filter.accelerators.name
+        acc_count = resource_filter.accelerators.count
         acc_filter = {
             'AcceleratorName': acc_name,
             'AcceleratorCount': acc_count,
@@ -234,9 +234,9 @@ def get_feasible_resources(
     # Search the host VM.
     if resource_filter.instance_type == 'tpu-vm':
         # Treat TPU VM as a special case.
-        if resource_filter.accelerator is None:
+        if resource_filter.accelerators is None:
             return []
-        elif not _is_tpu(resource_filter.accelerator.name):
+        elif not _is_tpu(resource_filter.accelerators.name):
             return []
     else:
         filters = {
@@ -248,7 +248,7 @@ def get_feasible_resources(
         if vm_df.empty:
             return []
 
-    if resource_filter.accelerator is None:
+    if resource_filter.accelerators is None:
         df = vm_df
     else:
         assert acc_df is not None
@@ -279,7 +279,7 @@ def get_feasible_resources(
             instance_type=row.InstanceType,
             cpu=float(row.vCPUs),
             memory=float(row.MemoryGiB),
-            accelerator=resource_filter.accelerator,
+            accelerator=resource_filter.accelerators,
             use_spot=resource_filter.use_spot,
             spot_recovery=resource_filter.spot_recovery,
             disk_size=resource_filter.disk_size,
@@ -300,9 +300,9 @@ def get_hourly_price(resource: resources.VMResources) -> float:
                                                   resource.use_spot)
 
     acc_price = 0.0
-    if resource.accelerator is not None:
-        df = _df[_df['AcceleratorName'] == resource.accelerator.name]
-        df = df[df['AcceleratorCount'] == resource.accelerator.count]
+    if resource.accelerators is not None:
+        df = _df[_df['AcceleratorName'] == resource.accelerators.name]
+        df = df[df['AcceleratorCount'] == resource.accelerators.count]
         df = df[df['AvailabilityZone'] == resource.zone]
         assert len(df) == 1
         if resource.use_spot:

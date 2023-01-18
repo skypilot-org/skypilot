@@ -17,28 +17,20 @@ logger = sky_logging.init_logger(__name__)
 _DEFAULT_DISK_SIZE_GB = 256
 
 
-class Accelerator:
+class Accelerators:
 
     def __init__(self, name: str, count: int,
                  args: Optional[Dict[str, str]]) -> None:
         self.name = accelerator_registry.canonicalize_accelerator_name(name)
         self.count = count
-        self.args = args
+        self.args = args  # Only used for TPU nodes.
 
     def __repr__(self) -> str:
-        return f'<Accelerator: {self.name}x{self.count}>'
+        return f'<Accelerators: {self.count}x{self.name}>'
 
-    def __eq__(self, other: 'Accelerator') -> bool:
-        if self.name != other.name:
-            return False
-        if self.count != other.count:
-            return False
-        if self.args is None:
-            return other.args is None
-        elif other.args is None:
-            return False
-        else:
-            return self.args == other.args
+    def __eq__(self, other: 'Accelerators') -> bool:
+        return (self.name == other.name and self.count == other.count and
+                self.args == other.args)
 
 
 class ResourceFilter:
@@ -69,7 +61,7 @@ class ResourceFilter:
         self.image_id = image_id
 
         # Set by canonicalization.
-        self.accelerator: Optional[Accelerator] = None
+        self.accelerators: Optional[Accelerators] = None
 
         self._check_syntax()
         self._check_input_types()
@@ -165,9 +157,9 @@ class ResourceFilter:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(parse_error) from None
 
-        self.accelerator = Accelerator(name=acc_name,
-                                       count=acc_count,
-                                       args=self._accelerator_args)
+        self.accelerators = Accelerators(name=acc_name,
+                                         count=acc_count,
+                                         args=self._accelerator_args)
 
     def _assign_defaults(self) -> None:
         if self.use_spot is None:
@@ -245,7 +237,7 @@ class VMResources:
         instance_type: str,
         cpu: float,
         memory: float,
-        accelerator: Optional[Accelerator],
+        accelerators: Optional[Accelerators],
         use_spot: bool,
         spot_recovery: Optional[str],
         disk_size: int,
@@ -259,7 +251,7 @@ class VMResources:
         self.instance_type = instance_type
         self.cpu = cpu
         self.memory = memory
-        self.accelerator = accelerator
+        self.accelerators = accelerators
         self.use_spot = use_spot
         self.spot_recovery = spot_recovery
         self.disk_size = disk_size
@@ -276,7 +268,7 @@ class VMResources:
                 self.instance_type == other.instance_type and
                 self.cpu == other.cpu and \
                 self.memory == other.memory and
-                self.accelerator == other.accelerator and
+                self.accelerators == other.accelerators and
                 self.use_spot == other.use_spot and
                 self.spot_recovery == other.spot_recovery and
                 self.disk_size == other.disk_size and
@@ -290,7 +282,7 @@ class VMResources:
                 f'instance_type={self.instance_type}, '
                 f'cpu={self.cpu}, '
                 f'memory={self.memory}, '
-                f'accelerator={self.accelerator}, '
+                f'accelerators={self.accelerators}, '
                 f'use_spot={self.use_spot}, '
                 f'spot_recovery={self.spot_recovery}, '
                 f'disk_size={self.disk_size}, '
@@ -317,7 +309,7 @@ class ClusterResources:
         self.instance_type = head_node.instance_type
         self.cpu = head_node.cpu
         self.memory = head_node.memory
-        self.accelerator = head_node.accelerator
+        self.accelerators = head_node.accelerators
         self.use_spot = head_node.use_spot
         self.spot_recovery = head_node.spot_recovery
         self.disk_size = head_node.disk_size

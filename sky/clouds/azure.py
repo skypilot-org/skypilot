@@ -272,7 +272,7 @@ class Azure(clouds.Cloud):
             return []
         if r.image_id is not None:
             return []
-        if r.accelerator is not None and r.accelerator.args is not None:
+        if r.accelerators is not None and r.accelerators.args is not None:
             return []
 
         # If the user specified the instance type,
@@ -282,7 +282,7 @@ class Azure(clouds.Cloud):
 
         # If the user specified the accelerator,
         # use it to infer the instance types.
-        if r.accelerator is not None:
+        if r.accelerators is not None:
             return service_catalog.get_feasible_resources(r, clouds='azure')
 
         # Otherwise, use the default instance type.

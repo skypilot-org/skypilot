@@ -396,7 +396,7 @@ class GCP(clouds.Cloud):
         resource_filter: 'resources.ResourceFilter',
     ) -> List['resources.VMResources']:
         r = resource_filter.copy()
-        if r.accelerator is None:
+        if r.accelerators is None:
             if r.instance_type is not None:
                 # If the user specified the instance type,
                 # directly query the service catalog.
@@ -406,28 +406,28 @@ class GCP(clouds.Cloud):
                 r.instance_type = cls.get_default_instance_type()
                 return service_catalog.get_feasible_resources(r, clouds='gcp')
 
-        if r.accelerator.name.startswith('tpu'):
+        if r.accelerators.name.startswith('tpu'):
             # TPU
-            if r.accelerator.args is None:
-                r.accelerator.args = {}
-            if 'tpu_vm' not in r.accelerator.args:
-                r.accelerator.args['tpu_vm'] = False
+            if r.accelerators.args is None:
+                r.accelerators.args = {}
+            if 'tpu_vm' not in r.accelerators.args:
+                r.accelerators.args['tpu_vm'] = False
 
-            if r.accelerator.args['tpu_vm']:
+            if r.accelerators.args['tpu_vm']:
                 # TPU VM
                 # The instance type must be 'tpu-vm'.
                 if r.instance_type is None:
                     r.instance_type = 'tpu-vm'
                 elif r.instance_type != 'tpu-vm':
                     return []
-                r.accelerator.args['runtime_version'] = 'tpu-vm-base'
+                r.accelerators.args['runtime_version'] = 'tpu-vm-base'
             else:
                 # TPU Node
-                if 'runtime_version' not in r.accelerator.args:
-                    r.accelerator.args['runtime_version'] = '2.5.0'
+                if 'runtime_version' not in r.accelerators.args:
+                    r.accelerators.args['runtime_version'] = '2.5.0'
         else:
             # GPU
-            if r.accelerator.args is not None:
+            if r.accelerators.args is not None:
                 return []
         return service_catalog.get_feasible_resources(r, clouds='gcp')
 
