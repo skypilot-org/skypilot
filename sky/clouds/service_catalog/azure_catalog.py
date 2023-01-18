@@ -17,7 +17,7 @@ _df = common.read_catalog('azure/vms.csv')
 
 
 def get_suitable_vms(
-        resource_req: resources.ResourceRequirement) -> List[resources.VMSpec]:
+        resource_req: resources.ResourceRequirements) -> List[resources.VMSpec]:
     df = _df
     if 'AvailabilityZone' not in df.columns:
         # TODO(woosuk): Add the 'AvailabilityZone' column to the catalog.

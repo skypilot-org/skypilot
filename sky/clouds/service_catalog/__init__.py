@@ -53,7 +53,7 @@ def get_hourly_price(vm_spec: 'resources.VMSpec',
 
 
 def get_suitable_vms(
-    resource_req: 'resources.ResourceRequirement',
+    resource_req: 'resources.ResourceRequirements',
     clouds: CloudFilter = None,
 ) -> List['resources.VMSpec']:
     return _map_clouds_catalog(clouds, 'get_suitable_vms', resource_req)

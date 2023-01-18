@@ -338,7 +338,7 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_suitable_vms(
         cls,
-        resource_req: 'resources_lib.ResourceRequirement',
+        resource_req: 'resources_lib.ResourceRequirements',
     ) -> List['resources_lib.VMSpec']:
         r = resource_req.copy()
         # AWS-specific semantic checks.

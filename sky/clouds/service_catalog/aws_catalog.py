@@ -64,7 +64,7 @@ _df = _apply_az_mapping(_df)
 
 
 def get_suitable_vms(
-        resource_req: resources.ResourceRequirement) -> List[resources.VMSpec]:
+        resource_req: resources.ResourceRequirements) -> List[resources.VMSpec]:
     df = _df
     df = common.filter_spot(df, resource_req.use_spot)
 

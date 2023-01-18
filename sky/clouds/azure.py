@@ -251,7 +251,7 @@ class Azure(clouds.Cloud):
     @classmethod
     def get_suitable_vms(
         cls,
-        resource_req: 'resources.ResourceRequirement',
+        resource_req: 'resources.ResourceRequirements',
     ) -> List['resources.VMSpec']:
         r = resource_req.copy()
         # Azure-specific semantic check.

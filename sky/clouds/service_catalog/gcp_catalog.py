@@ -186,7 +186,7 @@ def _get_default_host_size(acc_name: str,
 
 
 def get_suitable_vms(
-        resource_req: resources.ResourceRequirement) -> List[resources.VMSpec]:
+        resource_req: resources.ResourceRequirements) -> List[resources.VMSpec]:
     df = _df
     df = common.filter_spot(df, resource_req.use_spot)
 

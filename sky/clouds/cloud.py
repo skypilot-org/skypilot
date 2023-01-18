@@ -193,7 +193,7 @@ class Cloud:
 
     @classmethod
     def get_suitable_vms(
-        cls, resource_req: 'resources.ResourceRequirement'
+        cls, resource_req: 'resources.ResourceRequirements'
     ) -> List['resources.VMSpec']:
         raise NotImplementedError
 

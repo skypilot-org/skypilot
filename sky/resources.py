@@ -38,7 +38,7 @@ class Accelerators:
 # TODO(woosuk): Define Disks class to represent different types of disks.
 
 
-class ResourceRequirement:
+class ResourceRequirements:
     """A user-specified resource requirement."""
 
     def __init__(
@@ -187,7 +187,7 @@ class ResourceRequirement:
                     f'Invalid spot_recovery strategy: {self.spot_recovery}.')
 
     @classmethod
-    def from_yaml_config(cls, config: Dict[str, str]) -> 'ResourceRequirement':
+    def from_yaml_config(cls, config: Dict[str, str]) -> 'ResourceRequirements':
         # Validate the YAML schema.
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
@@ -218,7 +218,7 @@ class ResourceRequirement:
                 config[field] = val
         return config
 
-    def copy(self) -> 'ResourceRequirement':
+    def copy(self) -> 'ResourceRequirements':
         # FIXME
         return copy.deepcopy(self)
 
@@ -228,7 +228,7 @@ class ResourceRequirement:
 
 
 # User-facing class.
-class Resources(ResourceRequirement):
+class Resources(ResourceRequirements):
     pass
 
 
@@ -349,7 +349,7 @@ class JobResources:
     def __init__(
         self,
         num_nodes: Optional[int] = None,
-        num_gpus: Union[None, int, float] = None, # FIXME
+        num_gpus: Union[None, int, float] = None,
     ) -> None:
         self.num_nodes = num_nodes
         self.num_gpus = num_gpus
@@ -435,7 +435,7 @@ class ResourceMapper:
         return feasible_clouds
 
     def map_suitable_vms(self,
-                         resource_req: ResourceRequirement) -> List[VMSpec]:
+                         resource_req: ResourceRequirements) -> List[VMSpec]:
         feasible_clouds = self._get_feasible_clouds(resource_req.cloud)
         if not feasible_clouds:
             # TODO: Print a warning.
@@ -467,7 +467,7 @@ class ResourceMapper:
     def map_suitable_clusters(
         self,
         num_nodes: int,
-        resource_req: ResourceRequirement,
+        resource_req: ResourceRequirements,
     ) -> List[ClusterSpec]:
         vms = self.map_suitable_vms(resource_req)
         clusters = [ClusterSpec(vm_specs=[vm] * num_nodes) for vm in vms]
