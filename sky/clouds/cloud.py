@@ -188,7 +188,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.VMResources') -> float:
+    def get_hourly_price(cls, resource: 'resources.VMSpec') -> float:
         raise NotImplementedError
 
     @classmethod
@@ -203,7 +203,7 @@ class Cloud:
     @classmethod
     def get_feasible_resources(
         cls, resource_filter: 'resources.ResourceFilter'
-    ) -> List['resources.VMResources']:
+    ) -> List['resources.VMSpec']:
         raise NotImplementedError
 
     @classmethod

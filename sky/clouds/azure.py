@@ -245,7 +245,7 @@ class Azure(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.VMResources') -> float:
+    def get_hourly_price(cls, resource: 'resources.VMSpec') -> float:
         return service_catalog.get_hourly_price(resource, clouds='azure')
 
     @classmethod
@@ -263,7 +263,7 @@ class Azure(clouds.Cloud):
     def get_feasible_resources(
         cls,
         resource_filter: 'resources.ResourceFilter',
-    ) -> List['resources.VMResources']:
+    ) -> List['resources.VMSpec']:
         r = resource_filter.copy()
         # Azure-specific semantic check.
         if r.use_spot:

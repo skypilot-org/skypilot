@@ -376,7 +376,7 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.VMResources') -> float:
+    def get_hourly_price(cls, resource: 'resources.VMSpec') -> float:
         return service_catalog.get_hourly_price(resource, clouds='gcp')
 
     @classmethod
@@ -394,7 +394,7 @@ class GCP(clouds.Cloud):
     def get_feasible_resources(
         cls,
         resource_filter: 'resources.ResourceFilter',
-    ) -> List['resources.VMResources']:
+    ) -> List['resources.VMSpec']:
         r = resource_filter.copy()
         if r.accelerators is None:
             if r.instance_type is not None:

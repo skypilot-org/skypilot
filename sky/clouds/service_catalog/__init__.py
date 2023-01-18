@@ -47,7 +47,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     return results
 
 
-def get_hourly_price(resource: 'resources.VMResources',
+def get_hourly_price(resource: 'resources.VMSpec',
                      clouds: CloudFilter = None) -> float:
     return _map_clouds_catalog(clouds, 'get_hourly_price', resource)
 
@@ -55,7 +55,7 @@ def get_hourly_price(resource: 'resources.VMResources',
 def get_feasible_resources(
     resource_filter: 'resources.ResourceFilter',
     clouds: CloudFilter = None,
-) -> List['resources.VMResources']:
+) -> List['resources.VMSpec']:
     return _map_clouds_catalog(clouds, 'get_feasible_resources',
                                resource_filter)
 

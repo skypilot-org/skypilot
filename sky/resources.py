@@ -24,6 +24,7 @@ class Accelerators:
         self.name = accelerator_registry.canonicalize_accelerator_name(name)
         self.count = count
         self.args = args  # Only used for TPU nodes.
+        # TODO(woosuk): Add more fields such as memory, interconnect, etc.
 
     def __repr__(self) -> str:
         return f'<Accelerators: {self.count}x{self.name}>'
@@ -31,6 +32,9 @@ class Accelerators:
     def __eq__(self, other: 'Accelerators') -> bool:
         return (self.name == other.name and self.count == other.count and
                 self.args == other.args)
+
+
+#TODO(woosuk): Define Disk class to represent different types of disks.
 
 
 class ResourceFilter:
@@ -94,8 +98,8 @@ class ResourceFilter:
             else:
                 expected_type = expected_type.__name__
             with ux_utils.print_exception_no_traceback():
-                raise TypeError(f'Expected Resources.{field} to be '
-                                f'{expected_type}, found {type(val)}.')
+                raise TypeError(f'Expected {self.__class__.__name__}.{field} '
+                                f'to be {expected_type}, found {type(val)}.')
 
     def _check_input_types(self) -> None:
         # TODO(woosuk): Do more precise type checking.
@@ -226,7 +230,7 @@ class Resources(ResourceFilter):
     pass
 
 
-class VMResources:
+class VMSpec:
     """SkyPilot's internal representation of the resources in a cloud VM."""
 
     def __init__(
@@ -260,7 +264,7 @@ class VMResources:
     def get_hourly_price(self) -> float:
         return self.cloud.get_hourly_price(self)
 
-    def __eq__(self, other: 'VMResources') -> bool:
+    def __eq__(self, other: 'VMSpec') -> bool:
         if not self.cloud.is_same_cloud(other.cloud):
             return False
         return (self.region == other.region and \
@@ -275,7 +279,7 @@ class VMResources:
                 self.image_id == other.image_id)
 
     def __repr__(self) -> str:
-        return ('VMResources('
+        return ('VMSpec('
                 f'cloud={self.cloud}, '
                 f'region={self.region}, '
                 f'zone={self.zone}, '
@@ -289,16 +293,16 @@ class VMResources:
                 f'image_id={self.image_id})')
 
 
-class ClusterResources:
+class ClusterSpec:
     """SkyPilot's internal representation of the resources in a cluster."""
 
     def __init__(
         self,
-        vm_resources: List[VMResources],
+        vm_specs: List[VMSpec],
     ) -> None:
-        assert vm_resources, 'vm_resources cannot be empty.'
-        self.num_nodes = len(vm_resources)
-        self.vm_resources = vm_resources
+        assert vm_specs, 'vm_specs cannot be empty.'
+        self.num_nodes = len(vm_specs)
+        self.vm_specs = vm_specs
 
         # NOTE: Currently, we assume that all VMs in a cluster are identical.
         # TODO(woosuk): support heterogeneous clusters.
@@ -315,17 +319,17 @@ class ClusterResources:
         self.disk_size = head_node.disk_size
         self.image_id = head_node.image_id
 
-    def get_head_node(self) -> VMResources:
-        return self.vm_resources[0]
+    def get_head_node(self) -> VMSpec:
+        return self.vm_specs[0]
 
     def get_hourly_price(self) -> float:
-        return sum(vm.get_hourly_price() for vm in self.vm_resources)
+        return sum(vm.get_hourly_price() for vm in self.vm_specs)
 
     def get_cost(self, seconds: float) -> float:
         hours = seconds / 3600.0
         return hours * self.get_hourly_price()
 
-    def __eq__(self, other: 'ClusterResources') -> bool:
+    def __eq__(self, other: 'ClusterSpec') -> bool:
         if self.num_nodes != other.num_nodes:
             return False
         # NOTE: this relies on the assumption that all VMs in a cluster are
@@ -335,7 +339,7 @@ class ClusterResources:
         return head_node == other_head_node
 
     def __repr__(self) -> str:
-        return ('ClusterResources('
+        return ('ClusterSpec('
                 f'num_nodes={self.num_nodes}, '
                 f'head_node={self.get_head_node()})')
 
@@ -367,8 +371,8 @@ class JobResources:
             else:
                 expected_type = expected_type.__name__
             with ux_utils.print_exception_no_traceback():
-                raise TypeError(f'Expected JobResources.{field} to be '
-                                f'{expected_type}, found {type(val)}.')
+                raise TypeError(f'Expected {self.__class__.__name__}.{field} '
+                                f'to be {expected_type}, found {type(val)}.')
 
     def _check_input_types(self) -> None:
         self._check_type('num_nodes', (int))
@@ -430,21 +434,20 @@ class ResourceMapper:
                 feasible_clouds.append(c)
         return feasible_clouds
 
-    def map_feasible_resources(
-            self, resource_filter: ResourceFilter) -> List[VMResources]:
+    def map_feasible_vms(self, resource_filter: ResourceFilter) -> List[VMSpec]:
         feasible_clouds = self._get_feasible_clouds(resource_filter.cloud)
         if not feasible_clouds:
             # TODO: Print a warning.
             return []
 
-        feasible_resources = []
+        vms = []
         for cloud in feasible_clouds:
             # TODO: Support on-prem.
-            feasible_resources += cloud.get_feasible_resources(resource_filter)
+            vms += cloud.get_feasible_resources(resource_filter)
 
-        if feasible_resources:
-            # Found resources that match the filter.
-            return feasible_resources
+        if vms:
+            # Found VMs that match the filter.
+            return vms
 
         return []
 

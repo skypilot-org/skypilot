@@ -1,6 +1,6 @@
 """Sky backend interface."""
 import typing
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import sky
 from sky.utils import timeline
@@ -37,7 +37,7 @@ class Backend:
     @usage_lib.messages.usage.update_runtime('provision')
     def provision(self,
                   task: 'task_lib.Task',
-                  to_provision: Optional['resources.ClusterResources'],
+                  to_provision: Optional['resources.ClusterSpec'],
                   dryrun: bool,
                   stream_logs: bool,
                   cluster_name: Optional[str] = None,
@@ -106,7 +106,7 @@ class Backend:
     # --- Implementations of the APIs ---
     def _provision(self,
                    task: 'task_lib.Task',
-                   to_provision: Optional['resources.ClusterResources'],
+                   to_provision: Optional['resources.ClusterSpec'],
                    dryrun: bool,
                    stream_logs: bool,
                    cluster_name: str,

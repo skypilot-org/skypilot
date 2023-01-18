@@ -33,8 +33,8 @@ class Optimizer:
 
     @staticmethod
     def _optimize(
-        feasible_clusters: List[resources.ClusterResources],
-    ) -> Optional[resources.ClusterResources]:
+        feasible_clusters: List[resources.ClusterSpec],
+    ) -> Optional[resources.ClusterSpec]:
         # TODO(woosuk): Consider data locality in optimization.
         if not feasible_clusters:
             return None
@@ -44,9 +44,9 @@ class Optimizer:
 
     @staticmethod
     def optimize(
-        feasible_clusters: List[resources.ClusterResources],
+        feasible_clusters: List[resources.ClusterSpec],
         quiet: bool = True,
-    ) -> Optional[resources.ClusterResources]:
+    ) -> Optional[resources.ClusterSpec]:
         chosen_cluster = Optimizer._optimize(feasible_clusters)
         if quiet:
             return chosen_cluster

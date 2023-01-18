@@ -332,7 +332,7 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources_lib.VMResources') -> float:
+    def get_hourly_price(cls, resource: 'resources_lib.VMSpec') -> float:
         return service_catalog.get_hourly_price(resource, clouds='aws')
 
     @classmethod
@@ -350,7 +350,7 @@ class AWS(clouds.Cloud):
     def get_feasible_resources(
         cls,
         resource_filter: 'resources_lib.ResourceFilter',
-    ) -> List['resources_lib.VMResources']:
+    ) -> List['resources_lib.VMSpec']:
         r = resource_filter.copy()
         # AWS-specific semantic checks.
         if r.image_id is not None:

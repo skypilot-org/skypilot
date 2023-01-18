@@ -130,7 +130,7 @@ def _is_tpu(acc_name: str) -> bool:
     return acc_name.startswith('tpu-')
 
 
-def _check_host_vm_limit(resource: resources.VMResources) -> bool:
+def _check_host_vm_limit(resource: resources.VMSpec) -> bool:
     if resource.accelerators is None:
         # No accelerator, no problem.
         return True
@@ -186,8 +186,7 @@ def _get_default_host_size(acc_name: str,
 
 
 def get_feasible_resources(
-        resource_filter: resources.ResourceFilter
-) -> List[resources.VMResources]:
+        resource_filter: resources.ResourceFilter) -> List[resources.VMSpec]:
     df = _df
     df = common.filter_spot(df, resource_filter.use_spot)
 
@@ -272,14 +271,14 @@ def get_feasible_resources(
 
     gcp = sky.GCP()
     feasible_resources = [
-        resources.VMResources(
+        resources.VMSpec(
             cloud=gcp,
             region=row.Region,
             zone=row.AvailabilityZone,
             instance_type=row.InstanceType,
             cpu=float(row.vCPUs),
             memory=float(row.MemoryGiB),
-            accelerator=resource_filter.accelerators,
+            accelerators=resource_filter.accelerators,
             use_spot=resource_filter.use_spot,
             spot_recovery=resource_filter.spot_recovery,
             disk_size=resource_filter.disk_size,
@@ -291,7 +290,7 @@ def get_feasible_resources(
     return [r for r in feasible_resources if _check_host_vm_limit(r)]
 
 
-def get_hourly_price(resource: resources.VMResources) -> float:
+def get_hourly_price(resource: resources.VMSpec) -> float:
     if resource.instance_type == 'tpu-vm':
         host_price = 0.0
     else:

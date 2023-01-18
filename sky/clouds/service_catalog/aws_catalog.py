@@ -64,8 +64,7 @@ _df = _apply_az_mapping(_df)
 
 
 def get_feasible_resources(
-        resource_filter: resources.ResourceFilter
-) -> List[resources.VMResources]:
+        resource_filter: resources.ResourceFilter) -> List[resources.VMSpec]:
     df = _df
     df = common.filter_spot(df, resource_filter.use_spot)
 
@@ -95,14 +94,14 @@ def get_feasible_resources(
                                          count=int(row.AcceleratorCount),
                                          args=None)
         feasible_resources.append(
-            resources.VMResources(
+            resources.VMSpec(
                 cloud=aws,
                 region=row.Region,
                 zone=row.AvailabilityZone,
                 instance_type=row.InstanceType,
                 cpu=float(row.vCPUs),
                 memory=float(row.MemoryGiB),
-                accelerator=acc,
+                accelerators=acc,
                 use_spot=resource_filter.use_spot,
                 spot_recovery=resource_filter.spot_recovery,
                 disk_size=resource_filter.disk_size,
@@ -111,7 +110,7 @@ def get_feasible_resources(
     return feasible_resources
 
 
-def get_hourly_price(resource: resources.VMResources) -> float:
+def get_hourly_price(resource: resources.VMSpec) -> float:
     return common.get_hourly_price_impl(_df, resource.instance_type,
                                         resource.zone, resource.use_spot)
 
