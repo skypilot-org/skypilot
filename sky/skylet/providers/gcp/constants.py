@@ -4,7 +4,7 @@ SKYPILOT_VPC_NAME = "skypilot-vpc"
 # https://cloud.google.com/vpc/docs/firewalls#more_rules_default_vpc
 VPC_TEMPLATE = {
     "name": "{VPC_NAME}",
-    "selfLink": "projects/{PROJ_ID}/global/networks/{SKYPILOT_VPC_NAME}",
+    "selfLink": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
     "autoCreateSubnetworks": True,
     "mtu": 1460,
     "routingConfig": {"routingMode": "GLOBAL"},

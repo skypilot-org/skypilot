@@ -506,10 +506,7 @@ def _check_firewall_rules(vpc_name, config, compute):
 
     def _get_refined_rule(rule):
         KEY_TO_COMPARE = {"sourceRanges", "allowed", "direction"}
-        refined_rule = {}
-        for k in KEY_TO_COMPARE:
-            refined_rule[k] = set(rule[k]) if isinstance(rule[k], list) else rule[k]
-        return refined_rule
+        return {k: rule[k] for k in KEY_TO_COMPARE}
 
     required_rules = list(map(_get_refined_rule, required_rules))
     effective_rules = list(map(_get_refined_rule, effective_rules))
