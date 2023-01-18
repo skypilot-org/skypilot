@@ -27,7 +27,11 @@ class AcceleratorsSpec:
         # TODO(woosuk): Add more fields such as memory, interconnect, etc.
 
     def __repr__(self) -> str:
-        return f'<AcceleratorsSpec: {self.count}x{self.name}>'
+        if self.args is None:
+            return f'<AcceleratorsSpec: {self.count}x{self.name}>'
+        else:
+            return (f'<AcceleratorsSpec: {self.count}x{self.name} '
+                    f'with args {self.args}>')
 
     def __eq__(self, other: 'AcceleratorsSpec') -> bool:
         return self.name == other.name and \
@@ -224,8 +228,16 @@ class ResourceRequirements:
         return copy.deepcopy(self)
 
     def __repr__(self) -> str:
-        # TODO
-        pass
+        return (f'{self.__class__.__name__}('
+                f'cloud={self.cloud}, '
+                f'region={self.region}, '
+                f'zone={self.zone}, '
+                f'instance_type={self.instance_type}, '
+                f'accelerators={self.accelerators}, '
+                f'use_spot={self.use_spot}, '
+                f'spot_recovery={self.spot_recovery}, '
+                f'disk_size={self.disk_size}, '
+                f'image_id={self.image_id})')
 
 
 # User-facing class.
