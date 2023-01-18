@@ -34,7 +34,8 @@ class Accelerators:
                 self.args == other.args)
 
 
-#TODO(woosuk): Define Disks class to represent different types of disks.
+# TODO(woosuk): Define CPU class to represent different types of CPUs.
+# TODO(woosuk): Define Disks class to represent different types of disks.
 
 
 class ResourceFilter:
