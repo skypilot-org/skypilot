@@ -47,17 +47,16 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     return results
 
 
-def get_hourly_price(resource: 'resources.VMSpec',
+def get_hourly_price(vm_spec: 'resources.VMSpec',
                      clouds: CloudFilter = None) -> float:
-    return _map_clouds_catalog(clouds, 'get_hourly_price', resource)
+    return _map_clouds_catalog(clouds, 'get_hourly_price', vm_spec)
 
 
-def get_feasible_resources(
-    resource_filter: 'resources.ResourceFilter',
+def get_suitable_vms(
+    resource_req: 'resources.ResourceRequirement',
     clouds: CloudFilter = None,
 ) -> List['resources.VMSpec']:
-    return _map_clouds_catalog(clouds, 'get_feasible_resources',
-                               resource_filter)
+    return _map_clouds_catalog(clouds, 'get_suitable_vms', resource_req)
 
 
 def list_accelerators(

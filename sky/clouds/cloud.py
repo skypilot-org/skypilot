@@ -188,21 +188,12 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.VMSpec') -> float:
+    def get_hourly_price(cls, vm_spec: 'resources.VMSpec') -> float:
         raise NotImplementedError
 
     @classmethod
-    def is_subset_of(cls, instance_family_a: str,
-                     instance_family_b: str) -> bool:
-        raise NotImplementedError
-
-    @classmethod
-    def get_default_instance_families(cls) -> List[str]:
-        raise NotImplementedError
-
-    @classmethod
-    def get_feasible_resources(
-        cls, resource_filter: 'resources.ResourceFilter'
+    def get_suitable_vms(
+        cls, resource_req: 'resources.ResourceRequirement'
     ) -> List['resources.VMSpec']:
         raise NotImplementedError
 

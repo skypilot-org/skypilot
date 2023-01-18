@@ -332,26 +332,15 @@ class AWS(clouds.Cloud):
         }
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources_lib.VMSpec') -> float:
-        return service_catalog.get_hourly_price(resource, clouds='aws')
+    def get_hourly_price(cls, vm_spec: 'resources_lib.VMSpec') -> float:
+        return service_catalog.get_hourly_price(vm_spec, clouds='aws')
 
     @classmethod
-    def is_subset_of(cls, instance_family_a: str,
-                     instance_family_b: str) -> bool:
-        return service_catalog.is_subset_of(instance_family_a,
-                                            instance_family_b,
-                                            clouds='aws')
-
-    @classmethod
-    def get_default_instance_families(cls) -> List[str]:
-        return service_catalog.get_default_instance_families(clouds='aws')
-
-    @classmethod
-    def get_feasible_resources(
+    def get_suitable_vms(
         cls,
-        resource_filter: 'resources_lib.ResourceFilter',
+        resource_req: 'resources_lib.ResourceRequirement',
     ) -> List['resources_lib.VMSpec']:
-        r = resource_filter.copy()
+        r = resource_req.copy()
         # AWS-specific semantic checks.
         if r.image_id is not None:
             if r.region is not None or r.zone is not None:
@@ -362,16 +351,16 @@ class AWS(clouds.Cloud):
         # If the user specified the instance type,
         # directly query the service catalog.
         if r.instance_type is not None:
-            return service_catalog.get_feasible_resources(r, clouds='aws')
+            return service_catalog.get_suitable_vms(r, clouds='aws')
 
         # If the user specified the accelerator,
         # use it to infer the instance types.
         if r.accelerators is not None:
-            return service_catalog.get_feasible_resources(r, clouds='aws')
+            return service_catalog.get_suitable_vms(r, clouds='aws')
 
         # Otherwise, use the default instance type.
         r.instance_type = cls.get_default_instance_type()
-        return service_catalog.get_feasible_resources(r, clouds='aws')
+        return service_catalog.get_suitable_vms(r, clouds='aws')
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):

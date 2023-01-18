@@ -38,7 +38,7 @@ class Accelerators:
 # TODO(woosuk): Define Disks class to represent different types of disks.
 
 
-class ResourceFilter:
+class ResourceRequirement:
     """A user-specified resource requirement."""
 
     def __init__(
@@ -186,7 +186,7 @@ class ResourceFilter:
                     f'Invalid spot_recovery strategy: {self.spot_recovery}.')
 
     @classmethod
-    def from_yaml_config(cls, config: Dict[str, str]) -> 'ResourceFilter':
+    def from_yaml_config(cls, config: Dict[str, str]) -> 'ResourceRequirement':
         # Validate the YAML schema.
         backend_utils.validate_schema(config, schemas.get_resources_schema(),
                                       'Invalid resources YAML: ')
@@ -217,7 +217,7 @@ class ResourceFilter:
                 config[field] = val
         return config
 
-    def copy(self) -> 'ResourceFilter':
+    def copy(self) -> 'ResourceRequirement':
         # FIXME
         return copy.deepcopy(self)
 
@@ -227,7 +227,7 @@ class ResourceFilter:
 
 
 # User-facing class.
-class Resources(ResourceFilter):
+class Resources(ResourceRequirement):
     pass
 
 
@@ -432,8 +432,9 @@ class ResourceMapper:
                 feasible_clouds.append(c)
         return feasible_clouds
 
-    def map_feasible_vms(self, resource_filter: ResourceFilter) -> List[VMSpec]:
-        feasible_clouds = self._get_feasible_clouds(resource_filter.cloud)
+    def map_suitable_vms(self,
+                         resource_req: ResourceRequirement) -> List[VMSpec]:
+        feasible_clouds = self._get_feasible_clouds(resource_req.cloud)
         if not feasible_clouds:
             # TODO: Print a warning.
             return []
@@ -441,10 +442,10 @@ class ResourceMapper:
         vms = []
         for cloud in feasible_clouds:
             # TODO: Support on-prem.
-            vms += cloud.get_feasible_resources(resource_filter)
+            vms += cloud.get_suitable_vms(resource_req)
 
         if vms:
-            # Found VMs that match the filter.
+            # Found VMs that meet the requirement.
             return vms
 
         return []
@@ -453,10 +454,17 @@ class ResourceMapper:
         fuzzy_match_resources = []
         for cloud in feasible_clouds:
             fuzzy_match_resources += cloud.get_fuzzy_match_resources(
-                resource_filter)
-        logger.info(f'No resource satisfying {resource_filter} found.')
+                resource_req)
+        logger.info(f'No resource satisfying {resource_req} found.')
         logger.info(f'Did you mean: '
                     f'{colorama.Fore.CYAN}'
                     f'{sorted(fuzzy_match_resources)}'
                     f'{colorama.Style.RESET_ALL}')
         return []
+
+    def map_suitable_clusters(self,
+                              resource_req: ResourceRequirement,
+                              num_nodes: int = 1) -> List[ClusterSpec]:
+        vms = self.map_suitable_vms(resource_req)
+        clusters = [ClusterSpec(vm_specs=[vm] * num_nodes) for vm in vms]
+        return clusters

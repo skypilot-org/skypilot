@@ -376,35 +376,24 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     @classmethod
-    def get_hourly_price(cls, resource: 'resources.VMSpec') -> float:
-        return service_catalog.get_hourly_price(resource, clouds='gcp')
+    def get_hourly_price(cls, vm_spec: 'resources.VMSpec') -> float:
+        return service_catalog.get_hourly_price(vm_spec, clouds='gcp')
 
     @classmethod
-    def is_subset_of(cls, instance_family_a: str,
-                     instance_family_b: str) -> bool:
-        return service_catalog.is_subset_of(instance_family_a,
-                                            instance_family_b,
-                                            clouds='gcp')
-
-    @classmethod
-    def get_default_instance_families(cls) -> List[str]:
-        return service_catalog.get_default_instance_families(clouds='gcp')
-
-    @classmethod
-    def get_feasible_resources(
+    def get_suitable_vms(
         cls,
-        resource_filter: 'resources.ResourceFilter',
+        resource_req: 'resources.ResourceRequirement',
     ) -> List['resources.VMSpec']:
-        r = resource_filter.copy()
+        r = resource_req.copy()
         if r.accelerators is None:
             if r.instance_type is not None:
                 # If the user specified the instance type,
                 # directly query the service catalog.
-                return service_catalog.get_feasible_resources(r, clouds='gcp')
+                return service_catalog.get_suitable_vms(r, clouds='gcp')
             else:
                 # Otherwise, use the default instance type.
                 r.instance_type = cls.get_default_instance_type()
-                return service_catalog.get_feasible_resources(r, clouds='gcp')
+                return service_catalog.get_suitable_vms(r, clouds='gcp')
 
         if r.accelerators.name.startswith('tpu'):
             # TPU
@@ -429,7 +418,7 @@ class GCP(clouds.Cloud):
             # GPU
             if r.accelerators.args is not None:
                 return []
-        return service_catalog.get_feasible_resources(r, clouds='gcp')
+        return service_catalog.get_suitable_vms(r, clouds='gcp')
 
     def get_feasible_launchable_resources(self, resources):
         fuzzy_candidate_list = []

@@ -185,22 +185,22 @@ def _get_default_host_size(acc_name: str,
     return num_vcpus, cpu_memory
 
 
-def get_feasible_resources(
-        resource_filter: resources.ResourceFilter) -> List[resources.VMSpec]:
+def get_suitable_vms(
+        resource_req: resources.ResourceRequirement) -> List[resources.VMSpec]:
     df = _df
-    df = common.filter_spot(df, resource_filter.use_spot)
+    df = common.filter_spot(df, resource_req.use_spot)
 
     # Users cannot use A2 machines without A100 GPUs.
-    if (resource_filter.instance_type is not None and
-            resource_filter.startswith('a2-')):
-        if resource_filter.accelerators is None:
+    if (resource_req.instance_type is not None and
+            resource_req.startswith('a2-')):
+        if resource_req.accelerators is None:
             return []
 
     # Search the accelerator first.
     acc_df = None
-    if resource_filter.accelerators is not None:
-        acc_name = resource_filter.accelerators.name
-        acc_count = resource_filter.accelerators.count
+    if resource_req.accelerators is not None:
+        acc_name = resource_req.accelerators.name
+        acc_count = resource_req.accelerators.count
         acc_filter = {
             'AcceleratorName': acc_name,
             'AcceleratorCount': acc_count,
@@ -210,48 +210,48 @@ def get_feasible_resources(
             return []
 
         # Set the host VM type that matches the accelerator.
-        if resource_filter.instance_type == 'tpu-vm':
+        if resource_req.instance_type == 'tpu-vm':
             # TPU VM.
             pass
         elif acc_name in _A100_INSTANCE_TYPE_DICTS:
             # A100 GPUs are attached to fixed size VMs.
             assert acc_count in _A100_INSTANCE_TYPE_DICTS[acc_name]
             instance_type = _A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]
-            if resource_filter.instance_type is None:
-                resource_filter.instance_type = instance_type
-            elif resource_filter.instance_type != instance_type:
+            if resource_req.instance_type is None:
+                resource_req.instance_type = instance_type
+            elif resource_req.instance_type != instance_type:
                 return []
         else:
             # TPUs and other GPUs.
-            if resource_filter.instance_type is None:
+            if resource_req.instance_type is None:
                 # If not specified, provide the default host VM size.
-                resource_filter.instance_type = 'n1-highmem-8'  # FIXME
-            elif not resource_filter.instance_type.startswith('n1-'):
+                resource_req.instance_type = 'n1-highmem-8'  # FIXME
+            elif not resource_req.instance_type.startswith('n1-'):
                 # These accelerators can be only attached to N1 machines.
                 return []
 
     # Search the host VM.
-    if resource_filter.instance_type == 'tpu-vm':
+    if resource_req.instance_type == 'tpu-vm':
         # Treat TPU VM as a special case.
-        if resource_filter.accelerators is None:
+        if resource_req.accelerators is None:
             return []
-        elif not _is_tpu(resource_filter.accelerators.name):
+        elif not _is_tpu(resource_req.accelerators.name):
             return []
     else:
         filters = {
-            'InstanceType': resource_filter.instance_type,
-            'Region': resource_filter.region,
-            'AvailabilityZone': resource_filter.zone,
+            'InstanceType': resource_req.instance_type,
+            'Region': resource_req.region,
+            'AvailabilityZone': resource_req.zone,
         }
         vm_df = common.apply_filters(df, filters)
         if vm_df.empty:
             return []
 
-    if resource_filter.accelerators is None:
+    if resource_req.accelerators is None:
         df = vm_df
     else:
         assert acc_df is not None
-        if resource_filter.instance_type == 'tpu-vm':
+        if resource_req.instance_type == 'tpu-vm':
             df = acc_df.copy()
             # TODO: Add tpu-vm to the catalog.
             df['InstanceType'] = 'tpu-vm'
@@ -278,10 +278,10 @@ def get_feasible_resources(
             instance_type=row.InstanceType,
             cpu=float(row.vCPUs),
             memory=float(row.MemoryGiB),
-            accelerators=resource_filter.accelerators,
-            use_spot=resource_filter.use_spot,
-            disk_size=resource_filter.disk_size,
-            image_id=resource_filter.image_id,
+            accelerators=resource_req.accelerators,
+            use_spot=resource_req.use_spot,
+            disk_size=resource_req.disk_size,
+            image_id=resource_req.image_id,
         ) for row in df.itertuples()
     ]
 

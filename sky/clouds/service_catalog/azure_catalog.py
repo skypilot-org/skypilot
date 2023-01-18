@@ -16,26 +16,26 @@ from sky.utils import ux_utils
 _df = common.read_catalog('azure/vms.csv')
 
 
-def get_feasible_resources(
-        resource_filter: resources.ResourceFilter) -> List[resources.VMSpec]:
+def get_suitable_vms(
+        resource_req: resources.ResourceRequirement) -> List[resources.VMSpec]:
     df = _df
     if 'AvailabilityZone' not in df.columns:
         # TODO(woosuk): Add the 'AvailabilityZone' column to the catalog.
         df['AvailabilityZone'] = df['Region']
-    df = common.filter_spot(df, resource_filter.use_spot)
+    df = common.filter_spot(df, resource_req.use_spot)
 
-    if resource_filter.accelerators is None:
+    if resource_req.accelerators is None:
         acc_name = None
         acc_count = None
     else:
-        acc_name = resource_filter.accelerators.name
-        acc_count = resource_filter.accelerators.count
+        acc_name = resource_req.accelerators.name
+        acc_count = resource_req.accelerators.count
     filters = {
-        'InstanceType': resource_filter.instance_type,
+        'InstanceType': resource_req.instance_type,
         'AcceleratorName': acc_name,
         'AcceleratorCount': acc_count,
-        'Region': resource_filter.region,
-        'AvailabilityZone': resource_filter.zone,
+        'Region': resource_req.region,
+        'AvailabilityZone': resource_req.zone,
     }
     df = common.apply_filters(df, filters)
     df = df.reset_index(drop=True)
@@ -58,9 +58,9 @@ def get_feasible_resources(
                 cpu=float(row.vCPUs),
                 memory=float(row.MemoryGiB),
                 accelerators=acc,
-                use_spot=resource_filter.use_spot,
-                disk_size=resource_filter.disk_size,
-                image_id=resource_filter.image_id,
+                use_spot=resource_req.use_spot,
+                disk_size=resource_req.disk_size,
+                image_id=resource_req.image_id,
             ))
     return feasible_resources
 
