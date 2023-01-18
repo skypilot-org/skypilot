@@ -30,8 +30,9 @@ class Accelerators:
         return f'<Accelerators: {self.count}x{self.name}>'
 
     def __eq__(self, other: 'Accelerators') -> bool:
-        return (self.name == other.name and self.count == other.count and
-                self.args == other.args)
+        return self.name == other.name and \
+               self.count == other.count and \
+               self.args == other.args
 
 
 # TODO(woosuk): Define CPU class to represent different types of CPUs.
@@ -39,7 +40,7 @@ class Accelerators:
 
 
 class ResourceRequirements:
-    """A user-specified resource requirement."""
+    """User-specified resource requirements."""
 
     def __init__(
         self,
@@ -349,10 +350,13 @@ class JobResources:
     def __init__(
         self,
         num_nodes: Optional[int] = None,
-        num_gpus: Union[None, int, float] = None,
+        gpus: Union[None, str, Dict[str, float]] = None,
     ) -> None:
         self.num_nodes = num_nodes
-        self.num_gpus = num_gpus
+        self._gpus = gpus
+
+        self.acc_name = None
+        self.acc_count = None
 
         self._check_input_types()
         self._canonicalize()
@@ -376,26 +380,65 @@ class JobResources:
 
     def _check_input_types(self) -> None:
         self._check_type('num_nodes', (int))
-        self._check_type('num_gpus', (int, float))
+        self._check_type('_gpus', (str, dict))
 
     def _canonicalize(self) -> None:
-        if self.num_gpus is not None:
-            self.num_gpus = float(self.num_gpus)
+        if self._gpus is None:
+            return
+
+        # FIXME(woosuk): Duplicated code. Refactor.
+        # Parse gpus.
+        if isinstance(self._gpus, dict):
+            if len(self._gpus) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('gpus must be specified as a single '
+                                     'accelerator name and count.')
+            # TODO: Check that acc_name is string and acc_count is float
+            # in _check_input_types.
+            acc_name, acc_count = list(self._gpus.items())[0]
+            acc_count = float(acc_count)
+        else:
+            assert isinstance(self._gpus, str)
+            if ':' not in self._gpus:
+                acc_name = self._gpus
+                acc_count = 1.0
+            else:
+                splits = self._gpus.split(':')
+                parse_error = ('gpus must be either <name> or <name>:<cnt>. '
+                               f'Found: {self._gpus!r}')
+                if len(splits) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(parse_error)
+                try:
+                    acc_name = splits[0]
+                    acc_count = float(splits[1])
+                except ValueError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(parse_error) from None
+
+        # NEVER use Accelerators class here.
+        self.acc_name = accelerator_registry.canonicalize_accelerator_name(
+            acc_name)
+        self.acc_count = acc_count
 
     def _assign_defaults(self) -> None:
         if self.num_nodes is None:
             self.num_nodes = 1
-        if self.num_gpus is None:
-            self.num_gpus = 0.0
 
     def _check_semantics(self) -> None:
         if self.num_nodes < 1:
-            raise ValueError('num_nodes must be at least 1.')
-        if self.num_gpus < 0:
-            raise ValueError('num_gpus must be non-negative.')
-        elif self.num_gpus > 1:
-            if not self.num_gpus.is_integer():
-                raise ValueError('num_gpus must be an integer if > 1.')
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('num_nodes must be >= 1.')
+
+        if self.acc_count is None:
+            return
+        if self.acc_count <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('The number of GPUs must be > 0.')
+        elif self.acc_count > 1:
+            with ux_utils.print_exception_no_traceback():
+                if not self.acc_count.is_integer():
+                    raise ValueError('num_gpus must be an integer if > 1.')
 
 
 class ResourceMapper:
