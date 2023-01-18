@@ -98,10 +98,10 @@ def create_table(cursor, conn):
                                  'INTEGER DEFAULT 0')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'owner', 'TEXT')
-    conn.commit()
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
+    conn.commit()
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)

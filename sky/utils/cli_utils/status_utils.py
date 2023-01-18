@@ -114,7 +114,7 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
 
 def show_report_table(cluster_records: List[Dict[str, Any]],
                       show_all: bool,
-                      reserved_group_name: Optional[str] = None) -> int:
+                      reserved_group_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
 
     Returns:
@@ -158,7 +158,6 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-    return 0
 
 
 def show_local_status_table(local_clusters: List[str]):
