@@ -13,7 +13,7 @@ from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
 from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType
-from sky.skylet.providers.gcp.constant import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE
+from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
