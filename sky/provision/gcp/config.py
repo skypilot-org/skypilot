@@ -7,8 +7,7 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
-from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType
-from ray.autoscaler._private.util import check_legacy_fields
+from sky.provision.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType
 
 logger = logging.getLogger(__name__)
 
@@ -83,25 +82,6 @@ def wait_for_crm_operation(operation, crm):
         time.sleep(POLL_INTERVAL)
 
     return result
-
-
-def _has_tpus_in_node_configs(config: dict) -> bool:
-    """Check if any nodes in config are TPUs."""
-    node_configs = [
-        node_type['node_config']
-        for node_type in config['available_node_types'].values()
-    ]
-    return any(get_node_type(node) == GCPNodeType.TPU for node in node_configs)
-
-
-def _is_head_node_a_tpu(config: dict) -> bool:
-    """Check if the head node is a TPU."""
-    node_configs = {
-        node_id: node_type['node_config']
-        for node_id, node_type in config['available_node_types'].items()
-    }
-    return get_node_type(
-        node_configs[config['head_node_type']]) == GCPNodeType.TPU
 
 
 def _create_crm(gcp_credentials=None):
@@ -189,40 +169,55 @@ def construct_clients_from_provider_config(provider_config):
 
 def bootstrap_gcp(config):
     config = copy.deepcopy(config)
-    check_legacy_fields(config)
-    # Used internally to store head IAM role.
-    config['head_node'] = {}
+    region = config['provider']['region']
+    project_id = config['provider'].get('project_id')
+    assert config['provider']['project_id'] is not None, (
+        '"project_id" must be set in the "provider" section of the autoscaler'
+        ' config. Notice that the project id must be globally unique.')
     assert 'ssh_private_key' in config['auth']
 
-    # Check if we have any TPUs defined, and if so,
-    # insert that information into the provider config
-    if _has_tpus_in_node_configs(config):
-        config['provider'][HAS_TPU_PROVIDER_FIELD] = True
+    node_config = config['node_config']
 
     crm, iam, compute, tpu = construct_clients_from_provider_config(
         config['provider'])
 
-    config = _configure_project(config, crm)
-    config = _configure_iam_role(config, crm, iam)
-    config = _configure_subnet(config, compute)
+    _configure_project(project_id, crm)
 
+    has_tpu = (get_node_type(node_config) == GCPNodeType.TPU)
+    account_dict = _configure_iam_role(project_id, has_tpu, crm, iam)
+    if has_tpu:
+        # SKY: The API for TPU VM is slightly different from normal compute instances.
+        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
+        account_dict['scope'] = account_dict['scopes']
+        account_dict.pop('scopes')
+        node_config['serviceAccount'] = account_dict
+    else:
+        node_config['serviceAccounts'] = [account_dict]
+
+    # Rationale: avoid subnet lookup if the network is already
+    # completely manually configured
+    # networkInterfaces is compute, networkConfig is TPU
+    if ('networkInterfaces' not in node_config and
+            'networkConfig' not in node_config):
+        default_interfaces = _configure_subnet(project_id, region, compute)
+        # The not applicable key will be removed during node creation
+        # compute
+        if 'networkInterfaces' not in node_config:
+            node_config['networkInterfaces'] = default_interfaces
+        # TPU
+        if 'networkConfig' not in node_config:
+            node_config['networkConfig'] = default_interfaces[0]
+            node_config['networkConfig'].pop('accessConfigs')
     return config
 
 
-def _configure_project(config, crm):
+def _configure_project(project_id: str, crm):
     """Setup a Google Cloud Platform Project.
 
     Google Compute Platform organizes all the resources, such as storage
     buckets, users, and instances under projects. This is different from
     aws ec2 where everything is global.
     """
-    config = copy.deepcopy(config)
-
-    project_id = config['provider'].get('project_id')
-    assert config['provider']['project_id'] is not None, (
-        '"project_id" must be set in the "provider" section of the autoscaler'
-        ' config. Notice that the project id must be globally unique.')
-
     try:
         project = crm.projects().get(projectId=project_id).execute()
     except errors.HttpError as e:
@@ -244,13 +239,10 @@ def _configure_project(config, crm):
     assert (project['lifecycleState'] == 'ACTIVE'
            ), 'Project status needs to be ACTIVE, got {}'.format(
                project['lifecycleState'])
-
-    config['provider']['project_id'] = project['projectId']
-
-    return config
+    assert project_id == project['projectId']
 
 
-def _configure_iam_role(config, crm, iam):
+def _configure_iam_role(project_id: str, has_tpu: bool, crm, iam):
     """Setup a gcp service account with IAM roles.
 
     Creates a gcp service acconut and binds IAM roles which allow it to control
@@ -260,26 +252,37 @@ def _configure_iam_role(config, crm, iam):
 
     TODO: Allow the name/id of the service account to be configured
     """
-    config = copy.deepcopy(config)
-
+    # email is also the account name
     email = SERVICE_ACCOUNT_EMAIL_TEMPLATE.format(
         account_id=DEFAULT_SERVICE_ACCOUNT_ID,
-        project_id=config['provider']['project_id'],
+        project_id=project_id,
     )
-    service_account = _get_service_account(email, config, iam)
+
+    full_name = f'projects/{project_id}/serviceAccounts/{email}'
+    try:
+        service_account = iam.projects().serviceAccounts().get(
+            name=full_name).execute()
+    except errors.HttpError as e:
+        if e.resp.status != 404:
+            raise
+        service_account = None
 
     if service_account is None:
         logger.info(
             '_configure_iam_role: '
             f'Creating new service account {DEFAULT_SERVICE_ACCOUNT_ID}')
 
-        service_account = _create_service_account(
-            DEFAULT_SERVICE_ACCOUNT_ID, DEFAULT_SERVICE_ACCOUNT_CONFIG, config,
-            iam)
+        service_account = (iam.projects().serviceAccounts().create(
+            name=f'projects/{project_id}',
+            body={
+                'accountId': DEFAULT_SERVICE_ACCOUNT_ID,
+                'serviceAccount': DEFAULT_SERVICE_ACCOUNT_CONFIG,
+            },
+        ).execute())
 
     assert service_account is not None, 'Failed to create service account'
 
-    if config['provider'].get(HAS_TPU_PROVIDER_FIELD, False):
+    if has_tpu:
         roles = DEFAULT_SERVICE_ACCOUNT_ROLES + TPU_SERVICE_ACCOUNT_ROLES
     else:
         roles = DEFAULT_SERVICE_ACCOUNT_ROLES
@@ -294,37 +297,14 @@ def _configure_iam_role(config, crm, iam):
         # account is limited by the IAM rights specified below.
         'scopes': ['https://www.googleapis.com/auth/cloud-platform']
     }
-    if _is_head_node_a_tpu(config):
-        # SKY: The API for TPU VM is slightly different from normal compute instances.
-        # See https://cloud.google.com/tpu/docs/reference/rest/v2alpha1/projects.locations.nodes#Node
-        account_dict['scope'] = account_dict['scopes']
-        account_dict.pop('scopes')
-        config['head_node']['serviceAccount'] = account_dict
-    else:
-        config['head_node']['serviceAccounts'] = [account_dict]
-
-    return config
+    return account_dict
 
 
-def _configure_subnet(config, compute):
+def _configure_subnet(project_id: str, region: str, compute):
     """Pick a reasonable subnet if not specified by the config."""
-    config = copy.deepcopy(config)
-
-    node_configs = [
-        node_type['node_config']
-        for node_type in config['available_node_types'].values()
-    ]
-    # Rationale: avoid subnet lookup if the network is already
-    # completely manually configured
-
-    # networkInterfaces is compute, networkConfig is TPU
-    if all('networkInterfaces' in node_config or 'networkConfig' in node_config
-           for node_config in node_configs):
-        return config
-
     subnets = compute.subnetworks().list(
-        project=config['provider']['project_id'],
-        region=config['provider']['region'],
+        project=project_id,
+        region=region,
     ).execute()['items']
 
     if not subnets:
@@ -343,46 +323,7 @@ def _configure_subnet(config, compute):
         }],
     }]
 
-    for node_config in node_configs:
-        # The not applicable key will be removed during node creation
-
-        # compute
-        if 'networkInterfaces' not in node_config:
-            node_config['networkInterfaces'] = copy.deepcopy(default_interfaces)
-        # TPU
-        if 'networkConfig' not in node_config:
-            node_config['networkConfig'] = copy.deepcopy(default_interfaces)[0]
-            node_config['networkConfig'].pop('accessConfigs')
-
-    return config
-
-
-def _get_service_account(account, config, iam):
-    project_id = config['provider']['project_id']
-    full_name = f'projects/{project_id}/serviceAccounts/{account}'
-    try:
-        service_account = iam.projects().serviceAccounts().get(
-            name=full_name).execute()
-    except errors.HttpError as e:
-        if e.resp.status != 404:
-            raise
-        service_account = None
-
-    return service_account
-
-
-def _create_service_account(account_id, account_config, config, iam):
-    project_id = config['provider']['project_id']
-
-    service_account = (iam.projects().serviceAccounts().create(
-        name=f'projects/{project_id}',
-        body={
-            'accountId': account_id,
-            'serviceAccount': account_config,
-        },
-    ).execute())
-
-    return service_account
+    return default_interfaces
 
 
 def _add_iam_policy_binding(service_account, roles, crm):
