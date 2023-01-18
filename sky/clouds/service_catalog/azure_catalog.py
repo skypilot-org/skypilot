@@ -17,7 +17,8 @@ _df = common.read_catalog('azure/vms.csv')
 
 
 def get_feasible_resources(
-    resource_filter: resources.ResourceFilter) -> List[resources.VMResources]:
+        resource_filter: resources.ResourceFilter
+) -> List[resources.VMResources]:
     df = _df
     if 'AvailabilityZone' not in df.columns:
         # TODO(woosuk): Add the 'AvailabilityZone' column to the catalog.
@@ -59,6 +60,7 @@ def get_feasible_resources(
                 cpu_memory=float(row.MemoryGiB),
                 accelerator=acc,
                 use_spot=resource_filter.use_spot,
+                spot_recovery=resource_filter.spot_recovery,
                 disk_size=resource_filter.disk_size,
                 image_id=resource_filter.image_id,
             ))

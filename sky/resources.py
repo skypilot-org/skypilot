@@ -241,7 +241,7 @@ class VMResources:
         self,
         cloud: clouds.Cloud,
         region: str,
-        zone: str,
+        zone: Optional[str],
         instance_type: str,
         num_vcpus: float,
         cpu_memory: float,
@@ -271,7 +271,8 @@ class VMResources:
     def __eq__(self, other: 'VMResources') -> bool:
         if not self.cloud.is_same_cloud(other.cloud):
             return False
-        return (self.region == other.region and self.zone == other.zone and
+        return (self.region == other.region and \
+                self.zone == other.zone and
                 self.instance_type == other.instance_type and
                 self.accelerator == other.accelerator and
                 self.use_spot == other.use_spot and
@@ -287,6 +288,7 @@ class VMResources:
                 f'instance_type={self.instance_type}, '
                 f'accelerator={self.accelerator}, '
                 f'use_spot={self.use_spot}, '
+                f'spot_recovery={self.spot_recovery}, '
                 f'disk_size={self.disk_size}, '
                 f'image_id={self.image_id})')
 
@@ -433,7 +435,7 @@ class ResourceMapper:
         return feasible_clouds
 
     def map_feasible_resources(
-        self, resource_filter: ResourceFilter) -> List[VMResources]:
+            self, resource_filter: ResourceFilter) -> List[VMResources]:
         feasible_clouds = self._get_feasible_clouds(resource_filter.cloud)
         if not feasible_clouds:
             # TODO: Print a warning.

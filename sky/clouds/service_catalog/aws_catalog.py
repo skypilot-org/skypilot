@@ -68,7 +68,8 @@ _df = _apply_az_mapping(_df)
 
 
 def get_feasible_resources(
-    resource_filter: resources.ResourceFilter) -> List[resources.VMResources]:
+        resource_filter: resources.ResourceFilter
+) -> List[resources.VMResources]:
     df = _df
     df = common.filter_spot(df, resource_filter.use_spot)
 
@@ -107,6 +108,7 @@ def get_feasible_resources(
                 cpu_memory=float(row.MemoryGiB),
                 accelerator=acc,
                 use_spot=resource_filter.use_spot,
+                spot_recovery=resource_filter.spot_recovery,
                 disk_size=resource_filter.disk_size,
                 image_id=resource_filter.image_id,
             ))
