@@ -62,6 +62,7 @@ __all__ = [
     'stop',
     'down',
     'autostop',
+    'cost_report',
     # core APIs Job Management
     'queue',
     'cancel',
