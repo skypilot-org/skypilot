@@ -100,7 +100,8 @@ class ResourceRequirement:
                 expected_type = expected_type.__name__
             with ux_utils.print_exception_no_traceback():
                 raise TypeError(f'Expected {self.__class__.__name__}.{field} '
-                                f'to be {expected_type}, found {type(val)}.')
+                                f'to be {expected_type}, found '
+                                f'{type(val).__name__}.')
 
     def _check_input_types(self) -> None:
         # TODO(woosuk): Do more precise type checking.
@@ -348,7 +349,7 @@ class JobResources:
     def __init__(
         self,
         num_nodes: Optional[int] = None,
-        num_gpus: Union[None, int, float] = None,
+        num_gpus: Union[None, int, float] = None, # FIXME
     ) -> None:
         self.num_nodes = num_nodes
         self.num_gpus = num_gpus
@@ -370,7 +371,8 @@ class JobResources:
                 expected_type = expected_type.__name__
             with ux_utils.print_exception_no_traceback():
                 raise TypeError(f'Expected {self.__class__.__name__}.{field} '
-                                f'to be {expected_type}, found {type(val)}.')
+                                f'to be {expected_type}, found '
+                                f'{type(val).__name__}.')
 
     def _check_input_types(self) -> None:
         self._check_type('num_nodes', (int))
