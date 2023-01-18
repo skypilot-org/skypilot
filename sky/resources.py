@@ -123,7 +123,7 @@ class ResourceFilter:
         if self.zone is not None:
             self.zone = self.zone.lower()
         if self.instance_type is not None:
-            # NOTE: Some azure instance types use uppercase letters.
+            # NOTE: Azure instance types include uppercase letters.
             self.instance_type = self.instance_type.lower()
         if self.spot_recovery is not None:
             self.spot_recovery = self.spot_recovery.upper()
