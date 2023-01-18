@@ -125,7 +125,7 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
     status_columns = [
         StatusColumn('NAME', _get_name),
         StatusColumn('LAUNCHED', _get_launched),
-        StatusColumn('DURATION', _get_duration),
+        StatusColumn('DURATION', _get_duration, trunc_length=20),
         StatusColumn('RESOURCES',
                      _get_resources_for_cost_report,
                      trunc_length=70 if not show_all else 0),
@@ -139,7 +139,6 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
             columns.append(status_column.name)
     cluster_table = log_utils.create_table(columns)
 
-    pending_autostop = 0
     for record in cluster_records:
         row = []
         for status_column in status_columns:
@@ -159,9 +158,7 @@ def show_report_table(cluster_records: List[Dict[str, Any]],
             click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                        f'{colorama.Style.RESET_ALL}')
         click.echo(cluster_table)
-    else:
-        click.echo('No existing clusters.')
-    return pending_autostop
+    return 0
 
 
 def show_local_status_table(local_clusters: List[str]):

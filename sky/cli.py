@@ -1465,7 +1465,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     on the cloud console.
     """
 
-    cluster_records = core.report()
+    cluster_records = core.cost_report()
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:

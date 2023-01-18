@@ -97,11 +97,11 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
 
-    db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
-                                 'TEXT DEFAULT null')
-
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'owner', 'TEXT')
     conn.commit()
+
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
+                                 'TEXT DEFAULT null')
 
 
 _DB = db_utils.SQLiteConn(_DB_PATH, create_table)
@@ -203,7 +203,7 @@ def add_or_update_cluster(cluster_name: str,
         # the field of the existing row with the default value if not
         # specified.
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, cluster_hash, metadata, owner) '
+        'autostop, to_down, metadata, owner, cluster_hash) '
         'VALUES ('
         # name
         '?, '
@@ -226,8 +226,6 @@ def add_or_update_cluster(cluster_name: str,
         # default 0.
         'COALESCE('
         '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0),'
-        # cluster_hash
-        '?,'
         # Keep the old metadata value if it exists, otherwise set it to
         # default {}.
         'COALESCE('
@@ -235,7 +233,9 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old owner value if it exists, otherwise set it to
         # default null.
         'COALESCE('
-        '(SELECT owner FROM clusters WHERE name=?), null)'
+        '(SELECT owner FROM clusters WHERE name=?), null),'
+        # cluster_hash
+        '?'
         ')',
         (
             # name
@@ -256,12 +256,12 @@ def add_or_update_cluster(cluster_name: str,
             # to_down
             cluster_name,
             ClusterStatus.STOPPED.value,
-            # cluster_hash
-            cluster_hash,
             # metadata
             cluster_name,
             # owner
             cluster_name,
+            # cluster_hash
+            cluster_hash,
         ))
 
     _DB.cursor.execute(
@@ -485,10 +485,7 @@ def get_launched_resources_from_cluster_hash(
     rows = _DB.cursor.execute(
         'SELECT num_nodes, launched_resources '
         'FROM cluster_history WHERE cluster_hash=(?)', (cluster_hash,))
-    for (
-            num_nodes,
-            launched_resources,
-    ) in rows:
+    for (num_nodes, launched_resources) in rows:
         if num_nodes is None or launched_resources is None:
             return None
         launched_resources = pickle.loads(launched_resources)
@@ -504,7 +501,7 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         cluster_hash, to_down, owner) = row[:10]
+         to_down, owner, cluster_hash) = row[:10]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -527,7 +524,7 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         cluster_hash, to_down, owner) = row[:10]
+         to_down, owner, cluster_hash) = row[:10]
         # TODO: use namedtuple instead of dict
 
         record = {
@@ -551,6 +548,9 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT * from cluster_history').fetchall()
 
     records = []
+
+    # sort by launch time, descending in recency
+    rows.sort(key=lambda row: -_get_cluster_launch_time(row[0]))
 
     for (
             cluster_hash,

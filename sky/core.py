@@ -103,7 +103,7 @@ def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
 
 
 @usage_lib.entrypoint
-def report() -> List[Dict[str, Any]]:
+def cost_report() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
