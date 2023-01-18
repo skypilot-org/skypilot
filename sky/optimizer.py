@@ -930,8 +930,8 @@ def _fill_in_launchable_resources(
             launchable[resources] = _make_launchables_for_valid_region_zones(
                 resources)
         else:
-            clouds_list = [resources.cloud
-                          ] if resources.cloud is not None else enabled_clouds
+            clouds_list = ([resources.cloud]
+                           if resources.cloud is not None else enabled_clouds)
             # Hack: When >=2 cloud candidates, always remove local cloud from
             # possible candidates. This is so the optimizer will consider
             # public clouds, except local. Local will be included as part of
@@ -943,8 +943,8 @@ def _fill_in_launchable_resources(
                 ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:
-                (feasible_resources, fuzzy_candidate_list
-                ) = cloud.get_feasible_launchable_resources(resources)
+                (feasible_resources, fuzzy_candidate_list) = (
+                    cloud.get_feasible_launchable_resources(resources))
                 if len(feasible_resources) > 0:
                     # Assume feasible_resources is sorted by prices.
                     cheapest = feasible_resources[0]
@@ -955,7 +955,7 @@ def _fill_in_launchable_resources(
                 else:
                     all_fuzzy_candidates.update(fuzzy_candidate_list)
             if len(launchable[resources]) == 0:
-                logger.info(f'No resource satisfying {resources.accelerators} '
+                logger.info(f'No resource satisfying {resources} '
                             f'on {clouds_list}.')
                 if len(all_fuzzy_candidates) > 0:
                     logger.info('Did you mean: '

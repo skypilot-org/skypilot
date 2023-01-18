@@ -2406,10 +2406,14 @@ def check_cluster_name_is_valid(cluster_name: str,
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if cluster name is reserved by sky.
+    """Errors out if the cluster is a reserved cluster (spot controller).
 
-    If the cluster name is reserved, return the error message. Otherwise,
-    return None.
+    Raises:
+      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
+        with an error message explaining 'operation_str' is not allowed.
+
+    Returns:
+      None, if the cluster name is not reserved.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
@@ -2417,7 +2421,7 @@ def check_cluster_name_not_reserved(
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(msg)
+            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c
