@@ -359,7 +359,7 @@ class JobResources:
         self._check_semantics()
 
     def _check_type(self, field: str, expected_type) -> None:
-        # FIXME(woosuk): The same code as in ResourceFilter. Refactor.
+        # FIXME(woosuk): The same code as in ResourceRequirement. Refactor.
         val = getattr(self, field)
         if val is not None and not isinstance(val, expected_type):
             if field.startswith('_'):
