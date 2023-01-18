@@ -462,9 +462,11 @@ class ResourceMapper:
                     f'{colorama.Style.RESET_ALL}')
         return []
 
-    def map_suitable_clusters(self,
-                              resource_req: ResourceRequirement,
-                              num_nodes: int = 1) -> List[ClusterSpec]:
+    def map_suitable_clusters(
+        self,
+        num_nodes: int,
+        resource_req: ResourceRequirement,
+    ) -> List[ClusterSpec]:
         vms = self.map_suitable_vms(resource_req)
         clusters = [ClusterSpec(vm_specs=[vm] * num_nodes) for vm in vms]
         return clusters
