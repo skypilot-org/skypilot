@@ -549,8 +549,6 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
 
     records = []
 
-    # sort by launch time, descending in recency
-
     for row in rows:
         # TODO: use namedtuple instead of dict
 
@@ -568,6 +566,8 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         }
 
         records.append(record)
+
+    # sort by launch time, descending in recency
     records = sorted(records, key=lambda record: -record['launched_at'])
     return records
 
