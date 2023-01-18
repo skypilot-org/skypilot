@@ -1,13 +1,17 @@
 """Optimizer: assigns best resources to user tasks."""
 import enum
-from typing import Dict, List, Optional, Tuple
+import typing
+from typing import List, Optional
 
 import colorama
 import prettytable
 
-from sky import resources
 from sky import sky_logging
 from sky.utils import log_utils
+
+if typing.TYPE_CHECKING:
+    from sky import resources
+    from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -33,9 +37,11 @@ class Optimizer:
 
     @staticmethod
     def _optimize(
-        feasible_clusters: List[resources.ClusterSpec],
-    ) -> Optional[resources.ClusterSpec]:
+        task: 'task_lib.Task',
+        feasible_clusters: List['resources.ClusterSpec'],
+    ) -> Optional['resources.ClusterSpec']:
         # TODO(woosuk): Consider data locality in optimization.
+        del task  # unused
         if not feasible_clusters:
             return None
         chosen_cluster = min(feasible_clusters,
@@ -44,10 +50,11 @@ class Optimizer:
 
     @staticmethod
     def optimize(
-        feasible_clusters: List[resources.ClusterSpec],
-        quiet: bool = True,
-    ) -> Optional[resources.ClusterSpec]:
-        chosen_cluster = Optimizer._optimize(feasible_clusters)
+        task: 'task_lib.Task',
+        feasible_clusters: List['resources.ClusterSpec'],
+        quiet: bool = False,
+    ) -> Optional['resources.ClusterSpec']:
+        chosen_cluster = Optimizer._optimize(task, feasible_clusters)
         if quiet:
             return chosen_cluster
 
