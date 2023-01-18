@@ -1477,12 +1477,11 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
         else:
             nonreserved_cluster_records.append(cluster_record)
 
-    status_utils.show_report_table(nonreserved_cluster_records, all)
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
 
     for cluster_group_name, cluster_record in reserved_clusters.items():
-        status_utils.show_report_table([cluster_record],
-                                       all,
-                                       reserved_group_name=cluster_group_name)
+        status_utils.show_cost_report_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
 
 
 @cli.command()

@@ -550,17 +550,12 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
     records = []
 
     # sort by launch time, descending in recency
-    rows.sort(key=lambda row: -_get_cluster_launch_time(row[0]))
 
-    for (
-            cluster_hash,
-            name,
-            num_nodes,
-            _,
-            launched_resources,
-            usage_intervals,
-    ) in rows:
+    for row in rows:
         # TODO: use namedtuple instead of dict
+
+        (cluster_hash, name, num_nodes, _, launched_resources,
+         usage_intervals) = row[:6]
 
         record = {
             'name': name,
@@ -573,6 +568,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         }
 
         records.append(record)
+    records = sorted(records, key=lambda record: -record['launched_at'])
     return records
 
 

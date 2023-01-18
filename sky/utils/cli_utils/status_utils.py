@@ -112,9 +112,9 @@ def show_status_table(cluster_records: List[Dict[str, Any]],
     return pending_autostop
 
 
-def show_report_table(cluster_records: List[Dict[str, Any]],
-                      show_all: bool,
-                      reserved_group_name: Optional[str] = None):
+def show_cost_report_table(cluster_records: List[Dict[str, Any]],
+                           show_all: bool,
+                           reserved_group_name: Optional[str] = None):
     """Compute cluster table values and display for cost report.
 
     Returns:
