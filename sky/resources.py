@@ -23,7 +23,7 @@ class Accelerators:
                  args: Optional[Dict[str, str]]) -> None:
         self.name = accelerator_registry.canonicalize_accelerator_name(name)
         self.count = count
-        self.args = args  # Only used for TPU nodes.
+        self.args = args  # Only used for TPUs.
         # TODO(woosuk): Add more fields such as memory, interconnect, etc.
 
     def __repr__(self) -> str:
@@ -34,7 +34,7 @@ class Accelerators:
                 self.args == other.args)
 
 
-#TODO(woosuk): Define Disk class to represent different types of disks.
+#TODO(woosuk): Define Disks class to represent different types of disks.
 
 
 class ResourceFilter:
@@ -243,7 +243,6 @@ class VMSpec:
         memory: float,
         accelerators: Optional[Accelerators],
         use_spot: bool,
-        spot_recovery: Optional[str],
         disk_size: int,
         image_id: Optional[str],
     ) -> None:
@@ -257,7 +256,6 @@ class VMSpec:
         self.memory = memory
         self.accelerators = accelerators
         self.use_spot = use_spot
-        self.spot_recovery = spot_recovery
         self.disk_size = disk_size
         self.image_id = image_id
 
@@ -274,7 +272,6 @@ class VMSpec:
                 self.memory == other.memory and
                 self.accelerators == other.accelerators and
                 self.use_spot == other.use_spot and
-                self.spot_recovery == other.spot_recovery and
                 self.disk_size == other.disk_size and
                 self.image_id == other.image_id)
 
@@ -288,7 +285,6 @@ class VMSpec:
                 f'memory={self.memory}, '
                 f'accelerators={self.accelerators}, '
                 f'use_spot={self.use_spot}, '
-                f'spot_recovery={self.spot_recovery}, '
                 f'disk_size={self.disk_size}, '
                 f'image_id={self.image_id})')
 
@@ -315,9 +311,10 @@ class ClusterSpec:
         self.memory = head_node.memory
         self.accelerators = head_node.accelerators
         self.use_spot = head_node.use_spot
-        self.spot_recovery = head_node.spot_recovery
         self.disk_size = head_node.disk_size
         self.image_id = head_node.image_id
+
+        # TODO(woosuk): Add cluster-wide configurations such as interconnects.
 
     def get_head_node(self) -> VMSpec:
         return self.vm_specs[0]

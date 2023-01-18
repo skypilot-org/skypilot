@@ -280,7 +280,6 @@ def get_feasible_resources(
             memory=float(row.MemoryGiB),
             accelerators=resource_filter.accelerators,
             use_spot=resource_filter.use_spot,
-            spot_recovery=resource_filter.spot_recovery,
             disk_size=resource_filter.disk_size,
             image_id=resource_filter.image_id,
         ) for row in df.itertuples()
