@@ -5,8 +5,8 @@ from typing import List
 import socket
 from sky.backends import backend_utils
 
-SKYLET_SERVER_LOCAL_PATH = str((pathlib.Path(__file__).parent.parent / 'skylet' /
-                            'server').resolve())
+SKYLET_SERVER_LOCAL_PATH = str(
+    (pathlib.Path(__file__).parent.parent / 'skylet' / 'server').resolve())
 SKYLET_SERVER_REMOTE_PATH = backend_utils._REMOTE_RUNTIME_FILES_DIR + '/server'
 
 

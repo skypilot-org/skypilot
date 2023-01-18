@@ -107,7 +107,9 @@ def test_provision():
         config['auth']['ssh_private_key'],
     )
     for runner in ssh_cmd_runners:
-        runner.run(f'mkdir -p {os.path.dirname(provision_utils.SKYLET_SERVER_REMOTE_PATH)}')
+        runner.run(
+            f'mkdir -p {os.path.dirname(provision_utils.SKYLET_SERVER_REMOTE_PATH)}'
+        )
         runner.rsync(provision_utils.SKYLET_SERVER_LOCAL_PATH,
                      provision_utils.SKYLET_SERVER_REMOTE_PATH,
                      up=True)
