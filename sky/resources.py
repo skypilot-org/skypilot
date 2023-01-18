@@ -367,6 +367,7 @@ class JobResources:
         self.num_nodes = num_nodes
         self._gpus = gpus
 
+        # Set by canonicalization.
         self.acc_name = None
         self.acc_count = None
 
