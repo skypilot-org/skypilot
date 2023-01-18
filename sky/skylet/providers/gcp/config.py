@@ -574,7 +574,7 @@ def _configure_subnet(config, compute):
         return config
 
     usable_vpc_name = get_usable_vpc(config)
-    subnets = _list_subnets(config, compute, filter=f"(name='{usable_vpc_name}')")
+    subnets = _list_subnets(config, compute, filter=f"(name=\"{usable_vpc_name}\")")
 
     # TODO: make sure that we have usable subnet. Maybe call
     # compute.subnetworks().listUsable? For some reason it didn't
