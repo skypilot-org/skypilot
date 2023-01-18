@@ -466,12 +466,10 @@ def cancel(cluster_name: str,
     Please refer to the sky.cli.cancel for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported or the
-          cluster does not exist.
-        ValueError: if the cluster does not exist.
+        ValueError: if arguments are invalid, or the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+          reserved cluster that does not support this operation.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
@@ -647,7 +645,8 @@ def spot_status(refresh: bool) -> List[Dict[str, Any]]:
 
 
 @usage_lib.entrypoint
-def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
+def spot_queue(refresh: bool,
+               skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get statuses of managed spot jobs.
 
@@ -710,6 +709,8 @@ def spot_queue(refresh: bool) -> List[Dict[str, Any]]:
         raise RuntimeError(e.error_msg) from e
 
     jobs = spot.load_spot_job_queue(job_table_payload)
+    if skip_finished:
+        jobs = list(filter(lambda job: not job['status'].is_terminal(), jobs))
     return jobs
 
 

@@ -745,7 +745,7 @@ def write_cluster_config(
         - 'tpu-delete-script' (if TPU is requested)
     Raises:
         ResourceUnavailableError: if the region/zones requested does not appear
-            in the catalog.
+            in the catalog, or an ssh_proxy_command is specified but not for the given region.
     """
     # task.best_resources may not be equal to to_provision if the user
     # is running a job with less resources than the cluster has.
@@ -781,6 +781,30 @@ def write_cluster_config(
 
     yaml_path = _get_yaml_path_from_cluster_name(cluster_name)
 
+    # Retrieve the ssh_proxy_command for the given cloud / region.
+    ssh_proxy_command_config = skypilot_config.get_nested(
+        (str(cloud).lower(), 'ssh_proxy_command'), None)
+    if (isinstance(ssh_proxy_command_config, str) or
+            ssh_proxy_command_config is None):
+        ssh_proxy_command = ssh_proxy_command_config
+    elif isinstance(ssh_proxy_command_config, dict):
+        ssh_proxy_command = ssh_proxy_command_config.get(region_name, None)
+        if ssh_proxy_command is None:
+            # Skip this region. The upper layer will handle the failover to
+            # other regions.
+            raise exceptions.ResourcesUnavailableError(
+                f'No ssh_proxy_command provided for region {region_name}. Skipped.'
+            )
+        elif not isinstance(ssh_proxy_command, str):
+            raise ValueError(
+                'Invalid ssh_proxy_command config (expected a str): '
+                f'{ssh_proxy_command_config!r}')
+    else:
+        raise ValueError(
+            'Invalid ssh_proxy_command config (expected a str or a dict with '
+            f'region names as keys): {ssh_proxy_command_config!r}')
+    logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -812,8 +836,7 @@ def write_cluster_config(
                     ('aws', 'use_internal_ips'), False),
                 # Not exactly AWS only, but we only test it's supported on AWS
                 # for now:
-                'ssh_proxy_command': skypilot_config.get_nested(
-                    ('auth', 'ssh_proxy_command'), None),
+                'ssh_proxy_command': ssh_proxy_command,
 
                 # Azure only:
                 'azure_subscription_id': azure_subscription_id,
@@ -1560,8 +1583,15 @@ def _process_cli_query(
     ]
 
 
-def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
-    """Returns a set of Ray launch config hashes, one per node type."""
+def _ray_launch_hash(cluster_name: str,
+                     ray_config: Dict[str, Any]) -> Optional[Set[str]]:
+    """Returns a set of Ray launch config hashes, one per node type.
+
+    This returns None if ray's _bootstrap_config() failed to return, which can
+    happen if node providers' bootstrapping phase (config.py) raises an error
+    (which *should* only happen on errors prior to nodes launching, e.g.,
+    VPC/subnet setup).
+    """
     # Use the cached Ray launch hashes if they exist.
     metadata = global_user_state.get_cluster_metadata(cluster_name)
     assert metadata is not None, cluster_name
@@ -1569,8 +1599,16 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_hashes.')
         return set(ray_launch_hashes)
-    with ux_utils.suppress_output():
-        ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    try:
+        with ux_utils.suppress_output():
+            ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    except RuntimeError as e:
+        # TODO(zongheng): is this safe? Could it be node(s) are live but somehow a
+        # separate status refresh hits such errors?
+        if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
+            logger.error(f'Error found when refreshing cluster status: {e}')
+            return None
+        raise e
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in
     # sync).
@@ -1624,10 +1662,15 @@ def _query_status_aws(
     }
     region = ray_config['provider']['region']
     launch_hashes = _ray_launch_hash(cluster, ray_config)
-    hash_filter_str = ','.join(launch_hashes)
+    if launch_hashes is not None:
+        hash_filter_str = ','.join(launch_hashes)
+        hash_filter_line = (
+            f'Name=tag:ray-launch-config,Values={hash_filter_str} ')
+    else:
+        hash_filter_line = ''
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
-                 f'Name=tag:ray-launch-config,Values={hash_filter_str} '
+                 f'{hash_filter_line}'
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1639,6 +1682,7 @@ def _query_status_gcp(
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
     launch_hashes = _ray_launch_hash(cluster, ray_config)
+    assert launch_hashes is not None
     hash_filter_str = ' '.join(launch_hashes)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
@@ -1725,6 +1769,7 @@ def _query_status_azure(
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
     launch_hashes = _ray_launch_hash(cluster, ray_config)
+    assert launch_hashes is not None
     hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
@@ -1864,6 +1909,30 @@ def _update_cluster_status_no_lock(
                      f'{cluster_name!r}, trying to fetch from provider.')
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
+
+    if len(node_statuses) > handle.launched_nodes:
+        # Unexpected: this could mean ray launch hash is not calculated and we
+        # used the cluster name as the only filter when querying the cloud
+        # provider, and in the queried region more than 1 cluster with the same
+        # constructed name tag returned. This will typically not happen unless
+        # users manually create a cluster with that constructed name.
+        #
+        # (Technically speaking, even if returned num nodes <= num
+        # handle.launched_nodes), not including the launch hash could mean the
+        # returned nodes contain some nodes that do not belong to the logical
+        # skypilot cluster. Doesn't seem to be a good way to handle this for
+        # now?)
+        #
+        # We have not experienced the above; adding as a safeguard.
+        #
+        # Since we failed to refresh, warn and return old record.
+        logger.warning(
+            f'Failed to refresh status for cluster {cluster_name!r} '
+            f'due to {len(node_statuses)} nodes being found with the '
+            'same name tag, but the cluster should have '
+            f'{handle.launched_nodes} nodes. Keeping the old status.')
+        return record
+    assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
     # safely set the cluster status to TERMINATED. This handles the edge case
@@ -2356,10 +2425,14 @@ def check_cluster_name_is_valid(cluster_name: str,
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if cluster name is reserved by sky.
+    """Errors out if the cluster is a reserved cluster (spot controller).
 
-    If the cluster name is reserved, return the error message. Otherwise,
-    return None.
+    Raises:
+      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
+        with an error message explaining 'operation_str' is not allowed.
+
+    Returns:
+      None, if the cluster name is not reserved.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
@@ -2367,7 +2440,7 @@ def check_cluster_name_not_reserved(
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(msg)
+            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c

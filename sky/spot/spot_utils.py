@@ -416,7 +416,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
                                              absolute=True),
             job_duration,
             job['recovery_count'],
-            job['status'].value,
+            job['status'].colored_str(),
         ]
         if not job['status'].is_terminal():
             status_counts[job['status'].value] += 1

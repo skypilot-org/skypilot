@@ -301,11 +301,11 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky launch -y -c {name} tests/test_yamls/no_conda_ami.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
-            f'sky exec {name} examples/tests/test_yamls/no_conda_ami.yaml',
+            f'sky exec {name} tests/test_yamls/no_conda_ami.yaml',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
@@ -1036,6 +1036,24 @@ def test_spot():
             # 'sky status | grep sky-spot-controller- | grep UP | grep 10m',
         ],
         cancel_command,
+    )
+    run_one_test(test)
+
+
+def test_spot_failed_setup():
+    """Test managed spot job with failed setup."""
+    name = _get_cluster_name()
+    test = Test(
+        'spot-failed-setup',
+        [
+            f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup.yaml',
+            'sleep 200',
+            # Make sure the job failed quickly.
+            f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "FAILED"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 

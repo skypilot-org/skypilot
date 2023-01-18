@@ -45,7 +45,7 @@ scripts, access checkpoints, etc.).
 
 .. note::
 
-    For large, multi-gigabyte workdirs, uploading may be slow because the they
+    For large, multi-gigabyte workdirs, uploading may be slow because they
     are synced to the remote VM(s) with :code:`rsync`. To exclude large files in
     your workdir from being uploaded, add them to the :code:`.gitignore` file
     (or a ``.git/info/exclude`` file) under the workdir.
