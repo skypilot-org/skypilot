@@ -13,6 +13,7 @@ from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
 from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType
+from sky.skylet.providers.gcp.constant import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -45,8 +46,6 @@ HAS_TPU_PROVIDER_FIELD = "_has_tpus"
 
 # NOTE: iam.serviceAccountUser allows the Head Node to create worker nodes
 # with ServiceAccounts.
-
-SKYPILOT_VPC_NAME = "skypilot-vpc"
 
 def get_node_type(node: dict) -> GCPNodeType:
     """Returns node type based on the keys in ``node``.
@@ -489,6 +488,76 @@ def _configure_key_pair(config, compute):
     return config
 
 
+def _check_firewall_rules(vpc_name, config, compute):
+    """Check if the firewall rules in the VPC are sufficient."""
+    required_rules = FIREWALL_RULES_TEMPLATE.copy()
+
+    operation = (
+        compute.networks().
+        getEffectiveFirewalls(
+            project=config["provider"]["project_id"],
+            network=vpc_name
+        )
+    )
+    response = operation.execute()
+    if len(response) == 0:
+        return False
+    effective_rules = response["firewalls"]
+
+    def _get_refined_rule(rule):
+        KEY_TO_COMPARE = {"sourceRanges", "allowed", "direction"}
+        refined_rule = {}
+        for k in KEY_TO_COMPARE:
+            refined_rule[k] = set(rule[k]) if isinstance(rule[k], list) else rule[k]
+        return refined_rule
+
+    required_rules = list(map(_get_refined_rule, required_rules))
+    effective_rules = list(map(_get_refined_rule, effective_rules))
+
+    for rule in required_rules:
+        if rule not in effective_rules:
+            return False
+    return True
+
+
+def get_usable_vpc(config):
+    """Return a usable VPC.
+
+    If not found, create a new one with sufficient firewall rules.
+    """
+    _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
+    vpcnets_all = _list_vpcnets(config, compute)
+
+    usable_vpc_name = None
+    for vpc in vpcnets_all:
+        if _check_firewall_rules(vpc["name"], config, compute):
+            usable_vpc_name = vpc["name"]
+            break
+
+    if usable_vpc_name is None:
+        logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
+
+        # Create a default VPC network
+        proj_id = config["provider"]["project_id"]
+        body = VPC_TEMPLATE.copy()
+        body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+        body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+        _create_vpcnet(config, compute, body)
+
+        # Create firewall rules
+        for rule in FIREWALL_RULES_TEMPLATE:
+            body = rule.copy()
+            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            body["network"] = body["network"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            _create_firewall_rule(config, compute, body)
+
+        usable_vpc_name = SKYPILOT_VPC_NAME
+        logger.info(f"A VPC network {SKYPILOT_VPC_NAME} created.")
+
+    return usable_vpc_name
+
+
 def _configure_subnet(config, compute):
     """Pick a reasonable subnet if not specified by the config."""
     config = copy.deepcopy(config)
@@ -507,50 +576,8 @@ def _configure_subnet(config, compute):
     ):
         return config
 
-    subnets = _list_subnets(config, compute, filter=f'(name="{SKYPILOT_VPC_NAME}")')
-
-    if not subnets:
-        # Create a default VPC network and firewall rules
-        proj_id = config["provider"]["project_id"]
-
-        logger.info(f'Creating a default VPC network, {SKYPILOT_VPC_NAME}...')
-        vpc_network_body = {
-            "name": SKYPILOT_VPC_NAME,
-            "selfLink": f"projects/{proj_id}/global/networks/{SKYPILOT_VPC_NAME}",
-            "autoCreateSubnetworks": True,
-            "mtu": 1460,
-            "routingConfig": {"routingMode": "GLOBAL"},
-        }
-        _create_vpcnet(config, compute, vpc_network_body)
-
-        firewall_body = {
-            "name": f"{SKYPILOT_VPC_NAME}-allow-custom",
-            "network": f"projects/{proj_id}/global/networks/{SKYPILOT_VPC_NAME}",
-            "selfLink": f"projects/{proj_id}/global/firewalls/{SKYPILOT_VPC_NAME}-allow-custom",
-            "direction": "INGRESS",
-            "priority": 65534,
-            "allowed": [{"IPProtocol": "all"}],
-            "sourceRanges": ["10.128.0.0/9"],
-        }
-        _create_firewall_rule(config, compute, firewall_body)
-
-        firewall_body = {
-            "name": f"{SKYPILOT_VPC_NAME}-allow-ssh",
-            "network": f"projects/{proj_id}/global/networks/{SKYPILOT_VPC_NAME}",
-            "selfLink": f"projects/{proj_id}/global/firewalls/{SKYPILOT_VPC_NAME}-allow-ssh",
-            "direction": "INGRESS",
-            "priority": 65534,
-            "allowed": [{
-                "IPProtocol": "tcp",
-                "ports": ["22"],
-            }],
-            "sourceRanges": ["0.0.0.0/0"],
-        }
-        _create_firewall_rule(config, compute, firewall_body)
-
-        logger.info(f'A VPC network {SKYPILOT_VPC_NAME} created.')
-
-        subnets = _list_subnets(config, compute, filter=f'(name="{SKYPILOT_VPC_NAME}")')
+    usable_vpc_name = get_usable_vpc(config)
+    subnets = _list_subnets(config, compute, filter=f"(name='{usable_vpc_name}')")
 
     # TODO: make sure that we have usable subnet. Maybe call
     # compute.subnetworks().listUsable? For some reason it didn't
@@ -605,6 +632,18 @@ def _create_vpcnet(config, compute, body):
         config["provider"]["project_id"], operation, compute
     )
     return response
+
+
+def _list_vpcnets(config, compute):
+    response = (
+        compute.networks()
+        .list(
+            project=config["provider"]["project_id"],
+        )
+        .execute()
+    )
+
+    return response["items"] if "items" in response else []
 
 
 def _list_subnets(config, compute, filter=None):
