@@ -13,12 +13,13 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509 import oid
 
-KEY_DIR = pathlib.Path.home() / '.sky' / 'certs'
-KEY_DIR.mkdir(parents=True, exist_ok=True)
-CLIENT_KEY_PATH = KEY_DIR / 'client.key'
-CLIENT_CERT_PATH = KEY_DIR / 'client.crt'
-SERVER_KEY_PATH = KEY_DIR / 'server.key'
-SERVER_CERT_PATH = KEY_DIR / 'server.crt'
+CERTS_LOCAL_DIR = pathlib.Path.home() / '.sky' / 'certs'
+CERTS_REMOTE_DIR = '~/.sky/certs'
+CERTS_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
+CLIENT_KEY_PATH = CERTS_LOCAL_DIR / 'client.key'
+CLIENT_CERT_PATH = CERTS_LOCAL_DIR / 'client.crt'
+SERVER_KEY_PATH = CERTS_LOCAL_DIR / 'server.key'
+SERVER_CERT_PATH = CERTS_LOCAL_DIR / 'server.crt'
 
 VALID_DAYS = datetime.timedelta(365 * 100, 0, 0)
 ONE_DAY = datetime.timedelta(1, 0, 0)

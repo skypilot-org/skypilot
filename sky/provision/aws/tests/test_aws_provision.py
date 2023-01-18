@@ -9,11 +9,13 @@ import jinja2
 import yaml
 
 import sky
+from sky import authentication
 from sky.backends import backend_utils
 from sky.clouds import aws as aws_cloud
-from sky.utils import common_utils
+from sky.utils import common_utils, command_runner
 from sky.provision import utils as provision_utils
 from sky.provision import aws
+from sky.provision import ca
 
 TEMPLATE_FILE = pathlib.Path(__file__).parent.parent.resolve() / 'aws.yml.j2'
 
@@ -29,7 +31,7 @@ def test_provision():
     region = 'us-east-1'
     availability_zone = 'us-east-1f'
     instance_type = aws_cloud.AWS.get_default_instance_type()
-    num_nodes = 8
+    num_nodes = 2
     content = template.render(
         cluster_name=cluster_name,
         region=region,
@@ -38,6 +40,7 @@ def test_provision():
         zones=availability_zone,
         num_nodes=num_nodes,
         disk_size=256,
+        ssh_private_key=os.path.expanduser(authentication.PRIVATE_SSH_KEY_PATH),
         # If the current code is run by controller, propagate the real
         # calling user which should've been passed in as the
         # SKYPILOT_USER env var (see spot-controller.yaml.j2).
@@ -95,10 +98,25 @@ def test_provision():
     provision_utils.wait_for_ssh(public_ips)
     print(f'Wait for SSH connection duration = {time.time() - start:.3f}s')
 
-    start = time.time()
-    aws.terminate_instances(region, cluster_name)
-    print(f'Terminate cluster (trigger) duration = {time.time() - start:.3f}s')
+    ca.generate_cert_file()
+    print(f'Generated certification files')
 
-    start = time.time()
-    aws.wait_instances(region, cluster_name, state='terminated')
-    print(f'Terminate cluster duration = {time.time() - start:.3f}s')
+    ssh_cmd_runners = command_runner.SSHCommandRunner.make_runner_list(
+        public_ips,
+        config['auth']['ssh_user'],
+        config['auth']['ssh_private_key'],
+    )
+    for runner in ssh_cmd_runners:
+        runner.run(f'mkdir -p {os.path.dirname(provision_utils.SKYLET_SERVER_REMOTE_PATH)}')
+        runner.rsync(provision_utils.SKYLET_SERVER_LOCAL_PATH,
+                     provision_utils.SKYLET_SERVER_REMOTE_PATH,
+                     up=True)
+        runner.rsync(ca.CERTS_LOCAL_DIR, ca.CERTS_REMOTE_DIR, up=True)
+
+    # start = time.time()
+    # aws.terminate_instances(region, cluster_name)
+    # print(f'Terminate cluster (trigger) duration = {time.time() - start:.3f}s')
+
+    # start = time.time()
+    # aws.wait_instances(region, cluster_name, state='terminated')
+    # print(f'Terminate cluster duration = {time.time() - start:.3f}s')
