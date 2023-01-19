@@ -508,6 +508,8 @@ def _check_firewall_rules(vpc_name, config, compute):
         KEY_TO_COMPARE = {"sourceRanges", "allowed", "direction"}
         refined_rule = {}
         for k in KEY_TO_COMPARE:
+            if k not in rule:
+                continue
             if k == "allowed":
                 refined_rule[k] = sorted(rule[k], key=lambda x: x["IPProtocol"])
             else:
