@@ -83,7 +83,7 @@ class Optimizer:
         best_clusters = [chosen_cluster] + best_clusters
 
         # Diplay the optimization result as a table.
-        # FIXME: Zone -> Region
+        # FIXME: Zone -> Region/Zone
         columns = [
             'CLOUD', 'INSTANCE', 'vCPUs', 'MEM(GiB)', 'ACCELERATORS', 'ZONE',
             '$/hr', 'CHOSEN'
@@ -98,10 +98,10 @@ class Optimizer:
 
         rows = []
         for c in best_clusters:
-            if c.accelerator is None:
+            if c.accelerators is None:
                 acc = '-'
             else:
-                acc = f'{c.accelerator.name}:{c.accelerator.count}'
+                acc = f'{c.accelerators.name}:{c.accelerators.count}'
             row = [
                 str(c.cloud),
                 c.instance_type,
