@@ -16,8 +16,6 @@ from ray.autoscaler.tags import (
     NODE_KIND_HEAD,
 )
 from ray.autoscaler._private.util import hash_launch_conf
-from sky.authentication import PRIVATE_SSH_KEY_PATH
-from sky.backends import backend_utils
 from sky.skylet.providers.lambda_labs import lambda_utils
 from sky.utils import common_utils
 
