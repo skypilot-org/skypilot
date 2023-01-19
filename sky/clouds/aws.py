@@ -345,7 +345,7 @@ class AWS(clouds.Cloud):
         if r.image_id is not None:
             if r.region is not None or r.zone is not None:
                 return []
-        if r.accelerators is not None and r.accelerators.args is not None:
+        if r.accelerators is not None and r.accelerator_args is not None:
             return []
 
         # If the user specified the instance type,

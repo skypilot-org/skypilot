@@ -28,8 +28,8 @@ def get_suitable_vms(
         acc_name = None
         acc_count = None
     else:
-        acc_name = resource_req.accelerators.name
-        acc_count = resource_req.accelerators.count
+        acc_name = resource_req.accelerator_name
+        acc_count = resource_req.accelerator_count
     filters = {
         'InstanceType': resource_req.instance_type,
         'AcceleratorName': acc_name,

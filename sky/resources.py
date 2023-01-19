@@ -17,31 +17,6 @@ logger = sky_logging.init_logger(__name__)
 _DEFAULT_DISK_SIZE_GB = 256
 
 
-class AcceleratorsSpec:
-
-    def __init__(self, name: str, count: int,
-                 args: Optional[Dict[str, str]]) -> None:
-        self.name = accelerator_registry.canonicalize_accelerator_name(name)
-        self.count = count
-        self.args = args  # Only used for TPUs.
-        # TODO(woosuk): Add more fields such as memory, interconnect, etc.
-
-    def __repr__(self) -> str:
-        if self.args is None:
-            return f'{self.count}x{self.name}'
-        else:
-            return f'{self.count}x{self.name} (args: {self.args})'
-
-    def __eq__(self, other: 'AcceleratorsSpec') -> bool:
-        return self.name == other.name and \
-               self.count == other.count and \
-               self.args == other.args
-
-
-# TODO(woosuk): Define CPU class to represent different types of CPUs.
-# TODO(woosuk): Define Disks class to represent different types of disks.
-
-
 class ResourceRequirements:
     """User-specified resource requirements."""
 
@@ -51,7 +26,7 @@ class ResourceRequirements:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         instance_type: Optional[str] = None,
-        accelerators: Union[None, str, Dict[str, int], AcceleratorsSpec] = None,
+        accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
@@ -63,14 +38,16 @@ class ResourceRequirements:
         self.zone = zone
         self.instance_type = instance_type
         self._accelerators = accelerators
-        self._accelerator_args = accelerator_args
+        self.accelerator_args = accelerator_args
         self.use_spot = use_spot
         self.spot_recovery = spot_recovery
         self.disk_size = disk_size
         self.image_id = image_id
 
         # Set by canonicalization.
-        self.accelerators: Optional[AcceleratorsSpec] = None
+        self.accelerators: Optional[str] = None
+        self.accelerator_name: Optional[str] = None
+        self.accelerator_count: Optional[int] = None
 
         self._check_syntax()
         self._check_input_types()
@@ -83,7 +60,7 @@ class ResourceRequirements:
                                    self.zone is not None):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('Cannot specify region/zone without cloud.')
-        if self._accelerators is None and self._accelerator_args is not None:
+        if self._accelerators is None and self.accelerator_args is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify accelerator_args without accelerators.')
@@ -91,7 +68,7 @@ class ResourceRequirements:
             # Here, we use the assert statement instead of raising
             # a user-friendly error because AcceleratorsSpec is not a
             # user-facing class.
-            assert self._accelerator_args is not None, (
+            assert self.accelerator_args is not None, (
                 'When accelerators is AcceleratorsSpec, accelerator_args '
                 'must be specified in accelerators.args.')
         if ((self.use_spot is None or not self.use_spot) and
@@ -120,8 +97,8 @@ class ResourceRequirements:
         self._check_type('region', str)
         self._check_type('zone', str)
         self._check_type('instance_type', str)
-        self._check_type('_accelerators', (str, dict, AcceleratorsSpec))
-        self._check_type('_accelerator_args', dict)
+        self._check_type('_accelerators', (str, dict))
+        self._check_type('accelerator_args', dict)
         self._check_type('use_spot', bool)
         self._check_type('spot_recovery', str)
         self._check_type('disk_size', int)
@@ -142,9 +119,6 @@ class ResourceRequirements:
             self.spot_recovery = self.spot_recovery.upper()
 
         if self._accelerators is None:
-            return
-        if isinstance(self._accelerators, AcceleratorsSpec):
-            self.accelerators = self._accelerators
             return
 
         # Parse accelerators.
@@ -178,9 +152,11 @@ class ResourceRequirements:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(parse_error) from None
 
-        self.accelerators = AcceleratorsSpec(name=acc_name,
-                                             count=acc_count,
-                                             args=self._accelerator_args)
+        acc_name = accelerator_registry.canonicalize_accelerator_name(acc_name)
+        # NOTE: accelerators is always a string after canonicalization.
+        self.accelerators = f'{acc_name}:{acc_count}'
+        self.accelerator_name = acc_name
+        self.accelerator_count = acc_count
 
     def _assign_defaults(self) -> None:
         if self.use_spot is None:
@@ -253,6 +229,126 @@ class ResourceRequirements:
 # User-facing class.
 class Resources(ResourceRequirements):
     pass
+
+
+# User-facing class.
+class JobResources:
+
+    def __init__(
+        self,
+        num_nodes: Optional[int] = None,
+        gpus: Union[None, str, Dict[str, float]] = None,
+    ) -> None:
+        self.num_nodes = num_nodes
+        self._gpus = gpus
+
+        # Set by canonicalization.
+        self.acc_name: Optional[str] = None
+        self.acc_count: Optional[float] = None
+
+        self._check_input_types()
+        self._canonicalize()
+        self._assign_defaults()
+        self._check_semantics()
+
+    def _check_type(self, field: str, expected_type) -> None:
+        # FIXME(woosuk): Duplicated code. Refactor.
+        val = getattr(self, field)
+        if val is not None and not isinstance(val, expected_type):
+            if field.startswith('_'):
+                field = field[1:]
+            if isinstance(expected_type, tuple):
+                expected_type = ' or '.join([t.__name__ for t in expected_type])
+            else:
+                expected_type = expected_type.__name__
+            with ux_utils.print_exception_no_traceback():
+                raise TypeError(f'Expected {self.__class__.__name__}.{field} '
+                                f'to be {expected_type}, found '
+                                f'{type(val).__name__}.')
+
+    def _check_input_types(self) -> None:
+        self._check_type('num_nodes', (int))
+        self._check_type('_gpus', (str, dict))
+
+    def _canonicalize(self) -> None:
+        if self._gpus is None:
+            return
+
+        # FIXME(woosuk): Duplicated code. Refactor.
+        # Parse gpus.
+        if isinstance(self._gpus, dict):
+            if len(self._gpus) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('gpus must be specified as a single '
+                                     'accelerator name and count.')
+            # TODO: Check that acc_name is string and acc_count is float
+            # in _check_input_types.
+            acc_name, acc_count = list(self._gpus.items())[0]
+            acc_count = float(acc_count)
+        else:
+            assert isinstance(self._gpus, str)
+            if ':' not in self._gpus:
+                acc_name = self._gpus
+                acc_count = 1.0
+            else:
+                splits = self._gpus.split(':')
+                parse_error = ('gpus must be either <name> or <name>:<cnt>. '
+                               f'Found: {self._gpus!r}')
+                if len(splits) != 2:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(parse_error)
+                try:
+                    acc_name = splits[0]
+                    acc_count = float(splits[1])
+                except ValueError:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(parse_error) from None
+
+        # NEVER use AcceleratorsSpec class here.
+        self.acc_name = accelerator_registry.canonicalize_accelerator_name(
+            acc_name)
+        self.acc_count = acc_count
+
+    def _assign_defaults(self) -> None:
+        if self.num_nodes is None:
+            self.num_nodes = 1
+
+    def _check_semantics(self) -> None:
+        if self.num_nodes < 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('num_nodes must be >= 1.')
+
+        if self.acc_count is None:
+            return
+        if self.acc_count <= 0:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('The number of GPUs must be > 0.')
+        elif self.acc_count > 1:
+            with ux_utils.print_exception_no_traceback():
+                if not self.acc_count.is_integer():
+                    raise ValueError('num_gpus must be an integer if > 1.')
+
+
+# TODO(woosuk): Define classes for other resource types such as CPUs and disks.
+class AcceleratorsSpec:
+
+    def __init__(self, name: str, count: int,
+                 args: Optional[Dict[str, str]]) -> None:
+        self.name = accelerator_registry.canonicalize_accelerator_name(name)
+        self.count = count
+        self.args = args  # Only used for TPUs.
+        # TODO(woosuk): Add more fields such as memory, interconnect, etc.
+
+    def __repr__(self) -> str:
+        if self.args is None:
+            return f'{self.count}x{self.name}'
+        else:
+            return f'{self.count}x{self.name} (args: {self.args})'
+
+    def __eq__(self, other: 'AcceleratorsSpec') -> bool:
+        return self.name == other.name and \
+               self.count == other.count and \
+               self.args == other.args
 
 
 class VMSpec:
@@ -364,104 +460,6 @@ class ClusterSpec:
         return ('ClusterSpec('
                 f'num_nodes={self.num_nodes}, '
                 f'head_node={self.get_head_node()})')
-
-
-# User-facing class.
-class JobResources:
-
-    def __init__(
-        self,
-        num_nodes: Optional[int] = None,
-        gpus: Union[None, str, Dict[str, float]] = None,
-    ) -> None:
-        self.num_nodes = num_nodes
-        self._gpus = gpus
-
-        # Set by canonicalization.
-        self.acc_name = None
-        self.acc_count = None
-
-        self._check_input_types()
-        self._canonicalize()
-        self._assign_defaults()
-        self._check_semantics()
-
-    def _check_type(self, field: str, expected_type) -> None:
-        # FIXME(woosuk): Duplicated code. Refactor.
-        val = getattr(self, field)
-        if val is not None and not isinstance(val, expected_type):
-            if field.startswith('_'):
-                field = field[1:]
-            if isinstance(expected_type, tuple):
-                expected_type = ' or '.join([t.__name__ for t in expected_type])
-            else:
-                expected_type = expected_type.__name__
-            with ux_utils.print_exception_no_traceback():
-                raise TypeError(f'Expected {self.__class__.__name__}.{field} '
-                                f'to be {expected_type}, found '
-                                f'{type(val).__name__}.')
-
-    def _check_input_types(self) -> None:
-        self._check_type('num_nodes', (int))
-        self._check_type('_gpus', (str, dict))
-
-    def _canonicalize(self) -> None:
-        if self._gpus is None:
-            return
-
-        # FIXME(woosuk): Duplicated code. Refactor.
-        # Parse gpus.
-        if isinstance(self._gpus, dict):
-            if len(self._gpus) != 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('gpus must be specified as a single '
-                                     'accelerator name and count.')
-            # TODO: Check that acc_name is string and acc_count is float
-            # in _check_input_types.
-            acc_name, acc_count = list(self._gpus.items())[0]
-            acc_count = float(acc_count)
-        else:
-            assert isinstance(self._gpus, str)
-            if ':' not in self._gpus:
-                acc_name = self._gpus
-                acc_count = 1.0
-            else:
-                splits = self._gpus.split(':')
-                parse_error = ('gpus must be either <name> or <name>:<cnt>. '
-                               f'Found: {self._gpus!r}')
-                if len(splits) != 2:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(parse_error)
-                try:
-                    acc_name = splits[0]
-                    acc_count = float(splits[1])
-                except ValueError:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(parse_error) from None
-
-        # NEVER use AcceleratorsSpec class here.
-        self.acc_name = accelerator_registry.canonicalize_accelerator_name(
-            acc_name)
-        self.acc_count = acc_count
-
-    def _assign_defaults(self) -> None:
-        if self.num_nodes is None:
-            self.num_nodes = 1
-
-    def _check_semantics(self) -> None:
-        if self.num_nodes < 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('num_nodes must be >= 1.')
-
-        if self.acc_count is None:
-            return
-        if self.acc_count <= 0:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('The number of GPUs must be > 0.')
-        elif self.acc_count > 1:
-            with ux_utils.print_exception_no_traceback():
-                if not self.acc_count.is_integer():
-                    raise ValueError('num_gpus must be an integer if > 1.')
 
 
 class ResourceMapper:

@@ -395,28 +395,29 @@ class GCP(clouds.Cloud):
                 r.instance_type = cls.get_default_instance_type()
                 return service_catalog.get_suitable_vms(r, clouds='gcp')
 
-        if r.accelerators.name.startswith('tpu'):
+        # FIXME: use tpu_utils.
+        if r.accelerator_name.startswith('tpu'):
             # TPU
-            if r.accelerators.args is None:
-                r.accelerators.args = {}
-            if 'tpu_vm' not in r.accelerators.args:
-                r.accelerators.args['tpu_vm'] = False
+            if r.accelerator_args is None:
+                r.accelerator_args = {}
+            if 'tpu_vm' not in r.accelerator_args:
+                r.accelerator_args['tpu_vm'] = False
 
-            if r.accelerators.args['tpu_vm']:
+            if r.accelerator_args['tpu_vm']:
                 # TPU VM
                 # The instance type must be 'tpu-vm'.
                 if r.instance_type is None:
                     r.instance_type = 'tpu-vm'
                 elif r.instance_type != 'tpu-vm':
                     return []
-                r.accelerators.args['runtime_version'] = 'tpu-vm-base'
+                r.accelerator_args['runtime_version'] = 'tpu-vm-base'
             else:
                 # TPU Node
-                if 'runtime_version' not in r.accelerators.args:
-                    r.accelerators.args['runtime_version'] = '2.5.0'
+                if 'runtime_version' not in r.accelerator_args:
+                    r.accelerator_args['runtime_version'] = '2.5.0'
         else:
             # GPU
-            if r.accelerators.args is not None:
+            if r.accelerator_args is not None:
                 return []
         return service_catalog.get_suitable_vms(r, clouds='gcp')
 

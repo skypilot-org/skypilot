@@ -199,8 +199,8 @@ def get_suitable_vms(
     # Search the accelerator first.
     acc_df = None
     if resource_req.accelerators is not None:
-        acc_name = resource_req.accelerators.name
-        acc_count = resource_req.accelerators.count
+        acc_name = resource_req.accelerator_name
+        acc_count = resource_req.accelerator_count
         acc_filter = {
             'AcceleratorName': acc_name,
             'AcceleratorCount': acc_count,
@@ -269,22 +269,28 @@ def get_suitable_vms(
             df = pd.merge(vm_df, acc_df, on=['Region', 'AvailabilityZone'])
     df = df.reset_index(drop=True)
 
+    feasible_resources = []
     gcp = sky.GCP()
-    feasible_resources = [
-        resources.VMSpec(
-            cloud=gcp,
-            region=row.Region,
-            zone=row.AvailabilityZone,
-            instance_type=row.InstanceType,
-            cpu=float(row.vCPUs),
-            memory=float(row.MemoryGiB),
-            accelerators=resource_req.accelerators,
-            use_spot=resource_req.use_spot,
-            disk_size=resource_req.disk_size,
-            image_id=resource_req.image_id,
-        ) for row in df.itertuples()
-    ]
-
+    for row in df.itertuples():
+        if pd.isna(row.AcceleratorName) or pd.isna(row.AcceleratorCount):
+            acc = None
+        else:
+            acc = resources.AcceleratorsSpec(name=row.AcceleratorName,
+                                             count=int(row.AcceleratorCount),
+                                             args=None)
+        feasible_resources.append(
+            resources.VMSpec(
+                cloud=gcp,
+                region=row.Region,
+                zone=row.AvailabilityZone,
+                instance_type=row.InstanceType,
+                cpu=float(row.vCPUs),
+                memory=float(row.MemoryGiB),
+                accelerators=acc,
+                use_spot=resource_req.use_spot,
+                disk_size=resource_req.disk_size,
+                image_id=resource_req.image_id,
+        ))
     # Filter out invalid combinations.
     return [r for r in feasible_resources if _check_host_vm_limit(r)]
 
