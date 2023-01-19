@@ -192,7 +192,7 @@ def get_suitable_vms(
 
     # Users cannot use A2 machines without A100 GPUs.
     if (resource_req.instance_type is not None and
-            resource_req.startswith('a2-')):
+            resource_req.instance_type.startswith('a2-')):
         if resource_req.accelerators is None:
             return []
 
