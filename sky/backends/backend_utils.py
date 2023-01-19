@@ -1361,8 +1361,8 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                 f'--zone={zone} --format=value\\(name\\)')
+                 f'"(labels.ray-cluster-name={cluster_name})" '
+                 f'--zone={zone} --format="value(name)"')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       '/dev/null',
                                                       shell=True,
@@ -1684,6 +1684,9 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
+    # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
+    # fails to filter labels with "=".
+    # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
     launch_hashes = _ray_launch_hash(cluster, ray_config)
     assert launch_hashes is not None
     hash_filter_str = ' '.join(launch_hashes)
@@ -1885,6 +1888,7 @@ def _update_cluster_status_no_lock(
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
+                                                requested_resources=None,
                                                 ready=True,
                                                 is_launch=False)
         return record
@@ -1964,6 +1968,7 @@ def _update_cluster_status_no_lock(
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
+                                                requested_resources=None,
                                                 ready=False,
                                                 is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
@@ -2409,10 +2414,14 @@ def check_cluster_name_is_valid(cluster_name: str,
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if cluster name is reserved by sky.
+    """Errors out if the cluster is a reserved cluster (spot controller).
 
-    If the cluster name is reserved, return the error message. Otherwise,
-    return None.
+    Raises:
+      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
+        with an error message explaining 'operation_str' is not allowed.
+
+    Returns:
+      None, if the cluster name is not reserved.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
@@ -2420,7 +2429,7 @@ def check_cluster_name_not_reserved(
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(msg)
+            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c

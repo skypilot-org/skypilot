@@ -1368,10 +1368,17 @@ def exec(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
+def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
+
+    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
 
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
@@ -1417,7 +1424,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    cluster_records = core.status(refresh=refresh)
+    if clusters:
+        clusters = _get_glob_clusters(clusters)
+    else:
+        clusters = None
+    cluster_records = core.status(cluster_names=clusters, refresh=refresh)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -1447,6 +1458,50 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                    f'{colorama.Style.BRIGHT}sky status --refresh'
                    f'{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
+
+
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def cost_report(all: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show cost reports for each cluster.
+
+    The following fields for each cluster are recorded: cluster name,
+    resources, launched time, duration that cluster was up,
+    and total cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until the call
+    to status. This means if the cluster is UP, successive calls to report
+    will show increasing price. The estimated cost is calculated based on
+    the local cache of the cluster status, and may not be accurate for
+    the cluster with autostop/use_spot set or terminated/stopped
+    on the cloud console.
+    """
+
+    cluster_records = core.cost_report()
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
+
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        status_utils.show_cost_report_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
 
 
 @cli.command()
@@ -1622,22 +1677,48 @@ def logs(
 def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
+    bold = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
+    if not jobs and not all:
+        # Friendly message for usage like 'sky cancel 1' / 'sky cancel myclus'.
+        message = textwrap.dedent(f"""\
+          Use:
+            {bold}sky cancel <cluster_name> <job IDs>{reset}   -- cancel one or more jobs on a cluster
+            {bold}sky cancel <cluster_name> -a / --all{reset}  -- cancel all jobs on a cluster
+
+          Job IDs can be looked up by {bold}sky queue{reset}.""")
+        raise click.UsageError(message)
+
     if not yes:
         job_ids = ' '.join(map(str, jobs))
         plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} with ID{plural} {job_ids}'
+        job_identity_str = f'job{plural} {job_ids}'
         if all:
-            job_identity_str = 'all managed spot jobs'
-        job_identity_str += f' on {cluster}'
+            job_identity_str = 'all jobs'
+        job_identity_str += f' on cluster {cluster!r}'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
+
     try:
         core.cancel(cluster, all, jobs)
+    except exceptions.NotSupportedError:
+        # Friendly message for usage like 'sky cancel <spot controller> -a/<job
+        # id>'.
+        if all:
+            arg_str = '--all'
+        else:
+            arg_str = ' '.join(map(str, jobs))
+        error_str = ('Cancelling the spot controller\'s jobs is not allowed.'
+                     f'\nTo cancel spot jobs, use: sky spot cancel <spot '
+                     f'job IDs> [--all]'
+                     f'\nDo you mean: {bold}sky spot cancel {arg_str}{reset}')
+        click.echo(error_str)
+        sys.exit(1)
     except ValueError as e:
         raise click.UsageError(str(e))
-    except (exceptions.NotSupportedError, exceptions.ClusterNotUpError) as e:
+    except exceptions.ClusterNotUpError as e:
         click.echo(str(e))
         sys.exit(1)
 
@@ -2314,6 +2395,7 @@ def _down_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
+
         progress.stop()
         click.echo(message)
         if success_progress:

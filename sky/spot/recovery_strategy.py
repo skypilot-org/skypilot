@@ -160,11 +160,18 @@ class StrategyExecutor:
             except exceptions.InvalidClusterNameError as e:
                 # The cluster name is too long.
                 raise exceptions.ResourcesUnavailableError(str(e)) from e
+            except exceptions.ClusterSetUpError as e:
+                # When setup fails, do not retry, as it will likely fail again.
+                # The exception will be handled by the caller and set the job
+                # state to FAILED.
+                raise
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.
                 logger.info('Failed to launch the spot cluster with error: '
-                            f'{type(e)}: {e}')
+                            f'{common_utils.format_exception(e)})')
+                import traceback  # pylint: disable=import-outside-toplevel
+                logger.info(f'  Traceback: {traceback.format_exc()}')
                 retry_launch = True
                 exception = e
 
