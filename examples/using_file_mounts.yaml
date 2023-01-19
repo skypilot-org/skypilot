@@ -81,7 +81,7 @@ file_mounts:
 
 setup: |
   sudo apt update
-  sudo apt install tree
+  sudo apt install -y tree
 
 run: |
   set -ex

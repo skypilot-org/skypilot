@@ -460,6 +460,8 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     return common.get_image_id_from_tag_impl(_image_df, tag, region)
 
 
-def validate_image_tag(tag: str, region: Optional[str]) -> bool:
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
-    return common.is_image_tag_valid_impl(_image_df, tag, region)
+    # GCP images are not region-specific.
+    del region  # Unused.
+    return common.is_image_tag_valid_impl(_image_df, tag, None)

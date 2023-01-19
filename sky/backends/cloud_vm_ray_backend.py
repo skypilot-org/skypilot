@@ -2897,10 +2897,9 @@ class CloudVmRayBackend(backends.Backend):
                     terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
                         cluster_name, zone, log_abs_path)
                 else:
-                    query_cmd = (
-                        f'gcloud compute instances list --filter='
-                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                        f'--zones={zone} --format=value\\(name\\)')
+                    query_cmd = (f'gcloud compute instances list --filter='
+                                 f'"(labels.ray-cluster-name={cluster_name})" '
+                                 f'--zones={zone} --format=value\\(name\\)')
                     terminate_cmd = (
                         f'gcloud compute instances delete --zone={zone}'
                         f' --quiet $({query_cmd})')
@@ -2956,8 +2955,14 @@ class CloudVmRayBackend(backends.Backend):
             #   never launched and the errors are related to pre-launch
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
+            #
+            # '(ResourceGroupNotFound)': this indicates the resource group on
+            #   Azure is not found. That means the cluster is already deleted
+            #   on the cloud. So it's safe & good UX to not print a failure
+            #   message.
             elif ('TPU must be specified.' not in stderr and
-                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
+                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
+                  '(ResourceGroupNotFound)' not in stderr):
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',

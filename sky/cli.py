@@ -1368,10 +1368,17 @@ def exec(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
+def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
+
+    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
 
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
@@ -1417,7 +1424,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    cluster_records = core.status(refresh=refresh)
+    if clusters:
+        clusters = _get_glob_clusters(clusters)
+    else:
+        clusters = None
+    cluster_records = core.status(cluster_names=clusters, refresh=refresh)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
