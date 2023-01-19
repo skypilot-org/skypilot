@@ -251,32 +251,25 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 
 
 # Fetch Images
-_GPU_TO_IMAGE_DATE = {
-    # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-    # Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
-    # does not have the latest PyTorch version):
-    # GPU:
-    # Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
-    #   Nvidia driver: 510.47.03, CUDA Version: 11.6
-    #
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
-    #
-    # K80:
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-    #
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
-    # Use a list to fallback to newer AMI, as some regions like ap-southeast-3 does not have
-    # the older AMI.
-    'gpu': ['20230103', '20221114'],
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-    # Downgrade the AMI for K80 due as it is only compatible with
-    # NVIDIA driver lower than 470.
-    'k80': ['20211208']
-}
-_UBUNTU_VERSION = ['18.04', '20.04']
-# Fallback list of PyTorch versions to try.
-# PyTorch 1.13.1 is only available for Ubuntu 20.04.
-_PYTORCH_VERSION = ['1.13.1', '1.10.0']
+# https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
+# Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
+# does not have the latest PyTorch version):
+# GPU:
+# Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
+#   Nvidia driver: 510.47.03, CUDA Version: 11.6
+#
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
+#
+# K80:
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+#
+# Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
+_GPU_UBUNTU_DATE_PYTORCH = [
+    ('gpu', '20.04', '20230103', '1.13.1'),
+    ('gpu', '18.04', '20221114', '1.10.0'),
+    ('k80', '20.04', '20211208', '1.10.0'),
+    ('k80', '18.04', '20211208', '1.10.0'),
+]
 
 
 def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
@@ -301,37 +294,25 @@ def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
 
 @ray.remote
 def _get_image_row(
-        region: str, ubuntu_version: str,
-        cpu_or_gpu: str) -> Tuple[str, str, str, str, Optional[str], str]:
-    print(f'Getting image for {region}, {ubuntu_version}, {cpu_or_gpu}')
-    creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
-    date = None
-    for date in creation_date:
-        for pytorch_version in _PYTORCH_VERSION:
-            image_id = _fetch_image_id(region, ubuntu_version, date,
-                                       pytorch_version)
-            if image_id:
-                break
-        if image_id:
-            break
-    else:
+        region: str, gpu: str, ubuntu_version: str, date: str,
+        pytorch_version) -> Tuple[str, str, str, str, Optional[str], str]:
+    print(f'Getting image for {region}, {ubuntu_version}, {gpu}')
+    image_id = _fetch_image_id(region, ubuntu_version, date, pytorch_version)
+    if image_id is None:
         # not found
-        print(
-            f'Failed to find image for {region}, {ubuntu_version}, {cpu_or_gpu}'
-        )
-    if date is None:
-        raise ValueError(f'Could not find the creation date for {cpu_or_gpu}.')
-    tag = f'skypilot:{cpu_or_gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
+        print(f'Failed to find image for {region}, {ubuntu_version}, {gpu}')
+    tag = f'skypilot:{gpu}-ubuntu-{ubuntu_version.replace(".", "")}'
     return tag, region, 'ubuntu', ubuntu_version, image_id, date
 
 
 def get_all_regions_images_df(regions: Set[str]) -> pd.DataFrame:
     workers = []
-    for cpu_or_gpu in _GPU_TO_IMAGE_DATE:
-        for ubuntu_version in _UBUNTU_VERSION:
-            for region in regions:
-                workers.append(
-                    _get_image_row.remote(region, ubuntu_version, cpu_or_gpu))
+    for (gpu, ubuntu_version, date,
+         pytorch_version) in _GPU_UBUNTU_DATE_PYTORCH:
+        for region in regions:
+            workers.append(
+                _get_image_row.remote(region, gpu, ubuntu_version, date,
+                                      pytorch_version))
 
     results = ray.get(workers)
     results = pd.DataFrame(
