@@ -2,11 +2,12 @@
 
 import functools
 import getpass
-import inspect
 import hashlib
+import inspect
 import json
-import random
 import os
+import platform
+import random
 import re
 import socket
 import sys
@@ -339,3 +340,21 @@ def remove_color(s: str):
         A string without color.
     """
     return _COLOR_PATTERN.sub('', s)
+
+
+def remove_file_if_exists(path: str):
+    """Delete a file if it exists.
+
+    Args:
+        path: The path to the file.
+    """
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        logger.debug(f'Tried to remove {path} but failed to find it. Skip.')
+        pass
+
+
+def is_wsl() -> bool:
+    """Detect if running under Windows Subsystem for Linux (WSL)."""
+    return 'microsoft' in platform.uname()[3].lower()

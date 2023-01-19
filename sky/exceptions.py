@@ -43,6 +43,11 @@ class ClusterNotUpError(Exception):
     pass
 
 
+class ClusterSetUpError(Exception):
+    """Raised when a cluster has setup error."""
+    pass
+
+
 class NotSupportedError(Exception):
     """Raised when a feature is not supported."""
     pass

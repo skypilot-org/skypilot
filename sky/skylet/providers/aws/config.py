@@ -36,7 +36,6 @@ SKYPILOT = "skypilot"
 DEFAULT_SKYPILOT_INSTANCE_PROFILE = SKYPILOT + "-v1"
 DEFAULT_SKYPILOT_IAM_ROLE = SKYPILOT + "-v1"
 
-
 # V61.0 has CUDA 11.2
 DEFAULT_AMI_NAME = "AWS Deep Learning AMI (Ubuntu 18.04) V61.0"
 
@@ -239,10 +238,13 @@ def bootstrap_aws(config, skypilot_iam_role: bool = False):
 
     # If NetworkInterfaces are provided, extract the necessary fields for the
     # config stages below.
+    # This basically adds two fields 'SubnetIds', 'SecurityGroupIds' to the
+    # node_config dict.
     config = _configure_from_network_interfaces(config)
 
     # The head node needs to have an IAM role that allows it to create further
     # EC2 instances.
+    #
     # If skypilot_iam_role is True, we use our own IAM role for both head and
     # workers.
     config = _configure_iam_role(config, skypilot_iam_role=skypilot_iam_role)
@@ -282,7 +284,9 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
             # SkyPilot: let the workers use the same role as the head node, so that they
             # can access private S3 buckets.
             for node_type in config["available_node_types"].values():
-                node_type["node_config"]["IamInstanceProfile"] = head_node_config['IamInstanceProfile']
+                node_type["node_config"]["IamInstanceProfile"] = head_node_config[
+                    "IamInstanceProfile"
+                ]
         return config
     _set_config_info(head_instance_profile_src="default")
 
@@ -333,7 +337,6 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
                     "arn:aws:iam::aws:policy/AmazonS3FullAccess",
                 ],
             )
-            
 
             iam.create_role(
                 RoleName=role_name, AssumeRolePolicyDocument=json.dumps(policy_doc)
@@ -365,10 +368,10 @@ def _configure_iam_role(config, skypilot_iam_role: bool):
                         "Effect": "Allow",
                         "Action": "iam:GetInstanceProfile",
                         "Resource": profile.arn,
-                    }
+                    },
                 ]
             }
-            if skypilot_iam_role:       
+            if skypilot_iam_role:
                 role.Policy("SkyPilotPassRolePolicy").put(
                     PolicyDocument=json.dumps(skypilot_pass_role_policy_doc)
                 )
@@ -452,7 +455,7 @@ def _configure_key_pair(config):
             break
 
     if not key:
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             "No matching local key file for any of the key pairs in this "
             "account with ids from 0..{}. "
             "Consider deleting some unused keys pairs from your account.",
@@ -519,6 +522,14 @@ def _usable_subnet_ids(
         user_specified_subnet_ids = {s.subnet_id for s in user_specified_subnets}
         return user_specified_subnet_ids - current_subnet_ids
 
+    def _subnet_name_tag_contains(subnet, substr: str) -> bool:
+        tags = subnet.meta.data["Tags"]
+        for tag in tags:
+            if tag["Key"] == "Name":
+                name = tag["Value"]
+                return substr in name
+        return False
+
     try:
         candidate_subnets = (
             user_specified_subnets
@@ -529,12 +540,55 @@ def _usable_subnet_ids(
             candidate_subnets = [
                 s for s in candidate_subnets if s.vpc_id == vpc_id_of_sg
             ]
+
         subnets = sorted(
             (
                 s
                 for s in candidate_subnets
                 if s.state == "available"
-                and (use_internal_ips or s.map_public_ip_on_launch)
+                and (
+                    # If using internal IPs, the subnets must not assign public
+                    # IPs. Additionally, requires that each eligible subnet
+                    # contain a name tag which includes the substring
+                    # 'private'. This is a HACK; see below.
+                    #
+                    # Reason: the first two checks alone are not enough. For
+                    # example, the VPC creation helper from AWS will create a
+                    # "public" and a "private" subnet per AZ. However, the
+                    # created "public" subnet by default has
+                    # map_public_ip_on_launch set to False as well. This means
+                    # we could've launched in that subnet, which will make any
+                    # instances not able to send outbound traffic to the
+                    # Internet, due to the way route tables/gateways are set up
+                    # for that public subnet. The "public" subnets are NOT
+                    # intended to host data plane VMs, while the "private"
+                    # subnets are.
+                    #
+                    # An alternative to the subnet name hack is to ensure
+                    # there's a route (dest=0.0.0.0/0, target=nat-*) in the
+                    # subnet's route table so that outbound connections
+                    # work. This seems hard to do, given a ec2.Subnet
+                    # object. (Easy to see in console though.) So we opt for
+                    # the subnet name requirement for now.
+                    (
+                        use_internal_ips
+                        and not s.map_public_ip_on_launch
+                        and _subnet_name_tag_contains(s, "private")
+                    )
+                    or
+                    # Or if using public IPs, the subnets must assign public
+                    # IPs.
+                    (not use_internal_ips and s.map_public_ip_on_launch)
+                    # NOTE: SkyPilot also changes the semantics of
+                    # 'use_internal_ips' through the above two conditions.
+                    # Previously, this flag by itself does not enforce only
+                    # choosing subnets that do not assign public IPs.  Now we
+                    # do so.
+                    #
+                    # In both before and now, this flag makes Ray communicate
+                    # between the client and the head node using the latter's
+                    # private ip.
+                )
             ),
             reverse=True,  # sort from Z-A
             key=lambda subnet: subnet.availability_zone,
@@ -544,16 +598,16 @@ def _usable_subnet_ids(
         raise exc
 
     if not subnets:
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             f"No usable subnets found for node type {node_type_key}, try "
             "manually creating an instance in your specified region to "
-            "populate the list of subnets and trying this again.\n"
+            "populate the list of subnets and trying this again. "
             "Note that the subnet must map public IPs "
             "on instance launch unless you set `use_internal_ips: true` in "
             "the `provider` config."
         )
     elif _are_user_subnets_pruned(subnets):
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             f"The specified subnets for node type {node_type_key} are not "
             f"usable: {_get_pruned_subnets(subnets)}"
         )
@@ -567,18 +621,20 @@ def _usable_subnet_ids(
             if s.availability_zone == az
         ]
         if not subnets:
-            cli_logger.abort(
+            _skypilot_log_error_and_exit_for_failover(
                 f"No usable subnets matching availability zone {azs} found "
-                f"for node type {node_type_key}.\nChoose a different "
+                f"for node type {node_type_key}. Choose a different "
                 "availability zone or try manually creating an instance in "
                 "your specified region to populate the list of subnets and "
-                "trying this again."
+                "trying this again. If you have set `use_internal_ips`, check "
+                "that this zone has a subnet that (1) has the substring 'private' in its name tag "
+                "and (2) does not assign public IPs (`map_public_ip_on_launch` is False)."
             )
         elif _are_user_subnets_pruned(subnets):
-            cli_logger.abort(
+            _skypilot_log_error_and_exit_for_failover(
                 f"MISMATCH between specified subnets and Availability Zones! "
                 "The following Availability Zones were specified in the "
-                f"`provider section`: {azs}.\n The following subnets for node "
+                f"`provider section`: {azs}. The following subnets for node "
                 f"type `{node_type_key}` have no matching availability zone: "
                 f"{list(_get_pruned_subnets(subnets))}."
             )
@@ -592,11 +648,10 @@ def _usable_subnet_ids(
     subnets = [s.subnet_id for s in subnets if s.vpc_id == subnets[0].vpc_id]
     if _are_user_subnets_pruned(subnets):
         subnet_vpcs = {s.subnet_id: s.vpc_id for s in user_specified_subnets}
-        cli_logger.abort(
+        _skypilot_log_error_and_exit_for_failover(
             f"Subnets specified in more than one VPC for node type `{node_type_key}`! "
             f"Please ensure that all subnets share the same VPC and retry your "
-            "request. Subnet VPCs: {}",
-            subnet_vpcs,
+            f"request. Subnet VPCs: {subnet_vpcs}"
         )
     return subnets, first_subnet_vpc_id
 
@@ -610,7 +665,11 @@ def _configure_subnet(config):
     for node_type in config["available_node_types"].values():
         node_config = node_type["node_config"]
         sg_ids.extend(node_config.get("SecurityGroupIds", []))
-    if sg_ids:
+
+    if "vpc_name" in config["provider"]:
+        # NOTE: This is a new field added by SkyPilot and parsed by our own AWSNodeProvider.
+        vpc_id_of_sg = _get_vpc_id_by_name(config["provider"]["vpc_name"], config)
+    elif sg_ids:
         vpc_id_of_sg = _get_vpc_id_of_sg(sg_ids, config)
     else:
         vpc_id_of_sg = None
@@ -618,7 +677,7 @@ def _configure_subnet(config):
     # map from node type key -> source of SubnetIds field
     subnet_src_info = {}
     _set_config_info(subnet_src=subnet_src_info)
-    all_subnets = list(ec2.subnets.all())
+    all_subnets = list(ec2.subnets.all())  # All subnets of this region.
     # separate node types with and without user-specified subnets
     node_types_subnets = []
     node_types_no_subnets = []
@@ -665,6 +724,44 @@ def _configure_subnet(config):
     return config
 
 
+def _skypilot_log_error_and_exit_for_failover(error: str) -> None:
+    """Logs an message then raises a specific RuntimeError to trigger failover.
+
+    Mainly used for handling VPC/subnet errors before nodes are launched.
+    """
+    # NOTE: keep. The backend looks for this to know no nodes are launched.
+    prefix = "SKYPILOT_ERROR_NO_NODES_LAUNCHED: "
+    raise RuntimeError(prefix + error)
+
+
+def _get_vpc_id_by_name(vpc_name: str, config: Dict[str, Any]) -> str:
+    """Returns the VPC ID of the unique VPC with a given name.
+
+    Exits with code 1 if:
+      - No VPC with the given name is found in the current region.
+      - More than 1 VPC with the given name are found in the current region.
+    """
+    ec2 = _resource("ec2", config)
+    # Look in the "Name" tag (shown as Name column in console).
+    filters = [{"Name": "tag:Name", "Values": [vpc_name]}]
+    vpcs = [vpc for vpc in ec2.vpcs.filter(Filters=filters)]
+    if not vpcs:
+        _skypilot_log_error_and_exit_for_failover(
+            f"No VPC with name {vpc_name!r} is found "
+            f'in {config["provider"]["region"]}. '
+            "To fix: specify a correct VPC name."
+        )
+    elif len(vpcs) > 1:
+        _skypilot_log_error_and_exit_for_failover(
+            f"Multiple VPCs with name {vpc_name!r} "
+            f'found in {config["provider"]["region"]}: {vpcs}. '
+            "It is ambiguous as to which VPC to use. To fix: specify a "
+            "VPC name that is uniquely identifying."
+        )
+    assert len(vpcs) == 1, vpcs
+    return vpcs[0].id
+
+
 def _get_vpc_id_of_sg(sg_ids: List[str], config: Dict[str, Any]) -> str:
     """Returns the VPC id of the security groups with the provided security
     group ids.
@@ -683,7 +780,9 @@ def _get_vpc_id_of_sg(sg_ids: List[str], config: Dict[str, Any]) -> str:
 
     multiple_vpc_msg = (
         "All security groups specified in the cluster config "
-        "should belong to the same VPC."
+        "should belong to the same VPC.\n"
+        f"Security group IDs: {sg_ids}\n"
+        f"Their VPC IDs (expected 1 element): {vpc_ids}\n"
     )
     cli_logger.doassert(len(vpc_ids) <= 1, multiple_vpc_msg)
     assert len(vpc_ids) <= 1, multiple_vpc_msg
@@ -745,7 +844,7 @@ def _check_ami(config):
         node_ami = node_config.get("ImageId", "").lower()
         if node_ami in ["", "latest_dlami"]:
             if not default_ami:
-                cli_logger.abort(
+                _skypilot_log_error_and_exit_for_failover(
                     f"Node type `{key}` has no ImageId in its node_config "
                     f"and no default AMI is available for the region `{region}`. "
                     "ImageId will need to be set manually in your cluster config."
