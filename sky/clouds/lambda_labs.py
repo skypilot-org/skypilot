@@ -204,7 +204,7 @@ class Lambda(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
-            lambda_utils.LambdaLabsClient().ls()
+            lambda_utils.LambdaLabsClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaLabsError):
             return False, ('Failed to access Lambda Labs with credentials. '
                            'To configure credentials, go to:\n    '

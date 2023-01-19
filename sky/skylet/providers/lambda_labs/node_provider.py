@@ -50,6 +50,8 @@ class LambdaNodeProvider(NodeProvider):
         self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
 
         # If tag file does not exist on head, create it and add basic tags.
+        # This is a hack to make sure that ray on head can access some
+        # important tags.
         # TODO(ewzeng): change when Lambda Labs adds tag support.
         ray_yaml_path = os.path.expanduser(REMOTE_RAY_YAML)
         if os.path.exists(ray_yaml_path) and not os.path.exists(
@@ -66,7 +68,7 @@ class LambdaNodeProvider(NodeProvider):
                 head_node_config.update(head_config["node_config"])
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
-            vms = self.lambda_client.ls().get('data', [])
+            vms = self.lambda_client.list_instances().get('data', [])
             for node in vms:
                 self.metadata[node['id']] = {'tags':
                     {
@@ -89,7 +91,7 @@ class LambdaNodeProvider(NodeProvider):
                     return False
             return True
 
-        vms = self.lambda_client.ls().get('data', [])
+        vms = self.lambda_client.list_instances().get('data', [])
         vms = [
             node for node in vms
             if node['name'] == self.cluster_name
@@ -156,10 +158,10 @@ class LambdaNodeProvider(NodeProvider):
         # create the node
         ttype = node_config['InstanceType']
         region = self.provider_config['region']
-        vm_resp = self.lambda_client.up(instance_type=ttype,
-                                        region=region,
-                                        quantity=1,
-                                        name=self.cluster_name)
+        vm_resp = self.lambda_client.create_instances(instance_type=ttype,
+                                                      region=region,
+                                                      quantity=1,
+                                                      name=self.cluster_name)
         vm_list = vm_resp.get('data', []).get('instance_ids', [])
         assert len(vm_list) == 1, len(vm_list)
         vm_id = vm_list[0]
@@ -168,7 +170,7 @@ class LambdaNodeProvider(NodeProvider):
         # Wait for booting to finish
         # TODO(ewzeng): For multi-node, launch all vms first and then wait.
         while True:
-            vms = self.lambda_client.ls().get('data', [])
+            vms = self.lambda_client.list_instances().get('data', [])
             for vm in vms:
                 if vm['id'] == vm_id and vm['status'] == 'active':
                     return
@@ -183,7 +185,7 @@ class LambdaNodeProvider(NodeProvider):
 
     def terminate_node(self, node_id):
         """Terminates the specified node."""
-        self.lambda_client.rm(node_id)
+        self.lambda_client.remove_instances(node_id)
         self.metadata[node_id] = None
 
     def _get_node(self, node_id):

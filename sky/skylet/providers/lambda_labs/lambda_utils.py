@@ -8,7 +8,7 @@ API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 
 
 class LambdaLabsError(Exception):
-    __module__ = 'builtins'
+    pass
 
 
 class Metadata:
@@ -20,12 +20,11 @@ class Metadata:
         # operations, but this should be improved in the future.
         self.path = os.path.expanduser(f'{path_prefix}-{cluster_name}')
         self._metadata = {}
+        # In case parent directory does not exist
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
         if os.path.exists(self.path):
             with open(self.path, 'r') as f:
                 self._metadata = json.load(f)
-        else:
-            # In case parent directory does not exist
-            os.makedirs(os.path.dirname(self.path), exist_ok=True)
 
     def __getitem__(self, instance_id):
         return self._metadata.get(instance_id)
@@ -77,12 +76,12 @@ class LambdaLabsClient:
         self.ssh_key_name = self._credentials.get('ssh_key_name', None)
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
-    def up(self,
-           instance_type='gpu_1x_a100_sxm4',
-           region='us-east-1',
-           quantity=1,
-           name=''):
-        """Start a new instance."""
+    def create_instances(self,
+                         instance_type='gpu_1x_a100_sxm4',
+                         region='us-east-1',
+                         quantity=1,
+                         name=''):
+        """Launch new instances."""
         assert self.ssh_key_name is not None
 
         # Optimization:
@@ -90,7 +89,7 @@ class LambdaLabsClient:
         # launch requests are rate limited at ~1 request every 10 seconds.
         # So don't use launch requests to check availability.
         # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
-        available_regions = self.ls_catalog()['data'][instance_type]\
+        available_regions = self.list_catalog()['data'][instance_type]\
                 ['regions_with_capacity_available']
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
@@ -120,7 +119,7 @@ class LambdaLabsClient:
         raise_lambda_error(response)
         return response.json()
 
-    def rm(self, *instance_ids):
+    def remove_instances(self, *instance_ids):
         """Terminate instances."""
         data = json.dumps({
             'instance_ids': [
@@ -133,7 +132,7 @@ class LambdaLabsClient:
         raise_lambda_error(response)
         return response.json()
 
-    def ls(self):
+    def list_instances(self):
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances', headers=self.headers)
         raise_lambda_error(response)
@@ -154,7 +153,7 @@ class LambdaLabsClient:
             f.write(f'api_key={self.api_key}\n')
             f.write(f'ssh_key_name={self.ssh_key_name}\n')
 
-    def ls_catalog(self):
+    def list_catalog(self):
         """List offered instances and their availability."""
         response = requests.get(f'{API_ENDPOINT}/instance-types',
                                 headers=self.headers)
