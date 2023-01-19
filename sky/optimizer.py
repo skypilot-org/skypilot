@@ -74,7 +74,7 @@ class Optimizer:
         best_per_cloud = {}
         for cloud, clusters in clusters_per_cloud.items():
             if cloud != str(chosen_cluster.cloud):
-                best_per_cloud[cloud] = Optimizer._optimize(clusters)
+                best_per_cloud[cloud] = Optimizer._optimize(task, clusters)
 
         # Sort the best clusters by price.
         # The chosen cluster should be at the front of the list.
