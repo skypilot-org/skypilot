@@ -89,11 +89,11 @@ class Optimizer:
         return egress_time
 
     @staticmethod
-    def optimize(dag: 'dag_lib.Dag',
-                 minimize=OptimizeTarget.COST,
-                 blocked_launchable_resources: Optional[List[
-                     resources_lib.Resources]] = None,
-                 quiet: bool = False):
+    def optimize(
+            dag: 'dag_lib.Dag',
+            minimize=OptimizeTarget.COST,
+            blocked_resources: Optional[List[resources_lib.Resources]] = None,
+            quiet: bool = False):
         # This function is effectful: mutates every node in 'dag' by setting
         # node.best_resources if it is None.
         Optimizer._add_dummy_source_sink_nodes(dag)
@@ -101,7 +101,7 @@ class Optimizer:
             unused_best_plan = Optimizer._optimize_objective(
                 dag,
                 minimize_cost=minimize == OptimizeTarget.COST,
-                blocked_launchable_resources=blocked_launchable_resources,
+                blocked_resources=blocked_resources,
                 quiet=quiet)
         finally:
             # Make sure to remove the dummy source/sink nodes, even if the
@@ -202,8 +202,7 @@ class Optimizer:
     def _estimate_nodes_cost_or_time(
         topo_order: List[Task],
         minimize_cost: bool = True,
-        blocked_launchable_resources: Optional[List[
-            resources_lib.Resources]] = None,
+        blocked_resources: Optional[List[resources_lib.Resources]] = None,
     ) -> Tuple[_TaskToCostMap, _TaskToPerCloudCandidates]:
         """Estimates the cost/time of each task-resource mapping in the DAG.
 
@@ -236,7 +235,7 @@ class Optimizer:
                 launchable_resources, cloud_candidates = \
                     _fill_in_launchable_resources(
                         node,
-                        blocked_launchable_resources
+                        blocked_resources
                     )
                 node_to_candidate_map[node] = cloud_candidates
             else:
@@ -765,8 +764,7 @@ class Optimizer:
     def _optimize_objective(
         dag: 'dag_lib.Dag',
         minimize_cost: bool = True,
-        blocked_launchable_resources: Optional[List[
-            resources_lib.Resources]] = None,
+        blocked_resources: Optional[List[resources_lib.Resources]] = None,
         quiet: bool = False,
     ) -> Dict[Task, resources_lib.Resources]:
         """Finds the optimal task-resource mapping for the entire DAG.
@@ -785,7 +783,7 @@ class Optimizer:
             Optimizer._estimate_nodes_cost_or_time(
                 topo_order,
                 minimize_cost,
-                blocked_launchable_resources)
+                blocked_resources)
 
         if dag.is_chain():
             best_plan, best_total_objective = Optimizer._optimize_by_dp(
@@ -874,12 +872,12 @@ def _make_launchables_for_valid_region_zones(
 
 def _filter_out_blocked_launchable_resources(
         launchable_resources: List[resources_lib.Resources],
-        blocked_launchable_resources: List[resources_lib.Resources]):
+        blocked_resources: List[resources_lib.Resources]):
     """Whether the resources are blocked."""
     available_resources = []
     for resources in launchable_resources:
-        for blocked_resources in blocked_launchable_resources:
-            if resources.should_be_blocked_by(blocked_resources):
+        for blocked in blocked_resources:
+            if resources.should_be_blocked_by(blocked):
                 break
         else:  # non-blocked launchable resources. (no break)
             available_resources.append(resources)
@@ -888,7 +886,7 @@ def _filter_out_blocked_launchable_resources(
 
 def _fill_in_launchable_resources(
     task: Task,
-    blocked_launchable_resources: Optional[List[resources_lib.Resources]],
+    blocked_resources: Optional[List[resources_lib.Resources]],
     try_fix_with_sky_check: bool = True,
 ) -> Tuple[Dict[resources_lib.Resources, List[resources_lib.Resources]],
            _PerCloudCandidates]:
@@ -896,16 +894,16 @@ def _fill_in_launchable_resources(
     enabled_clouds = global_user_state.get_enabled_clouds()
     launchable = collections.defaultdict(list)
     cloud_candidates = collections.defaultdict(resources_lib.Resources)
-    if blocked_launchable_resources is None:
-        blocked_launchable_resources = []
+    if blocked_resources is None:
+        blocked_resources = []
     for resources in task.get_resources():
         if resources.cloud is not None and not _cloud_in_list(
                 resources.cloud, enabled_clouds):
             if try_fix_with_sky_check:
                 # Explicitly check again to update the enabled cloud list.
                 check.check(quiet=True)
-                return _fill_in_launchable_resources(
-                    task, blocked_launchable_resources, False)
+                return _fill_in_launchable_resources(task, blocked_resources,
+                                                     False)
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError(
                     f'Task {task} requires {resources.cloud} which is not '
@@ -964,6 +962,6 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Style.RESET_ALL}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
-            launchable[resources], blocked_launchable_resources)
+            launchable[resources], blocked_resources)
 
     return launchable, cloud_candidates

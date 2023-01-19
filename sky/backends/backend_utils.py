@@ -1882,6 +1882,7 @@ def _update_cluster_status_no_lock(
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
+                                                requested_resources=None,
                                                 ready=True,
                                                 is_launch=False)
         return record
@@ -1961,6 +1962,7 @@ def _update_cluster_status_no_lock(
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
+                                                requested_resources=None,
                                                 ready=False,
                                                 is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
