@@ -26,6 +26,7 @@ pip install -r requirements-dev.txt
 ### Testing
 To run smoke tests (NOTE: Running all smoke tests launches ~20 clusters):
 ```
+# Run all tests except for AWS
 pytest tests/test_smoke.py
 
 # Re-run last failed tests
@@ -34,8 +35,8 @@ pytest --lf
 # Run one of the smoke tests
 pytest tests/test_smoke.py::test_minimal
 
-# Enable test for AWS
-pytest tests/test_smoke.py --enable-aws
+# Only run test for AWS + generic tests
+pytest tests/test_smoke.py --aws
 
 # Change cloud for generic tests to aws
 pytest tests/test_smoke.py --generic-cloud aws

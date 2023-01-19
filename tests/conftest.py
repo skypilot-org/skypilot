@@ -2,13 +2,22 @@ import os
 import pytest
 import tempfile
 import textwrap
+from typing import List
+
 
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
 # https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 
-clouds = ['aws', 'gcp', 'azure']
+# By default, only run generic tests and cloud-specific tests for GCP and Azure,
+# due to the cloud credit limit for the development account.
+# To only run tests for a specific cloud (as well as generic tests), use
+# --aws, --gcp, or --azure.
+# A "generic test" tests a generic functionality (e.g., autostop) that
+# should work on any cloud we support. The cloud used for such a test
+# is controlled by `--generic-cloud` (typically you do not need to set it).
+all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure']
 default_clouds_to_run = ['gcp', 'azure']
 
 
@@ -18,11 +27,7 @@ def pytest_addoption(parser):
                      action='store_true',
                      default=False,
                      help='run slow tests')
-    # By default, only run tests for GCP and Azure, due to the cloud credit
-    # limit for the development account.
-    # To only run tests for a specific cloud (as well as generic tests), use
-    # --aws, --gcp, or --azure.
-    for cloud in clouds:
+    for cloud in all_clouds_in_smoke_tests:
         parser.addoption(f'--{cloud}',
                          action='store_true',
                          default=False,
@@ -31,7 +36,7 @@ def pytest_addoption(parser):
         '--generic-cloud',
         type=str,
         default='gcp',
-        choices=clouds,
+        choices=all_clouds_in_smoke_tests,
         help='Cloud to use for generic tests. If the generic cloud is '
         'not within the clouds to be run, it will be reset to the first '
         'cloud in the list of the clouds to be run.')
@@ -39,14 +44,14 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
-    for cloud in clouds:
+    for cloud in all_clouds_in_smoke_tests:
         config.addinivalue_line('markers',
                                 f'{cloud}: mark test as {cloud} specific')
 
 
-def _get_cloud_to_run(config):
+def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
-    for cloud in clouds:
+    for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
             cloud_to_run.append(cloud)
     if not cloud_to_run:
@@ -57,7 +62,7 @@ def _get_cloud_to_run(config):
 def pytest_collection_modifyitems(config, items):
     skip_slow = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks = {}
-    for cloud in clouds:
+    for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
 
@@ -66,7 +71,7 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_slow)
-        for cloud in clouds:
+        for cloud in all_clouds_in_smoke_tests:
             if cloud in item.keywords and cloud not in cloud_to_run:
                 item.add_marker(skip_marks[cloud])
 
