@@ -44,7 +44,6 @@ from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
-from sky.skylet.providers.gcp import config as gcp_config
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -905,6 +904,7 @@ def write_cluster_config(
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
 
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
         config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
         vpc_name = gcp_config.get_usable_vpc(config)
 

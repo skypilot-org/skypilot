@@ -506,7 +506,13 @@ def _check_firewall_rules(vpc_name, config, compute):
 
     def _get_refined_rule(rule):
         KEY_TO_COMPARE = {"sourceRanges", "allowed", "direction"}
-        return {k: rule[k] for k in KEY_TO_COMPARE}
+        refined_rule = {}
+        for k in KEY_TO_COMPARE:
+            if k == "allowed":
+                refined_rule[k] = sorted(rule[k], key=lambda x: x["IPProtocol"])
+            else:
+                refined_rule[k] = rule[k]
+        return refined_rule
 
     required_rules = list(map(_get_refined_rule, required_rules))
     effective_rules = list(map(_get_refined_rule, effective_rules))
