@@ -9,38 +9,29 @@ import textwrap
 # https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 
 clouds = ['aws', 'gcp', 'azure']
+default_clouds_to_run = ['gcp', 'azure']
 
 
 def pytest_addoption(parser):
+    # tests marked as `slow` will be skipped by default, use --runslow to run
     parser.addoption('--runslow',
                      action='store_true',
                      default=False,
                      help='run slow tests')
-    # All markers (cluods/generic) except for `slow` are enabled by default.
-    # To disable a cloud, use `--disable-<cloud>`. The generic tests are
-    # cloud agnostic and can be run on any cloud, it is possible to specify
-    # which cloud to use with `--generic-cloud` for generic tests and
-    # `--generic-spot-cloud` for generic spot tests.
+    # By default, only run tests for GCP and Azure, due to the cloud credit
+    # limit for the development account.
+    # To only run tests for a specific cloud (as well as generic tests), use
+    # --aws, --gcp, or --azure.
     for cloud in clouds:
-        parser.addoption(
-            f'--enable-{cloud}',
-            action='store_true',
-            default=True,
-            help=f'enable {cloud.upper()} for tests, default: True')
-        parser.addoption(f'--disable-{cloud}',
-                         action='store_false',
-                         dest=f'enable_{cloud}',
-                         help=f'disable {cloud.upper()} for tests')
+        parser.addoption(f'--{cloud}',
+                         action='store_true',
+                         default=False,
+                         help=f'Only run {cloud.upper()} tests')
     parser.addoption('--generic-cloud',
                      type=str,
                      default='gcp',
                      choices=clouds,
                      help='cloud to use for generic tests')
-    parser.addoption('--generic-spot-cloud',
-                     type=str,
-                     default='gcp',
-                     choices=clouds,
-                     help='cloud to use for generic spot tests')
 
 
 def pytest_configure(config):
@@ -50,32 +41,40 @@ def pytest_configure(config):
                                 f'{cloud}: mark test as {cloud} specific')
 
 
+def _get_cloud_to_run(config):
+    cloud_to_run = []
+    for cloud in clouds:
+        if config.getoption(f'--{cloud}'):
+            cloud_to_run.append(cloud)
+    if not cloud_to_run:
+        cloud_to_run = default_clouds_to_run
+    return cloud_to_run
+
+
 def pytest_collection_modifyitems(config, items):
     skip_slow = pytest.mark.skip(reason='need --runslow option to run')
-    skip_aws = pytest.mark.skip(reason='--no-aws is set, skip to run aws tests')
-    skip_gcp = pytest.mark.skip(reason='--no-gcp is set, skip to run gcp tests')
-    skip_azure = pytest.mark.skip(
-        reason='--no-azure is set, skipped run azure tests')
+    skip_marks = {}
+    for cloud in clouds:
+        skip_marks[cloud] = pytest.mark.skip(
+            reason=f'tests for {cloud} is skipped, try setting --{cloud}')
+
+    cloud_to_run = _get_cloud_to_run(config)
 
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_slow)
-        if 'aws' in item.keywords and not config.getoption('--enable-aws'):
-            item.add_marker(skip_aws)
-        if 'gcp' in item.keywords and not config.getoption('--enable-gcp'):
-            item.add_marker(skip_gcp)
-        if 'azure' in item.keywords and not config.getoption('--enable-azure'):
-            item.add_marker(skip_azure)
+        for cloud in clouds:
+            if cloud in item.keywords and cloud not in cloud_to_run:
+                item.add_marker(skip_marks[cloud])
 
 
 @pytest.fixture
 def generic_cloud(request) -> str:
-    return request.config.getoption('--generic-cloud')
-
-
-@pytest.fixture
-def generic_spot_cloud(request) -> str:
-    return request.config.getoption('--generic-spot-cloud')
+    c = request.config.getoption('--generic-cloud')
+    cloud_to_run = _get_cloud_to_run(request.config)
+    if c not in cloud_to_run:
+        c = cloud_to_run[0]
+    return c
 
 
 def pytest_sessionstart(session):

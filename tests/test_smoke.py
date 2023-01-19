@@ -154,7 +154,6 @@ def test_example_app():
 
 
 # ---------- A minimal task ----------
-@pytest.mark.generic
 def test_minimal(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -485,7 +484,6 @@ def test_image_no_conda():
 
 
 # ------------ Test stale job ------------
-@pytest.mark.generic
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -563,7 +561,6 @@ def test_gcp_stale_job_manual_restart():
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
-@pytest.mark.generic
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -578,7 +575,6 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
-@pytest.mark.generic
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -651,7 +647,6 @@ def test_gcp_storage_mounts():
 
 
 # ---------- CLI logs ----------
-@pytest.mark.generic
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
     timestamp = time.time()
@@ -674,7 +669,6 @@ def test_cli_logs(generic_cloud: str):
 
 
 # ---------- Job Queue. ----------
-@pytest.mark.generic
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -701,7 +695,6 @@ def test_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.generic
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -738,7 +731,6 @@ def test_job_queue_multinode(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.generic
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -759,7 +751,6 @@ def test_large_job_queue(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
-@pytest.mark.generic
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -780,7 +771,6 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
-@pytest.mark.generic
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -857,7 +847,6 @@ def test_tpu_vm_pod():
 
 
 # ---------- Simple apps. ----------
-@pytest.mark.generic
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -874,7 +863,6 @@ def test_multi_hostname(generic_cloud: str):
 
 
 # ---------- Task: n=2 nodes with setups. ----------
-@pytest.mark.generic
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -938,7 +926,6 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
-@pytest.mark.generic
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -994,7 +981,6 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
-@pytest.mark.generic
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1073,7 +1059,6 @@ def test_cancel_azure():
 
 
 # ---------- Testing `sky cancel` ----------
-@pytest.mark.generic
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1097,14 +1082,13 @@ def test_cancel_pytorch(generic_cloud: str):
 
 
 # ---------- Testing use-spot option ----------
-@pytest.mark.generic_spot
-def test_use_spot(generic_spot_cloud: str):
+def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
     test = Test(
         'use-spot',
         [
-            f'sky launch -c {name} --cloud {generic_spot_cloud} tests/test_yamls/minimal.yaml --use-spot -y',
+            f'sky launch -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml --use-spot -y',
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
@@ -1115,8 +1099,7 @@ def test_use_spot(generic_spot_cloud: str):
 
 
 # ---------- Testing managed spot ----------
-@pytest.mark.generic_spot
-def test_spot(generic_spot_cloud: str):
+def test_spot(generic_cloud: str):
     """Test the spot yaml."""
     name = _get_cluster_name()
     cancel_command = (
@@ -1124,8 +1107,8 @@ def test_spot(generic_spot_cloud: str):
     test = Test(
         'managed-spot',
         [
-            f'sky spot launch -n {name}-1 --cloud {generic_spot_cloud} examples/managed_spot.yaml -y -d',
-            f'sky spot launch -n {name}-2 --cloud {generic_spot_cloud} examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-1 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
+            f'sky spot launch -n {name}-2 --cloud {generic_cloud} examples/managed_spot.yaml -y -d',
             'sleep 5',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-1 | head -n1 | grep "STARTING\|RUNNING"',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "STARTING\|RUNNING"',
@@ -1140,14 +1123,13 @@ def test_spot(generic_spot_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.generic
-def test_spot_failed_setup(generic_spot_cloud: str):
+def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
     name = _get_cluster_name()
     test = Test(
         'spot-failed-setup',
         [
-            f'sky spot launch -n {name} --cloud {generic_spot_cloud} -y -d tests/test_yamls/failed_setup.yaml',
+            f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 200',
             # Make sure the job failed quickly.
             f's=$(sky spot queue); echo "$s"; echo; echo; echo "$s" | grep {name} | head -n1 | grep "FAILED"',
@@ -1221,14 +1203,13 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
-@pytest.mark.generic_spot
-def test_spot_recovery_default_resources(generic_spot_cloud: str):
+def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
     name = _get_cluster_name()
     test = Test(
         'managed-spot-recovery-default-resources',
         [
-            f'sky spot launch -n {name} --cloud {generic_spot_cloud} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            f'sky spot launch -n {name} --cloud {generic_cloud} "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
             'sleep 360',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|RECOVERING"',
         ],
@@ -1418,8 +1399,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
-@pytest.mark.generic_spot
-def test_spot_storage(generic_spot_cloud: str):
+def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
     name = _get_cluster_name()
     yaml_str = pathlib.Path(
@@ -1434,7 +1414,7 @@ def test_spot_storage(generic_spot_cloud: str):
             'spot_storage',
             [
                 *storage_setup_commands,
-                f'sky spot launch -n {name} --cloud {generic_spot_cloud} {file_path} -y',
+                f'sky spot launch -n {name} --cloud {generic_cloud} {file_path} -y',
                 'sleep 60',  # Wait the spot queue to be updated
                 f'{_SPOT_QUEUE_WAIT}| grep {name} | grep SUCCEEDED',
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
@@ -1464,7 +1444,6 @@ def test_spot_tpu():
 
 
 # ---------- Testing env ----------
-@pytest.mark.generic
 def test_inline_env(generic_cloud: str):
     """Test env"""
     name = _get_cluster_name()
@@ -1482,14 +1461,13 @@ def test_inline_env(generic_cloud: str):
 
 
 # ---------- Testing env for spot ----------
-@pytest.mark.generic_spot
-def test_inline_spot_env(generic_spot_cloud: str):
+def test_inline_spot_env(generic_cloud: str):
     """Test env"""
     name = _get_cluster_name()
     test = Test(
         'test-inline-spot-env',
         [
-            f'sky spot launch -n {name} -y --cloud {generic_spot_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky spot launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
             'sleep 20',
             f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
