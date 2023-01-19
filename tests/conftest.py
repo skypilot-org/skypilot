@@ -31,7 +31,9 @@ def pytest_addoption(parser):
                      type=str,
                      default='gcp',
                      choices=clouds,
-                     help='cloud to use for generic tests')
+                     help='Cloud to use for generic tests. If the generic cloud is '
+                     'not within the clouds to be run, it will be reset to the first '
+                     'cloud in the list of the clouds to be run.')
 
 
 def pytest_configure(config):
