@@ -27,13 +27,14 @@ def pytest_addoption(parser):
                          action='store_true',
                          default=False,
                          help=f'Only run {cloud.upper()} tests')
-    parser.addoption('--generic-cloud',
-                     type=str,
-                     default='gcp',
-                     choices=clouds,
-                     help='Cloud to use for generic tests. If the generic cloud is '
-                     'not within the clouds to be run, it will be reset to the first '
-                     'cloud in the list of the clouds to be run.')
+    parser.addoption(
+        '--generic-cloud',
+        type=str,
+        default='gcp',
+        choices=clouds,
+        help='Cloud to use for generic tests. If the generic cloud is '
+        'not within the clouds to be run, it will be reset to the first '
+        'cloud in the list of the clouds to be run.')
 
 
 def pytest_configure(config):
