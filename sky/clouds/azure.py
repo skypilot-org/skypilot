@@ -399,3 +399,10 @@ class Azure(clouds.Cloud):
                     'cli command: "az account set -s <subscription_id>".'
                 ) from e
         return azure_subscription_id
+
+    @classmethod
+    def support(cls, requested_features: List[str]) -> bool:
+        # Currently, only 'autostop' can be in requested_features.
+        # Azure supports autostop.
+        del requested_features  # unused
+        return True

@@ -297,5 +297,14 @@ class Cloud:
         del resource
         return False
 
+    @classmethod
+    def support(cls, requested_features: List[str]) -> bool:
+        """Returns whether requested features are supported.
+
+        For instance, Lambda Labs does not support autostop, so
+        Lambda.support(['autostop']) returns False.
+        """
+        raise NotImplementedError
+
     def __repr__(self):
         return self._REPR

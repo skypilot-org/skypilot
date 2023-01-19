@@ -179,6 +179,9 @@ def _execute(
 
     stages = stages if stages is not None else list(Stage)
 
+    # Requested features that some clouds support and others don't.
+    requested_features = []
+
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
         if down and idle_minutes_to_autostop is None:
@@ -200,15 +203,8 @@ def _execute(
                 idle_minutes_to_autostop = 1
             stages.remove(Stage.DOWN)
 
-            # Lambda Labs does not support autostop.
-            # e2e failover from another cloud can get around this check, but
-            # there is another check in backend.set_autostop.
-            if (task.best_resources and
-                    task.best_resources.cloud.is_same_cloud(sky.Lambda()) and
-                    not down):
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        ('Lambda Labs does not support stopping instances.'))
+            if not down:
+                requested_features.append('autostop')
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
@@ -243,7 +239,9 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    backend.register_info(dag=dag, optimize_target=optimize_target)
+    backend.register_info(dag=dag,
+                          optimize_target=optimize_target,
+                          requested_features=requested_features)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket

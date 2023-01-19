@@ -171,3 +171,8 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
+
+    @classmethod
+    def support(cls, requested_features: List[str]) -> bool:
+        del requested_features  # unused
+        return True

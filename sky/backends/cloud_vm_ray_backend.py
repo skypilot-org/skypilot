@@ -574,13 +574,14 @@ class RetryingVmProvisioner(object):
         HEAD_FAILED = 2
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
-                 optimize_target: OptimizeTarget,
+                 optimize_target: OptimizeTarget, requested_features: List[str],
                  local_wheel_path: pathlib.Path, wheel_hash: str):
         self._blocked_resources = set()
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
+        self._requested_features = requested_features
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
 
@@ -1656,6 +1657,28 @@ class RetryingVmProvisioner(object):
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
+        # Re-optimize if to_provision.cloud does not support requested features
+        while not to_provision.cloud.support(self._requested_features):
+            if launchable_retries_disabled:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        f'{to_provision.cloud} does not support: '
+                        f'{self._requested_features}. DAG and '
+                        'optimize_target needs to be registered first '
+                        'to enable cross-cloud retry.')
+            self._blocked_resources.add(
+                resources_lib.Resources(cloud=to_provision.cloud))
+            # Set to None so that sky.optimize() will assign a new one
+            # (otherwise will skip re-optimizing this task).
+            # TODO: set all remaining tasks' best_resources to None.
+            task.best_resources = None
+            self._dag = sky.optimize(self._dag,
+                                     minimize=self._optimize_target,
+                                     blocked_resources=self._blocked_resources)
+            to_provision = task.best_resources
+            assert task in self._dag.tasks, 'Internal logic error.'
+            assert to_provision is not None, task
+
         style = colorama.Style
         # Retrying launchable resources.
         while True:
@@ -1722,16 +1745,25 @@ class RetryingVmProvisioner(object):
                 num_nodes = task.num_nodes
                 cluster_exists = False
 
-            # Set to None so that sky.optimize() will assign a new one
-            # (otherwise will skip re-optimizing this task).
-            # TODO: set all remaining tasks' best_resources to None.
-            task.best_resources = None
-            self._dag = sky.optimize(self._dag,
-                                     minimize=self._optimize_target,
-                                     blocked_resources=self._blocked_resources)
-            to_provision = task.best_resources
-            assert task in self._dag.tasks, 'Internal logic error.'
-            assert to_provision is not None, task
+            while True:
+                # Set to None so that sky.optimize() will assign a new one
+                # (otherwise will skip re-optimizing this task).
+                # TODO: set all remaining tasks' best_resources to None.
+                task.best_resources = None
+                self._dag = sky.optimize(
+                    self._dag,
+                    minimize=self._optimize_target,
+                    blocked_resources=self._blocked_resources)
+                to_provision = task.best_resources
+                assert task in self._dag.tasks, 'Internal logic error.'
+                assert to_provision is not None, task
+
+                # Skip clouds that do not support requested features.
+                if to_provision.cloud.support(self._requested_features):
+                    break
+                self._blocked_resources.add(
+                    resources_lib.Resources(cloud=to_provision.cloud))
+
         return config_dict
 
 
@@ -1983,6 +2015,7 @@ class CloudVmRayBackend(backends.Backend):
 
         self._dag = None
         self._optimize_target = None
+        self._requested_features = []
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -1995,6 +2028,8 @@ class CloudVmRayBackend(backends.Backend):
         self._dag = kwargs.pop('dag', self._dag)
         self._optimize_target = kwargs.pop(
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
+        self._requested_features = kwargs.pop('requested_features',
+                                              self._requested_features)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(self, handle: ResourceHandle,
@@ -2118,10 +2153,9 @@ class CloudVmRayBackend(backends.Backend):
                 # in if retry_until_up is set, which will kick off new "rounds"
                 # of optimization infinitely.
                 try:
-                    provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                                        self._optimize_target,
-                                                        local_wheel_path,
-                                                        wheel_hash)
+                    provisioner = RetryingVmProvisioner(
+                        self.log_dir, self._dag, self._optimize_target,
+                        self._requested_features, local_wheel_path, wheel_hash)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break
@@ -3075,16 +3109,6 @@ class CloudVmRayBackend(backends.Backend):
                      down: bool = False,
                      stream_logs: bool = True) -> None:
         if idle_minutes_to_autostop is not None:
-            # Lambda Labs does not support autostop.
-            # TODO(ewzeng): optimizer should avoid Lambda Labs
-            # if launching with autostop.
-            if (handle.launched_resources.cloud.is_same_cloud(sky.Lambda()) and
-                    not down and idle_minutes_to_autostop >= 0):
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        ('Failed to set autostop. Lambda Labs does not '
-                         'support stopping instances.'))
-
             code = autostop_lib.AutostopCodeGen.set_autostop(
                 idle_minutes_to_autostop, self.NAME, down)
             returncode, _, stderr = self.run_on_head(handle,

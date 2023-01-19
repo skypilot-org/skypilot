@@ -538,3 +538,10 @@ class AWS(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'aws')
+
+    @classmethod
+    def support(cls, requested_features: List[str]) -> bool:
+        # Currently, only 'autostop' can be in requested_features.
+        # AWS supports autostop.
+        del requested_features  # unused
+        return True

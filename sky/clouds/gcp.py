@@ -635,3 +635,10 @@ class GCP(clouds.Cloud):
             zone: Optional[str] = None) -> None:
         service_catalog.check_accelerator_attachable_to_host(
             instance_type, accelerators, zone, 'gcp')
+
+    @classmethod
+    def support(cls, requested_features: List[str]) -> bool:
+        # Currently, only 'autostop' can be in requested_features.
+        # GCP supports autostop.
+        del requested_features  # unused
+        return True

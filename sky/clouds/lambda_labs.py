@@ -3,6 +3,8 @@ import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
+import colorama
+
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_labs import lambda_utils
@@ -233,3 +235,12 @@ class Lambda(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'lambda')
+
+    @classmethod
+    def support(cls, requested_features: List[str]) -> bool:
+        if 'autostop' in requested_features:
+            print(f'{colorama.Fore.YELLOW}'
+                  'Lambda Labs does not support autostop.'
+                  f'{colorama.Style.RESET_ALL}')
+            return False
+        return True
