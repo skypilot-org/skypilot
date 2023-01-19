@@ -253,7 +253,8 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 # Fetch Images
 _GPU_TO_IMAGE_DATE = {
     # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
-    # Current AMIs:
+    # Current AMIs (we have to use different PyTorch versions for different OS as Ubuntu 18.04
+    # does not have the latest PyTorch version):
     # GPU:
     # Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
     #   Nvidia driver: 510.47.03, CUDA Version: 11.6
