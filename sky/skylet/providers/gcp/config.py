@@ -579,12 +579,9 @@ def _configure_subnet(config, compute):
     ):
         return config
 
+    # SkyPilot: make sure there's a usable VPC
     usable_vpc_name = get_usable_vpc(config)
     subnets = _list_subnets(config, compute, filter=f"(name=\"{usable_vpc_name}\")")
-
-    # TODO: make sure that we have usable subnet. Maybe call
-    # compute.subnetworks().listUsable? For some reason it didn't
-    # work out-of-the-box
     default_subnet = subnets[0]
 
     default_interfaces = [
