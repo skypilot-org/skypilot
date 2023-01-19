@@ -404,12 +404,12 @@ if __name__ == '__main__':
                 f'requested regions {user_regions}.')
 
     ray.init()
-    # instance_df = get_all_regions_instance_types_df(user_regions)
-    # _check_regions_integrity(instance_df, 'instance types')
+    instance_df = get_all_regions_instance_types_df(user_regions)
+    _check_regions_integrity(instance_df, 'instance types')
 
     os.makedirs('aws', exist_ok=True)
-    # instance_df.to_csv('aws/vms.csv', index=False)
-    # print('AWS Service Catalog saved to aws/vms.csv')
+    instance_df.to_csv('aws/vms.csv', index=False)
+    print('AWS Service Catalog saved to aws/vms.csv')
 
     image_df = get_all_regions_images_df(user_regions)
     _check_regions_integrity(image_df, 'images')
