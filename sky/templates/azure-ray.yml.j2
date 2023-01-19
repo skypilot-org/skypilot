@@ -28,6 +28,8 @@ available_node_types:
     ray.head.default:
       resources: {}
       node_config:
+        tags:
+          skypilot-user: {{ user }}
         azure_arm_parameters:
             vmSize: {{instance_type}}
             # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
@@ -50,6 +52,8 @@ available_node_types:
       max_workers: {{num_nodes - 1}}
       resources: {}
       node_config:
+        tags:
+          skypilot-user: {{ user }}
         azure_arm_parameters:
             vmSize: {{instance_type}}
             # List images https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage

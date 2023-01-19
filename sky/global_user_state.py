@@ -34,7 +34,11 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
-    conn.execute('PRAGMA journal_mode=WAL')
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if not common_utils.is_wsl():
+        cursor.execute('PRAGMA journal_mode=WAL')
     # Table for Clusters
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS clusters (

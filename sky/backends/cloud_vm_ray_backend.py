@@ -72,7 +72,7 @@ _NODES_LAUNCHING_PROGRESS_TIMEOUT = 90
 _RETRY_UNTIL_UP_INIT_GAP_SECONDS = 60
 
 # The maximum retry count for fetching IP address.
-_FETCH_IP_MAX_ATTEMPTS = 5
+_FETCH_IP_MAX_ATTEMPTS = 3
 
 _TEARDOWN_FAILURE_MESSAGE = (
     f'\n{colorama.Fore.RED}Failed to terminate '
@@ -1225,13 +1225,14 @@ class RetryingVmProvisioner(object):
                 logger.error(f'*** {terminate_str} the failed cluster. ***')
 
             # If these conditions hold, it *should* be safe to skip the cleanup
-            # action.
+            # action. This is a UX optimization.
             #
-            # We want to skip mainly for custom VPC: if users encountered "No
-            # VPC with name 'xxx' is found in <region>.", then going ahead to
-            # down the non-existent cluster will itself error out with the same
-            # error message.  This was found to be confusing. In that case we
-            # skip termination.
+            # We want to skip mainly for VPC/subnets errors thrown during node
+            # provider bootstrapping: if users encountered "No VPC with name
+            # 'xxx' is found in <region>.", then going ahead to down the
+            # non-existent cluster will itself print out a (caught, harmless)
+            # error with the same message.  This was found to be
+            # confusing. Thus we skip termination.
             skip_cleanup = not cluster_exists and definitely_no_nodes_launched
             if skip_cleanup:
                 continue
@@ -1869,6 +1870,11 @@ class CloudVmRayBackend(backends.Backend):
             if self.stable_internal_external_ips is not None:
                 return [ips[1] for ips in self.stable_internal_external_ips]
             return None
+
+        def get_hourly_price(self) -> float:
+            hourly_cost = (self.launched_resources.get_cost(3600) *
+                           self.launched_nodes)
+            return hourly_cost
 
         @property
         def cluster_yaml(self):

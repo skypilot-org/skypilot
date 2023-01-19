@@ -1586,8 +1586,15 @@ def _process_cli_query(
     ]
 
 
-def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
-    """Returns a set of Ray launch config hashes, one per node type."""
+def _ray_launch_hash(cluster_name: str,
+                     ray_config: Dict[str, Any]) -> Optional[Set[str]]:
+    """Returns a set of Ray launch config hashes, one per node type.
+
+    This returns None if ray's _bootstrap_config() failed to return, which can
+    happen if node providers' bootstrapping phase (config.py) raises an error
+    (which *should* only happen on errors prior to nodes launching, e.g.,
+    VPC/subnet setup).
+    """
     # Use the cached Ray launch hashes if they exist.
     metadata = global_user_state.get_cluster_metadata(cluster_name)
     assert metadata is not None, cluster_name
@@ -1595,8 +1602,16 @@ def _ray_launch_hash(cluster_name: str, ray_config: Dict[str, Any]) -> Set[str]:
     if ray_launch_hashes is not None:
         logger.debug('Using cached launch_hashes.')
         return set(ray_launch_hashes)
-    with ux_utils.suppress_output():
-        ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    try:
+        with ux_utils.suppress_output():
+            ray_config = ray_commands._bootstrap_config(ray_config)  # pylint: disable=protected-access
+    except RuntimeError as e:
+        # TODO(zongheng): is this safe? Could it be node(s) are live but somehow a
+        # separate status refresh hits such errors?
+        if 'SKYPILOT_ERROR_NO_NODES_LAUNCHED' in str(e):
+            logger.error(f'Error found when refreshing cluster status: {e}')
+            return None
+        raise e
     # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in
     # sync).
@@ -1650,10 +1665,15 @@ def _query_status_aws(
     }
     region = ray_config['provider']['region']
     launch_hashes = _ray_launch_hash(cluster, ray_config)
-    hash_filter_str = ','.join(launch_hashes)
+    if launch_hashes is not None:
+        hash_filter_str = ','.join(launch_hashes)
+        hash_filter_line = (
+            f'Name=tag:ray-launch-config,Values={hash_filter_str} ')
+    else:
+        hash_filter_line = ''
     query_cmd = ('aws ec2 describe-instances --filters '
                  f'Name=tag:ray-cluster-name,Values={cluster} '
-                 f'Name=tag:ray-launch-config,Values={hash_filter_str} '
+                 f'{hash_filter_line}'
                  f'--region {region} '
                  '--query "Reservations[].Instances[].State.Name" '
                  '--output text')
@@ -1665,6 +1685,7 @@ def _query_status_gcp(
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
     launch_hashes = _ray_launch_hash(cluster, ray_config)
+    assert launch_hashes is not None
     hash_filter_str = ' '.join(launch_hashes)
 
     use_tpu_vm = ray_config['provider'].get('_has_tpus', False)
@@ -1751,6 +1772,7 @@ def _query_status_azure(
         'VM deallocated': global_user_state.ClusterStatus.STOPPED,
     }
     launch_hashes = _ray_launch_hash(cluster, ray_config)
+    assert launch_hashes is not None
     hash_filter_str = ', '.join(f'\\"{h}\\"' for h in launch_hashes)
     query_cmd = (
         'az vm show -d --ids $(az vm list --query '
@@ -1871,6 +1893,30 @@ def _update_cluster_status_no_lock(
                      f'{cluster_name!r}, trying to fetch from provider.')
     # For all code below, ray fails to get IPs for the cluster.
     node_statuses = _get_cluster_status_via_cloud_cli(handle)
+
+    if len(node_statuses) > handle.launched_nodes:
+        # Unexpected: this could mean ray launch hash is not calculated and we
+        # used the cluster name as the only filter when querying the cloud
+        # provider, and in the queried region more than 1 cluster with the same
+        # constructed name tag returned. This will typically not happen unless
+        # users manually create a cluster with that constructed name.
+        #
+        # (Technically speaking, even if returned num nodes <= num
+        # handle.launched_nodes), not including the launch hash could mean the
+        # returned nodes contain some nodes that do not belong to the logical
+        # skypilot cluster. Doesn't seem to be a good way to handle this for
+        # now?)
+        #
+        # We have not experienced the above; adding as a safeguard.
+        #
+        # Since we failed to refresh, warn and return old record.
+        logger.warning(
+            f'Failed to refresh status for cluster {cluster_name!r} '
+            f'due to {len(node_statuses)} nodes being found with the '
+            'same name tag, but the cluster should have '
+            f'{handle.launched_nodes} nodes. Keeping the old status.')
+        return record
+    assert len(node_statuses) <= handle.launched_nodes
 
     # If the node_statuses is empty, all the nodes are terminated. We can
     # safely set the cluster status to TERMINATED. This handles the edge case

@@ -1180,6 +1180,15 @@ def launch(
     if backend_name is None:
         backend_name = backends.CloudVmRayBackend.NAME
 
+    # A basic check. Programmatic calls will have a proper (but less
+    # informative) error from optimizer.
+    if (cloud is not None and cloud.lower() == 'azure' and
+            use_spot is not None and use_spot):
+        raise click.UsageError(
+            'SkyPilot currently has not implemented '
+            'support for spot instances on Azure. Please file '
+            'an issue if you need this feature.')
+
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
         name=name,
@@ -1602,11 +1611,28 @@ def logs(
               is_flag=True,
               required=False,
               help='Cancel all jobs on the specified cluster.')
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int]):  # pylint: disable=redefined-builtin
+def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s)."""
+    if not yes:
+        job_ids = ' '.join(map(str, jobs))
+        plural = 's' if len(job_ids) > 1 else ''
+        job_identity_str = f'job{plural} with ID{plural} {job_ids}'
+        if all:
+            job_identity_str = 'all managed spot jobs'
+        job_identity_str += f' on {cluster}'
+        click.confirm(f'Cancelling {job_identity_str}. Proceed?',
+                      default=True,
+                      abort=True,
+                      show_default=True)
     try:
         core.cancel(cluster, all, jobs)
     except ValueError as e:
@@ -2185,11 +2211,12 @@ def _down_or_stop_clusters(
                 assert len(reserved_clusters) == 1, reserved_clusters
                 _hint_for_down_spot_controller(reserved_clusters[0])
 
-                click.confirm('Proceed?',
-                              default=False,
-                              abort=True,
-                              show_default=True)
-                no_confirm = True
+                if not no_confirm:
+                    click.confirm('Proceed?',
+                                  default=False,
+                                  abort=True,
+                                  show_default=True)
+                    no_confirm = True
         names += reserved_clusters
 
     if apply_to_all:
@@ -2270,11 +2297,11 @@ def _down_or_stop_clusters(
                     core.down(name, purge=purge)
                 else:
                     core.stop(name, purge=purge)
-            except RuntimeError:
+            except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
-                    'Please check the logs and try again.'
-                    f'{colorama.Style.RESET_ALL}')
+                    f'{colorama.Style.RESET_ALL}'
+                    f'\n\tReason: {common_utils.format_exception(e)}.')
             except (exceptions.NotSupportedError,
                     exceptions.ClusterOwnerIdentityMismatchError) as e:
                 message = str(e)
@@ -2939,9 +2966,15 @@ def spot_launch(
     required=False,
     help='Query the latest statuses, restarting the spot controller if stopped.'
 )
+@click.option('--skip-finished',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def spot_queue(all: bool, refresh: bool):
+def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed spot jobs.
 
     \b
@@ -2971,25 +3004,48 @@ def spot_queue(all: bool, refresh: bool):
       watch -n60 sky spot queue
     """
     click.secho('Fetching managed spot job statuses...', fg='yellow')
+    no_jobs_found_str = '  No jobs found.'
     try:
-        job_table = core.spot_queue(refresh=refresh)
+        job_table = core.spot_queue(refresh=refresh,
+                                    skip_finished=skip_finished)
     except exceptions.ClusterNotUpError:
+        # TODO(mehul): handle skip_finished for the cached case. E.g., change
+        # {load,dump}_job_table_cache() to use structured data, and let
+        # format_job_table() to take skip_finished.
         cache = spot_lib.load_job_table_cache()
         if cache is not None:
             readable_time = log_utils.readable_time_duration(cache[0])
+            if not cache[1].strip():
+                table_str = no_jobs_found_str
+                cached_hint = ''
+            else:
+                table_str = cache[1]
+                # Show a helpful hint at the end, if cached table is non-empty.
+                cached_hint = (
+                    '\n\nNOTE: cached job table is being shown '
+                    f'[last updated: {readable_time}].\nUse '
+                    f'{colorama.Style.BRIGHT}--refresh / -r'
+                    f'{colorama.Style.RESET_ALL} to restart the spot '
+                    'controller and see the latest job table.')
             table_message = (
                 f'\n{colorama.Fore.YELLOW}Cached job status table '
                 f'[last updated: {readable_time}]:{colorama.Style.RESET_ALL}\n'
-                f'{cache[1]}\n')
+                f'{table_str}{cached_hint}')
         else:
             table_message = 'No cached job status table found.'
         click.echo(table_message)
         return
     job_table = spot_lib.format_job_table(job_table, all)
 
-    # Dump cache
     spot_lib.dump_job_table_cache(job_table)
-    click.echo(f'Managed spot jobs:\n{job_table}')
+
+    if not skip_finished:
+        in_progress_only_hint = ''
+    else:
+        in_progress_only_hint = ' (showing in-progress jobs only)'
+    if not job_table:
+        job_table = no_jobs_found_str
+    click.echo(f'Managed spot jobs{in_progress_only_hint}:\n{job_table}')
 
 
 _add_command_alias_to_group(spot, spot_queue, 'status', hidden=True)
