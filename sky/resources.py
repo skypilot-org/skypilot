@@ -28,10 +28,9 @@ class AcceleratorsSpec:
 
     def __repr__(self) -> str:
         if self.args is None:
-            return f'<AcceleratorsSpec: {self.count}x{self.name}>'
+            return f'{self.count}x{self.name}'
         else:
-            return (f'<AcceleratorsSpec: {self.count}x{self.name} '
-                    f'with args {self.args}>')
+            return f'{self.count}x{self.name} (args: {self.args})'
 
     def __eq__(self, other: 'AcceleratorsSpec') -> bool:
         return self.name == other.name and \
@@ -52,7 +51,7 @@ class ResourceRequirements:
         region: Optional[str] = None,
         zone: Optional[str] = None,
         instance_type: Optional[str] = None,
-        accelerators: Union[None, str, Dict[str, int]] = None,
+        accelerators: Union[None, str, Dict[str, int], AcceleratorsSpec] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
         spot_recovery: Optional[str] = None,
@@ -88,6 +87,13 @@ class ResourceRequirements:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify accelerator_args without accelerators.')
+        if isinstance(self._accelerators, AcceleratorsSpec):
+            # Here, we use the assert statement instead of raising
+            # a user-friendly error because AcceleratorsSpec is not a
+            # user-facing class.
+            assert self._accelerator_args is not None, (
+                'When accelerators is AcceleratorsSpec, accelerator_args '
+                'must be specified in accelerators.args.')
         if ((self.use_spot is None or not self.use_spot) and
                 self.spot_recovery is not None):
             with ux_utils.print_exception_no_traceback():
@@ -114,7 +120,7 @@ class ResourceRequirements:
         self._check_type('region', str)
         self._check_type('zone', str)
         self._check_type('instance_type', str)
-        self._check_type('_accelerators', (str, dict))
+        self._check_type('_accelerators', (str, dict, AcceleratorsSpec))
         self._check_type('_accelerator_args', dict)
         self._check_type('use_spot', bool)
         self._check_type('spot_recovery', str)
@@ -137,6 +143,10 @@ class ResourceRequirements:
 
         if self._accelerators is None:
             return
+        if isinstance(self._accelerators, AcceleratorsSpec):
+            self.accelerators = self._accelerators
+            return
+
         # Parse accelerators.
         if isinstance(self._accelerators, dict):
             if len(self._accelerators) != 1:
@@ -506,18 +516,6 @@ class ResourceMapper:
             # Found VMs that meet the requirement.
             return vms
 
-        return []
-
-        # No feasible resources found. Try to find a fuzzy match.
-        fuzzy_match_resources = []
-        for cloud in feasible_clouds:
-            fuzzy_match_resources += cloud.get_fuzzy_match_resources(
-                resource_req)
-        logger.info(f'No resource satisfying {resource_req} found.')
-        logger.info(f'Did you mean: '
-                    f'{colorama.Fore.CYAN}'
-                    f'{sorted(fuzzy_match_resources)}'
-                    f'{colorama.Style.RESET_ALL}')
         return []
 
     def map_suitable_clusters(
