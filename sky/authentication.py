@@ -245,7 +245,8 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # OS Login is not enabled for the project. Add the ssh key directly to the
     # metadata.
     # TODO(zhwu): Use cloud init to add ssh public key, to avoid the permission
-    # issue.
+    # issue. A blocker is that the cloud init is not installed in the debian
+    # image by default.
     project_keys = next(
         (item for item in project['commonInstanceMetadata'].get('items', [])
          if item['key'] == 'ssh-keys'), {}).get('value', '')

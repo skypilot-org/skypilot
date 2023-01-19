@@ -254,26 +254,36 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 _GPU_TO_IMAGE_DATE = {
     # https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#Images:visibility=public-images;v=3;search=:64,:Ubuntu%2020,:Deep%20Learning%20AMI%20GPU%20PyTorch # pylint: disable=line-too-long
     # Current AMIs:
-    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20220308
-    #   Nvidia driver: 510.47.03, CUDA Version: 11.6 (does not support torch==1.13.0+cu117)
+    # GPU:
+    # Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
+    #   Nvidia driver: 510.47.03, CUDA Version: 11.6
     #
+    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
+    #
+    # K80:
+    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
+    #
+    # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
     # Use a list to fallback to newer AMI, as some regions like ap-southeast-3 does not have
     # the older AMI.
-    'gpu': ['20220308', '20221101'],
+    'gpu': ['20230103', '20221114'],
     # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
     # Downgrade the AMI for K80 due as it is only compatible with
     # NVIDIA driver lower than 470.
     'k80': ['20211208']
 }
 _UBUNTU_VERSION = ['18.04', '20.04']
+# Fallback list of PyTorch versions to try.
+# PyTorch 1.13.1 is only available for Ubuntu 20.04.
+_PYTORCH_VERSION = ['1.13.1', '1.10.0']
 
 
-def _fetch_image_id(region: str, ubuntu_version: str,
-                    creation_date: str) -> Optional[str]:
+def _fetch_image_id(region: str, ubuntu_version: str, creation_date: str,
+                    pytorch_version: str) -> Optional[str]:
     try:
         image = subprocess.check_output(f"""\
             aws ec2 describe-images --region {region} --owners amazon \\
-                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu {ubuntu_version}) {creation_date}"' \\
+                --filters 'Name=name,Values="Deep Learning AMI GPU PyTorch {pytorch_version} (Ubuntu {ubuntu_version}) {creation_date}"' \\
                     'Name=state,Values=available' --query 'Images[:1].ImageId' --output text
             """,
                                         shell=True)
@@ -296,7 +306,11 @@ def _get_image_row(
     creation_date = _GPU_TO_IMAGE_DATE[cpu_or_gpu]
     date = None
     for date in creation_date:
-        image_id = _fetch_image_id(region, ubuntu_version, date)
+        for pytorch_version in _PYTORCH_VERSION:
+            image_id = _fetch_image_id(region, ubuntu_version, date,
+                                       pytorch_version)
+            if image_id:
+                break
         if image_id:
             break
     else:
@@ -390,12 +404,12 @@ if __name__ == '__main__':
                 f'requested regions {user_regions}.')
 
     ray.init()
-    instance_df = get_all_regions_instance_types_df(user_regions)
-    _check_regions_integrity(instance_df, 'instance types')
+    # instance_df = get_all_regions_instance_types_df(user_regions)
+    # _check_regions_integrity(instance_df, 'instance types')
 
     os.makedirs('aws', exist_ok=True)
-    instance_df.to_csv('aws/vms.csv', index=False)
-    print('AWS Service Catalog saved to aws/vms.csv')
+    # instance_df.to_csv('aws/vms.csv', index=False)
+    # print('AWS Service Catalog saved to aws/vms.csv')
 
     image_df = get_all_regions_images_df(user_regions)
     _check_regions_integrity(image_df, 'images')
