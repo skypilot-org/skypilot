@@ -163,7 +163,7 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 
 def validate_region_zone_impl(
-        df: pd.DataFrame, region: Optional[str],
+        cloud_name: str, df: pd.DataFrame, region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
@@ -178,7 +178,8 @@ def validate_region_zone_impl(
 
     def _get_all_supported_regions_str() -> str:
         all_regions: List[str] = sorted(df['Region'].unique().tolist())
-        return f'\nList of supported regions: {", ".join(all_regions)!r}'
+        return \
+        f'\nList of supported {cloud_name} regions: {", ".join(all_regions)!r}'
 
     validated_region, validated_zone = region, zone
 

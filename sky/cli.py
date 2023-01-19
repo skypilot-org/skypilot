@@ -2660,8 +2660,8 @@ def check():
     '--region',
     required=False,
     type=str,
-    help=(
-        'The region to use. If not given, shows accelerators from all regions. '
+    help=
+    ('The region to use. If not specified, shows accelerators from all regions.'
     ),
 )
 @usage_lib.entrypoint
@@ -2683,11 +2683,11 @@ def show_gpus(
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
-    NOTE: The price displayed for each instance type is the lowest across all
-    regions for both on-demand and spot instances.
+    NOTE: If region is not specified, the price displayed for each instance type
+    is the lowest across all regions for both on-demand and spot instances.
     """
     # validation for the --region flag
-    if region and not cloud:
+    if region is not None and cloud is None:
         raise click.UsageError(
             'The --region flag is only valid when the --cloud flag is set.')
     service_catalog.validate_region_zone(region, None, clouds=cloud)

@@ -210,7 +210,7 @@ def get_instance_type_for_accelerator(
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('gcp', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
