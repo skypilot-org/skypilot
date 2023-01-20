@@ -189,10 +189,11 @@ class ResourceRequirements:
                 'accelerator_args', 'use_spot', 'disk_size', 'image_id'
         ]:
             val = config.pop(field, None)
-            if field == 'disk_size':
-                val = int(val)
-            elif field == 'accelerator_args':
-                val = dict(val)
+            if val is not None:
+                if field == 'disk_size':
+                    val = int(val)
+                elif field == 'accelerator_args':
+                    val = dict(val)
             resources_fields[field] = val
         assert not config, f'Invalid resource args: {config.keys()}'
         return cls(**resources_fields)
@@ -209,17 +210,34 @@ class ResourceRequirements:
                 config[field] = val
         return config
 
-    def copy(self) -> 'ResourceRequirements':
-        # FIXME
-        return copy.deepcopy(self)
+    def copy(self, **override) -> 'ResourceRequirements':
+        r = ResourceRequirements(
+            cloud=override.pop('cloud', self.cloud),
+            region=override.pop('region', self.region),
+            zone=override.pop('zone', self.zone),
+            instance_type=override.pop('instance_type', self.instance_type),
+            accelerators=override.pop('accelerators', self.accelerators),
+            accelerator_args=override.pop('accelerator_args',
+                                          self.accelerator_args),
+            use_spot=override.pop('use_spot', self.use_spot),
+            spot_recovery=override.pop('spot_recovery', self.spot_recovery),
+            disk_size=override.pop('disk_size', self.disk_size),
+            image_id=override.pop('image_id', self.image_id))
+        assert len(override) == 0
+        return r
 
     def __repr__(self) -> str:
+        if self.accelerator_args is None:
+            accelerator_args_str = ''
+        else:
+            accelerator_args_str = f'accelerator_args={self.accelerator_args}, '
         return (f'{self.__class__.__name__}('
                 f'cloud={self.cloud}, '
                 f'region={self.region}, '
                 f'zone={self.zone}, '
                 f'instance_type={self.instance_type}, '
                 f'accelerators={self.accelerators}, '
+                f'{accelerator_args_str}'
                 f'use_spot={self.use_spot}, '
                 f'spot_recovery={self.spot_recovery}, '
                 f'disk_size={self.disk_size}, '
