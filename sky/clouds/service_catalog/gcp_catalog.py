@@ -290,7 +290,7 @@ def get_suitable_vms(
                 use_spot=resource_req.use_spot,
                 disk_size=resource_req.disk_size,
                 image_id=resource_req.image_id,
-        ))
+            ))
     # Filter out invalid combinations.
     return [r for r in feasible_resources if _check_host_vm_limit(r)]
 
