@@ -318,6 +318,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     # The spot_status may not be in terminal status yet, since the controllerhas
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
+    wait_seconds = 0
     spot_status = spot_state.get_status(job_id)
     assert spot_status is not None, job_id
     while (not spot_status.is_terminal() and follow and
