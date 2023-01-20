@@ -541,8 +541,7 @@ def get_usable_vpc(config):
     )
     node = resource._list_instances(label_filters=None, status_filter=None)
     if len(node) > 0:
-        labels = node[0].get_labels()
-        netInterfaces = labels.get("networkInterfaces", [])
+        netInterfaces = node[0].get("networkInterfaces", [])
         if len(netInterfaces) > 0:
             vpc_name = netInterfaces[0]["network"].split("/")[-1]
             return vpc_name
