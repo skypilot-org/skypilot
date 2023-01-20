@@ -535,8 +535,8 @@ def get_usable_vpc(config):
     # For backward compatibility, reuse the VPC if the VM is launched.
     resource = GCPCompute(
         compute,
-        config["project_id"],
-        config["availability_zone"],
+        config["provider"]["project_id"],
+        config["provider"]["availability_zone"],
         config["cluster_name"],
     )
     node = resource._list_instances(label_filters=None, status_filter=None)
