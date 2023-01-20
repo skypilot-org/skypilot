@@ -532,7 +532,7 @@ def get_usable_vpc(config):
     """
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
 
-    # For backward compatibility, reuse the VPC for if the VM is launched.
+    # For backward compatibility, reuse the VPC if the VM is launched.
     ins_all = _list_instances(config, compute)
     for ins in ins_all:
         labels = ins.get("labels", {})
