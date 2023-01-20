@@ -12,7 +12,7 @@ from google.oauth2 import service_account
 from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
-from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType
+from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType, GCPCompute
 from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE
 from ray.autoscaler._private.util import check_legacy_fields
 
@@ -533,15 +533,19 @@ def get_usable_vpc(config):
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
 
     # For backward compatibility, reuse the VPC if the VM is launched.
-    ins_all = _list_instances(config, compute)
-    for ins in ins_all:
-        labels = ins.get("labels", {})
-        for k, v in labels.items():
-            if k == "ray-cluster-name" and v == config["cluster_name"]:
-                if "networkInterfaces" not in ins or len(ins["networkInterfaces"]) == 0:
-                    continue
-                vpc_name = ins["networkInterfaces"][0]["network"].split("/")[-1]
-                return vpc_name
+    resource = GCPCompute(
+        compute,
+        config["project_id"],
+        config["availability_zone"],
+        config["cluster_name"],
+    )
+    node = resource._list_instances(label_filters=None, status_filter=None)
+    if len(node) > 0:
+        labels = node[0].get_labels()
+        netInterfaces = labels.get("networkInterfaces", [])
+        if len(netInterfaces) > 0:
+            vpc_name = netInterfaces[0]["network"].split("/")[-1]
+            return vpc_name
 
     vpcnets_all = _list_vpcnets(config, compute)
 
@@ -645,19 +649,6 @@ def _create_vpcnet(config, compute, body):
     response = wait_for_compute_global_operation(
         config["provider"]["project_id"], operation, compute
     )
-    return response
-
-
-def _list_instances(config, compute):
-    operation = (
-        compute.instances()
-        .list(
-            project=config["provider"]["project_id"],
-            zone=config["provider"]["availability_zone"],
-        )
-        .execute()
-    )
-    response = operation.get("items", [])
     return response
 
 
