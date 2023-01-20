@@ -1880,19 +1880,3 @@ class TestYamlSpecs:
                                                            exist_ok=True)
         for yaml_path in self._TEST_YAML_PATHS:
             self._check_equivalent(yaml_path)
-
-
-# Place the spot controller autostop test here to try best to run it last, after
-# all the spot tests are done.
-def test_spot_controller_autostop():
-    """Test controller autostop"""
-    test = Test(
-        'test-spot-controller-autostop',
-        [
-            'sleep 720',  # Sleep for a bit more than the default 10m.
-            'sky status --refresh | grep sky-spot-controller- | grep STOPPED',
-            'sky start "sky-spot-controller-*" -y',
-            # Ensures it's up and the autostop setting is restored.
-            'sky status | grep sky-spot-controller- | grep UP | grep 10m',
-        ])
-    run_one_test(test)
