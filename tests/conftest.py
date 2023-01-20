@@ -13,6 +13,7 @@ from typing import List
 # due to the cloud credit limit for the development account.
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, or --azure.
+# To only run tests for managed spot (without generic tests), use --managed-spot.
 # A "generic test" tests a generic functionality (e.g., autostop) that
 # should work on any cloud we support. The cloud used for such a test
 # is controlled by `--generic-cloud` (typically you do not need to set it).
@@ -25,12 +26,16 @@ def pytest_addoption(parser):
     parser.addoption('--runslow',
                      action='store_true',
                      default=False,
-                     help='run slow tests')
+                     help='run slow tests.')
     for cloud in all_clouds_in_smoke_tests:
         parser.addoption(f'--{cloud}',
                          action='store_true',
                          default=False,
-                         help=f'Only run {cloud.upper()} tests')
+                         help=f'Only run {cloud.upper()} tests.')
+    parser.addoption('--managed-spot',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for managed spot.')
     parser.addoption(
         '--generic-cloud',
         type=str,
@@ -59,8 +64,10 @@ def _get_cloud_to_run(config) -> List[str]:
 
 
 def pytest_collection_modifyitems(config, items):
-    skip_slow = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks = {}
+    skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
+    skip_marks['managed_spot'] = pytest.mark.skip(
+        reason='skipped, because --managed-spot option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -69,10 +76,14 @@ def pytest_collection_modifyitems(config, items):
 
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
-            item.add_marker(skip_slow)
+            item.add_marker(skip_marks['slow'])
         for cloud in all_clouds_in_smoke_tests:
             if cloud in item.keywords and cloud not in cloud_to_run:
                 item.add_marker(skip_marks[cloud])
+
+        if (not 'managed_spot'
+                in item.keywords) and config.getoption('--managed-spot'):
+            item.add_marker(skip_marks['managed_spot'])
 
 
 @pytest.fixture

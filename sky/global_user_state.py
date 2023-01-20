@@ -185,7 +185,6 @@ def add_or_update_cluster(cluster_name: str,
 
     # first time a cluster is being launched
     if not usage_intervals:
-        assert requested_resources is not None
         usage_intervals = []
 
     # if this is the cluster init or we are starting after a stop
