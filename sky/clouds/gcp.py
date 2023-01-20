@@ -280,8 +280,9 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 52 GB RAM.  First-gen general purpose.
-        return 'n1-highmem-8'
+        # General-purpose instance with 8 vCPUs and 32 GB RAM.
+        # Intel Ice Lake 8373C or Cascade Lake 6268CL
+        return 'n2-standard-8'
 
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
