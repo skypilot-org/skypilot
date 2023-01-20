@@ -176,11 +176,6 @@ class SpotController:
             spot_state.set_failed(
                 self._job_id,
                 failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
-        except exceptions.ClusterSetUpError as e:
-            logger.error(f'{common_utils.class_fullname(e.__class__)}: '
-                         f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
-            spot_state.set_failed(self._job_id,
-                                  failure_type=spot_state.SpotStatus.FAILED)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
             logger.error('Unexpected error occurred: '
