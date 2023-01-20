@@ -1099,6 +1099,7 @@ def test_use_spot(generic_cloud: str):
 
 
 # ---------- Testing managed spot ----------
+@pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
     name = _get_cluster_name()
@@ -1125,6 +1126,7 @@ def test_spot(generic_cloud: str):
 
 # ---------- Testing managed spot recovery ----------
 @pytest.mark.aws
+@pytest.mark.managed_spot
 def test_spot_recovery_aws():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1155,6 +1157,7 @@ def test_spot_recovery_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1185,6 +1188,7 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
     name = _get_cluster_name()
@@ -1202,6 +1206,7 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 
 
 @pytest.mark.aws
+@pytest.mark.managed_spot
 def test_spot_recovery_multi_node_aws():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1233,6 +1238,7 @@ def test_spot_recovery_multi_node_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1266,6 +1272,7 @@ def test_spot_recovery_multi_node_gcp():
 
 
 @pytest.mark.aws
+@pytest.mark.managed_spot
 def test_spot_cancellation_aws():
     name = _get_cluster_name()
     region = 'us-east-2'
@@ -1326,6 +1333,7 @@ def test_spot_cancellation_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     zone = 'us-west3-b'
@@ -1381,6 +1389,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
+@pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
     name = _get_cluster_name()
@@ -1408,6 +1417,7 @@ def test_spot_storage(generic_cloud: str):
 
 # ---------- Testing spot TPU ----------
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_tpu():
     """Test managed spot on TPU."""
     name = _get_cluster_name()
@@ -1443,6 +1453,7 @@ def test_inline_env(generic_cloud: str):
 
 
 # ---------- Testing env for spot ----------
+@pytest.mark.managed_spot
 def test_inline_spot_env(generic_cloud: str):
     """Test env"""
     name = _get_cluster_name()
