@@ -371,6 +371,10 @@ class SSHConfigHelper(object):
             proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
+        # StrictHostKeyChecking=no skips the host key check for the first
+        # time. UserKnownHostsFile=/dev/null prevents the host key from being
+        # added to the known_hosts file, so that the host key check is skipped
+        # for all subsequent connections.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -380,6 +384,7 @@ class SSHConfigHelper(object):
               IdentitiesOnly yes
               ForwardAgent yes
               StrictHostKeyChecking no
+              UserKnownHostsFile=/dev/null
               Port 22
               {proxy}
             """.rstrip())
