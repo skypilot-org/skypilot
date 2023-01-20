@@ -31,6 +31,10 @@ def pytest_addoption(parser):
                          action='store_true',
                          default=False,
                          help=f'Only run {cloud.upper()} tests')
+    parser.addoption('--managed-spot',
+                    action='store_true',
+                    default=False,
+                    help='Only run tests for managed spot instances')
     parser.addoption(
         '--generic-cloud',
         type=str,
@@ -59,8 +63,9 @@ def _get_cloud_to_run(config) -> List[str]:
 
 
 def pytest_collection_modifyitems(config, items):
-    skip_slow = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks = {}
+    skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
+    skip_marks['managed_spot'] = pytest.mark.skip(reason='skipped, due to --managed-spot option is set')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -69,10 +74,13 @@ def pytest_collection_modifyitems(config, items):
 
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
-            item.add_marker(skip_slow)
+            item.add_marker(skip_marks['slow'])
         for cloud in all_clouds_in_smoke_tests:
             if cloud in item.keywords and cloud not in cloud_to_run:
                 item.add_marker(skip_marks[cloud])
+        
+        if (not 'managed_spot' in item.keywords) and config.getoption('--managed-spot'):
+            item.add_marker(skip_marks['managed_spot'])
 
 
 @pytest.fixture
