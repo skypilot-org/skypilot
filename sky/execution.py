@@ -26,6 +26,7 @@ from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
+from sky import skypilot_config
 from sky import sky_logging
 from sky import spot
 from sky import task as task_lib
@@ -118,6 +119,9 @@ def _execute(
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     """Execute a entrypoint.
 
@@ -202,18 +206,31 @@ def _execute(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and Stage.OPTIMIZE in stages:
-        if task.best_resources is None:
-            # TODO: fix this for the situation where number of requested
-            # accelerators is not an integer.
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # TODO: adding this check because docker backend on a
-                # no-credential machine should not enter optimize(), which
-                # would directly error out ('No cloud is enabled...').  Fix by
-                # moving `sky check` checks out of optimize()?
-                dag = sky.optimize(dag, minimize=optimize_target)
-                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                assert task.best_resources is not None, task
+    if not cluster_exists:
+        if (Stage.PROVISION in stages and task.use_spot and
+                not _is_launched_by_spot_controller):
+            yellow = colorama.Fore.YELLOW
+            bold = colorama.Style.BRIGHT
+            reset = colorama.Style.RESET_ALL
+            logger.info(
+                f'{yellow}Launching an unmanaged spot task, which does not '
+                f'automatically recover from preemptions.{reset}\n{yellow}To '
+                'get automatic recovery, use managed spot instead: '
+                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
+                f'{bold}sky.spot_launch(){reset}.')
+
+        if Stage.OPTIMIZE in stages:
+            if task.best_resources is None:
+                # TODO: fix this for the situation where number of requested
+                # accelerators is not an integer.
+                if isinstance(backend, backends.CloudVmRayBackend):
+                    # TODO: adding this check because docker backend on a
+                    # no-credential machine should not enter optimize(), which
+                    # would directly error out ('No cloud is enabled...').  Fix
+                    # by moving `sky check` checks out of optimize()?
+                    dag = sky.optimize(dag, minimize=optimize_target)
+                    task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                    assert task.best_resources is not None, task
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
@@ -298,6 +315,9 @@ def launch(
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task.
@@ -372,6 +392,7 @@ def launch(
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
+        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
     )
 
 
@@ -427,6 +448,8 @@ def exec(  # pylint: disable=redefined-builtin
     Raises:
         ValueError: if the specified cluster does not exist or is not in UP
             status.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+            reserved cluster that does not support this operation.
     """
     entrypoint = task
     if isinstance(entrypoint, sky.Dag):
@@ -437,14 +460,10 @@ def exec(  # pylint: disable=redefined-builtin
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
-    status, handle = backend_utils.refresh_cluster_status_handle(cluster_name)
-    with ux_utils.print_exception_no_traceback():
-        if handle is None:
-            raise ValueError(f'Cluster {cluster_name!r} not found.  '
-                             'Use `sky launch` to provision first.')
-        if status != global_user_state.ClusterStatus.UP:
-            raise ValueError(f'Cluster {cluster_name!r} is not up.  '
-                             'Use `sky status` to check the status.')
+    handle = backend_utils.check_cluster_available(
+        cluster_name,
+        operation='executing tasks',
+        check_cloud_vm_ray_backend=False)
     _execute(entrypoint=entrypoint,
              dryrun=dryrun,
              down=down,
@@ -516,19 +535,63 @@ def spot_launch(
         common_utils.dump_yaml(f.name, task_config)
 
         controller_name = spot.SPOT_CONTROLLER_NAME
+        vars_to_fill = {
+            'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
+            'user_yaml_path': f.name,
+            'user_config_path': None,
+            'spot_controller': controller_name,
+            'cluster_name': name,
+            'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
+            'is_dev': env_options.Options.IS_DEVELOPER.get(),
+            'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
+            'logging_user_hash': common_utils.get_user_hash(),
+            'retry_until_up': retry_until_up,
+            'user': os.environ.get('USER', None),
+        }
+        if skypilot_config.loaded():
+            # Look up the contents of the already loaded configs via the
+            # 'skypilot_config' module. Don't simply read the on-disk file as
+            # it may have changed since this process started.
+            #
+            # Pop any proxy command, because the controller would've been
+            # launched behind the proxy, and in general any nodes we launch may
+            # not have or need the proxy setup. (If the controller needs to
+            # launch spot clusters in another region/VPC, the user should
+            # properly set up VPC peering, which will allow the
+            # cross-region/VPC communication. The proxy command is orthogonal
+            # to this scenario.)
+            #
+            # This file will be uploaded to the controller node and will be
+            # used throughout the spot job's recovery attempts (i.e., if it
+            # relaunches due to preemption, we make sure the same config is
+            # used).
+            #
+            # NOTE: suppose that we have a controller in old VPC, then user
+            # changes 'vpc_name' in the config and does a 'spot launch'. In
+            # general, the old controller may not successfully launch the job
+            # in the new VPC. This happens if the two VPCs don’t have peering
+            # set up. Like other places in the code, we assume properly setting
+            # up networking is user's responsibilities.
+            # TODO(zongheng): consider adding a basic check that checks
+            # controller VPC (or name) == the spot job's VPC (or name). It may
+            # not be a sufficient check (as it's always possible that peering
+            # is not set up), but it may catch some obvious errors.
+            # TODO(zhwu): hacky. We should pop the proxy command of the cloud
+            # where the controller is launched (currently, only aws user uses
+            # proxy_command).
+            config_dict = skypilot_config.pop_nested(
+                ('aws', 'ssh_proxy_command'))
+            with tempfile.NamedTemporaryFile(mode='w', delete=False) as tmpfile:
+                common_utils.dump_yaml(tmpfile.name, config_dict)
+                vars_to_fill.update({
+                    'user_config_path': tmpfile.name,
+                    'env_var_skypilot_config':
+                        skypilot_config.ENV_VAR_SKYPILOT_CONFIG,
+                })
+
         yaml_path = backend_utils.fill_template(
-            spot.SPOT_CONTROLLER_TEMPLATE, {
-                'remote_user_yaml_prefix': spot.SPOT_TASK_YAML_PREFIX,
-                'user_yaml_path': f.name,
-                'spot_controller': controller_name,
-                'cluster_name': name,
-                'gcloud_installation_commands': gcp.GCLOUD_INSTALLATION_COMMAND,
-                'is_dev': env_options.Options.IS_DEVELOPER.get(),
-                'disable_logging': env_options.Options.DISABLE_LOGGING.get(),
-                'logging_user_hash': common_utils.get_user_hash(),
-                'retry_until_up': retry_until_up,
-                'user': os.environ.get('USER', None),
-            },
+            spot.SPOT_CONTROLLER_TEMPLATE,
+            vars_to_fill,
             output_prefix=spot.SPOT_CONTROLLER_YAML_PREFIX)
         controller_task = task_lib.Task.from_yaml(yaml_path)
         controller_task.spot_task = task

@@ -1,8 +1,5 @@
 name: multi_hostname
 
-resources:
-  cloud: gcp
-
 num_nodes: 2
 
 # The run command will be run on *all* nodes.

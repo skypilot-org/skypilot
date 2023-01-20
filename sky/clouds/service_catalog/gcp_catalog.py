@@ -127,7 +127,7 @@ _NUM_ACC_TO_MAX_CPU_AND_MEMORY = {
 def _is_power_of_two(x: int) -> bool:
     """Returns true if x is a power of two."""
     # https://stackoverflow.com/questions/600293/how-to-check-if-a-number-is-a-power-of-2
-    return x and not x & (x - 1)
+    return bool(x and not x & (x - 1))
 
 
 def _closest_power_of_two(x: int) -> int:
@@ -146,14 +146,15 @@ def instance_type_exists(instance_type: str) -> bool:
 
 def get_hourly_cost(
     instance_type: str,
-    region: Optional[str] = None,
     use_spot: bool = False,
+    region: Optional[str] = None,
+    zone: Optional[str] = None,
 ) -> float:
-    """Returns the hourly price for a given instance type and region."""
     if instance_type == 'TPU-VM':
         # Currently the host VM of TPU does not cost extra.
         return 0
-    return common.get_hourly_cost_impl(_df, instance_type, region, use_spot)
+    return common.get_hourly_cost_impl(_df, instance_type, use_spot, region,
+                                       zone)
 
 
 def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
@@ -164,7 +165,11 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 
 
 def get_instance_type_for_accelerator(
-        acc_name: str, acc_count: int) -> Tuple[Optional[List[str]], List[str]]:
+        acc_name: str,
+        acc_count: int,
+        use_spot: bool = False,
+        region: Optional[str] = None,
+        zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
     """Fetch instance types with similar CPU count for given accelerator.
 
     Return: a list with a single matched instance type and a list of candidates
@@ -173,7 +178,7 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         df=_df, acc_name=acc_name, acc_count=acc_count)
+         _df, acc_name, acc_count, use_spot, region, zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 
@@ -227,19 +232,22 @@ def _get_accelerator(
     accelerator: str,
     count: int,
     region: Optional[str],
+    zone: Optional[str] = None,
 ) -> pd.DataFrame:
     idx = (df['AcceleratorName'].str.fullmatch(
         accelerator, case=False)) & (df['AcceleratorCount'] == count)
     if region is not None:
         idx &= df['Region'] == region
+    if zone is not None:
+        idx &= df['AvailabilityZone'] == zone
     return df[idx]
 
 
 def get_accelerator_hourly_cost(accelerator: str,
                                 count: int,
+                                use_spot: bool = False,
                                 region: Optional[str] = None,
-                                use_spot: bool = False) -> float:
-    """Returns the cost, or the cheapest cost among all zones for spot."""
+                                zone: Optional[str] = None) -> float:
     # NOTE: As of 2022/4/13, Prices of TPU v3-64 to v3-2048 are not available on
     # https://cloud.google.com/tpu/pricing. We put estimates in gcp catalog.
     if region is None:
@@ -248,7 +256,8 @@ def get_accelerator_hourly_cost(accelerator: str,
             if len(set(df['Price'])) == 1:
                 region = tpu_region
                 break
-    df = _get_accelerator(_df, accelerator, count, region)
+
+    df = _get_accelerator(_df, accelerator, count, region, zone)
     assert len(set(df['Price'])) == 1, df
     if not use_spot:
         return df['Price'].iloc[0]
@@ -287,12 +296,14 @@ def list_accelerators(
         memory = df['MemoryGiB'].iloc[0]
         vm_price = common.get_hourly_cost_impl(_df,
                                                a100_host_vm_type,
-                                               None,
-                                               use_spot=False)
+                                               use_spot=False,
+                                               region=None,
+                                               zone=None)
         vm_spot_price = common.get_hourly_cost_impl(_df,
                                                     a100_host_vm_type,
-                                                    None,
-                                                    use_spot=True)
+                                                    use_spot=True,
+                                                    region=None,
+                                                    zone=None)
         new_infos[info.accelerator_name].append(
             info._replace(
                 instance_type=a100_host_vm_type,
@@ -449,6 +460,8 @@ def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
     return common.get_image_id_from_tag_impl(_image_df, tag, region)
 
 
-def validate_image_tag(tag: str, region: Optional[str]) -> bool:
+def is_image_tag_valid(tag: str, region: Optional[str]) -> bool:
     """Returns whether the image tag is valid."""
-    return common.is_image_tag_valid_impl(_image_df, tag, region)
+    # GCP images are not region-specific.
+    del region  # Unused.
+    return common.is_image_tag_valid_impl(_image_df, tag, None)
