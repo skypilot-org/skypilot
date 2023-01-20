@@ -13,6 +13,7 @@ from typing import List
 # due to the cloud credit limit for the development account.
 # To only run tests for a specific cloud (as well as generic tests), use
 # --aws, --gcp, or --azure.
+# To only run tests for managed spot (without generic tests), use --managed-spot.
 # A "generic test" tests a generic functionality (e.g., autostop) that
 # should work on any cloud we support. The cloud used for such a test
 # is controlled by `--generic-cloud` (typically you do not need to set it).

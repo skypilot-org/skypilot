@@ -35,6 +35,9 @@ pytest --lf
 # Run one of the smoke tests
 pytest tests/test_smoke.py::test_minimal
 
+# Only run managed spot tests
+pytest tests/test_smoke.py --managed-spot
+
 # Only run test for AWS + generic tests
 pytest tests/test_smoke.py --aws
 
