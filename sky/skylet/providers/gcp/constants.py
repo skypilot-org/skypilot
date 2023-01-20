@@ -49,17 +49,4 @@ FIREWALL_RULES_TEMPLATE = [
         }],
         "sourceRanges": ["0.0.0.0/0"],
     },
-    {
-        "name": "{VPC_NAME}-allow-rdp",
-        "description": "Allows RDP connections from any source to any instance on the network using port 3389.",
-        "network": "projects/{PROJ_ID}/global/networks/{VPC_NAME}",
-        "selfLink": "projects/{PROJ_ID}/global/firewalls/{VPC_NAME}-allow-rdp",
-        "direction": "INGRESS",
-        "priority": 65534,
-        "allowed": [{
-            "IPProtocol": "tcp",
-            "ports": ["3389"],
-        }],
-        "sourceRanges": ["0.0.0.0/0"],
-    }
 ]

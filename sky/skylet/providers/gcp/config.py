@@ -531,6 +531,18 @@ def get_usable_vpc(config):
     If not found, create a new one with sufficient firewall rules.
     """
     _, _, compute, _ = construct_clients_from_provider_config(config["provider"])
+
+    # For backward compatibility, reuse the VPC for if the VM is launched.
+    ins_all = _list_instances(config, compute)
+    for ins in ins_all:
+        labels = ins.get("labels", {})
+        for k, v in labels.items():
+            if k == "ray-cluster-name" and v == config["cluster_name"]:
+                if "networkInterfaces" not in ins or len(ins["networkInterfaces"]) == 0:
+                    continue
+                vpc_name = ins["networkInterfaces"][0]["network"].split("/")[-1]
+                return vpc_name
+
     vpcnets_all = _list_vpcnets(config, compute)
 
     usable_vpc_name = None
@@ -633,6 +645,19 @@ def _create_vpcnet(config, compute, body):
     response = wait_for_compute_global_operation(
         config["provider"]["project_id"], operation, compute
     )
+    return response
+
+
+def _list_instances(config, compute):
+    operation = (
+        compute.instances()
+        .list(
+            project=config["provider"]["project_id"],
+            zone=config["provider"]["availability_zone"],
+        )
+        .execute()
+    )
+    response = operation.get("items", [])
     return response
 
 
