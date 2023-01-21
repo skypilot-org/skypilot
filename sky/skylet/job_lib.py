@@ -362,17 +362,14 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
 def update_job_status(job_owner: str,
                       job_ids: List[int],
                       silent: bool = False) -> List[JobStatus]:
-    """Updates and returns the job statuses matching our `JobStatus` semantics
+    """Updates and returns the job statuses matching our `JobStatus` semantics.
 
-    "True" statuses: this function queries `ray job status` and processes
-    those results to match our semantics.
+    This function queries `ray job status` and processes those results to match
+    our semantics.
 
-    This function queries `ray job status` and processes those results to
-    match our semantics.
-
-    Though we update job status actively in ray program and job cancelling,
-    we still need this to handle staleness problem, caused by instance
-    restarting and other corner cases (if any).
+    Though we update job status actively in the generated ray program and
+    during job cancelling, we still need this to handle the staleness problem,
+    caused by instance restarting and other corner cases (if any).
 
     This function should only be run on the remote instance with ray==2.0.1.
     """
@@ -413,7 +410,8 @@ def update_job_status(job_owner: str,
             if status is None:
                 original_status = get_status_no_lock(job_id)
                 status = original_status
-                if not original_status.is_terminal():
+                if (original_status is not None and
+                        not original_status.is_terminal()):
                     # The job may be stale, when the instance is restarted
                     # (the ray redis is volatile). We need to reset the
                     # status of the task to FAILED if its original status
@@ -670,9 +668,10 @@ class JobLibCodeGen:
             'else job_lib.get_latest_job_id()',
             'run_timestamp = job_lib.get_run_timestamp(job_id)',
             (f'log_dir = os.path.join({constants.SKY_LOGS_DIRECTORY!r}, '
-             'run_timestamp)'),
+             '"" if run_timestamp is None else run_timestamp)'),
             (f'log_lib.tail_logs({job_owner!r},'
-             f'job_id, log_dir, {spot_job_id!r}, follow={follow})'),
+             f'job_id, None if run_timestamp is None else log_dir, '
+             f'{spot_job_id!r}, follow={follow})'),
         ]
         return cls._build(code)
 
