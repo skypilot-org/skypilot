@@ -22,7 +22,7 @@ def validate_region_zone(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Azure does not support zones.')
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('azure', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
@@ -89,10 +89,12 @@ def get_gen_version_from_instance_type(instance_type: str) -> Optional[int]:
     return _df[_df['InstanceType'] == instance_type]['Generation'].iloc[0]
 
 
-def list_accelerators(gpus_only: bool,
-                      name_filter: Optional[str],
-                      case_sensitive: bool = True
-                     ) -> Dict[str, List[common.InstanceTypeInfo]]:
+def list_accelerators(
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        case_sensitive: bool = True
+) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Azure offering GPUs."""
     return common.list_accelerators_impl('Azure', _df, gpus_only, name_filter,
-                                         case_sensitive)
+                                         region_filter, case_sensitive)
