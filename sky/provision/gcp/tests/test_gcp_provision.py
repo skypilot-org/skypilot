@@ -78,6 +78,8 @@ def test_provision():
     bootstrapped_config = gcp.bootstrap(config)
     print(f'Bootstrapping duration = {time.time() - start:.3f}s')
 
+    return
+
     start = time.time()
     gcp.create_or_resume_instances(
         region,

@@ -123,16 +123,26 @@ def construct_clients_from_provider_config(provider_config):
     tpu resource (the last element of the tuple) will be None if
     `_has_tpus` in provider config is not set or False.
     """
+
+    def _create_credentials(creds):
+        if provider_config.get(HAS_TPU_PROVIDER_FIELD, False):
+            _create_tpu_optional = _create_tpu
+        else:
+
+            def _create_tpu_optional(_):
+                return None
+
+        # If gcp_credentials is None, then discovery.build will search for
+        # credentials in the local environment.
+        return _create_crm(creds), _create_iam(creds), _create_compute(
+            creds), _create_tpu_optional(creds)
+
     gcp_credentials = provider_config.get('gcp_credentials')
     if gcp_credentials is None:
         logger.debug('gcp_credentials not found in cluster yaml file. '
                      'Falling back to GOOGLE_APPLICATION_CREDENTIALS '
                      'environment variable.')
-        tpu_resource = (_create_tpu() if provider_config.get(
-            HAS_TPU_PROVIDER_FIELD, False) else None)
-        # If gcp_credentials is None, then discovery.build will search for
-        # credentials in the local environment.
-        return _create_crm(), _create_iam(), _create_compute(), tpu_resource
+        return _create_credentials(None)
 
     assert ('type' in gcp_credentials
            ), 'gcp_credentials cluster yaml field missing "type" field.'
@@ -155,16 +165,10 @@ def construct_clients_from_provider_config(provider_config):
     elif cred_type == 'credentials_token':
         # Otherwise the credentials type must be credentials_token.
         credentials = OAuthCredentials(credentials_field)
+    else:
+        raise ValueError(f'Unknown GCP credential type: {cred_type}')
 
-    tpu_resource = (_create_tpu(credentials) if provider_config.get(
-        HAS_TPU_PROVIDER_FIELD, False) else None)
-
-    return (
-        _create_crm(credentials),
-        _create_iam(credentials),
-        _create_compute(credentials),
-        tpu_resource,
-    )
+    return _create_credentials(credentials)
 
 
 def bootstrap_gcp(config):
