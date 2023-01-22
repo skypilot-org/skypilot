@@ -593,14 +593,14 @@ class RetryingVmProvisioner(object):
         assert len(zones) == 1, zones
         zone = zones[0]
         splits = stderr.split('\n')
-        exception_str = [s for s in splits if s.startswith('Exception: ')]
+        exception_list = [s for s in splits if s.startswith('Exception: ')]
         httperror_str = [
             s for s in splits
             if s.startswith('googleapiclient.errors.HttpError: ')
         ]
-        if len(exception_str) == 1:
+        if len(exception_list) == 1:
             # Parse structured response {'errors': [...]}.
-            exception_str = exception_str[0][len('Exception: '):]
+            exception_str = exception_list[0][len('Exception: '):]
             try:
                 exception_dict = ast.literal_eval(exception_str)
             except Exception as e:
@@ -669,7 +669,7 @@ class RetryingVmProvisioner(object):
                     launchable_resources.copy(zone=zone.name))
         else:
             # No such structured error response found.
-            assert not exception_str, stderr
+            assert not exception_list, stderr
             if 'was not found' in stderr:
                 # Example: The resource
                 # 'projects/<id>/zones/zone/acceleratorTypes/nvidia-tesla-v100'
@@ -1067,7 +1067,7 @@ class RetryingVmProvisioner(object):
         dryrun: bool,
         stream_logs: bool,
         cluster_name: str,
-        cloud_user_identity: str,
+        cloud_user_identity: Optional[str],
         cluster_exists: bool = False,
     ):
         """The provision retry loop."""
@@ -1628,6 +1628,7 @@ class RetryingVmProvisioner(object):
                 # change the cloud assignment.
                 backend_utils.check_cluster_name_is_valid(
                     cluster_name, to_provision.cloud)
+
                 if dryrun:
                     cloud_user = None
                 else:

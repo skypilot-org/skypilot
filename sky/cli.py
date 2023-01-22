@@ -1433,11 +1433,10 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    query_clusters: Optional[List[str]] = None
     if clusters:
-        clusters = _get_glob_clusters(clusters)
-    else:
-        clusters = None
-    cluster_records = core.status(cluster_names=clusters, refresh=refresh)
+        query_clusters = _get_glob_clusters(clusters)
+    cluster_records = core.status(cluster_names=query_clusters, refresh=refresh)
     nonreserved_cluster_records = []
     reserved_clusters = {}
     for cluster_record in cluster_records:
