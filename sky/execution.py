@@ -117,6 +117,9 @@ def _execute(
     detach_run: bool = False,
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     """Execute a entrypoint.
 
@@ -201,18 +204,31 @@ def _execute(
                 f'Backend {backend.NAME} does not support autostop, please try '
                 f'{backends.CloudVmRayBackend.NAME}')
 
-    if not cluster_exists and Stage.OPTIMIZE in stages:
-        if task.best_resources is None:
-            # TODO: fix this for the situation where number of requested
-            # accelerators is not an integer.
-            if isinstance(backend, backends.CloudVmRayBackend):
-                # TODO: adding this check because docker backend on a
-                # no-credential machine should not enter optimize(), which
-                # would directly error out ('No cloud is enabled...').  Fix by
-                # moving `sky check` checks out of optimize()?
-                dag = sky.optimize(dag, minimize=optimize_target)
-                task = dag.tasks[0]  # Keep: dag may have been deep-copied.
-                assert task.best_resources is not None, task
+    if not cluster_exists:
+        if (Stage.PROVISION in stages and task.use_spot and
+                not _is_launched_by_spot_controller):
+            yellow = colorama.Fore.YELLOW
+            bold = colorama.Style.BRIGHT
+            reset = colorama.Style.RESET_ALL
+            logger.info(
+                f'{yellow}Launching an unmanaged spot task, which does not '
+                f'automatically recover from preemptions.{reset}\n{yellow}To '
+                'get automatic recovery, use managed spot instead: '
+                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
+                f'{bold}sky.spot_launch(){reset}.')
+
+        if Stage.OPTIMIZE in stages:
+            if task.best_resources is None:
+                # TODO: fix this for the situation where number of requested
+                # accelerators is not an integer.
+                if isinstance(backend, backends.CloudVmRayBackend):
+                    # TODO: adding this check because docker backend on a
+                    # no-credential machine should not enter optimize(), which
+                    # would directly error out ('No cloud is enabled...').  Fix
+                    # by moving `sky check` checks out of optimize()?
+                    dag = sky.optimize(dag, minimize=optimize_target)
+                    task = dag.tasks[0]  # Keep: dag may have been deep-copied.
+                    assert task.best_resources is not None, task
 
     backend.register_info(dag=dag, optimize_target=optimize_target)
 
@@ -298,6 +314,9 @@ def launch(
     detach_setup: bool = False,
     detach_run: bool = False,
     no_setup: bool = False,
+    # Internal only:
+    # pylint: disable=invalid-name
+    _is_launched_by_spot_controller: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a task.
@@ -372,6 +391,7 @@ def launch(
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
+        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
     )
 
 
@@ -427,6 +447,8 @@ def exec(  # pylint: disable=redefined-builtin
     Raises:
         ValueError: if the specified cluster does not exist or is not in UP
             status.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+            reserved cluster that does not support this operation.
     """
     entrypoint = task
     if isinstance(entrypoint, sky.Dag):

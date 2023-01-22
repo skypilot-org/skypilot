@@ -49,6 +49,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
 def list_accelerators(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
@@ -58,7 +59,7 @@ def list_accelerators(
     of instance type offerings. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter, case_sensitive)
+                                  name_filter, region_filter, case_sensitive)
     if not isinstance(results, list):
         results = [results]
     ret: Dict[str,
@@ -72,6 +73,7 @@ def list_accelerators(
 def list_accelerator_counts(
     gpus_only: bool = True,
     name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
     clouds: CloudFilter = None,
 ) -> Dict[str, List[int]]:
     """List all accelerators offered by Sky and available counts.
@@ -80,7 +82,7 @@ def list_accelerator_counts(
     of available counts. See usage in cli.py.
     """
     results = _map_clouds_catalog(clouds, 'list_accelerators', gpus_only,
-                                  name_filter)
+                                  name_filter, region_filter, False)
     if not isinstance(results, list):
         results = [results]
     accelerator_counts: Dict[str, Set[int]] = collections.defaultdict(set)

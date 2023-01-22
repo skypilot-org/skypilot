@@ -34,7 +34,10 @@ logger = sky_logging.init_logger(__name__)
 def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
            refresh: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get all cluster statuses.
+    """Get cluster statuses.
+
+    If cluster_names is given, return those clusters. Otherwise, return all
+    clusters.
 
     Each returned value has the following fields:
 
@@ -101,6 +104,56 @@ def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
     return backend_utils.get_clusters(include_reserved=True,
                                       refresh=refresh,
                                       cluster_names=cluster_names)
+
+
+@usage_lib.entrypoint
+def cost_report() -> List[Dict[str, Any]]:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Get all cluster cost reports, including those that have been downed.
+
+    Each returned value has the following fields:
+
+    .. code-block:: python
+
+        {
+            'name': (str) cluster name,
+            'launched_at': (int) timestamp of last launch on this cluster,
+            'duration': (int) total seconds that cluster was up and running,
+            'last_use': (str) the last command/entrypoint that affected this
+            'num_nodes': (int) number of nodes launched for cluster,
+            'resources': (resources.Resources) type of resource launched,
+            'cluster_hash': (str) unique hash identifying cluster,
+            'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
+            'total_cost': (float) cost given resources and usage intervals,
+        }
+
+
+        The estimated cost column indicates price for the cluster based on the
+        type of resources being used and the duration of use up until the call
+        to status. This means if the cluster is UP, successive calls to report
+        will show increasing price. The estimated cost is calculated based on
+        the local cache of the cluster status, and may not be accurate for
+        the cluster with autostop/use_spot set or terminated/stopped
+        on the cloud console.
+
+    Returns:
+        A list of dicts, with each dict containing the cost information of a
+        cluster.
+    """
+    cluster_reports = global_user_state.get_clusters_from_history()
+
+    def get_total_cost(cluster_report: dict) -> float:
+        duration = cluster_report['duration']
+        launched_nodes = cluster_report['num_nodes']
+        launched_resources = cluster_report['resources']
+
+        cost = (launched_resources.get_cost(duration) * launched_nodes)
+        return cost
+
+    for cluster_report in cluster_reports:
+        cluster_report['total_cost'] = get_total_cost(cluster_report)
+
+    return cluster_reports
 
 
 def _start(
@@ -459,12 +512,10 @@ def cancel(cluster_name: str,
     Please refer to the sky.cli.cancel for the document.
 
     Raises:
-        ValueError: arguments are invalid or the cluster is not supported or the
-          cluster does not exist.
-        ValueError: if the cluster does not exist.
+        ValueError: if arguments are invalid, or the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
-        sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+          reserved cluster that does not support this operation.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current

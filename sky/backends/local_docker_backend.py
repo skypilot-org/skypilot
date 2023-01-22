@@ -165,9 +165,11 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         self.images[handle] = (image_tag, metadata)
         logger.info(f'Image {image_tag} built.')
         logger.info('Provisioning complete.')
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                cluster_handle=handle,
-                                                ready=False)
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            cluster_handle=handle,
+            requested_resources=task.resources,
+            ready=False)
         return handle
 
     def _sync_workdir(self, handle: LocalDockerResourceHandle,
@@ -258,9 +260,11 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             f'-it {container.name} /bin/bash{style.RESET_ALL}.\n'
             f'You can debug the image by running: {style.BRIGHT}docker run -it '
             f'{image_tag} /bin/bash{style.RESET_ALL}.\n')
-        global_user_state.add_or_update_cluster(cluster_name,
-                                                cluster_handle=handle,
-                                                ready=True)
+        global_user_state.add_or_update_cluster(
+            cluster_name,
+            cluster_handle=handle,
+            requested_resources=task.resources,
+            ready=True)
 
     def _execute(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
                  detach_run: bool) -> None:
@@ -324,6 +328,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             container = self.containers[handle]
             container.remove(force=True)
         cluster_name = handle.get_cluster_name()
+
         global_user_state.remove_cluster(cluster_name, terminate=True)
 
     # --- Utilities ---
