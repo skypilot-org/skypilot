@@ -226,7 +226,7 @@ class StrategyExecutor:
                     continue
 
                 # Check the job status until it is not in initialized status
-                if status is not None and job_lib.JobStatus.INIT < status:
+                if status is not None and status > job_lib.JobStatus.INIT:
                     try:
                         launch_time = spot_utils.get_job_timestamp(
                             self.backend, self.cluster_name, get_end_time=False)
