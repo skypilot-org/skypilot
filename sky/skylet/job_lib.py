@@ -696,7 +696,9 @@ class JobLibCodeGen:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            f'job_time = job_lib.get_job_submitted_or_ended_timestamp_payload(job_id, {get_ended_time})',
+            'job_time = '
+            'job_lib.get_job_submitted_or_ended_timestamp_payload('
+            f'job_id, {get_ended_time})',
             'print(job_time, flush=True)',
         ]
         return cls._build(code)

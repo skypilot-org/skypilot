@@ -53,7 +53,7 @@ columns = [
 
 class SpotStatus(enum.Enum):
     """Spot job status, designed to be in serverless style
-    
+
     The SpotStatus is a higher level status than the JobStatus.
     Each spot job submitted to the spot cluster, will have a JobStatus
     on that spot cluster:
@@ -62,7 +62,7 @@ class SpotStatus(enum.Enum):
     will go through the statuses above again.
     That means during the lifetime of a spot job, its JobsStatus could be
     reset to INIT or SETTING_UP multiple times (depending on the preemptions).
-    
+
     However, a spot job only has one SpotStatus on the spot controller.
         SpotStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
     Mapping from JobStatus to SpotStatus:
@@ -97,7 +97,8 @@ class SpotStatus(enum.Enum):
     SUCCEEDED = 'SUCCEEDED'
     # FAILED: The job is finished with failure from the user's program.
     FAILED = 'FAILED'
-    # FAILED_SETUP: The job is finished with failure from the user's setup script.
+    # FAILED_SETUP: The job is finished with failure from the user's setup
+    # script.
     FAILED_SETUP = 'FAILED_SETUP'
     # FAILED_NO_RESOURCE: The job is finished with failure because there is no
     # resource available in the cloud provider(s) to launch the spot cluster.
