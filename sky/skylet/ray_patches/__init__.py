@@ -14,7 +14,7 @@ To get original versions, go to the Ray branch with version:
 
 Example workflow:
 
-  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.0.1/python/ray/autoscaler/_private/command_runner.py
+  >> wget https://raw.githubusercontent.com/ray-project/ray/releases/2.2.0/python/ray/autoscaler/_private/command_runner.py
   >> cp command_runner.py command_runner.py.1
 
   >> # Make some edits to command_runner.py.1...
@@ -89,11 +89,21 @@ def patch() -> None:
     # by increasing the timeout.
     # Tracked in https://github.com/Azure/azure-cli/issues/20404#issuecomment-1249575110
     # Only patch it if azure cli is installed.
+    # Patch the azure_cli.py with `sed` instead of patching the file directly,
+    # because different versions of azure-cli-core have different line numbers.
     try:
         import azure
         from azure.identity._credentials import azure_cli
-        version = pkg_resources.get_distribution('azure-cli').version
-        _run_patch(azure_cli.__file__, _to_absolute('azure_cli.py.patch'),
-                   version)
+        version = pkg_resources.get_distribution("azure-cli-core").version
+        target_file = azure_cli.__file__
+        orig_file = f'{target_file}.{version}'
+        script = f"""\
+        if [ ! -f {orig_file} ]; then
+            echo Create backup file {orig_file}
+            cp {target_file} {orig_file}
+        fi
+        sed 's/kwargs["timeout"] = 10/kwargs["timeout"] = 30/g' {orig_file} > {target_file}
+        """
+        subprocess.run(script, shell=True, check=False)
     except ImportError:
         pass

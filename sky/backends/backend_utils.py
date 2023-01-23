@@ -1606,7 +1606,7 @@ def _ray_launch_hash(cluster_name: str,
             logger.error(f'Error found when refreshing cluster status: {e}')
             return None
         raise e
-    # Adopted from https://github.com/ray-project/ray/blob/ray-2.0.1/python/ray/autoscaler/_private/node_launcher.py#L87-L97
+    # Adopted from https://github.com/ray-project/ray/blob/ray-2.2.0/python/ray/autoscaler/_private/node_launcher.py#L71-L81
     # TODO(zhwu): this logic is duplicated from the ray code above (keep in
     # sync).
     launch_hashes = set()

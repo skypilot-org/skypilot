@@ -374,7 +374,7 @@ def update_job_status(job_owner: str,
     we still need this to handle staleness problem, caused by instance
     restarting and other corner cases (if any).
 
-    This function should only be run on the remote instance with ray==2.0.1.
+    This function should only be run on the remote instance with ray==2.2.0.
     """
     if len(job_ids) == 0:
         return []
@@ -384,7 +384,7 @@ def update_job_status(job_owner: str,
 
     job_client = _create_ray_job_submission_client()
 
-    # In ray 2.0.1, job_client.list_jobs returns a list of JobDetails,
+    # In ray 2.2.0, job_client.list_jobs returns a list of JobDetails,
     # which contains the job status (str) and submission_id (str).
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
