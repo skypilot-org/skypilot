@@ -134,10 +134,12 @@ class SpotController:
                                             None,
                                             spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    spot_state.set_failed(
-                        self._job_id,
-                        failure_type=spot_state.SpotStatus.FAILED,
-                        end_time=end_time)
+                    status_to_set = spot_state.SpotStatus.FAILED
+                    if job_status == job_lib.JobStatus.FAILED_SETUP:
+                        status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                    spot_state.set_failed(self._job_id,
+                                          failure_type=status_to_set,
+                                          end_time=end_time)
                     break
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the

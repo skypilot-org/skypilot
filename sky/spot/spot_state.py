@@ -60,6 +60,7 @@ class SpotStatus(enum.Enum):
     # Terminal statuses
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
+    FAILED_SETUP = 'FAILED_SETUP'
     FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
     FAILED_CONTROLLER = 'FAILED_CONTROLLER'
     CANCELLED = 'CANCELLED'
@@ -83,7 +84,10 @@ class SpotStatus(enum.Enum):
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
-        return [cls.FAILED, cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER]
+        return [
+            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER
+        ]
 
 
 _SPOT_STATUS_TO_COLOR = {
@@ -94,6 +98,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.RECOVERING: colorama.Fore.CYAN,
     SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
     SpotStatus.FAILED: colorama.Fore.RED,
+    SpotStatus.FAILED_SETUP: colorama.Fore.RED,
     SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
     SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
     SpotStatus.CANCELLED: colorama.Fore.YELLOW,
