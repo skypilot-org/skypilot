@@ -471,11 +471,11 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} -t none --region us-west-1 examples/per_region_images.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
-            f'sky exec {name} examples/per_region_images.yaml',
+            f'sky exec {name} -t none examples/per_region_images.yaml',
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
