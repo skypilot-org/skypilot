@@ -1457,7 +1457,7 @@ def test_spot_tpu():
     run_one_test(test)
 
 
-# ---------- Testing env ----------
+# ---------- Testing env for spot ----------
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
@@ -1476,7 +1476,7 @@ def test_spot_inline_env(generic_cloud: str):
     run_one_test(test)
 
 
-# ---------- Testing env for spot ----------
+# ---------- Testing env ----------
 def test_inline_env(generic_cloud: str):
     """Test env"""
     name = _get_cluster_name()
