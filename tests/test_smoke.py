@@ -1448,8 +1448,8 @@ def test_spot_tpu():
 
 
 # ---------- Testing env ----------
-def test_inline_env(generic_cloud: str):
-    """Test env"""
+def test_spot_inline_env(generic_cloud: str):
+    """Test spot env"""
     name = _get_cluster_name()
     test = Test(
         'test-spot-inline-env',
@@ -1467,7 +1467,7 @@ def test_inline_env(generic_cloud: str):
 
 
 # ---------- Testing env for spot ----------
-def test_inline_spot_env(generic_cloud: str):
+def test_inline_env(generic_cloud: str):
     """Test env"""
     name = _get_cluster_name()
     test = Test(
