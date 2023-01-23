@@ -80,7 +80,7 @@ class StrategyExecutor:
         It can fail if resource is not available. Need to check the cluster
         status, after calling.
 
-        Returns: The job's start timestamp, or None if failed to start.
+        Returns: The job's submit timestamp, or None if failed.
         """
         if self.retry_until_up:
             return self._launch(max_retry=None)

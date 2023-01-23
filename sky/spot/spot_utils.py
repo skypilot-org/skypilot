@@ -120,9 +120,9 @@ def update_spot_job_status(job_id: Optional[int] = None):
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       get_end_time: bool) -> float:
-    """Get the started/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_time_payload(job_id=None,
-                                                      is_end=get_end_time)
+    """Get the submitted/ended time of the job."""
+    code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+        job_id=None, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
@@ -355,12 +355,12 @@ def dump_spot_job_queue() -> str:
         if end_at is None:
             end_at = time.time()
 
-        job_start_at = job['last_recovered_at'] - job['job_duration']
+        job_launched_at = job['last_recovered_at'] - job['job_duration']
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
-        elif job_start_at > 0:
-            job_duration = end_at - job_start_at
+        elif job_launched_at > 0:
+            job_duration = end_at - job_launched_at
         else:
             # When job_start_at <= 0, that means the last_recovered_at is not
             # set yet, i.e. the job is not started.

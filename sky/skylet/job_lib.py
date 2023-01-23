@@ -290,8 +290,9 @@ def get_latest_job_id() -> Optional[int]:
         return job_id
 
 
-def get_job_time_payload(job_id: int, is_end: bool) -> Optional[int]:
-    field = 'end_at' if is_end else 'submitted_at'
+def get_job_submitted_or_ended_timestamp_payload(
+        job_id: int, get_ended_time: bool) -> Optional[int]:
+    field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
@@ -688,13 +689,14 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_time_payload(cls,
-                             job_id: Optional[int] = None,
-                             is_end: bool = False) -> str:
+    def get_job_submitted_or_ended_timestamp_payload(
+            cls,
+            job_id: Optional[int] = None,
+            get_ended_time: bool = False) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            f'job_time = job_lib.get_job_time_payload(job_id, {is_end})',
+            f'job_time = job_lib.get_job_submitted_or_ended_timestamp_payload(job_id, {get_ended_time})',
             'print(job_time, flush=True)',
         ]
         return cls._build(code)
