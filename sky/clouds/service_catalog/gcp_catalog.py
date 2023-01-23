@@ -210,7 +210,7 @@ def get_instance_type_for_accelerator(
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('gcp', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
@@ -273,11 +273,12 @@ def get_accelerator_hourly_cost(accelerator: str,
 def list_accelerators(
     gpus_only: bool,
     name_filter: Optional[str] = None,
+    region_filter: Optional[str] = None,
     case_sensitive: bool = True,
 ) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in GCP offering GPUs."""
     results = common.list_accelerators_impl('GCP', _df, gpus_only, name_filter,
-                                            case_sensitive)
+                                            region_filter, case_sensitive)
 
     a100_infos = results.get('A100', []) + results.get('A100-80GB', [])
     if not a100_infos:

@@ -1099,6 +1099,7 @@ def test_use_spot(generic_cloud: str):
 
 
 # ---------- Testing managed spot ----------
+@pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
     name = _get_cluster_name()
@@ -1143,6 +1144,7 @@ def test_spot_failed_setup():
 
 # ---------- Testing managed spot recovery ----------
 @pytest.mark.aws
+@pytest.mark.managed_spot
 def test_spot_recovery_aws():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1173,6 +1175,7 @@ def test_spot_recovery_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_recovery_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1203,6 +1206,7 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
     name = _get_cluster_name()
@@ -1220,6 +1224,7 @@ def test_spot_recovery_default_resources(generic_cloud: str):
 
 
 @pytest.mark.aws
+@pytest.mark.managed_spot
 def test_spot_recovery_multi_node_aws():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1251,6 +1256,7 @@ def test_spot_recovery_multi_node_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_recovery_multi_node_gcp():
     """Test managed spot recovery."""
     name = _get_cluster_name()
@@ -1284,6 +1290,7 @@ def test_spot_recovery_multi_node_gcp():
 
 
 @pytest.mark.aws
+@pytest.mark.managed_spot
 def test_spot_cancellation_aws():
     name = _get_cluster_name()
     region = 'us-east-2'
@@ -1344,6 +1351,7 @@ def test_spot_cancellation_aws():
 
 
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_cancellation_gcp():
     name = _get_cluster_name()
     zone = 'us-west3-b'
@@ -1399,6 +1407,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
+@pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
     name = _get_cluster_name()
@@ -1428,6 +1437,7 @@ def test_spot_storage(generic_cloud: str):
 
 # ---------- Testing spot TPU ----------
 @pytest.mark.gcp
+@pytest.mark.managed_spot
 def test_spot_tpu():
     """Test managed spot on TPU."""
     name = _get_cluster_name()
@@ -1448,16 +1458,16 @@ def test_spot_tpu():
 
 
 # ---------- Testing env ----------
+@pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""
     name = _get_cluster_name()
     test = Test(
         'test-spot-inline-env',
         [
-            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
-            f'sky logs {name} 1 --status',
-            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
-            f'sky logs {name} 2 --status',
+            f'sky spot launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            'sleep 20',
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
         ],
         f'sky spot cancel -y -n {name}',
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
@@ -1473,9 +1483,10 @@ def test_inline_env(generic_cloud: str):
     test = Test(
         'test-inline-env',
         [
-            f'sky spot launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 20',
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
+            f'sky launch -c {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 1 --status',
+            f'sky exec {name} --env TEST_ENV2="success" "([[ ! -z \\"\$TEST_ENV2\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
     )
