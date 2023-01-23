@@ -337,7 +337,7 @@ def test_aws_image_id_dict_region():
         'aws_image_id_dict_region',
         [
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --region us-east-1 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
             f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
@@ -403,7 +403,7 @@ def test_aws_image_id_dict_zone():
         'aws_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --zone us-east-2b examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --zone us-east-1b examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
             f'sky launch -y -c {name} --zone us-west-2a examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
