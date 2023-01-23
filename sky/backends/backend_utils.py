@@ -372,9 +372,11 @@ class SSHConfigHelper(object):
         else:
             proxy = ''
         # StrictHostKeyChecking=no skips the host key check for the first
-        # time. UserKnownHostsFile=/dev/null prevents the host key from being
-        # added to the known_hosts file, so that the host key check is skipped
-        # for all subsequent connections.
+        # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
+        # prevent the host key from being added to the known_hosts file and
+        # always return an empty file for known hosts, making the ssh think
+        # this is a first-time connection, and thus skipping the host key
+        # check.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -385,6 +387,7 @@ class SSHConfigHelper(object):
               ForwardAgent yes
               StrictHostKeyChecking no
               UserKnownHostsFile=/dev/null
+              GlobalKnownHostsFile=/dev/null
               Port 22
               {proxy}
             """.rstrip())
