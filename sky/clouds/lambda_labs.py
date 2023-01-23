@@ -3,8 +3,6 @@ import json
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple
 
-import colorama
-
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_labs import lambda_utils
@@ -164,7 +162,7 @@ class Lambda(clouds.Cloud):
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
+            # Accelerators are part of the instance type in Lambda Labs
             resources = resources.copy(accelerators=None)
             return ([resources], fuzzy_candidate_list)
 
@@ -238,9 +236,5 @@ class Lambda(clouds.Cloud):
 
     @classmethod
     def support(cls, requested_features: List[str]) -> bool:
-        if 'autostop' in requested_features:
-            print(f'{colorama.Fore.YELLOW}'
-                  'Lambda Labs does not support autostop.'
-                  f'{colorama.Style.RESET_ALL}')
-            return False
-        return True
+        # Lambda Labs does not support autostop
+        return not 'autostop' in requested_features

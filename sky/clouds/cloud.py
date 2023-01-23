@@ -303,6 +303,8 @@ class Cloud:
 
         For instance, Lambda Labs does not support autostop, so
         Lambda.support(['autostop']) returns False.
+
+        Possible requested features: autostop
         """
         raise NotImplementedError
 

@@ -1657,28 +1657,6 @@ class RetryingVmProvisioner(object):
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
-        # Re-optimize if to_provision.cloud does not support requested features
-        while not to_provision.cloud.support(self._requested_features):
-            if launchable_retries_disabled:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        f'{to_provision.cloud} does not support: '
-                        f'{self._requested_features}. DAG and '
-                        'optimize_target needs to be registered first '
-                        'to enable cross-cloud retry.')
-            self._blocked_resources.add(
-                resources_lib.Resources(cloud=to_provision.cloud))
-            # Set to None so that sky.optimize() will assign a new one
-            # (otherwise will skip re-optimizing this task).
-            # TODO: set all remaining tasks' best_resources to None.
-            task.best_resources = None
-            self._dag = sky.optimize(self._dag,
-                                     minimize=self._optimize_target,
-                                     blocked_resources=self._blocked_resources)
-            to_provision = task.best_resources
-            assert task in self._dag.tasks, 'Internal logic error.'
-            assert to_provision is not None, task
-
         style = colorama.Style
         # Retrying launchable resources.
         while True:
@@ -1691,6 +1669,13 @@ class RetryingVmProvisioner(object):
                     cloud_user = None
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
+                # Skip if to_provision.cloud does not support requested features
+                if not to_provision.cloud.support(self._requested_features):
+                    self._blocked_resources.add(
+                        resources_lib.Resources(cloud=to_provision.cloud))
+                    raise exceptions.ResourcesUnavailableError(
+                        f'{to_provision.cloud} does not support: '
+                        f'{self._requested_features}.')
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1745,25 +1730,16 @@ class RetryingVmProvisioner(object):
                 num_nodes = task.num_nodes
                 cluster_exists = False
 
-            while True:
-                # Set to None so that sky.optimize() will assign a new one
-                # (otherwise will skip re-optimizing this task).
-                # TODO: set all remaining tasks' best_resources to None.
-                task.best_resources = None
-                self._dag = sky.optimize(
-                    self._dag,
-                    minimize=self._optimize_target,
-                    blocked_resources=self._blocked_resources)
-                to_provision = task.best_resources
-                assert task in self._dag.tasks, 'Internal logic error.'
-                assert to_provision is not None, task
-
-                # Skip clouds that do not support requested features.
-                if to_provision.cloud.support(self._requested_features):
-                    break
-                self._blocked_resources.add(
-                    resources_lib.Resources(cloud=to_provision.cloud))
-
+            # Set to None so that sky.optimize() will assign a new one
+            # (otherwise will skip re-optimizing this task).
+            # TODO: set all remaining tasks' best_resources to None.
+            task.best_resources = None
+            self._dag = sky.optimize(self._dag,
+                                     minimize=self._optimize_target,
+                                     blocked_resources=self._blocked_resources)
+            to_provision = task.best_resources
+            assert task in self._dag.tasks, 'Internal logic error.'
+            assert to_provision is not None, task
         return config_dict
 
 
