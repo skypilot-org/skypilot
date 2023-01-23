@@ -34,6 +34,7 @@ class InstanceTypeInfo(NamedTuple):
     - memory: Instance memory in GiB.
     - price: Regular instance price per hour (cheapest across all regions).
     - spot_price: Spot instance price per hour (cheapest across all regions).
+    - region: Region where this instance type belongs to.
     """
     cloud: str
     instance_type: Optional[str]
@@ -43,6 +44,7 @@ class InstanceTypeInfo(NamedTuple):
     memory: Optional[float]
     price: float
     spot_price: float
+    region: str
 
 
 def get_catalog_path(filename: str) -> str:
@@ -161,7 +163,7 @@ def instance_type_exists_impl(df: pd.DataFrame, instance_type: str) -> bool:
 
 
 def validate_region_zone_impl(
-        df: pd.DataFrame, region: Optional[str],
+        cloud_name: str, df: pd.DataFrame, region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Validates whether region and zone exist in the catalog."""
 
@@ -174,6 +176,11 @@ def validate_region_zone_impl(
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
         return candidate_strs
 
+    def _get_all_supported_regions_str() -> str:
+        all_regions: List[str] = sorted(df['Region'].unique().tolist())
+        return \
+        f'\nList of supported {cloud_name} regions: {", ".join(all_regions)!r}'
+
     validated_region, validated_zone = region, zone
 
     filter_df = df
@@ -182,7 +189,12 @@ def validate_region_zone_impl(
         if len(filter_df) == 0:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
-                error_msg += _get_candidate_str(region, df['Region'].unique())
+                candidate_strs = _get_candidate_str(region,
+                                                    df['Region'].unique())
+                if not candidate_strs:
+                    error_msg += _get_all_supported_regions_str()
+                    raise ValueError(error_msg)
+                error_msg += candidate_strs
                 raise ValueError(error_msg)
 
     if zone is not None:
@@ -321,6 +333,7 @@ def list_accelerators_impl(
     df: pd.DataFrame,
     gpus_only: bool,
     name_filter: Optional[str],
+    region_filter: Optional[str],
     case_sensitive: bool = True,
 ) -> Dict[str, List[InstanceTypeInfo]]:
     """Lists accelerators offered in a cloud service catalog.
@@ -341,11 +354,16 @@ def list_accelerators_impl(
         'MemoryGiB',
         'Price',
         'SpotPrice',
+        'Region',
     ]].dropna(subset=['AcceleratorName']).drop_duplicates()
     if name_filter is not None:
         df = df[df['AcceleratorName'].str.contains(name_filter,
                                                    case=case_sensitive,
                                                    regex=True)]
+    if region_filter is not None:
+        df = df[df['Region'].str.contains(region_filter,
+                                          case=case_sensitive,
+                                          regex=True)]
     df['AcceleratorCount'] = df['AcceleratorCount'].astype(int)
     grouped = df.groupby('AcceleratorName')
 
@@ -366,6 +384,7 @@ def list_accelerators_impl(
                 row['MemoryGiB'],
                 row['Price'],
                 row['SpotPrice'],
+                row['Region'],
             ),
             axis='columns',
         ).tolist()
