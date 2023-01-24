@@ -98,7 +98,7 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpu: Optional[str] = None) -> str:
+def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
         cpu = '8'
     # The metal instance is not included in the default instance family.

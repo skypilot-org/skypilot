@@ -81,7 +81,7 @@ def _get_instance_family(instance_type: str) -> str:
     return instance_family
 
 
-def get_default_instance_type(cpu: Optional[str] = None) -> str:
+def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
         cpu = '8'
     df = _df[_df['InstanceType'].apply(_get_instance_family) ==

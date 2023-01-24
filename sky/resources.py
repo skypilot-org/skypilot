@@ -138,6 +138,10 @@ class Resources:
             if self.accelerator_args is not None:
                 accelerator_args = f', accelerator_args={self.accelerator_args}'
 
+        cpu = ''
+        if self.cpu is not None:
+            cpu = f', cpu={self.cpu}'
+
         if isinstance(self.cloud, clouds.Local):
             return f'{self.cloud}({self.accelerators})'
 
@@ -163,7 +167,7 @@ class Resources:
 
         hardware_str = (
             f'{instance_type}{use_spot}'
-            f'{accelerators}{accelerator_args}{image_id}{disk_size}')
+            f'{cpu}{accelerators}{accelerator_args}{image_id}{disk_size}')
         # It may have leading ',' (for example, instance_type not set) or empty
         # spaces.  Remove them.
         while hardware_str and hardware_str[0] in (',', ' '):

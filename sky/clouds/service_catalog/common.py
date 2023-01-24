@@ -268,13 +268,10 @@ def _filter_with_cpu(df: pd.DataFrame, cpu: Optional[str]) -> pd.DataFrame:
 
 
 def get_default_instance_type(df: pd.DataFrame,
-                              cpu: Optional[str] = None) -> str:
+                              cpu: Optional[str] = None) -> Optional[str]:
     df = _filter_with_cpu(df, cpu)
     if df.empty:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'No default instance type found for cpu={cpu}. '
-                             'Try other cpu values or add "+" to the end of '
-                             'the cpu value to allow larger vCPUs.')
+        return None
     # Sort by the number of vCPUs and then by the price.
     df = df.sort_values(by=['vCPUs', 'Price'], ascending=True)
     return df['InstanceType'].iloc[0]

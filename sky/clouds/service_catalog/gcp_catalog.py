@@ -169,7 +169,7 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
-def get_default_instance_type(cpu: Optional[str] = None) -> str:
+def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
         cpu = '8'
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-standard-'
@@ -200,13 +200,41 @@ def get_instance_type_for_accelerator(
     if acc_name in _A100_INSTANCE_TYPE_DICTS:
         # If A100 is used, host VM type must be A2.
         # https://cloud.google.com/compute/docs/gpus#a100-gpus
+
+        # FIXME(woosuk): This uses the knowledge that the A2 machines provide
+        # 12 vCPUs per GPU, except for a2-megagpu-16g which has 16 GPUs.
+        if cpu is not None:
+            num_a2_cpus = min(12 * acc_count, 96)
+            if cpu.endswith('+'):
+                if num_a2_cpus < float(cpu[:-1]):
+                    return None, []
+            else:
+                if num_a2_cpus != float(cpu):
+                    return None, []
         return [_A100_INSTANCE_TYPE_DICTS[acc_name][acc_count]], []
+
     if acc_name not in _NUM_ACC_TO_NUM_CPU:
         acc_name = 'DEFAULT'
 
-    num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
-    # The (acc_name, acc_count) should be validated in the caller.
-    assert num_cpus is not None, (acc_name, acc_count)
+    assert _DEFAULT_HOST_VM_FAMILY == 'n1'
+    num_cpus = None
+    if cpu is None:
+        num_cpus = _NUM_ACC_TO_NUM_CPU[acc_name].get(acc_count, None)
+    else:
+        # FIXME(woosuk): This uses the knowledge that the N1-highmem machines
+        # have 2, 4, 8, 16, 32, 64, or 96 vCPUs.
+        for num_n1_cpus in [2, 4, 8, 16, 32, 64, 96]:
+            if cpu.endswith('+'):
+                if num_n1_cpus >= float(cpu[:-1]):
+                    num_cpus = num_n1_cpus
+                    break
+            else:
+                if num_n1_cpus == float(cpu):
+                    num_cpus = num_n1_cpus
+                    break
+    if num_cpus is None:
+        return None, []
+
     mem_type = 'highmem'
     # patches for the number of cores per GPU, as some of the combinations
     # are not supported by GCP.

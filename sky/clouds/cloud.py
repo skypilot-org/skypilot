@@ -180,7 +180,7 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
+    def get_default_instance_type(cls, cpu: Optional[str] = None) -> Optional[str]:
         raise NotImplementedError
 
     @classmethod
