@@ -79,6 +79,8 @@ class JobStatus(enum.Enum):
     # The `job_id` has been generated, but the generated ray program has
     # not started yet. skylet can transit the state from INIT to FAILED
     # directly, if the ray program fails to start.
+    # In the 'jobs' table, the `submitted_at` column will be set to the current
+    # time, when the job is firstly created (in the INIT state).
     INIT = 'INIT'
     # Running the user's setup script (only in effect if --detach-setup is
     # set). Our update_job_status() can temporarily (for a short period) set
@@ -90,6 +92,8 @@ class JobStatus(enum.Enum):
     # by the placement constraints.)
     PENDING = 'PENDING'
     # The job is running.
+    # In the 'jobs' table, the `start_at` column will be set to the current
+    # time, when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
@@ -290,12 +294,26 @@ def get_latest_job_id() -> Optional[int]:
         return job_id
 
 
-def get_job_time_payload(job_id: int, is_end: bool) -> Optional[int]:
-    field = 'end_at' if is_end else 'start_at'
+def get_job_submitted_or_ended_timestamp_payload(job_id: int,
+                                                 get_ended_time: bool) -> str:
+    """Get the job submitted/ended timestamp.
+
+    This function should only be called by the spot controller,
+    which is ok to use `submitted_at` instead of `start_at`,
+    because the spot job duration need to include both setup
+    and running time and the job will not stay in PENDING
+    state.
+
+    The normal job duration will use `start_at` instead of
+    `submitted_at` (in `format_job_queue()`), because the job
+    may stay in PENDING if the cluster is busy.
+    """
+    field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
         return common_utils.encode_payload(timestamp)
+    return common_utils.encode_payload(None)
 
 
 def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
@@ -684,13 +702,16 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_time_payload(cls,
-                             job_id: Optional[int] = None,
-                             is_end: bool = False) -> str:
+    def get_job_submitted_or_ended_timestamp_payload(
+            cls,
+            job_id: Optional[int] = None,
+            get_ended_time: bool = False) -> str:
         code = [
             f'job_id = {job_id} if {job_id} is not None '
             'else job_lib.get_latest_job_id()',
-            f'job_time = job_lib.get_job_time_payload(job_id, {is_end})',
+            'job_time = '
+            'job_lib.get_job_submitted_or_ended_timestamp_payload('
+            f'job_id, {get_ended_time})',
             'print(job_time, flush=True)',
         ]
         return cls._build(code)

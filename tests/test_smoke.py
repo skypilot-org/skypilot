@@ -1103,8 +1103,6 @@ def test_use_spot(generic_cloud: str):
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
     name = _get_cluster_name()
-    cancel_command = (
-        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2')
     test = Test(
         'managed-spot',
         [
@@ -1119,7 +1117,28 @@ def test_spot(generic_cloud: str):
             'sleep 200',
             f'{_SPOT_QUEUE_WAIT}| grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
-        cancel_command,
+        f'sky spot cancel -y -n {name}-1; sky spot cancel -y -n {name}-2',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+@pytest.mark.managed_spot
+def test_spot_failed_setup(generic_cloud: str):
+    """Test managed spot job with failed setup."""
+    name = _get_cluster_name()
+    test = Test(
+        'spot-failed-setup',
+        [
+            f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
+            'sleep 200',
+            # Make sure the job failed quickly.
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1411,6 +1430,8 @@ def test_spot_storage(generic_cloud: str):
                 f'[ $(aws s3api list-buckets --query "Buckets[?contains(Name, \'{storage_name}\')].Name" --output text | wc -l) -eq 0 ]'
             ],
             f'sky spot cancel -y -n {name}',
+            # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+            timeout=20 * 60,
         )
         run_one_test(test)
 
@@ -1431,6 +1452,27 @@ def test_spot_tpu():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
+    )
+    run_one_test(test)
+
+
+# ---------- Testing env for spot ----------
+@pytest.mark.managed_spot
+def test_spot_inline_env(generic_cloud: str):
+    """Test spot env"""
+    name = _get_cluster_name()
+    test = Test(
+        'test-spot-inline-env',
+        [
+            f'sky spot launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
+            'sleep 20',
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
+        ],
+        f'sky spot cancel -y -n {name}',
+        # Increase timeout since sky spot queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
     )
     run_one_test(test)
 
@@ -1448,23 +1490,6 @@ def test_inline_env(generic_cloud: str):
             f'sky logs {name} 2 --status',
         ],
         f'sky down -y {name}',
-    )
-    run_one_test(test)
-
-
-# ---------- Testing env for spot ----------
-@pytest.mark.managed_spot
-def test_inline_spot_env(generic_cloud: str):
-    """Test env"""
-    name = _get_cluster_name()
-    test = Test(
-        'test-inline-spot-env',
-        [
-            f'sky spot launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_IPS\\" ]] && [[ ! -z \\"\$SKYPILOT_NODE_RANK\\" ]]) || exit 1"',
-            'sleep 20',
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | grep SUCCEEDED',
-        ],
-        f'sky spot cancel -y -n {name}',
     )
     run_one_test(test)
 
