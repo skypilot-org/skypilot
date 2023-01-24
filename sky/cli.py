@@ -177,7 +177,7 @@ def _interactive_node_cli_command(cli_func):
     cpu = click.option('--cpu',
                        default=None,
                        type=str,
-                       help='Number of CPUs to use. '
+                       help='Number of vCPUs to use. '
                        '(e.g., ``--cpu=4`` or ``--cpu=4+``).')
     gpus = click.option('--gpus',
                         default=None,
