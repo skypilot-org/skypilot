@@ -280,7 +280,7 @@ def _filter_with_cpu(df: pd.DataFrame, cpu: Optional[str]) -> pd.DataFrame:
 
 
 def get_default_instance_type_impl(df: pd.DataFrame,
-                              cpu: Optional[str] = None) -> Optional[str]:
+                                   cpu: Optional[str] = None) -> Optional[str]:
     df = _filter_with_cpu(df, cpu)
     if df.empty:
         return None
