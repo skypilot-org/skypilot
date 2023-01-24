@@ -106,7 +106,7 @@ def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     instance_type_suffix = 'xlarge'
     df = _df[_df['InstanceType'].str.startswith(instance_type_prefix) &
              _df['InstanceType'].str.endswith(instance_type_suffix)]
-    return common.get_default_instance_type(df, cpu)
+    return common.get_default_instance_type_impl(df, cpu)
 
 
 def get_accelerators_from_instance_type(
