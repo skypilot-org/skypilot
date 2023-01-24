@@ -279,7 +279,8 @@ class GCP(clouds.Cloud):
             raise
 
     @classmethod
-    def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
+    def get_default_instance_type(cls,
+                                  cpu: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpu=cpu, clouds='gcp')
 
     @classmethod
@@ -381,15 +382,18 @@ class GCP(clouds.Cloud):
             return ([resources], fuzzy_candidate_list)
 
         if resources.accelerators is None:
-            # Return a default VM type for the given CPU.
+            # Return a default instance type.
             host_vm_type = GCP.get_default_instance_type(cpu=resources.cpu)
-            r = resources.copy(
-                cloud=GCP(),
-                instance_type=host_vm_type,
-                accelerators=None,
-                cpu=None,
-            )
-            return ([r], fuzzy_candidate_list)
+            if host_vm_type is None:
+                return ([], fuzzy_candidate_list)
+            else:
+                r = resources.copy(
+                    cloud=GCP(),
+                    instance_type=host_vm_type,
+                    accelerators=None,
+                    cpu=None,
+                )
+                return ([r], fuzzy_candidate_list)
 
         use_tpu_vm = False
         if resources.accelerator_args is not None:

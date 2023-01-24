@@ -94,7 +94,8 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
+    def get_default_instance_type(cls,
+                                  cpu: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpu=cpu,
                                                          clouds='azure')
 
@@ -273,9 +274,13 @@ class Azure(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # Return a default VM type for the given CPU.
-            return (_make([Azure.get_default_instance_type(cpu=resources.cpu)]),
-                    fuzzy_candidate_list)
+            # Return a default VM type with the given number of vCPUs.
+            default_instance_type = Azure.get_default_instance_type(
+                cpu=resources.cpu)
+            if default_instance_type is None:
+                return ([], fuzzy_candidate_list)
+            else:
+                return (_make([default_instance_type]), fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]

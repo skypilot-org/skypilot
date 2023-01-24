@@ -274,7 +274,8 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
+    def get_default_instance_type(cls,
+                                  cpu: Optional[str] = None) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpu=cpu, clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
@@ -356,9 +357,13 @@ class AWS(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # Return a default VM type for the given CPU.
-            return (_make([AWS.get_default_instance_type(cpu=resources.cpu)]),
-                    fuzzy_candidate_list)
+            # Return a default instance type.
+            default_instance_type = AWS.get_default_instance_type(
+                cpu=resources.cpu)
+            if default_instance_type is None:
+                return ([], fuzzy_candidate_list)
+            else:
+                return (_make([default_instance_type]), fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
