@@ -140,9 +140,9 @@ class StrategyExecutor:
             raise_on_failure: Whether to raise an exception if the launch fails.
 
         Returns:
-            The job's submit timestamp, or None if failed to submit the job (either
-            provisioning fails or any error happens in job submission) and
-            raise_on_failure is False.
+            The job's submit timestamp, or None if failed to submit the job
+            (either provisioning fails or any error happens in job submission)
+            and raise_on_failure is False.
         """
         # TODO(zhwu): handle the failure during `preparing sky runtime`.
         retry_cnt = 0
