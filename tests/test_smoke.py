@@ -1124,13 +1124,14 @@ def test_spot(generic_cloud: str):
     run_one_test(test)
 
 
-def test_spot_failed_setup():
+@pytest.mark.managed_spot
+def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
     name = _get_cluster_name()
     test = Test(
         'spot-failed-setup',
         [
-            f'sky spot launch -n {name} -y -d tests/test_yamls/failed_setup.yaml',
+            f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 200',
             # Make sure the job failed quickly.
             f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED"',
