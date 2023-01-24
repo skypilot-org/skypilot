@@ -2,6 +2,7 @@ import logging
 import os
 import time
 from threading import RLock
+from typing import Any, Dict, List, Optional
 
 from ray.autoscaler.node_provider import NodeProvider
 from ray.autoscaler.tags import (
@@ -42,7 +43,9 @@ class LambdaNodeProvider(NodeProvider):
     This provider assumes Lambda Labs credentials are set.
     """
 
-    def __init__(self, provider_config, cluster_name):
+    def __init__(self,
+                 provider_config: Dict[str, Any],
+                 cluster_name: str) -> None:
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
         self.lambda_client = lambda_utils.LambdaLabsClient()
@@ -68,7 +71,7 @@ class LambdaNodeProvider(NodeProvider):
                 head_node_config.update(head_config["node_config"])
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
-            vms = self.lambda_client.list_instances().get('data', [])
+            vms = self.lambda_client.list_instances()
             for node in vms:
                 self.metadata[node['id']] = {'tags':
                     {
@@ -81,7 +84,8 @@ class LambdaNodeProvider(NodeProvider):
                     }}
 
     @synchronized
-    def _get_filtered_nodes(self, tag_filters):
+    def _get_filtered_nodes(self,
+                            tag_filters: Dict[str, str]) -> Dict[str, Any]:
 
         def match_tags(vm):
             vm_info = self.metadata[vm['id']]
@@ -91,7 +95,7 @@ class LambdaNodeProvider(NodeProvider):
                     return False
             return True
 
-        vms = self.lambda_client.list_instances().get('data', [])
+        vms = self.lambda_client.list_instances()
         vms = [
             node for node in vms
             if node['name'] == self.cluster_name
@@ -100,7 +104,7 @@ class LambdaNodeProvider(NodeProvider):
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes
 
-    def _extract_metadata(self, vm):
+    def _extract_metadata(self, vm: Dict[str, Any]) -> Dict[str, Any]:
         metadata = {'id': vm['id'], 'status': vm['status'], 'tags': {}}
         instance_info = self.metadata[vm['id']]
         if instance_info is not None:
@@ -110,7 +114,7 @@ class LambdaNodeProvider(NodeProvider):
         metadata['internal_ip'] = ip
         return metadata
 
-    def non_terminated_nodes(self, tag_filters):
+    def non_terminated_nodes(self, tag_filters: Dict[str, str]) -> List[str]:
         """Return a list of node ids filtered by the specified tags dict.
 
         This list must not include terminated nodes. For performance reasons,
@@ -126,27 +130,30 @@ class LambdaNodeProvider(NodeProvider):
         nodes = self._get_filtered_nodes(tag_filters=tag_filters)
         return [k for k, _ in nodes.items()]
 
-    def is_running(self, node_id):
+    def is_running(self, node_id: str) -> bool:
         """Return whether the specified node is running."""
         return self._get_cached_node(node_id=node_id) is not None
 
-    def is_terminated(self, node_id):
+    def is_terminated(self, node_id: str) -> bool:
         """Return whether the specified node is terminated."""
         return self._get_cached_node(node_id=node_id) is None
 
-    def node_tags(self, node_id):
+    def node_tags(self, node_id: str) -> Dict[str, str]:
         """Returns the tags of the given node (string dict)."""
         return self._get_cached_node(node_id=node_id)['tags']
 
-    def external_ip(self, node_id):
+    def external_ip(self, node_id: str) -> str:
         """Returns the external ip of the given node."""
         return self._get_cached_node(node_id=node_id)['external_ip']
 
-    def internal_ip(self, node_id):
+    def internal_ip(self, node_id: str) -> str:
         """Returns the internal ip (Ray ip) of the given node."""
         return self._get_cached_node(node_id=node_id)['internal_ip']
 
-    def create_node(self, node_config, tags, count):
+    def create_node(self,
+                    node_config: Dict[str, Any],
+                    tags: Dict[str, str],
+                    count: int) -> None:
         """Creates a number of nodes within the namespace."""
         assert count == 1, count   # Only support 1-node clusters for now
 
@@ -158,11 +165,10 @@ class LambdaNodeProvider(NodeProvider):
         # create the node
         ttype = node_config['InstanceType']
         region = self.provider_config['region']
-        vm_resp = self.lambda_client.create_instances(instance_type=ttype,
+        vm_list = self.lambda_client.create_instances(instance_type=ttype,
                                                       region=region,
                                                       quantity=1,
                                                       name=self.cluster_name)
-        vm_list = vm_resp.get('data', []).get('instance_ids', [])
         assert len(vm_list) == 1, len(vm_list)
         vm_id = vm_list[0]
         self.metadata[vm_id] = {'tags': config_tags}
@@ -170,29 +176,29 @@ class LambdaNodeProvider(NodeProvider):
         # Wait for booting to finish
         # TODO(ewzeng): For multi-node, launch all vms first and then wait.
         while True:
-            vms = self.lambda_client.list_instances().get('data', [])
+            vms = self.lambda_client.list_instances()
             for vm in vms:
                 if vm['id'] == vm_id and vm['status'] == 'active':
                     return
             time.sleep(10)
 
     @synchronized
-    def set_node_tags(self, node_id, tags):
+    def set_node_tags(self, node_id: str, tags: Dict[str, str]) -> None:
         """Sets the tag values (string dict) for the specified node."""
         node = self._get_node(node_id)
         node['tags'].update(tags)
         self.metadata[node_id] = {'tags': node['tags']}
 
-    def terminate_node(self, node_id):
+    def terminate_node(self, node_id: str) -> None:
         """Terminates the specified node."""
         self.lambda_client.remove_instances(node_id)
         self.metadata[node_id] = None
 
-    def _get_node(self, node_id):
+    def _get_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         self._get_filtered_nodes({})  # Side effect: updates cache
         return self.cached_nodes.get(node_id, None)
 
-    def _get_cached_node(self, node_id):
+    def _get_cached_node(self, node_id: str) -> Optional[Dict[str, Any]]:
         if node_id in self.cached_nodes:
             return self.cached_nodes[node_id]
         return self._get_node(node_id=node_id)

@@ -1799,7 +1799,7 @@ def _query_status_lambda(
         'terminated': None,
     }
     # TODO(ewzeng): filter by hash_filter_string to be safe
-    vms = lambda_utils.LambdaLabsClient().list_instances().get('data', [])
+    vms = lambda_utils.LambdaLabsClient().list_instances()
     for node in vms:
         if node['name'] == cluster:
             return [status_map[node['status']]]

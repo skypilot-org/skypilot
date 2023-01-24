@@ -1139,7 +1139,8 @@ class RetryingVmProvisioner(object):
             # but the optimizer that does the filtering will not be involved
             # until the next region.
             remaining_unblocked_zones = copy.deepcopy(zones)
-            for zone in zones:
+            # Skip loop if zones is None
+            for zone in zones or []:
                 for blocked_resources in self._blocked_resources:
                     if to_provision.copy(region=region.name,
                                          zone=zone.name).should_be_blocked_by(

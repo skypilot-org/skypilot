@@ -2,6 +2,7 @@
 import os
 import json
 import requests
+from typing import Any, Dict
 
 CREDENTIALS_PATH = '~/.lambda_labs/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -14,7 +15,7 @@ class LambdaLabsError(Exception):
 class Metadata:
     """Per-cluster metadata file."""
 
-    def __init__(self, path_prefix, cluster_name):
+    def __init__(self, path_prefix: str, cluster_name: str) -> None:
         # TODO(ewzeng): Metadata file is not thread safe. This is fine for
         # now since SkyPilot uses a per-cluster lock for ray-related
         # operations, but this should be improved in the future.
@@ -26,10 +27,10 @@ class Metadata:
             with open(self.path, 'r') as f:
                 self._metadata = json.load(f)
 
-    def __getitem__(self, instance_id):
+    def __getitem__(self, instance_id: str) -> Dict[str, Any]:
         return self._metadata.get(instance_id)
 
-    def __setitem__(self, instance_id, value):
+    def __setitem__(self, instance_id: str, value: Dict[str, Any]) -> None:
         if value is None:
             if instance_id in self._metadata:
                 self._metadata.pop(instance_id) # del entry
@@ -43,7 +44,7 @@ class Metadata:
             json.dump(self._metadata, f)
 
 
-def raise_lambda_error(response):
+def raise_lambda_error(response: requests.Response) -> None:
     """Raise LambdaLabsError if appropriate. """
     status_code = response.status_code
     if status_code == 200:
@@ -63,7 +64,7 @@ def raise_lambda_error(response):
 class LambdaLabsClient:
     """Wrapper functions for Lambda Labs API."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
         assert os.path.exists(self.credentials), 'Credentials not found'
         with open(self.credentials, 'r') as f:
@@ -77,10 +78,10 @@ class LambdaLabsClient:
         self.headers = {'Authorization': f'Bearer {self.api_key}'}
 
     def create_instances(self,
-                         instance_type='gpu_1x_a100_sxm4',
-                         region='us-east-1',
-                         quantity=1,
-                         name=''):
+                         instance_type: str = 'gpu_1x_a100_sxm4',
+                         region: str = 'us-east-1',
+                         quantity: int = 1,
+                         name: str = '') -> Dict[str, Any]:
         """Launch new instances."""
         assert self.ssh_key_name is not None
 
@@ -89,7 +90,7 @@ class LambdaLabsClient:
         # launch requests are rate limited at ~1 request every 10 seconds.
         # So don't use launch requests to check availability.
         # See https://docs.lambdalabs.com/cloud/rate-limiting/ for more.
-        available_regions = self.list_catalog()['data'][instance_type]\
+        available_regions = self.list_catalog()[instance_type]\
                 ['regions_with_capacity_available']
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
@@ -117,9 +118,9 @@ class LambdaLabsClient:
                                  data=data,
                                  headers=self.headers)
         raise_lambda_error(response)
-        return response.json()
+        return response.json().get('data', []).get('instance_ids', [])
 
-    def remove_instances(self, *instance_ids):
+    def remove_instances(self, *instance_ids: str) -> Dict[str, Any]:
         """Terminate instances."""
         data = json.dumps({
             'instance_ids': [
@@ -130,15 +131,15 @@ class LambdaLabsClient:
                                  data=data,
                                  headers=self.headers)
         raise_lambda_error(response)
-        return response.json()
+        return response.json().get('data', []).get('terminated_instances', [])
 
-    def list_instances(self):
+    def list_instances(self) -> Dict[str, Any]:
         """List existing instances."""
         response = requests.get(f'{API_ENDPOINT}/instances', headers=self.headers)
         raise_lambda_error(response)
-        return response.json()
+        return response.json().get('data', [])
 
-    def set_ssh_key(self, name, pub_key):
+    def set_ssh_key(self, name: str, pub_key: str) -> None:
         """Set ssh key."""
         data = json.dumps({
             'name': name,
@@ -153,9 +154,9 @@ class LambdaLabsClient:
             f.write(f'api_key={self.api_key}\n')
             f.write(f'ssh_key_name={self.ssh_key_name}\n')
 
-    def list_catalog(self):
+    def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
         response = requests.get(f'{API_ENDPOINT}/instance-types',
                                 headers=self.headers)
         raise_lambda_error(response)
-        return response.json()
+        return response.json().get('data', [])
