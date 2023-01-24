@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 # ======================== Instance state and lifecycle ========================
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-lifecycle.html
 
+# Data transfer within the same region but different availability zone costs $0.01/GB:
+# https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
+
 
 def describe_instances(region: str) -> Dict:
     # overhead: 658 ms ± 65.3 ms
