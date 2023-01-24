@@ -460,6 +460,20 @@ def exec(  # pylint: disable=redefined-builtin
     backend_utils.check_cluster_name_not_reserved(cluster_name,
                                                   operation_str='sky.exec')
 
+    if isinstance(entrypoint, sky.Dag):
+        task = entrypoint.tasks[0]
+    else:
+        task = entrypoint
+    task_resources = task.get_resources()
+    if task_resources:
+        assert len(task_resources) == 1
+        task_resources = list(task_resources)[0]
+        if task_resources.cpu is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Cannot specify CPU resources for sky exec. '
+                    f'CPU resources: {task_resources.cpu}')
+
     handle = backend_utils.check_cluster_available(
         cluster_name,
         operation='executing tasks',

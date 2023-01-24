@@ -398,12 +398,6 @@ _EXTRA_RESOURCES_OPTIONS = [
               '"resources.instance_type" config. Passing "none" resets the '
               'config.'),
     ),
-    click.option(
-        '--cpu',
-        default=None,
-        type=str,
-        required=False,
-        help=('The number of vCPUs to use. Either <number> or <number>+.')),
 ]
 
 
@@ -1110,6 +1104,11 @@ def cli():
               default=False,
               help='If used, runs locally inside a docker container.')
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cpu',
+              default=None,
+              type=str,
+              required=False,
+              help='The number of vCPUs to use. Either <number> or <number>+.')
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -1281,7 +1280,6 @@ def exec(
     zone: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
-    cpu: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1366,7 +1364,7 @@ def exec(
         region=region,
         zone=zone,
         gpus=gpus,
-        cpu=cpu,
+        cpu=None,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
@@ -2997,6 +2995,11 @@ def spot():
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
 @_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option('--cpu',
+              default=None,
+              type=str,
+              required=False,
+              help='The number of vCPUs to use. Either <number> or <number>+.')
 @click.option('--spot-recovery',
               default=None,
               type=str,
