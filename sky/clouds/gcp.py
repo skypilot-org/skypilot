@@ -387,13 +387,13 @@ class GCP(clouds.Cloud):
                 cloud=GCP(),
                 instance_type=host_vm_type,
                 accelerators=None,
-                cpu=None
+                cpu=None,
             )
             return ([r], fuzzy_candidate_list)
 
         # Find instance candidates to meet user's requirements
-        assert len(resources.accelerators.items(
-        )) == 1, 'cannot handle more than one accelerator candidates.'
+        assert len(resources.accelerators.items()
+                  ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
         (instance_list, fuzzy_candidate_list
         ) = service_catalog.get_instance_type_for_accelerator(

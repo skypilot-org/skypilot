@@ -255,7 +255,7 @@ class Resources:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'The "cpu" field should be either a number or '
-                        f'a string "<number>+". Found: {cpu!r}')
+                        f'a string "<number>+". Found: {cpu!r}') from None
         else:
             num_cpu = float(cpu)
 
@@ -431,7 +431,7 @@ class Resources:
                         f'{self.instance_type} does not have the requested '
                         f'number of vCPUs. {self.instance_type} has {cpu} '
                         f'vCPUs, but {self.cpu} is requested.')
-            
+
     def _try_validate_accelerators(self) -> None:
         """Validate accelerators against the instance type and region/zone."""
         acc_requested = self.accelerators

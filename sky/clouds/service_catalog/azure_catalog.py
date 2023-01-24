@@ -72,9 +72,11 @@ def _get_instance_family(instance_type: str) -> str:
     # TODO(woosuk): Use better regex.
     if '-' in instance_type:
         x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
+        assert x is not None, x
         instance_family = x.group(1) + '_' + x.group(5)
     else:
         x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
+        assert x is not None, x
         instance_family = x.group(1) + x.group(3)
     return instance_family
 
@@ -82,7 +84,8 @@ def _get_instance_family(instance_type: str) -> str:
 def get_default_instance_type(cpu: Optional[str] = None) -> str:
     if cpu is None:
         cpu = '8'
-    df = _df[_df['InstanceType'].apply(_get_instance_family) == _DEFAULT_INSTANCE_FAMILY]
+    df = _df[_df['InstanceType'].apply(_get_instance_family) ==
+             _DEFAULT_INSTANCE_FAMILY]
     return common.get_default_instance_type(df, cpu)
 
 

@@ -267,7 +267,8 @@ def _filter_with_cpu(df: pd.DataFrame, cpu: Optional[str]) -> pd.DataFrame:
         return df[df['vCPUs'] == float(cpu)]
 
 
-def get_default_instance_type(df: pd.DataFrame, cpu: Optional[str] = None) -> str:
+def get_default_instance_type(df: pd.DataFrame,
+                              cpu: Optional[str] = None) -> str:
     df = _filter_with_cpu(df, cpu)
     if df.empty:
         with ux_utils.print_exception_no_traceback():
@@ -276,7 +277,7 @@ def get_default_instance_type(df: pd.DataFrame, cpu: Optional[str] = None) -> st
                              'the cpu value to allow larger vCPUs.')
     # Sort by the number of vCPUs and then by the price.
     df = df.sort_values(by=['vCPUs', 'Price'], ascending=True)
-    return df['InstanceType'].iloc[0]    
+    return df['InstanceType'].iloc[0]
 
 
 def get_accelerators_from_instance_type_impl(

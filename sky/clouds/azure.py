@@ -95,7 +95,8 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
-        return service_catalog.get_default_instance_type(cpu=cpu, clouds='azure')
+        return service_catalog.get_default_instance_type(cpu=cpu,
+                                                         clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
         # az vm image list \
