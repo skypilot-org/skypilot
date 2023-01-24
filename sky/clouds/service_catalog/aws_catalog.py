@@ -75,7 +75,7 @@ def instance_type_exists(instance_type: str) -> bool:
 def validate_region_zone(
         region: Optional[str],
         zone: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('aws', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
@@ -151,13 +151,15 @@ def get_region_zones_for_instance_type(instance_type: str,
     return us_region_list + other_region_list
 
 
-def list_accelerators(gpus_only: bool,
-                      name_filter: Optional[str],
-                      case_sensitive: bool = True
-                     ) -> Dict[str, List[common.InstanceTypeInfo]]:
+def list_accelerators(
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        case_sensitive: bool = True
+) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in AWS offering accelerators."""
     return common.list_accelerators_impl('AWS', _df, gpus_only, name_filter,
-                                         case_sensitive)
+                                         region_filter, case_sensitive)
 
 
 def get_image_id_from_tag(tag: str, region: Optional[str]) -> Optional[str]:
