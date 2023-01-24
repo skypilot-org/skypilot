@@ -22,6 +22,7 @@ logger = sky_logging.init_logger(__name__)
 # General-purpose instance with Intel Ice Lake 8375C
 # 4 GB RAM per 1 vCPU
 _DEFAULT_INSTANCE_FAMILY = 'm6i'
+_DEFAULT_NUM_VCPUS = 8
 
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
@@ -100,7 +101,7 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 
 def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
-        cpu = '8'
+        cpu = str(_DEFAULT_NUM_VCPUS)
     # The metal instance is not included in the default instance family.
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
     instance_type_suffix = 'xlarge'

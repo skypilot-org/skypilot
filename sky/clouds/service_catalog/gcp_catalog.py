@@ -29,6 +29,7 @@ _TPU_REGIONS = [
 # General-purpose instance with Intel Ice Lake 8373C or Cascade Lake 6268CL
 # 4 GB RAM per 1 vCPU
 _DEFAULT_INSTANCE_FAMILY = 'n2'
+_DEFAULT_NUM_VCPUS = 8
 
 # This can be switched between n1 and n2.
 # n2 is not allowed for launching GPUs.
@@ -171,7 +172,7 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 
 def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
-        cpu = '8'
+        cpu = str(_DEFAULT_NUM_VCPUS)
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-standard-'
     df = _df[~_df['InstanceType'].isna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]

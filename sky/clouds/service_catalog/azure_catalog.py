@@ -15,6 +15,7 @@ _df = common.read_catalog('azure/vms.csv')
 # General-purpose instance with Intel Ice Lake 8370C
 # 4 GB RAM per 1 vCPU
 _DEFAULT_INSTANCE_FAMILY = 'D_v5'
+_DEFAULT_NUM_VCPUS = 8
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -83,7 +84,7 @@ def _get_instance_family(instance_type: str) -> str:
 
 def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
-        cpu = '8'
+        cpu = str(_DEFAULT_NUM_VCPUS)
     df = _df[_df['InstanceType'].apply(_get_instance_family) ==
              _DEFAULT_INSTANCE_FAMILY]
     return common.get_default_instance_type_impl(df, cpu)
