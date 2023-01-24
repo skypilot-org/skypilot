@@ -378,7 +378,8 @@ class GCPCompute(GCPResource):
         return self._list_instances(label_filters, non_terminated_status)
 
     def _list_instances(self, label_filters: Optional[dict],
-                        status_filter: List[str]) -> List[GCPComputeNode]:
+                        status_filter: Optional[List[str]]
+                        ) -> List[GCPComputeNode]:
         label_filters = label_filters or {}
 
         if label_filters:
@@ -395,16 +396,19 @@ class GCPCompute(GCPResource):
         else:
             label_filter_expr = ""
 
-        instance_state_filter_expr = (
-            "("
-            + " OR ".join(
-                [
-                    "(status = {status})".format(status=status)
-                    for status in status_filter
-                ]
+        if status_filter:
+            instance_state_filter_expr = (
+                "("
+                + " OR ".join(
+                    [
+                        "(status = {status})".format(status=status)
+                        for status in status_filter
+                    ]
+                )
+                + ")"
             )
-            + ")"
-        )
+        else:
+            instance_state_filter_expr = ""
 
         cluster_name_filter_expr = "(labels.{key} = {value})".format(
             key=TAG_RAY_CLUSTER_NAME, value=self.cluster_name
