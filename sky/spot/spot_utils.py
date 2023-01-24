@@ -42,6 +42,11 @@ _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
                                '{status_str}.[/] It may take a few minutes.')
 _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
                           '[/] It may take a minute.')
+
+# The maximum time to wait for the spot job status to transition to terminal
+# state, after the job finished. This is a safeguard to avoid the case where
+# the spot job status fails to be updated and keep the `sky spot logs` blocking
+# for a long time.
 _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 10
 
 
@@ -355,12 +360,12 @@ def dump_spot_job_queue() -> str:
         if end_at is None:
             end_at = time.time()
 
-        job_launched_at = job['last_recovered_at'] - job['job_duration']
+        job_submitted_at = job['last_recovered_at'] - job['job_duration']
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
-        elif job_launched_at > 0:
-            job_duration = end_at - job_launched_at
+        elif job_submitted_at > 0:
+            job_duration = end_at - job_submitted_at
         else:
             # When job_start_at <= 0, that means the last_recovered_at is not
             # set yet, i.e. the job is not started.

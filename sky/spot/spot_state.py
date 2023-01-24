@@ -52,7 +52,7 @@ columns = [
 
 
 class SpotStatus(enum.Enum):
-    """Spot job status, designed to be in serverless style
+    """Spot job status, designed to be in serverless style.
 
     The SpotStatus is a higher level status than the JobStatus.
     Each spot job submitted to the spot cluster, will have a JobStatus
@@ -80,6 +80,9 @@ class SpotStatus(enum.Enum):
     """
     # PENDING: Waiting for the spot controller to have a slot to run the
     # controller process.
+    # The submitted_at timestamp of the spot job in the 'spot' table will be
+    # set to the time when the job is firstly submitted by the user (set to
+    # PENDING).
     PENDING = 'PENDING'
     # SUBMITTED: The spot controller starts the controller process.
     SUBMITTED = 'SUBMITTED'
@@ -88,8 +91,8 @@ class SpotStatus(enum.Enum):
     STARTING = 'STARTING'
     # RUNNING: The job is submitted to the spot cluster, and is setting up
     # or running.
-    # The start_at of the spot job will be set to the current time when the
-    # job is firstly transitioned to RUNNING.
+    # The start_at timestamp of the spot job in the 'spot' table will be set
+    # to the time when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
     # RECOVERING: The spot cluster is preempted, and the controller process
     # is recovering the spot cluster (relaunching/failover).
