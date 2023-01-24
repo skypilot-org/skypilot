@@ -127,7 +127,7 @@ class SpotStatus(enum.Enum):
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
         return [
-            cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
+            cls.SUCCEEDED, cls.FAILED, cls.FAILED_SETUP, cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER, cls.CANCELLED
         ]
 
