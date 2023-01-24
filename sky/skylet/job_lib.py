@@ -298,14 +298,15 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
                                                  get_ended_time: bool) -> str:
     """Get the job submitted/ended timestamp.
 
-    This will only be used by the spot controller, which is ok
-    to use `submitted_at` instead of `start_at`, because the
-    spot job duration need to include both setup and running
-    time and the job will not stay in PENDING state.
+    This function should only be called by the spot controller,
+    which is ok to use `submitted_at` instead of `start_at`,
+    because the spot job duration need to include both setup
+    and running time and the job will not stay in PENDING
+    state.
 
     The normal job duration will use `start_at` instead of
-    `submitted_at`, because the job may stay in PENDING if
-    the cluster is busy.
+    `submitted_at` (in `format_job_queue()`), because the job
+    may stay in PENDING if the cluster is busy.
     """
     field = 'end_at' if get_ended_time else 'submitted_at'
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
