@@ -174,6 +174,11 @@ def _interactive_node_cli_command(cli_func):
                                         default=None,
                                         type=str,
                                         help='Instance type to use.')
+    cpu = click.option('--cpu',
+                        default=None,
+                        type=str,
+                        help='Number of CPUs to use. '
+                        '(e.g., ``--cpu=4`` or ``--cpu=4+``).')
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
@@ -268,6 +273,7 @@ def _interactive_node_cli_command(cli_func):
         region_option,
         zone_option,
         instance_type_option,
+        cpu,
         *([gpus] if cli_func.__name__ == 'gpunode' else []),
         *([tpus] if cli_func.__name__ == 'tpunode' else []),
         spot_option,
@@ -2432,7 +2438,7 @@ def _down_or_stop_clusters(
 # pylint: disable=redefined-outer-name
 def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], gpus: Optional[str],
+            instance_type: Optional[str], cpu: Optional[str], gpus: Optional[str],
             use_spot: Optional[bool], screen: Optional[bool],
             tmux: Optional[bool], disk_size: Optional[int],
             idle_minutes_to_autostop: Optional[int], down: bool,
@@ -2475,6 +2481,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
+                                    cpu is None and
                                     gpus is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['gpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
@@ -2488,6 +2495,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               region=region,
                               zone=zone,
                               instance_type=instance_type,
+                              cpu=cpu,
                               accelerators=gpus,
                               use_spot=use_spot,
                               disk_size=disk_size)
@@ -2511,7 +2519,7 @@ def gpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             cloud: Optional[str], region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], use_spot: Optional[bool],
+            instance_type: Optional[str], cpu: Optional[str], use_spot: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
             down: bool, retry_until_up: bool):
@@ -2552,7 +2560,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 
     user_requested_resources = not (cloud is None and region is None and
                                     zone is None and instance_type is None and
-                                    use_spot is None)
+                                    cpu is None and use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['cpunode']
     cloud_provider = clouds.CLOUD_REGISTRY.from_str(cloud)
     if instance_type is None:
@@ -2563,6 +2571,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               region=region,
                               zone=zone,
                               instance_type=instance_type,
+                              cpu=cpu,
                               use_spot=use_spot,
                               disk_size=disk_size)
 
@@ -2585,7 +2594,7 @@ def cpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
 # pylint: disable=redefined-outer-name
 def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
             region: Optional[str], zone: Optional[str],
-            instance_type: Optional[str], tpus: Optional[str],
+            instance_type: Optional[str], cpu: Optional[str], tpus: Optional[str],
             use_spot: Optional[bool], tpu_vm: Optional[bool],
             screen: Optional[bool], tmux: Optional[bool],
             disk_size: Optional[int], idle_minutes_to_autostop: Optional[int],
@@ -2626,7 +2635,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
         name = _default_interactive_node_name('tpunode')
 
     user_requested_resources = not (region is None and zone is None and
-                                    instance_type is None and tpus is None and
+                                    instance_type is None and cpu is None and tpus is None and
                                     use_spot is None)
     default_resources = _INTERACTIVE_NODE_DEFAULT_RESOURCES['tpunode']
     accelerator_args = default_resources.accelerator_args
@@ -2643,6 +2652,7 @@ def tpunode(cluster: str, yes: bool, port_forward: Optional[List[int]],
                               region=region,
                               zone=zone,
                               instance_type=instance_type,
+                              cpu=cpu,
                               accelerators=tpus,
                               accelerator_args=accelerator_args,
                               use_spot=use_spot,
