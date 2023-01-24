@@ -10,11 +10,7 @@ from azure.identity import AzureCliCredential
 from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.resource.resources.models import DeploymentMode
 
-RETRIES = 30
-MSI_NAME = "ray-msi-user-identity"
-NSG_NAME = "ray-nsg"
-SUBNET_NAME = "ray-subnet"
-VNET_NAME = "ray-vnet"
+UNIQUE_ID_LEN = 4
 
 logger = logging.getLogger(__name__)
 
