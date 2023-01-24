@@ -25,6 +25,11 @@ _TPU_REGIONS = [
     'asia-east1',
 ]
 
+# Default instance family for CPU-only VMs.
+# General-purpose instance with Intel Ice Lake 8373C or Cascade Lake 6268CL
+# 4 GB RAM per 1 vCPU
+_DEFAULT_INSTANCE_FAMILY = 'n2'
+
 # This can be switched between n1 and n2.
 # n2 is not allowed for launching GPUs.
 _DEFAULT_HOST_VM_FAMILY = 'n1'
@@ -164,9 +169,19 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
+def get_default_instance_type(cpu: Optional[str] = None) -> str:
+    if cpu is None:
+        cpu = '8'
+    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-standard-'
+    df = _df[~_df['InstanceType'].isna()]
+    df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
+    return common.get_default_instance_type(df, cpu)
+
+
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
+        cpu: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -178,7 +193,7 @@ def get_instance_type_for_accelerator(
     """
     (instance_list,
      fuzzy_candidate_list) = common.get_instance_type_for_accelerator_impl(
-         _df, acc_name, acc_count, use_spot, region, zone)
+         _df, acc_name, acc_count, cpu, use_spot, region, zone)
     if instance_list is None:
         return None, fuzzy_candidate_list
 

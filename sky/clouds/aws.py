@@ -274,10 +274,8 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        # General-purpose instance with 8 vCPUs and 32 GB RAM.
-        # Intel Ice Lake 8375C
-        return 'm6i.2xlarge'
+    def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
+        return service_catalog.get_default_instance_type(cpu=cpu, clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -350,6 +348,7 @@ class AWS(clouds.Cloud):
                     # Setting this to None as AWS doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
+                    cpu=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -357,8 +356,8 @@ class AWS(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([AWS.get_default_instance_type()]),
+            # Return a default VM type for the given CPU.
+            return (_make([AWS.get_default_instance_type(cpu=resources.cpu)]),
                     fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
@@ -368,6 +367,7 @@ class AWS(clouds.Cloud):
             acc,
             acc_count,
             use_spot=resources.use_spot,
+            cpu=resources.cpu,
             region=resources.region,
             zone=resources.zone,
             clouds='aws')

@@ -392,6 +392,12 @@ _EXTRA_RESOURCES_OPTIONS = [
               '"resources.instance_type" config. Passing "none" resets the '
               'config.'),
     ),
+    click.option(
+        '--cpu',
+        default=None,
+        type=str,
+        required=False,
+        help=('The number of vCPUs to use. Either <number> or <number>+.')),
 ]
 
 
@@ -556,6 +562,7 @@ def _parse_override_params(cloud: Optional[str] = None,
                            region: Optional[str] = None,
                            zone: Optional[str] = None,
                            gpus: Optional[str] = None,
+                           cpu: Optional[str] = None,
                            instance_type: Optional[str] = None,
                            use_spot: Optional[bool] = None,
                            image_id: Optional[str] = None,
@@ -582,6 +589,11 @@ def _parse_override_params(cloud: Optional[str] = None,
             override_params['accelerators'] = None
         else:
             override_params['accelerators'] = gpus
+    if cpu is not None:
+        if cpu.lower() == 'none':
+            override_params['cpu'] = None
+        else:
+            override_params['cpu'] = cpu
     if instance_type is not None:
         if instance_type.lower() == 'none':
             override_params['instance_type'] = None
@@ -908,6 +920,7 @@ def _make_task_from_entrypoint_with_overrides(
     region: Optional[str] = None,
     zone: Optional[str] = None,
     gpus: Optional[str] = None,
+    cpu: Optional[str] = None,
     instance_type: Optional[str] = None,
     num_nodes: Optional[int] = None,
     use_spot: Optional[bool] = None,
@@ -949,6 +962,7 @@ def _make_task_from_entrypoint_with_overrides(
                                              region=region,
                                              zone=zone,
                                              gpus=gpus,
+                                             cpu=cpu,
                                              instance_type=instance_type,
                                              use_spot=use_spot,
                                              image_id=image_id,
@@ -1154,6 +1168,7 @@ def launch(
     region: Optional[str],
     zone: Optional[str],
     gpus: Optional[str],
+    cpu: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1198,6 +1213,7 @@ def launch(
         region=region,
         zone=zone,
         gpus=gpus,
+        cpu=cpu,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,
@@ -1259,6 +1275,7 @@ def exec(
     zone: Optional[str],
     workdir: Optional[str],
     gpus: Optional[str],
+    cpu: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -1343,6 +1360,7 @@ def exec(
         region=region,
         zone=zone,
         gpus=gpus,
+        cpu=cpu,
         instance_type=instance_type,
         use_spot=use_spot,
         image_id=image_id,
@@ -2975,6 +2993,7 @@ def spot_launch(
     region: Optional[str],
     zone: Optional[str],
     gpus: Optional[str],
+    cpu: Optional[str],
     instance_type: Optional[str],
     num_nodes: Optional[int],
     use_spot: Optional[bool],
@@ -3013,6 +3032,7 @@ def spot_launch(
         region=region,
         zone=zone,
         gpus=gpus,
+        cpu=cpu,
         instance_type=instance_type,
         num_nodes=num_nodes,
         use_spot=use_spot,

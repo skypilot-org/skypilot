@@ -3,6 +3,7 @@
 This module loads the service catalog file and can be used to query
 instance types and pricing information for Azure.
 """
+import re
 from typing import Dict, List, Optional, Tuple
 
 from sky import clouds as cloud_lib
@@ -10,6 +11,10 @@ from sky.clouds.service_catalog import common
 from sky.utils import ux_utils
 
 _df = common.read_catalog('azure/vms.csv')
+
+# General-purpose instance with Intel Ice Lake 8370C
+# 4 GB RAM per 1 vCPU
+_DEFAULT_INSTANCE_FAMILY = 'D_v5'
 
 
 def instance_type_exists(instance_type: str) -> bool:
@@ -53,6 +58,34 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
+def _get_instance_family(instance_type: str) -> str:
+    if instance_type.startswith('Basic_A'):
+        return 'basic_a'
+
+    assert instance_type.startswith('Standard_')
+    # Remove the 'Standard_' prefix.
+    instance_type = instance_type[len('Standard_'):]
+    # Remove the '_Promo' suffix if exists.
+    if '_Promo' in instance_type:
+        instance_type = instance_type[:-len('_Promo')]
+
+    # TODO(woosuk): Use better regex.
+    if '-' in instance_type:
+        x = re.match(r'([A-Za-z]+)([0-9]+)(-)([0-9]+)(.*)', instance_type)
+        instance_family = x.group(1) + '_' + x.group(5)
+    else:
+        x = re.match(r'([A-Za-z]+)([0-9]+)(.*)', instance_type)
+        instance_family = x.group(1) + x.group(3)
+    return instance_family
+
+
+def get_default_instance_type(cpu: Optional[str] = None) -> str:
+    if cpu is None:
+        cpu = '8'
+    df = _df[_df['InstanceType'].apply(_get_instance_family) == _DEFAULT_INSTANCE_FAMILY]
+    return common.get_default_instance_type(df, cpu)
+
+
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
@@ -61,6 +94,7 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
+        cpu: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -74,6 +108,7 @@ def get_instance_type_for_accelerator(
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
+                                                         cpu=cpu,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)

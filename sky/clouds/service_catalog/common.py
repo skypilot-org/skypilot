@@ -258,6 +258,27 @@ def get_vcpus_from_instance_type_impl(
     return float(vcpus)
 
 
+def _filter_with_cpu(df: pd.DataFrame, cpu: Optional[str]) -> pd.DataFrame:
+    if cpu is None:
+        return df
+    if cpu.endswith('+'):
+        return df[df['vCPUs'] >= float(cpu[:-1])]
+    else:
+        return df[df['vCPUs'] == float(cpu)]
+
+
+def get_default_instance_type(df: pd.DataFrame, cpu: Optional[str] = None) -> str:
+    df = _filter_with_cpu(df, cpu)
+    if df.empty:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'No default instance type found for cpu={cpu}. '
+                             'Try other cpu values or add "+" to the end of '
+                             'the cpu value to allow larger vCPUs.')
+    # Sort by the number of vCPUs and then by the price.
+    df = df.sort_values(by=['vCPUs', 'Price'], ascending=True)
+    return df['InstanceType'].iloc[0]    
+
+
 def get_accelerators_from_instance_type_impl(
     df: pd.DataFrame,
     instance_type: str,
@@ -277,6 +298,7 @@ def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
+    cpu: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -300,6 +322,10 @@ def get_instance_type_for_accelerator_impl(
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
                                             f'{int(row["AcceleratorCount"])}')
         return (None, fuzzy_candidate_list)
+
+    result = _filter_with_cpu(result, cpu)
+    if len(result) == 0:
+        return ([], [])
 
     if region is not None:
         result = result[result['Region'] == region]

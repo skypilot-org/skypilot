@@ -94,10 +94,8 @@ class Azure(clouds.Cloud):
         return isinstance(other, Azure)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        # General-purpose instance with 8 vCPUs and 32 GB RAM.
-        # Intel Ice Lake 8370C
-        return 'Standard_D8_v5'
+    def get_default_instance_type(cls, cpu: Optional[str] = None) -> str:
+        return service_catalog.get_default_instance_type(cpu=cpu, clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
         # az vm image list \
@@ -265,15 +263,17 @@ class Azure(clouds.Cloud):
                     instance_type=instance_type,
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
-                    accelerators=None)
+                    accelerators=None,
+                    cpu=None,
+                )
                 resource_list.append(r)
             return resource_list
 
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([Azure.get_default_instance_type()]),
+            # Return a default VM type for the given CPU.
+            return (_make([Azure.get_default_instance_type(cpu=resources.cpu)]),
                     fuzzy_candidate_list)
 
         assert len(accelerators) == 1, resources
@@ -282,6 +282,7 @@ class Azure(clouds.Cloud):
         ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
+            cpu=resources.cpu,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,

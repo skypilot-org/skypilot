@@ -19,6 +19,10 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+# General-purpose instance with Intel Ice Lake 8375C
+# 4 GB RAM per 1 vCPU
+_DEFAULT_INSTANCE_FAMILY = 'm6i'
+
 # Keep it synced with the frequency in
 # skypilot-catalog/.github/workflows/update-aws-catalog.yml
 _PULL_FREQUENCY_HOURS = 7
@@ -94,6 +98,17 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
+def get_default_instance_type(cpu: Optional[str] = None) -> str:
+    if cpu is None:
+        cpu = '8'
+    # The metal instance is not included in the default instance family.
+    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
+    instance_type_suffix = 'xlarge'
+    df = _df[_df['InstanceType'].str.startswith(instance_type_prefix) & 
+             _df['InstanceType'].str.endswith(instance_type_suffix)]
+    return common.get_default_instance_type(df, cpu)
+
+
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
@@ -102,6 +117,7 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
     acc_name: str,
     acc_count: int,
+    cpu: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -113,6 +129,7 @@ def get_instance_type_for_accelerator(
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
+                                                         cpu=cpu,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)
