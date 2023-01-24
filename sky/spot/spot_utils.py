@@ -47,7 +47,7 @@ _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
 # state, after the job finished. This is a safeguard to avoid the case where
 # the spot job status fails to be updated and keep the `sky spot logs` blocking
 # for a long time.
-_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 10
+_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 15
 
 
 class UserSignal(enum.Enum):
