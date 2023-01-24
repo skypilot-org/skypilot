@@ -1134,7 +1134,7 @@ def test_spot_failed_setup(generic_cloud: str):
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 200',
             # Make sure the job failed quickly.
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED"',
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
         f'sky spot cancel -y -n {name}',
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
