@@ -329,7 +329,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER', default=True):
                          'cloud/region.')
             # Not using self.launch to avoid the retry until up logic.
             job_submitted_at = self._launch(max_retry=self._MAX_RETRY_CNT,
-                                         raise_on_failure=False)
+                                            raise_on_failure=False)
             if job_submitted_at is None:
                 # Failed to launch the cluster.
                 if self.retry_until_up:
