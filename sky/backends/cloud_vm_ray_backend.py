@@ -1103,9 +1103,10 @@ class RetryingVmProvisioner(object):
             if zones is not None:
                 for zone in zones:
                     for blocked_resources in self._blocked_resources:
-                        if to_provision.copy(region=region.name,
-                                            zone=zone.name).should_be_blocked_by(
-                                                blocked_resources):
+                        if to_provision.copy(
+                                region=region.name,
+                                zone=zone.name).should_be_blocked_by(
+                                    blocked_resources):
                             remaining_unblocked_zones.remove(zone)
                             break
             if zones and not remaining_unblocked_zones:
