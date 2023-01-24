@@ -357,7 +357,7 @@ class AWS(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # Return a default instance type.
+            # Return a default instance type with the given number of vCPUs.
             default_instance_type = AWS.get_default_instance_type(
                 cpu=resources.cpu)
             if default_instance_type is None:

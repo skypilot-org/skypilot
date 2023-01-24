@@ -274,7 +274,7 @@ class Azure(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # Return a default VM type with the given number of vCPUs.
+            # Return a default instance type with the given number of vCPUs.
             default_instance_type = Azure.get_default_instance_type(
                 cpu=resources.cpu)
             if default_instance_type is None:

@@ -382,7 +382,7 @@ class GCP(clouds.Cloud):
             return ([resources], fuzzy_candidate_list)
 
         if resources.accelerators is None:
-            # Return a default instance type.
+            # Return a default instance type with the given number of vCPUs.
             host_vm_type = GCP.get_default_instance_type(cpu=resources.cpu)
             if host_vm_type is None:
                 return ([], fuzzy_candidate_list)
