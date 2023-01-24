@@ -64,9 +64,9 @@ class SpotController:
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
-        launched_at = self._strategy_executor.launch()
+        job_submitted_at = self._strategy_executor.launch()
 
-        spot_state.set_started(self._job_id, start_time=launched_at)
+        spot_state.set_started(self._job_id, start_time=job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 

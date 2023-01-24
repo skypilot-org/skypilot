@@ -66,13 +66,13 @@ class SpotStatus(enum.Enum):
     However, a spot job only has one SpotStatus on the spot controller.
         SpotStatus = [PENDING, SUBMITTED, STARTING, RUNNING, ...]
     Mapping from JobStatus to SpotStatus:
-        INIT            -> STARTING
-        SETTING_UP      -> RUNNING
-        PENDING         -> RUNNING
-        RUNNING         -> RUNNING
-        SUCCEEDED       -> SUCCEEDED
-        FAILED          -> FAILED
-        FAILED_SETUP    -> FAILED_SETUP
+        INIT            ->  STARTING/RECOVERING
+        SETTING_UP      ->  RUNNING
+        PENDING         ->  RUNNING
+        RUNNING         ->  RUNNING
+        SUCCEEDED       ->  SUCCEEDED
+        FAILED          ->  FAILED
+        FAILED_SETUP    ->  FAILED_SETUP
     Note that the JobStatus will not be stuck in PENDING, because each spot
     cluster is dedicated to a spot job, i.e. there should always be enough
     resource to run the job and the job will be immediately transitioned to
@@ -88,6 +88,8 @@ class SpotStatus(enum.Enum):
     STARTING = 'STARTING'
     # RUNNING: The job is submitted to the spot cluster, and is setting up
     # or running.
+    # The start_at of the spot job will be set to the current time when the
+    # job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
     # RECOVERING: The spot cluster is preempted, and the controller process
     # is recovering the spot cluster (relaunching/failover).

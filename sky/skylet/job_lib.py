@@ -79,6 +79,8 @@ class JobStatus(enum.Enum):
     # The `job_id` has been generated, but the generated ray program has
     # not started yet. skylet can transit the state from INIT to FAILED
     # directly, if the ray program fails to start.
+    # The `submitted_at` column will be set to the current time, when the job
+    # is firstly created (in the INIT state).
     INIT = 'INIT'
     # Running the user's setup script (only in effect if --detach-setup is
     # set). Our update_job_status() can temporarily (for a short period) set
@@ -90,6 +92,8 @@ class JobStatus(enum.Enum):
     # by the placement constraints.)
     PENDING = 'PENDING'
     # The job is running.
+    # The `start_at` column will be set to the current time, when the job
+    # is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
