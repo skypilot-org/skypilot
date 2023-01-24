@@ -391,15 +391,22 @@ class GCP(clouds.Cloud):
             )
             return ([r], fuzzy_candidate_list)
 
+        use_tpu_vm = False
+        if resources.accelerator_args is not None:
+            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
+
         # Find instance candidates to meet user's requirements
         assert len(resources.accelerators.items()
                   ) == 1, 'cannot handle more than one accelerator candidates.'
         acc, acc_count = list(resources.accelerators.items())[0]
+
+        # For TPU VMs, the instance type is fixed to 'TPU-VM'. However, we still
+        # need to call the below function to get the fuzzy candidate list.
         (instance_list, fuzzy_candidate_list
         ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
-            cpu=resources.cpu,
+            cpu=resources.cpu if not use_tpu_vm else None,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
@@ -411,12 +418,23 @@ class GCP(clouds.Cloud):
             instance_list
         ) == 1, f'More than one instance type matched, {instance_list}'
 
-        host_vm_type = instance_list[0]
+        if use_tpu_vm:
+            host_vm_type = 'TPU-VM'
+            # FIXME(woosuk): This leverages the fact that TPU VMs have 96 vCPUs.
+            num_cpus_in_tpu_vm = 96
+            if resources.cpu is not None:
+                if resources.cpu.endswith('+'):
+                    cpu = float(resources.cpu[:-1])
+                    if cpu > num_cpus_in_tpu_vm:
+                        return ([], fuzzy_candidate_list)
+                else:
+                    cpu = float(resources.cpu)
+                    if cpu != num_cpus_in_tpu_vm:
+                        return ([], fuzzy_candidate_list)
+        else:
+            host_vm_type = instance_list[0]
+
         acc_dict = {acc: acc_count}
-        if resources.accelerator_args is not None:
-            use_tpu_vm = resources.accelerator_args.get('tpu_vm', False)
-            if use_tpu_vm:
-                host_vm_type = 'TPU-VM'
         r = resources.copy(
             cloud=GCP(),
             instance_type=host_vm_type,
