@@ -62,7 +62,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on the spot cluster.
 
-    It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     status = None
