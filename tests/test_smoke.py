@@ -606,7 +606,7 @@ def test_aws_storage_mounts():
         file_path = f.name
         test_commands = [
             *storage_setup_commands,
-            f'sky launch -y -c {name}-aws --cloud aws {file_path}',
+            f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
         ]
