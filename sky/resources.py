@@ -199,8 +199,10 @@ class Resources:
 
         For example, cpus='4' means each instance must have exactly 4 vCPUs,
         and cpus='4+' means each instance must have at least 4 vCPUs.
-        The cpus field is only used to select the instance type at launch time.
-        Thus, Resources in ResourceHandle will have cpus field set to None.
+
+        (Developer note: The cpus field is only used to select the instance type
+        at launch time. Thus, Resources in the backend's ResourceHandle will
+        always have the cpus field set to None.)
         """
         return self._cpus
 
