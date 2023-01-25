@@ -88,7 +88,7 @@ def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
         cpu = str(_DEFAULT_NUM_VCPUS)
     df = _df[_df['InstanceType'].apply(_get_instance_family) ==
              _DEFAULT_INSTANCE_FAMILY]
-    return common.get_default_instance_type_impl(df, cpu)
+    return common.get_instance_type_for_cpu_impl(df, cpu)
 
 
 def get_accelerators_from_instance_type(

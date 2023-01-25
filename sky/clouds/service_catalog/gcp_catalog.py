@@ -177,7 +177,7 @@ def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-standard-'
     df = _df[~_df['InstanceType'].isna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
-    return common.get_default_instance_type_impl(df, cpu)
+    return common.get_instance_type_for_cpu_impl(df, cpu)
 
 
 def get_instance_type_for_accelerator(
