@@ -427,6 +427,10 @@ class Resources:
         if self.cpus is None:
             return
         if self.instance_type is not None:
+            # The assertion should be true because we have already executed
+            # _try_validate_instance_type() before this method.
+            # The _try_validate_instance_type() method infers and sets
+            # self.cloud if self.instance_type is not None.
             assert self.cloud is not None
             cpus = self.cloud.get_vcpus_from_instance_type(self.instance_type)
             if self.cpus.endswith('+'):
