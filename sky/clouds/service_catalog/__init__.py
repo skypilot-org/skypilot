@@ -187,7 +187,8 @@ def get_instance_type_for_accelerator(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     return _map_clouds_catalog(clouds, 'get_instance_type_for_accelerator',
-                               acc_name, acc_count, cpus, use_spot, region, zone)
+                               acc_name, acc_count, cpus, use_spot, region,
+                               zone)
 
 
 def get_accelerator_hourly_cost(

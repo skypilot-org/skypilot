@@ -279,8 +279,8 @@ def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
         return df[df['vCPUs'] == float(cpus)]
 
 
-def get_instance_type_for_cpus_impl(df: pd.DataFrame,
-                                   cpus: Optional[str] = None) -> Optional[str]:
+def get_instance_type_for_cpus_impl(
+        df: pd.DataFrame, cpus: Optional[str] = None) -> Optional[str]:
     df = _filter_with_cpus(df, cpus)
     if df.empty:
         return None

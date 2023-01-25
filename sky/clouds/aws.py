@@ -276,7 +276,8 @@ class AWS(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus, clouds='aws')
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.

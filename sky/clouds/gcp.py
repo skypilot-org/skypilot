@@ -281,7 +281,8 @@ class GCP(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpus=cpus, clouds='gcp')
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='gcp')
 
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
