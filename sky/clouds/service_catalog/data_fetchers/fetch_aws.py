@@ -256,14 +256,16 @@ def get_all_regions_instance_types_df(regions: Set[str]) -> pd.DataFrame:
 # does not have the latest PyTorch version):
 # GPU:
 # Deep Learning AMI GPU PyTorch 1.13.1 (Ubuntu 20.04) 20230103
-#   Nvidia driver: 510.47.03, CUDA Version: 11.6
+#   Nvidia driver: 515.65.01, CUDA Version: 11.7
 #
 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20221114
+#   Nvidia driver: 510.47.03, CUDA Version: 11.6
 #
 # K80:
 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 20.04) 20211208
-#
+#   Nvidia driver: 470.57.02, CUDA Version: 11.4
 # Deep Learning AMI GPU PyTorch 1.10.0 (Ubuntu 18.04) 20211208
+#   Nvidia driver: 470.57.02, CUDA Version: 11.4
 _GPU_UBUNTU_DATE_PYTORCH = [
     ('gpu', '20.04', '20230103', '1.13.1'),
     ('gpu', '18.04', '20221114', '1.10.0'),
