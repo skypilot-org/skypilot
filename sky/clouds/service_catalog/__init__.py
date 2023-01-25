@@ -161,7 +161,12 @@ def get_vcpus_from_instance_type(instance_type: str,
 
 def get_default_instance_type(cpus: Optional[str] = None,
                               clouds: CloudFilter = None) -> Optional[str]:
-    """Returns the default instance type for the given number of CPU."""
+    """Returns the cloud's default instance type for the given number of vCPUs.
+
+    For example, if cpus='4', this method returns the default instance type
+    with 4 vCPUs.  If cpus='4+', this method returns the default instance
+    type with 4 or more vCPUs.
+    """
     return _map_clouds_catalog(clouds, 'get_default_instance_type', cpus)
 
 
