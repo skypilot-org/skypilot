@@ -47,7 +47,7 @@ _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
 # state, after the job finished. This is a safeguard to avoid the case where
 # the spot job status fails to be updated and keep the `sky spot logs` blocking
 # for a long time.
-_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 10
+_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 20
 
 
 class UserSignal(enum.Enum):
@@ -62,7 +62,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on the spot cluster.
 
-    It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     status = None
