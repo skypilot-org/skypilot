@@ -29,7 +29,7 @@ _TPU_REGIONS = [
 # This is the latest general-purpose instance family as of Jan 2023.
 # CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
 # Memory: 4 GiB RAM per 1 vCPU.
-_DEFAULT_INSTANCE_FAMILY = 'n2'
+_DEFAULT_INSTANCE_FAMILY = 'n2-standard'
 _DEFAULT_NUM_VCPUS = 8
 
 # This can be switched between n1 and n2.
@@ -174,8 +174,8 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
-    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-standard-'
-    df = _df[~_df['InstanceType'].isna()]
+    instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}-'
+    df = _df[_df['InstanceType'].notna()]
     df = df[df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_instance_type_for_cpus_impl(df, cpus)
 
