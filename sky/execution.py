@@ -176,12 +176,15 @@ def _execute(
         existing_handle = global_user_state.get_handle_from_cluster_name(
             cluster_name)
         cluster_exists = existing_handle is not None
-    if cluster_exists and task.resources.cpu is not None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Cannot specify CPU when using an existing cluster. '
-                'CPU is only used for selecting the instance type when '
-                'creating a new cluster.')
+    if cluster_exists:
+        assert len(task.resources) == 1
+        task_resources = list(task.resources)[0]
+        if task_resources.cpu is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify CPU when using an existing cluster. '
+                    'CPU is only used for selecting the instance type when '
+                    'creating a new cluster.')
 
     stages = stages if stages is not None else list(Stage)
 
