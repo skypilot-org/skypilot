@@ -102,11 +102,8 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
     if cpu is None:
         cpu = str(_DEFAULT_NUM_VCPUS)
-    # The metal instance is not included in the default instance family.
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
-    instance_type_suffix = 'large'
-    df = _df[_df['InstanceType'].str.startswith(instance_type_prefix) &
-             _df['InstanceType'].str.endswith(instance_type_suffix)]
+    df = _df[_df['InstanceType'].str.startswith(instance_type_prefix)]
     return common.get_default_instance_type_impl(df, cpu)
 
 
