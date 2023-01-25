@@ -12,8 +12,9 @@ import os
 import pathlib
 import pickle
 import time
+import uuid
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Tuple, Optional, Set
 
 import colorama
 
@@ -48,6 +49,29 @@ def create_table(cursor, conn):
         last_use TEXT,
         status TEXT,
         autostop INTEGER DEFAULT -1)""")
+
+    # Table for Cluster History
+    # usage_intervals: List[Tuple[int, int]]
+    #  Specifies start and end timestamps of cluster.
+    #  When the last end time is None, the cluster is still UP.
+    #  Example: [(start1, end1), (start2, end2), (start3, None)]
+
+    # requested_resources: Set[resource_lib.Resource]
+    #  Requested resources fetched from task that user specifies.
+
+    # launched_resources: Optional[resources_lib.Resources]
+    #  Actual launched resources fetched from handle for cluster.
+
+    # num_nodes: Optional[int] number of nodes launched.
+
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS cluster_history (
+        cluster_hash TEXT PRIMARY KEY,
+        name TEXT,
+        num_nodes int,
+        requested_resources BLOB,
+        launched_resources BLOB,
+        usage_intervals BLOB)""")
     # Table for configs (e.g. enabled clouds)
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS config (
@@ -72,7 +96,11 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
+
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'owner', 'TEXT')
+
+    db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
+                                 'TEXT DEFAULT null')
     conn.commit()
 
 
@@ -127,6 +155,7 @@ class StorageStatus(enum.Enum):
 
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.Backend.ResourceHandle',
+                          requested_resources: Optional[Set[Any]],
                           ready: bool,
                           is_launch: bool = True):
     """Adds or updates cluster_name -> cluster_handle mapping.
@@ -134,6 +163,7 @@ def add_or_update_cluster(cluster_name: str,
     Args:
         cluster_name: Name of the cluster.
         cluster_handle: Backend.ResourceHandle of the cluster.
+        requested_resources: Resources requested for cluster.
         ready: Whether the cluster is ready to use. If False, the cluster will
             be marked as INIT, otherwise it will be marked as UP.
         is_launch: if the cluster is firstly launched. If True, the launched_at
@@ -144,6 +174,27 @@ def add_or_update_cluster(cluster_name: str,
     cluster_launched_at = int(time.time()) if is_launch else None
     last_use = common_utils.get_pretty_entry_point() if is_launch else None
     status = ClusterStatus.UP if ready else ClusterStatus.INIT
+
+    # TODO (sumanth): Cluster history table will have multiple entries
+    # when the cluster failover through multiple regions (one entry per region).
+    # It can be more inaccurate for the multi-node cluster
+    # as the failover can have the nodes partially UP.
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name) or str(
+        uuid.uuid4())
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+
+    # first time a cluster is being launched
+    if not usage_intervals:
+        usage_intervals = []
+
+    # if this is the cluster init or we are starting after a stop
+    if len(usage_intervals) == 0 or usage_intervals[-1][-1] is not None:
+        usage_intervals.append((cluster_launched_at, None))
+
+    if requested_resources:
+        assert len(requested_resources) == 1, requested_resources
+        requested_resources = list(requested_resources)[0]
+
     _DB.cursor.execute(
         'INSERT or REPLACE INTO clusters'
         # All the fields need to exist here, even if they don't need
@@ -151,7 +202,7 @@ def add_or_update_cluster(cluster_name: str,
         # the field of the existing row with the default value if not
         # specified.
         '(name, launched_at, handle, last_use, status, '
-        'autostop, to_down, metadata, owner) '
+        'autostop, to_down, metadata, owner, cluster_hash) '
         'VALUES ('
         # name
         '?, '
@@ -173,7 +224,7 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old to_down value if it exists, otherwise set it to
         # default 0.
         'COALESCE('
-        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0), '
+        '(SELECT to_down FROM clusters WHERE name=? AND status!=?), 0),'
         # Keep the old metadata value if it exists, otherwise set it to
         # default {}.
         'COALESCE('
@@ -181,7 +232,9 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old owner value if it exists, otherwise set it to
         # default null.
         'COALESCE('
-        '(SELECT owner FROM clusters WHERE name=?), null)'
+        '(SELECT owner FROM clusters WHERE name=?), null),'
+        # cluster_hash
+        '?'
         ')',
         (
             # name
@@ -206,7 +259,42 @@ def add_or_update_cluster(cluster_name: str,
             cluster_name,
             # owner
             cluster_name,
+            # cluster_hash
+            cluster_hash,
         ))
+
+    _DB.cursor.execute(
+        'INSERT or REPLACE INTO cluster_history'
+        '(cluster_hash, name, num_nodes, requested_resources, '
+        'launched_resources, usage_intervals) '
+        'VALUES ('
+        # hash
+        '?, '
+        # name
+        '?, '
+        # requested resources
+        '?, '
+        # launched resources
+        '?, '
+        # number of nodes
+        '?, '
+        # usage intervals
+        '?)',
+        (
+            # hash
+            cluster_hash,
+            # name
+            cluster_name,
+            # number of nodes
+            cluster_handle.launched_nodes,
+            # requested resources
+            pickle.dumps(requested_resources),
+            # launched resources
+            pickle.dumps(cluster_handle.launched_resources),
+            # usage intervals
+            pickle.dumps(usage_intervals),
+        ))
+
     _DB.conn.commit()
 
 
@@ -217,8 +305,18 @@ def update_last_use(cluster_name: str):
     _DB.conn.commit()
 
 
-def remove_cluster(cluster_name: str, terminate: bool):
+def remove_cluster(cluster_name: str, terminate: bool) -> float:
     """Removes cluster_name mapping."""
+    cluster_hash = _get_hash_for_existing_cluster(cluster_name)
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+
+    # usage_intervals is not None and not empty
+    if usage_intervals:
+        start_time = usage_intervals.pop()[0]
+        end_time = int(time.time())
+        usage_intervals.append((start_time, end_time))
+        _set_cluster_usage_intervals(cluster_hash, usage_intervals)
+
     if terminate:
         _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)',
                            (cluster_name,))
@@ -282,6 +380,15 @@ def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+def get_cluster_launch_time(cluster_name: str) -> Optional[int]:
+    rows = _DB.cursor.execute('SELECT launched_at FROM clusters WHERE name=(?)',
+                              (cluster_name,))
+    for (launch_time,) in rows:
+        if launch_time is None:
+            return None
+        return int(launch_time)
+
+
 def get_cluster_metadata(cluster_name: str) -> Optional[Dict[str, Any]]:
     rows = _DB.cursor.execute('SELECT metadata FROM clusters WHERE name=(?)',
                               (cluster_name,))
@@ -303,17 +410,85 @@ def set_cluster_metadata(cluster_name: str, metadata: Dict[str, Any]) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
+def _get_cluster_usage_intervals(cluster_hash: str) -> Optional[Dict[str, Any]]:
+    rows = _DB.cursor.execute(
+        'SELECT usage_intervals FROM cluster_history WHERE cluster_hash=(?)',
+        (cluster_hash,))
+    for (usage_intervals,) in rows:
+        if usage_intervals is None:
+            return None
+        return pickle.loads(usage_intervals)
+
+
+def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+    return usage_intervals[0][0]
+
+
+def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
+    usage_intervals = _get_cluster_usage_intervals(cluster_hash)
+
+    total_duration = 0
+    for i, (start_time, end_time) in enumerate(usage_intervals):
+        # duration from latest start time to time of query
+        if end_time is None:
+            assert i == len(usage_intervals) - 1, i
+            end_time = int(time.time())
+        start_time, end_time = int(start_time), int(end_time)
+        total_duration += end_time - start_time
+    return total_duration
+
+
+def _set_cluster_usage_intervals(cluster_hash: str,
+                                 usage_intervals: Dict[str, Any]) -> None:
+    _DB.cursor.execute(
+        'UPDATE cluster_history SET usage_intervals=(?) WHERE cluster_hash=(?)',
+        (
+            pickle.dumps(usage_intervals),
+            cluster_hash,
+        ))
+
+    count = _DB.cursor.rowcount
+    _DB.conn.commit()
+    assert count <= 1, count
+    if count == 0:
+        raise ValueError(f'Cluster hash {cluster_hash} not found.')
+
+
 def set_owner_identity_for_cluster(cluster_name: str,
                                    owner_identity: Optional[str]) -> None:
     if owner_identity is None:
         return
     _DB.cursor.execute('UPDATE clusters SET owner=(?) WHERE name=(?)',
                        (owner_identity, cluster_name))
+
     count = _DB.cursor.rowcount
     _DB.conn.commit()
     assert count <= 1, count
     if count == 0:
         raise ValueError(f'Cluster {cluster_name} not found.')
+
+
+def _get_hash_for_existing_cluster(cluster_name: str) -> Optional[str]:
+    rows = _DB.cursor.execute(
+        'SELECT cluster_hash FROM clusters WHERE name=(?)', (cluster_name,))
+    for (cluster_hash,) in rows:
+        if cluster_hash is None:
+            return None
+        return cluster_hash
+
+
+def get_launched_resources_from_cluster_hash(
+        cluster_hash: str) -> Optional[Tuple[int, Any]]:
+
+    rows = _DB.cursor.execute(
+        'SELECT num_nodes, launched_resources '
+        'FROM cluster_history WHERE cluster_hash=(?)', (cluster_hash,))
+    for (num_nodes, launched_resources) in rows:
+        if num_nodes is None or launched_resources is None:
+            return None
+        launched_resources = pickle.loads(launched_resources)
+        return num_nodes, launched_resources
 
 
 def get_cluster_from_name(
@@ -325,7 +500,7 @@ def get_cluster_from_name(
         # we can add new fields to the database in the future without
         # breaking the previous code.
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner) = row[:9]
+         to_down, owner, cluster_hash) = row[:10]
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -337,6 +512,7 @@ def get_cluster_from_name(
             'to_down': bool(to_down),
             'owner': owner,
             'metadata': json.loads(metadata),
+            'cluster_hash': cluster_hash,
         }
         return record
 
@@ -347,8 +523,9 @@ def get_clusters() -> List[Dict[str, Any]]:
     records = []
     for row in rows:
         (name, launched_at, handle, last_use, status, autostop, metadata,
-         to_down, owner) = row[:9]
+         to_down, owner, cluster_hash) = row[:10]
         # TODO: use namedtuple instead of dict
+
         record = {
             'name': name,
             'launched_at': launched_at,
@@ -359,8 +536,38 @@ def get_clusters() -> List[Dict[str, Any]]:
             'to_down': bool(to_down),
             'owner': owner,
             'metadata': json.loads(metadata),
+            'cluster_hash': cluster_hash,
         }
+
         records.append(record)
+    return records
+
+
+def get_clusters_from_history() -> List[Dict[str, Any]]:
+    rows = _DB.cursor.execute('SELECT * from cluster_history').fetchall()
+
+    records = []
+
+    for row in rows:
+        # TODO: use namedtuple instead of dict
+
+        (cluster_hash, name, num_nodes, _, launched_resources,
+         usage_intervals) = row[:6]
+
+        record = {
+            'name': name,
+            'launched_at': _get_cluster_launch_time(cluster_hash),
+            'duration': _get_cluster_duration(cluster_hash),
+            'num_nodes': num_nodes,
+            'resources': pickle.loads(launched_resources),
+            'cluster_hash': cluster_hash,
+            'usage_intervals': pickle.loads(usage_intervals),
+        }
+
+        records.append(record)
+
+    # sort by launch time, descending in recency
+    records = sorted(records, key=lambda record: -record['launched_at'])
     return records
 
 

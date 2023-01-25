@@ -275,7 +275,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM. 3rd generation Intel Xeon. General Purpose.
+        # General-purpose instance with 8 vCPUs and 32 GB RAM.
+        # Intel Ice Lake 8375C
         return 'm6i.2xlarge'
 
     # TODO: factor the following three methods, as they are the same logic

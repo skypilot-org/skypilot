@@ -25,7 +25,7 @@ def validate_region_zone(
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Lambda Labs does not support zones.')
-    return common.validate_region_zone_impl(_df, region, zone)
+    return common.validate_region_zone_impl('lambda', _df, region, zone)
 
 
 def accelerator_in_region_or_zone(acc_name: str,
@@ -97,10 +97,12 @@ def get_region_zones_for_instance_type(instance_type: str,
     return us_region_list + other_region_list
 
 
-def list_accelerators(gpus_only: bool,
-                      name_filter: Optional[str],
-                      case_sensitive: bool = True
-                     ) -> Dict[str, List[common.InstanceTypeInfo]]:
+def list_accelerators(
+        gpus_only: bool,
+        name_filter: Optional[str],
+        region_filter: Optional[str],
+        case_sensitive: bool = True
+) -> Dict[str, List[common.InstanceTypeInfo]]:
     """Returns all instance types in Lambda offering GPUs."""
     return common.list_accelerators_impl('Lambda', _df, gpus_only, name_filter,
-                                         case_sensitive)
+                                         region_filter, case_sensitive)

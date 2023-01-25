@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -1102,14 +1102,17 @@ class RetryingVmProvisioner(object):
             logger.error(stderr)
             raise e
 
-    def _retry_region_zones(self,
-                            to_provision: resources_lib.Resources,
-                            num_nodes: int,
-                            dryrun: bool,
-                            stream_logs: bool,
-                            cluster_name: str,
-                            cloud_user_identity: Optional[str],
-                            cluster_exists: bool = False):
+    def _retry_region_zones(
+        self,
+        to_provision: resources_lib.Resources,
+        num_nodes: int,
+        requested_resources: Set[resources_lib.Resources],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        cloud_user_identity: str,
+        cluster_exists: bool = False,
+    ):
         """The provision retry loop."""
         style = colorama.Style
         fore = colorama.Fore
@@ -1139,14 +1142,15 @@ class RetryingVmProvisioner(object):
             # but the optimizer that does the filtering will not be involved
             # until the next region.
             remaining_unblocked_zones = copy.deepcopy(zones)
-            # Skip loop if zones is None
-            for zone in zones or []:
-                for blocked_resources in self._blocked_resources:
-                    if to_provision.copy(region=region.name,
-                                         zone=zone.name).should_be_blocked_by(
-                                             blocked_resources):
-                        remaining_unblocked_zones.remove(zone)
-                        break
+            if zones is not None:
+                for zone in zones:
+                    for blocked_resources in self._blocked_resources:
+                        if to_provision.copy(
+                                region=region.name,
+                                zone=zone.name).should_be_blocked_by(
+                                    blocked_resources):
+                            remaining_unblocked_zones.remove(zone)
+                            break
             if zones and not remaining_unblocked_zones:
                 # Skip the region if all zones are blocked.
                 continue
@@ -1193,9 +1197,13 @@ class RetryingVmProvisioner(object):
                 global_user_state.ClusterStatus.INIT)
 
             # This sets the status to INIT (even for a normal, UP cluster).
-            global_user_state.add_or_update_cluster(cluster_name,
-                                                    cluster_handle=handle,
-                                                    ready=False)
+            global_user_state.add_or_update_cluster(
+                cluster_name,
+                cluster_handle=handle,
+                requested_resources=requested_resources,
+                ready=False,
+            )
+
             global_user_state.set_owner_identity_for_cluster(
                 cluster_name, cloud_user_identity)
 
@@ -1680,6 +1688,7 @@ class RetryingVmProvisioner(object):
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
+                    requested_resources=task.resources,
                     dryrun=dryrun,
                     stream_logs=stream_logs,
                     cluster_name=cluster_name,
@@ -2256,9 +2265,12 @@ class CloudVmRayBackend(backends.Backend):
                     stdout + stderr)
 
             with timeline.Event('backend.provision.post_process'):
-                global_user_state.add_or_update_cluster(cluster_name,
-                                                        handle,
-                                                        ready=True)
+                global_user_state.add_or_update_cluster(
+                    cluster_name,
+                    handle,
+                    task.resources,
+                    ready=True,
+                )
                 usage_lib.messages.usage.update_final_cluster_status(
                     global_user_state.ClusterStatus.UP)
                 auth_config = common_utils.read_yaml(
@@ -2412,13 +2424,9 @@ class CloudVmRayBackend(backends.Backend):
                             f'{colorama.Style.RESET_ALL}')
                     return err_msg
 
-                try:
-                    subprocess_utils.handle_returncode(returncode=returncode,
-                                                       command=setup_cmd,
-                                                       error_msg=error_message)
-                except exceptions.CommandError as e:
-                    with ux_utils.print_exception_no_traceback():
-                        raise exceptions.ClusterSetUpError(str(e)) from e
+                subprocess_utils.handle_returncode(returncode=returncode,
+                                                   command=setup_cmd,
+                                                   error_msg=error_message)
 
             num_nodes = len(ip_list)
             plural = 's' if num_nodes > 1 else ''
@@ -2938,10 +2946,9 @@ class CloudVmRayBackend(backends.Backend):
                     terminate_cmd = tpu_utils.terminate_tpu_vm_cluster_cmd(
                         cluster_name, zone, log_abs_path)
                 else:
-                    query_cmd = (
-                        f'gcloud compute instances list --filter='
-                        f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                        f'--zones={zone} --format=value\\(name\\)')
+                    query_cmd = (f'gcloud compute instances list --filter='
+                                 f'"(labels.ray-cluster-name={cluster_name})" '
+                                 f'--zones={zone} --format=value\\(name\\)')
                     terminate_cmd = (
                         f'gcloud compute instances delete --zone={zone}'
                         f' --quiet $({query_cmd})')
@@ -2997,8 +3004,14 @@ class CloudVmRayBackend(backends.Backend):
             #   never launched and the errors are related to pre-launch
             #   configurations (such as VPC not found). So it's safe & good UX
             #   to not print a failure message.
+            #
+            # '(ResourceGroupNotFound)': this indicates the resource group on
+            #   Azure is not found. That means the cluster is already deleted
+            #   on the cloud. So it's safe & good UX to not print a failure
+            #   message.
             elif ('TPU must be specified.' not in stderr and
-                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr):
+                  'SKYPILOT_ERROR_NO_NODES_LAUNCHED: ' not in stderr and
+                  '(ResourceGroupNotFound)' not in stderr):
                 logger.error(
                     _TEARDOWN_FAILURE_MESSAGE.format(
                         extra_reason='',
@@ -3064,6 +3077,7 @@ class CloudVmRayBackend(backends.Backend):
         backend_utils.SSHConfigHelper.remove_cluster(handle.cluster_name,
                                                      handle.head_ip,
                                                      auth_config)
+
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
 

@@ -1368,10 +1368,17 @@ def exec(
     is_flag=True,
     required=False,
     help='Query the latest cluster statuses from the cloud provider(s).')
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
+def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
+
+    If CLUSTERS is given, show those clusters. Otherwise, show all clusters.
 
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
@@ -1417,7 +1424,11 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
-    cluster_records = core.status(refresh=refresh)
+    if clusters:
+        clusters = _get_glob_clusters(clusters)
+    else:
+        clusters = None
+    cluster_records = core.status(cluster_names=clusters, refresh=refresh)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:
@@ -1447,6 +1458,50 @@ def status(all: bool, refresh: bool):  # pylint: disable=redefined-builtin
                    f'{colorama.Style.BRIGHT}sky status --refresh'
                    f'{colorama.Style.RESET_ALL}')
     status_utils.show_local_status_table(local_clusters)
+
+
+@cli.command()
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all information in full.')
+@usage_lib.entrypoint
+def cost_report(all: bool):  # pylint: disable=redefined-builtin
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Show cost reports for each cluster.
+
+    The following fields for each cluster are recorded: cluster name,
+    resources, launched time, duration that cluster was up,
+    and total cost.
+
+    The estimated cost column indicates the price for the cluster based on the
+    type of resources being used and the duration of use up until the call
+    to status. This means if the cluster is UP, successive calls to report
+    will show increasing price. The estimated cost is calculated based on
+    the local cache of the cluster status, and may not be accurate for
+    the cluster with autostop/use_spot set or terminated/stopped
+    on the cloud console.
+    """
+
+    cluster_records = core.cost_report()
+    nonreserved_cluster_records = []
+    reserved_clusters = dict()
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        if cluster_name in backend_utils.SKY_RESERVED_CLUSTER_NAMES:
+            cluster_group_name = backend_utils.SKY_RESERVED_CLUSTER_NAMES[
+                cluster_name]
+            reserved_clusters[cluster_group_name] = cluster_record
+        else:
+            nonreserved_cluster_records.append(cluster_record)
+
+    status_utils.show_cost_report_table(nonreserved_cluster_records, all)
+
+    for cluster_group_name, cluster_record in reserved_clusters.items():
+        status_utils.show_cost_report_table(
+            [cluster_record], all, reserved_group_name=cluster_group_name)
 
 
 @cli.command()
@@ -2340,6 +2395,7 @@ def _down_or_stop_clusters(
                                 f'{colorama.Style.BRIGHT}sky start {name}'
                                 f'{colorama.Style.RESET_ALL}')
                 success_progress = True
+
         progress.stop()
         click.echo(message)
         if success_progress:
@@ -2611,8 +2667,20 @@ def check():
               default=None,
               type=str,
               help='Cloud provider to query.')
+@click.option(
+    '--region',
+    required=False,
+    type=str,
+    help=
+    ('The region to use. If not specified, shows accelerators from all regions.'
+    ),
+)
 @usage_lib.entrypoint
-def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pylint: disable=redefined-builtin
+def show_gpus(
+        gpu_name: Optional[str],
+        all: bool,  # pylint: disable=redefined-builtin
+        cloud: Optional[str],
+        region: Optional[str]):
     """Show supported GPU/TPU/accelerators.
 
     The names and counts shown can be set in the ``accelerators`` field in task
@@ -2626,9 +2694,14 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
     To show all accelerators, including less common ones and their detailed
     information, use ``sky show-gpus --all``.
 
-    NOTE: The price displayed for each instance type is the lowest across all
-    regions for both on-demand and spot instances.
+    NOTE: If region is not specified, the price displayed for each instance type
+    is the lowest across all regions for both on-demand and spot instances.
     """
+    # validation for the --region flag
+    if region is not None and cloud is None:
+        raise click.UsageError(
+            'The --region flag is only valid when the --cloud flag is set.')
+    service_catalog.validate_region_zone(region, None, clouds=cloud)
     show_all = all
     if show_all and gpu_name is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -2645,8 +2718,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
             ['OTHER_GPU', 'AVAILABLE_QUANTITIES'])
 
         if gpu_name is None:
-            result = service_catalog.list_accelerator_counts(gpus_only=True,
-                                                             clouds=cloud)
+            result = service_catalog.list_accelerator_counts(
+                gpus_only=True,
+                clouds=cloud,
+                region_filter=region,
+            )
             # NVIDIA GPUs
             for gpu in service_catalog.get_common_gpus():
                 if gpu in result:
@@ -2674,6 +2750,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         # Show detailed accelerator information
         result = service_catalog.list_accelerators(gpus_only=True,
                                                    name_filter=gpu_name,
+                                                   region_filter=region,
                                                    clouds=cloud)
         if len(result) == 0:
             yield f'Resources \'{gpu_name}\' not found. '
@@ -2686,7 +2763,7 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
         yield 'the host VM\'s cost is not included.\n\n'
         import pandas as pd  # pylint: disable=import-outside-toplevel
         for i, (gpu, items) in enumerate(result.items()):
-            accelerator_table = log_utils.create_table([
+            accelerator_table_headers = [
                 'GPU',
                 'QTY',
                 'CLOUD',
@@ -2695,7 +2772,11 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                 'HOST_MEMORY',
                 'HOURLY_PRICE',
                 'HOURLY_SPOT_PRICE',
-            ])
+            ]
+            if not show_all:
+                accelerator_table_headers.append('REGION')
+            accelerator_table = log_utils.create_table(
+                accelerator_table_headers)
             for item in items:
                 instance_type_str = item.instance_type if not pd.isna(
                     item.instance_type) else '(attachable)'
@@ -2713,11 +2794,20 @@ def show_gpus(gpu_name: Optional[str], all: bool, cloud: Optional[str]):  # pyli
                     item.price) else '-'
                 spot_price_str = f'$ {item.spot_price:.3f}' if not pd.isna(
                     item.spot_price) else '-'
-                accelerator_table.add_row([
-                    item.accelerator_name, item.accelerator_count, item.cloud,
-                    instance_type_str, cpu_str, mem_str, price_str,
-                    spot_price_str
-                ])
+                region_str = item.region if not pd.isna(item.region) else '-'
+                accelerator_table_vals = [
+                    item.accelerator_name,
+                    item.accelerator_count,
+                    item.cloud,
+                    instance_type_str,
+                    cpu_str,
+                    mem_str,
+                    price_str,
+                    spot_price_str,
+                ]
+                if not show_all:
+                    accelerator_table_vals.append(region_str)
+                accelerator_table.add_row(accelerator_table_vals)
 
             if i != 0:
                 yield '\n\n'

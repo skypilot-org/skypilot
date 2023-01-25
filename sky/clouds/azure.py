@@ -95,8 +95,9 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 32 GB RAM.  Prev-gen (as of 2021) general purpose.
-        return 'Standard_D8_v4'
+        # General-purpose instance with 8 vCPUs and 32 GB RAM.
+        # Intel Ice Lake 8370C
+        return 'Standard_D8_v5'
 
     def _get_image_config(self, gen_version, instance_type):
         # az vm image list \

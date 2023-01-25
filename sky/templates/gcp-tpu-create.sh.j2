@@ -9,4 +9,5 @@ gcloud config set project $PROJECT_ID
 yes | gcloud compute tpus create {{tpu_name}} \
 --zone={{zones}} \
 --version={{runtime_version}} \
---accelerator-type={{tpu_type}}
+--accelerator-type={{tpu_type}} \
+--network={{vpc_name}}
