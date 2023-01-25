@@ -93,12 +93,16 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     # Use cloud init in UserData to set up the authorized_keys to get
     # around the number of keys limit and permission issues with
     # ec2.describe_key_pairs.
+    # Note that sudo and shell need to be specified to ensure setup works.
+    # Reference: https://cloudinit.readthedocs.io/en/latest/reference/modules.html#users-and-groups  # pylint: disable=line-too-long
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config']['UserData'] = (
             textwrap.dedent(f"""\
             #cloud-config
             users:
             - name: {config['auth']['ssh_user']}
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
               ssh-authorized-keys:
                 - {public_key}
             """))
