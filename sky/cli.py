@@ -174,11 +174,13 @@ def _interactive_node_cli_command(cli_func):
                                         default=None,
                                         type=str,
                                         help='Instance type to use.')
-    cpu = click.option('--cpu',
-                       default=None,
-                       type=str,
-                       help='Number of vCPUs to use. '
-                       '(e.g., ``--cpu=4`` or ``--cpu=4+``).')
+    cpu = click.option(
+        '--cpu',
+        default=None,
+        type=str,
+        help=('Number of vCPUs each instance must have '
+              '(e.g., ``--cpu=4`` (exactly 4) or ``--cpu=4+`` (at least 4)). '
+              'This is used to automatically select the instance type.'))
     gpus = click.option('--gpus',
                         default=None,
                         type=str,
@@ -1108,7 +1110,9 @@ def cli():
               default=None,
               type=str,
               required=False,
-              help='The number of vCPUs to use. Either <number> or <number>+.')
+              help=('Number of vCPUs each instance must have (e.g., '
+                    '``--cpu=4`` (exactly 4) or ``--cpu=4+`` (at least 4)). '
+                    'This is used to automatically select the instance type.'))
 @click.option('--disk-size',
               default=None,
               type=int,
@@ -2999,7 +3003,9 @@ def spot():
               default=None,
               type=str,
               required=False,
-              help='The number of vCPUs to use. Either <number> or <number>+.')
+              help=('Number of vCPUs each instance must have (e.g., '
+                    '``--cpu=4`` (exactly 4) or ``--cpu=4+`` (at least 4)). '
+                    'This is used to automatically select the instance type.'))
 @click.option('--spot-recovery',
               default=None,
               type=str,
