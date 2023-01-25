@@ -280,8 +280,8 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls,
-                                  cpu: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpu=cpu, clouds='gcp')
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus, clouds='gcp')
 
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
@@ -382,7 +382,7 @@ class GCP(clouds.Cloud):
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
-            host_vm_type = GCP.get_default_instance_type(cpu=resources.cpu)
+            host_vm_type = GCP.get_default_instance_type(cpus=resources.cpus)
             if host_vm_type is None:
                 return ([], [])
             else:
@@ -390,7 +390,7 @@ class GCP(clouds.Cloud):
                     cloud=GCP(),
                     instance_type=host_vm_type,
                     accelerators=None,
-                    cpu=None,
+                    cpus=None,
                 )
                 return ([r], [])
 
@@ -409,7 +409,7 @@ class GCP(clouds.Cloud):
         ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
-            cpu=resources.cpu if not use_tpu_vm else None,
+            cpus=resources.cpus if not use_tpu_vm else None,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
@@ -425,14 +425,14 @@ class GCP(clouds.Cloud):
             host_vm_type = 'TPU-VM'
             # FIXME(woosuk): This leverages the fact that TPU VMs have 96 vCPUs.
             num_cpus_in_tpu_vm = 96
-            if resources.cpu is not None:
-                if resources.cpu.endswith('+'):
-                    cpu = float(resources.cpu[:-1])
-                    if cpu > num_cpus_in_tpu_vm:
+            if resources.cpus is not None:
+                if resources.cpus.endswith('+'):
+                    cpus = float(resources.cpus[:-1])
+                    if cpus > num_cpus_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
                 else:
-                    cpu = float(resources.cpu)
-                    if cpu != num_cpus_in_tpu_vm:
+                    cpus = float(resources.cpus)
+                    if cpus != num_cpus_in_tpu_vm:
                         return ([], fuzzy_candidate_list)
         else:
             host_vm_type = instance_list[0]
@@ -442,7 +442,7 @@ class GCP(clouds.Cloud):
             cloud=GCP(),
             instance_type=host_vm_type,
             accelerators=acc_dict,
-            cpu=None,
+            cpus=None,
         )
         return ([r], fuzzy_candidate_list)
 

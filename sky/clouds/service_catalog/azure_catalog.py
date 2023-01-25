@@ -83,12 +83,12 @@ def _get_instance_family(instance_type: str) -> str:
     return instance_family
 
 
-def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
-    if cpu is None:
-        cpu = str(_DEFAULT_NUM_VCPUS)
+def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
+    if cpus is None:
+        cpus = str(_DEFAULT_NUM_VCPUS)
     df = _df[_df['InstanceType'].apply(_get_instance_family) ==
              _DEFAULT_INSTANCE_FAMILY]
-    return common.get_instance_type_for_cpu_impl(df, cpu)
+    return common.get_instance_type_for_cpus_impl(df, cpus)
 
 
 def get_accelerators_from_instance_type(
@@ -99,7 +99,7 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
-        cpu: Optional[str] = None,
+        cpus: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -113,7 +113,7 @@ def get_instance_type_for_accelerator(
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
-                                                         cpu=cpu,
+                                                         cpus=cpus,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)

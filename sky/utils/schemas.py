@@ -25,7 +25,7 @@ def get_resources_schema():
             'zone': {
                 'type': 'string',
             },
-            'cpu': {
+            'cpus': {
                 'anyOf': [{
                     'type': 'string',
                 }, {

@@ -270,18 +270,18 @@ def get_vcpus_from_instance_type_impl(
     return float(vcpus)
 
 
-def _filter_with_cpu(df: pd.DataFrame, cpu: Optional[str]) -> pd.DataFrame:
-    if cpu is None:
+def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
+    if cpus is None:
         return df
-    if cpu.endswith('+'):
-        return df[df['vCPUs'] >= float(cpu[:-1])]
+    if cpus.endswith('+'):
+        return df[df['vCPUs'] >= float(cpus[:-1])]
     else:
-        return df[df['vCPUs'] == float(cpu)]
+        return df[df['vCPUs'] == float(cpus)]
 
 
-def get_instance_type_for_cpu_impl(df: pd.DataFrame,
-                                   cpu: Optional[str] = None) -> Optional[str]:
-    df = _filter_with_cpu(df, cpu)
+def get_instance_type_for_cpus_impl(df: pd.DataFrame,
+                                   cpus: Optional[str] = None) -> Optional[str]:
+    df = _filter_with_cpus(df, cpus)
     if df.empty:
         return None
     # Sort by the number of vCPUs and then by the price.
@@ -308,7 +308,7 @@ def get_instance_type_for_accelerator_impl(
     df: pd.DataFrame,
     acc_name: str,
     acc_count: int,
-    cpu: Optional[str] = None,
+    cpus: Optional[str] = None,
     use_spot: bool = False,
     region: Optional[str] = None,
     zone: Optional[str] = None,
@@ -333,7 +333,7 @@ def get_instance_type_for_accelerator_impl(
                                             f'{int(row["AcceleratorCount"])}')
         return (None, fuzzy_candidate_list)
 
-    result = _filter_with_cpu(result, cpu)
+    result = _filter_with_cpus(result, cpus)
     if region is not None:
         result = result[result['Region'] == region]
     if zone is not None:

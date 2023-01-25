@@ -179,7 +179,7 @@ def _execute(
     if cluster_exists:
         assert len(task.resources) == 1
         task_resources = list(task.resources)[0]
-        if task_resources.cpu is not None:
+        if task_resources.cpus is not None:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'Cannot specify CPU when using an existing cluster. '

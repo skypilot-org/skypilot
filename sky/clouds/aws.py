@@ -275,8 +275,8 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls,
-                                  cpu: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpu=cpu, clouds='aws')
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus, clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -348,7 +348,7 @@ class AWS(clouds.Cloud):
                     # Setting this to None as AWS doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
-                    cpu=None,
+                    cpus=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -358,7 +358,7 @@ class AWS(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = AWS.get_default_instance_type(
-                cpu=resources.cpu)
+                cpus=resources.cpus)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -371,7 +371,7 @@ class AWS(clouds.Cloud):
             acc,
             acc_count,
             use_spot=resources.use_spot,
-            cpu=resources.cpu,
+            cpus=resources.cpus,
             region=resources.region,
             zone=resources.zone,
             clouds='aws')

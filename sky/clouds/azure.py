@@ -95,8 +95,8 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls,
-                                  cpu: Optional[str] = None) -> Optional[str]:
-        return service_catalog.get_default_instance_type(cpu=cpu,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
                                                          clouds='azure')
 
     def _get_image_config(self, gen_version, instance_type):
@@ -265,7 +265,7 @@ class Azure(clouds.Cloud):
                     # Setting this to None as Azure doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
-                    cpu=None,
+                    cpus=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -275,7 +275,7 @@ class Azure(clouds.Cloud):
         if accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             default_instance_type = Azure.get_default_instance_type(
-                cpu=resources.cpu)
+                cpus=resources.cpus)
             if default_instance_type is None:
                 return ([], [])
             else:
@@ -287,7 +287,7 @@ class Azure(clouds.Cloud):
         ) = service_catalog.get_instance_type_for_accelerator(
             acc,
             acc_count,
-            cpu=resources.cpu,
+            cpus=resources.cpus,
             use_spot=resources.use_spot,
             region=resources.region,
             zone=resources.zone,
