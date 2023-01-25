@@ -104,7 +104,7 @@ def get_default_instance_type(cpu: Optional[str] = None) -> Optional[str]:
         cpu = str(_DEFAULT_NUM_VCPUS)
     # The metal instance is not included in the default instance family.
     instance_type_prefix = f'{_DEFAULT_INSTANCE_FAMILY}.'
-    instance_type_suffix = 'xlarge'
+    instance_type_suffix = 'large'
     df = _df[_df['InstanceType'].str.startswith(instance_type_prefix) &
              _df['InstanceType'].str.endswith(instance_type_suffix)]
     return common.get_default_instance_type_impl(df, cpu)
