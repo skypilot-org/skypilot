@@ -471,7 +471,7 @@ def exec(  # pylint: disable=redefined-builtin
     if task_resources.cpu is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Cannot specify CPU resources for sky exec. '
-                                f'CPU resources: {task_resources.cpu}')
+                             f'CPU resources: {task_resources.cpu}')
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
