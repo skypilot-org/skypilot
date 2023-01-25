@@ -115,34 +115,15 @@ def _create_tpu(gcp_credentials=None):
     )
 
 
-def construct_clients_from_provider_config(provider_config):
-    """
-    Attempt to fetch and parse the JSON GCP credentials from the provider
-    config yaml file.
-
-    tpu resource (the last element of the tuple) will be None if
-    `_has_tpus` in provider config is not set or False.
-    """
-
-    def _create_credentials(creds):
-        if provider_config.get(HAS_TPU_PROVIDER_FIELD, False):
-            _create_tpu_optional = _create_tpu
-        else:
-
-            def _create_tpu_optional(_):
-                return None
-
-        # If gcp_credentials is None, then discovery.build will search for
-        # credentials in the local environment.
-        return _create_crm(creds), _create_iam(creds), _create_compute(
-            creds), _create_tpu_optional(creds)
-
+def _get_gcp_credentials(provider_config):
+    # If gcp_credentials is None, then discovery.build will search for
+    # credentials in the local environment.
     gcp_credentials = provider_config.get('gcp_credentials')
     if gcp_credentials is None:
         logger.debug('gcp_credentials not found in cluster yaml file. '
                      'Falling back to GOOGLE_APPLICATION_CREDENTIALS '
                      'environment variable.')
-        return _create_credentials(None)
+        return None
 
     assert ('type' in gcp_credentials
            ), 'gcp_credentials cluster yaml field missing "type" field.'
@@ -167,8 +148,31 @@ def construct_clients_from_provider_config(provider_config):
         credentials = OAuthCredentials(credentials_field)
     else:
         raise ValueError(f'Unknown GCP credential type: {cred_type}')
+    return credentials
 
-    return _create_credentials(credentials)
+
+def construct_clients_from_provider_config(provider_config):
+    """
+    Attempt to fetch and parse the JSON GCP credentials from the provider
+    config yaml file.
+
+    tpu resource (the last element of the tuple) will be None if
+    `_has_tpus` in provider config is not set or False.
+    """
+    creds = _get_gcp_credentials(provider_config)
+    tpu = None
+    if provider_config.get(HAS_TPU_PROVIDER_FIELD, False):
+        tpu = _create_tpu()
+
+    return _create_crm(creds), _create_iam(creds), _create_compute(creds), tpu
+
+
+def construct_compute_clients_from_provider_config(provider_config):
+    creds = _get_gcp_credentials(provider_config)
+    if provider_config.get(HAS_TPU_PROVIDER_FIELD, False):
+        return _create_tpu(creds)
+    else:
+        return _create_compute(creds)
 
 
 def bootstrap_gcp(config):
