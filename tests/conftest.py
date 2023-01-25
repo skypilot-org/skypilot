@@ -100,18 +100,26 @@ def pytest_collection_modifyitems(config, items):
     # We run Lambda Labs tests serially because Lambda Labs rate limits its
     # launch API to one launch every 10 seconds. We also skip generic tests
     # marked with @pytest.mark.no_lambda_labs
+    serial_mark = pytest.mark.xdist_group(name='serial_lambda_labs')
+    # Handle generic tests
     if _generic_cloud(config) == 'lambda':
-        serial_mark = pytest.mark.xdist_group(name='serial_lambda_labs')
         for item in items:
-            if 'no_lambda_labs' in item.keywords:
+            if not _is_generic_test(item):
+                continue
+            elif 'no_lambda_labs' in item.keywords:
                 item.add_marker(skip_marks['lambda'])
-            elif 'lambda_labs' in item.keywords or _is_generic_test(item):
+            else:
                 item.add_marker(serial_mark)
                 # Adding the serial mark does not update the item.nodeid,
                 # but item.nodeid is important for pytest.xdist_group, e.g.
                 #   https://github.com/pytest-dev/pytest-xdist/blob/master/src/xdist/scheduler/loadgroup.py
                 # This is a hack to update item.nodeid
                 item._nodeid = f'{item.nodeid}@serial_lambda_labs'
+    # Handle Lambda Labs specific tests
+    for item in items:
+        if 'lambda_labs' in item.keywords:
+            item.add_marker(serial_mark)
+            item._nodeid = f'{item.nodeid}@serial_lambda_labs'  # See comment on item.nodeid above
 
 
 def _is_generic_test(item) -> bool:
