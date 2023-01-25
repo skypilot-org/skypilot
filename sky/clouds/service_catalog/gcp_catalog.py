@@ -448,7 +448,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
     acc_name, acc_count = acc[0]
 
     if acc_name.startswith('tpu-'):
-        # TODO(woosuk): Check max vcpus and memory for each TPU type.
+        # TODO(woosuk): Check max vCPUs and memory for each TPU type.
         assert instance_type == 'TPU-VM' or instance_type.startswith('n1-')
         return
 

@@ -195,10 +195,10 @@ class Resources:
 
     @property
     def cpus(self) -> Optional[str]:
-        """Returns the number of vcpus that each instance must have.
+        """Returns the number of vCPUs that each instance must have.
 
-        For example, cpus='4' means each instance must have exactly 4 vcpus,
-        and cpus='4+' means each instance must have at least 4 vcpus.
+        For example, cpus='4' means each instance must have exactly 4 vCPUs,
+        and cpus='4+' means each instance must have at least 4 vCPUs.
         The cpus field is only used to select the instance type at launch time.
         Thus, Resources in ResourceHandle will have cpus field set to None.
         """
