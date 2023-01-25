@@ -99,6 +99,8 @@ def setup_aws_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             #cloud-config
             users:
             - name: {config['auth']['ssh_user']}
+              shell: /bin/bash
+              sudo: ALL=(ALL) NOPASSWD:ALL
               ssh-authorized-keys:
                 - {public_key}
             """))
