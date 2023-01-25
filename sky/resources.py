@@ -429,7 +429,7 @@ class Resources:
                             f'{self.instance_type} does not have enough vCPUs. '
                             f'{self.instance_type} has {cpu} vCPUs, '
                             f'but {self.cpu} is requested.')
-            elif cpu != self.cpu:
+            elif cpu != float(self.cpu):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         f'{self.instance_type} does not have the requested '
