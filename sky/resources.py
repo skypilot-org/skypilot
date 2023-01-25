@@ -700,9 +700,6 @@ class Resources:
             return False
         # self._instance_type <= other.instance_type
 
-        # We do not allow comparing the clusters in terms of vCPUs.
-        assert self.cpus is None and other.cpus is None
-
         other_accelerators = other.accelerators
         if self.accelerators is not None:
             if other_accelerators is None:
