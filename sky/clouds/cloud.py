@@ -182,6 +182,12 @@ class Cloud:
     @classmethod
     def get_default_instance_type(cls,
                                   cpu: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given number of CPUs.
+
+        When cpu is None, this method will never return None.
+        This method may return None if the cloud's default instance family
+        does not have a VM with the given number of CPUs (e.g., when cpu='123').
+        """
         raise NotImplementedError
 
     @classmethod
