@@ -41,10 +41,8 @@ class Resources:
         # TODO:
         sky.Resources(requests={'mem': '16g', 'cpu': 8})
     """
-    # If any fields changed:
-    # 1. Increment the version. For backward compatibility.
-    # 2. Change the __setstate__ method to handle the new fields.
-    # 3. Modify the to_config method to handle the new fields.
+    # If any fields changed, increment the version. For backward compatibility,
+    # modify the __setstate__ method to handle the old version.
     _VERSION = 7
 
     def __init__(
