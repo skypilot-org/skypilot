@@ -12,8 +12,9 @@ from sky.utils import ux_utils
 
 _df = common.read_catalog('azure/vms.csv')
 
-# General-purpose instance with Intel Ice Lake 8370C
-# 4 GB RAM per 1 vCPU
+# This is the latest general-purpose instance family as of Jan 2023.
+# CPU: Intel Ice Lake 8370C.
+# Memory: 4 GiB RAM per 1 vCPU.
 _DEFAULT_INSTANCE_FAMILY = 'D_v5'
 _DEFAULT_NUM_VCPUS = 8
 

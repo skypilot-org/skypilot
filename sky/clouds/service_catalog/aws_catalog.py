@@ -19,8 +19,9 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-# General-purpose instance with Intel Ice Lake 8375C
-# 4 GB RAM per 1 vCPU
+# This is the latest general-purpose instance family as of Jan 2023.
+# CPU: Intel Ice Lake 8375C.
+# Memory: 4 GiB RAM per 1 vCPU.
 _DEFAULT_INSTANCE_FAMILY = 'm6i'
 _DEFAULT_NUM_VCPUS = 8
 

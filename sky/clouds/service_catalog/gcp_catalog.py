@@ -26,8 +26,9 @@ _TPU_REGIONS = [
 ]
 
 # Default instance family for CPU-only VMs.
-# General-purpose instance with Intel Ice Lake 8373C or Cascade Lake 6268CL
-# 4 GB RAM per 1 vCPU
+# This is the latest general-purpose instance family as of Jan 2023.
+# CPU: Intel Ice Lake 8373C or Cascade Lake 6268CL.
+# Memory: 4 GiB RAM per 1 vCPU.
 _DEFAULT_INSTANCE_FAMILY = 'n2'
 _DEFAULT_NUM_VCPUS = 8
 
