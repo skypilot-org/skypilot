@@ -334,9 +334,6 @@ def get_instance_type_for_accelerator_impl(
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpu(result, cpu)
-    if len(result) == 0:
-        return ([], [])
-
     if region is not None:
         result = result[result['Region'] == region]
     if zone is not None:
