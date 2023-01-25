@@ -376,16 +376,15 @@ class GCP(clouds.Cloud):
         return resources_vars
 
     def get_feasible_launchable_resources(self, resources):
-        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], [])
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
             host_vm_type = GCP.get_default_instance_type(cpu=resources.cpu)
             if host_vm_type is None:
-                return ([], fuzzy_candidate_list)
+                return ([], [])
             else:
                 r = resources.copy(
                     cloud=GCP(),
@@ -393,7 +392,7 @@ class GCP(clouds.Cloud):
                     accelerators=None,
                     cpu=None,
                 )
-                return ([r], fuzzy_candidate_list)
+                return ([r], [])
 
         use_tpu_vm = False
         if resources.accelerator_args is not None:

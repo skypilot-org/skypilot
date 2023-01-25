@@ -250,12 +250,11 @@ class Azure(clouds.Cloud):
             # TODO(zhwu): our azure subscription offer ID does not support spot.
             # Need to support it.
             return ([], [])
-        fuzzy_candidate_list = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
@@ -278,9 +277,9 @@ class Azure(clouds.Cloud):
             default_instance_type = Azure.get_default_instance_type(
                 cpu=resources.cpu)
             if default_instance_type is None:
-                return ([], fuzzy_candidate_list)
+                return ([], [])
             else:
-                return (_make([default_instance_type]), fuzzy_candidate_list)
+                return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
