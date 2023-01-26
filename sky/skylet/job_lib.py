@@ -163,7 +163,7 @@ class JobScheduler:
         _CONN.commit()
 
     def _run_job(self, job_id: int, run_cmd: str):
-        _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())}'
+        _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
