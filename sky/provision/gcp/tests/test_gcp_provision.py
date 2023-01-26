@@ -78,8 +78,6 @@ def test_provision():
     bootstrapped_config = gcp.bootstrap(config)
     print(f'Bootstrapping duration = {time.time() - start:.3f}s')
 
-    return
-
     start = time.time()
     gcp.create_or_resume_instances(
         region,
@@ -87,12 +85,15 @@ def test_provision():
         node_config=bootstrapped_config["node_config"],
         tags={},
         count=num_nodes,
-        resume_stopped_nodes=True)
+        resume_stopped_nodes=True,
+        provider_config=bootstrapped_config['provider'])
     print(f'Start cluster (trigger) duration = {time.time() - start:.3f}s')
 
     start = time.time()
-    gcp.wait_instances(region, cluster_name, state='running')
+    # gcp.wait_instances(region, cluster_name, state='running')
     print(f'Start cluster duration = {time.time() - start:.3f}s')
+
+    return
 
     start = time.time()
     public_ips = gcp.get_instance_ips(region, cluster_name, public_ips=True)
