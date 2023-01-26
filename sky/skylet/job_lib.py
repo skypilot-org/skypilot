@@ -155,6 +155,9 @@ class JobScheduler:
         self.schedule_step()
 
     def set_scheduled(self, job_id: str):
+        # TODO(mraheja): remove pylint disabling when filelock
+        # version updated
+        # pylint: disable=abstract-class-instantiated
         with filelock.FileLock(_get_lock_path(job_id)):
             self.remove_job_no_lock(job_id)
 
@@ -174,6 +177,9 @@ class JobScheduler:
         if len(jobs) > 0:
             update_status(job_owner, _SUBMITTED_GAP_SECONDS)
         for job_id, run_cmd, submit, _ in jobs:
+            # TODO(mraheja): remove pylint disabling when filelock
+            # version updated
+            # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = get_status_no_lock(job_id)
                 if status not in _PRE_RESOURCE_STATUSES:
@@ -675,6 +681,9 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     for job in job_records:
         job_id = make_ray_job_id(job['job_id'], job_owner)
         try:
+            # TODO(mraheja): remove pylint disabling when filelock
+            # version updated
+            # pylint: disable=abstract-class-instantiated
             with filelock.FileLock(_get_lock_path(job_id)):
                 job_client.stop_job(job_id)
         except RuntimeError as e:
