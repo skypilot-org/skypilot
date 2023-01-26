@@ -1970,6 +1970,10 @@ def _update_cluster_status_no_lock(
                 global_user_state.set_cluster_autostop_value(handle.cluster_name,
                                                             -1,
                                                             to_down=False)
+            else:
+                ux_utils.console_newline()
+                logger.info(f'Cluster {cluster_name!r} is autostopping, it will remain '
+                            'in INIT state until the autostop is finished.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
