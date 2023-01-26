@@ -2439,12 +2439,22 @@ class CloudVmRayBackend(backends.Backend):
                            f'> {remote_log_path} 2>&1')
             job_submit_cmd = self._setup_and_create_job_cmd_on_local_head(
                 handle, ray_command, ray_job_id)
-        else:
+        elif handle.cluster_name == spot_lib.SPOT_CONTROLLER_NAME:
             job_submit_cmd = (
                 f'{cd} && mkdir -p {remote_log_dir} && ray job submit '
                 f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
                 '--no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+        else:
+            job_submit_cmd = (
+                f'{cd} && ray job submit '
+                f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
+                '--no-wait '
+                f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
+        
+            mkdir_code = f'{cd} && mkdir -p {remote_log_dir} && touch {remote_log_path} && echo START > {remote_log_path} 2>&1'
+            code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
+            job_submit_cmd = mkdir_code + ' && ' + code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,

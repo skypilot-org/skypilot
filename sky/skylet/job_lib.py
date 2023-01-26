@@ -5,13 +5,16 @@ This is a remote utility module that provides job queue functionality.
 import enum
 import os
 import pathlib
+import psutil
 import shlex
+import subprocess
 import time
 import typing
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 import filelock
+import getpass
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -60,6 +63,13 @@ def create_table(cursor, conn):
         status TEXT,
         run_timestamp TEXT CANDIDATE KEY,
         start_at FLOAT DEFAULT -1)""")
+
+    cursor.execute("""CREATE TABLE IF NOT EXISTS pending_jobs(
+        job_id INTEGER,
+        run_cmd TEXT,
+        submit INTEGER,
+        created_time INTEGER
+    )""")
 
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'end_at', 'FLOAT')
     db_utils.add_column_to_table(cursor, conn, 'jobs', 'resources', 'TEXT')
@@ -124,6 +134,55 @@ class JobStatus(enum.Enum):
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
+class JobScheduler:
+    """Base class for job scheduler"""
+
+    def queue(self, job_id: int, cmd: str) -> None:
+        _CURSOR.execute('INSERT INTO pending_jobs VALUES (?,?,?,?)',
+                        (job_id, cmd, 0, int(time.time())))
+        _CONN.commit()
+        set_status(job_id, JobStatus.PENDING)
+        self.schedule_step()
+    
+    def set_scheduled(self, job_id: str):
+        with filelock.FileLock(_get_lock_path(job_id)):
+            self.remove_job_no_lock(job_id)
+
+    def remove_job_no_lock(self, job_id: str) -> None:
+        _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
+        _CONN.commit()
+    
+    def _run_job(self, job_id: int, run_cmd: str):
+        _CURSOR.execute(
+            f'UPDATE pending_jobs SET submit={int(time.time())} WHERE job_id={job_id!r}'
+        )
+        _CONN.commit()
+        subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
+
+    def schedule_step(self) -> None:
+        job_owner = getpass.getuser()
+        jobs = list(self._get_jobs())
+        if len(jobs) > 0:
+            update_status(job_owner)
+        for job_id, run_cmd, submit, _ in jobs:
+            with filelock.FileLock(_get_lock_path(job_id)):
+                status = get_status_no_lock(job_id)
+                if status != JobStatus.PENDING:
+                    # Job doesn't exist or is running/cancelled
+                    self.remove_job_no_lock(job_id)
+                    continue
+                if submit:
+                    # Next job waiting for resources
+                    return
+                self._run_job(job_id, run_cmd)
+                return
+
+class FIFOScheduler(JobScheduler):
+    """First in first out job scheduler"""
+    def _get_jobs(self) -> Tuple:
+        return _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id')
+
+scheduler = FIFOScheduler()
 
 _JOB_STATUS_TO_COLOR = {
     JobStatus.INIT: colorama.Fore.BLUE,
@@ -376,6 +435,16 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     records = _get_records_from_rows(rows)
     return records
 
+def _get_pending_jobs():
+    rows = _CURSOR.execute(
+        'SELECT job_id, created_time, submit FROM pending_jobs')
+    rows = list(rows)
+    return {
+        job_id: {
+            'created_time': created_time,
+            'submit': submit
+        } for job_id, created_time, submit in rows
+    }
 
 def update_job_status(job_owner: str,
                       job_ids: List[int],
@@ -403,6 +472,8 @@ def update_job_status(job_owner: str,
     # which contains the job status (str) and submission_id (str).
     job_detail_lists: List['ray_pydantic.JobDetails'] = job_client.list_jobs()
 
+    pending_jobs = _get_pending_jobs()
+
     job_details = dict()
     ray_job_ids_set = set(ray_job_ids)
     for job_detail in job_detail_lists:
@@ -410,9 +481,18 @@ def update_job_status(job_owner: str,
             job_details[job_detail.submission_id] = job_detail
     job_statuses: List[JobStatus] = [None] * len(ray_job_ids)
     for i, ray_job_id in enumerate(ray_job_ids):
+        job_id = job_ids[i]
         if ray_job_id in job_details:
             ray_status = job_details[ray_job_id].status
             job_statuses[i] = _RAY_TO_JOB_STATUS_MAP[ray_status]
+        if job_id in pending_jobs:
+            if pending_jobs[job_id]['submit'] > 0 and pending_jobs[job_id][
+                    'submit'] < time.time() - 5:
+                continue
+            if pending_jobs[job_id]['created_time'] < psutil.boot_time():
+                job_statuses[i] = JobStatus.FAILED
+            else:
+                job_statuses[i] = JobStatus.PENDING
 
     assert len(job_statuses) == len(job_ids), (job_statuses, job_ids)
 
@@ -581,7 +661,8 @@ def cancel_jobs(job_owner: str, jobs: Optional[List[int]]) -> None:
     for job in job_records:
         job_id = make_ray_job_id(job['job_id'], job_owner)
         try:
-            job_client.stop_job(job_id)
+            with filelock.FileLock(_get_lock_path(job_id)):
+                job_client.stop_job(job_id)
         except RuntimeError as e:
             # If the job does not exist or if the request to the
             # job server fails.
@@ -647,6 +728,13 @@ class JobLibCodeGen:
             f'{resources_str!r})',
             'print("Job ID: " + str(job_id), flush=True)',
         ]
+        return cls._build(code)
+
+    @classmethod
+    def queue_job(cls, job_name: str, cmd: str) -> None:
+        code = ['job_lib.scheduler.queue('
+                f'{job_name!r},'
+                f'{cmd!r})']
         return cls._build(code)
 
     @classmethod
