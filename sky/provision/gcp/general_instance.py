@@ -168,26 +168,26 @@ def create_instances(region: str, cluster_name: str,
                      node_config: Dict[str, Any], tags: Dict[str, str],
                      count: int, provider_config: Dict[str,
                                                        Any]) -> Dict[str, Any]:
-    project_id = provider_config['project_id']
-    availability_zone = provider_config.get('availability_zone')
     compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
 
+    project_id = provider_config['project_id']
+    availability_zone = provider_config.get('availability_zone')
     if availability_zone is None:
         zones = utils.get_zones_from_regions(region, project_id, compute_client)
         availability_zone = zones[0]
 
     labels = tags
 
-    config = _convert_resources_to_urls(node_config, project_id,
-                                        availability_zone)
+    node_config = _convert_resources_to_urls(node_config, project_id,
+                                             availability_zone)
     # removing TPU-specific default key set in config.py
-    config.pop('networkConfig', None)
+    node_config.pop('networkConfig', None)
     name = utils.generate_node_name(labels, 'compute')
 
-    labels = dict(config.get('labels', {}), **labels)
+    labels = dict(node_config.get('labels', {}), **labels)
 
-    config.update({
+    node_config.update({
         'labels': dict(labels, **{utils.TAG_RAY_CLUSTER_NAME: cluster_name}),
         'name': name,
     })
@@ -206,7 +206,7 @@ def create_instances(region: str, cluster_name: str,
     #
     # https://cloud.google.com/compute/docs/instance-templates
     # https://cloud.google.com/compute/docs/reference/rest/v1/instances/insert
-    source_instance_template = config.pop('sourceInstanceTemplate', None)
+    source_instance_template = node_config.pop('sourceInstanceTemplate', None)
 
     # Here we use the zonal API for bulk instance creation.
     # There is also regional instance creation API.
@@ -215,12 +215,12 @@ def create_instances(region: str, cluster_name: str,
     if count > 1:
         # 'name' is a field for creating a single instance, we pop it here
         #  and use a pattern instead.
-        name_pattern = config.pop('name') + '-' + '#' * len(str(count))
+        name_pattern = node_config.pop('name') + '-' + '#' * len(str(count))
         body = {
             'count': count,  # this is the max count
             'minCount': count,
             'namePattern': name_pattern,
-            'instanceProperties': config,
+            'instanceProperties': node_config,
             'sourceInstanceTemplate': source_instance_template,
         }
 
@@ -234,7 +234,7 @@ def create_instances(region: str, cluster_name: str,
             project=project_id,
             zone=availability_zone,
             sourceInstanceTemplate=source_instance_template,
-            body=config,
+            body=node_config,
         ).execute()
 
     _wait_for_operation(compute_client, operation, project_id,

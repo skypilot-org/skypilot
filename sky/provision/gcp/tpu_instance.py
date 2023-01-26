@@ -93,6 +93,62 @@ def batch_update_instance_labels(tpu_client, instances: List[Dict],
         _result = _wait_for_operation(tpu_client, opr)
 
 
+def create_instances(region: str, cluster_name: str,
+                     node_config: Dict[str, Any], tags: Dict[str, str],
+                     count: int, provider_config: Dict[str,
+                                                       Any]) -> Dict[str, Any]:
+    compute_client = config.construct_compute_client_from_provider_config(
+        provider_config)
+    tpu_client = config.construct_tpu_client_from_provider_config(
+        provider_config)
+
+    project_id = provider_config['project_id']
+    availability_zone = provider_config.get('availability_zone')
+    if availability_zone is None:
+        zones = utils.get_zones_from_regions(region, project_id, compute_client)
+        availability_zone = zones[0]
+    path = f'projects/{project_id}/locations/{availability_zone}'
+
+    labels = tags
+
+    node_config = node_config.copy()
+    # removing Compute-specific default key set in config.py
+    config.pop('networkInterfaces', None)
+    name = utils.generate_node_name(labels, 'tpu')
+
+    labels = dict(node_config.get('labels', {}), **labels)
+
+    node_config.update({
+        'labels': dict(labels, **{utils.TAG_RAY_CLUSTER_NAME: cluster_name}),
+    })
+
+    if 'networkConfig' not in node_config:
+        node_config['networkConfig'] = {}
+    if 'enableExternalIps' not in node_config['networkConfig']:
+        # this is required for SSH to work, per google documentation
+        # https://cloud.google.com/tpu/docs/users-guide-tpu-vm#create-curl
+        node_config['networkConfig']['enableExternalIps'] = True
+
+    operations = []
+    names = [name] if count <= 1 else [f'{name}-{i}' for i in range(count)]
+    for i in range(count):
+        try:
+            operation = tpu_client.projects().locations().nodes().create(
+                parent=path,
+                body=node_config,
+                nodeId=names[i],
+            ).execute()
+            operations.append(operation)
+        except errors.HttpError as e:
+            # SKY: Catch HttpError when accessing unauthorized region.
+            logger.error(f'googleapiclient.errors.HttpError: {e.reason}')
+            raise e
+
+    for opr in operations:
+        _wait_for_operation(tpu_client, opr, project_id, availability_zone)
+    return name
+
+
 def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
                      count: int, provider_config: Dict) -> Dict[str, Any]:
     project_id = provider_config['project_id']
@@ -123,9 +179,10 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
 
 
 def create_or_resume_instances(region: str, cluster_name: str,
-                               node_config: Dict[str, Any],
-                               tags: Dict[str, str], count: int,
-                               resume_stopped_nodes: bool) -> Dict[str, Any]:
+                               node_config: Dict[str, Any], tags: Dict[str,
+                                                                       str],
+                               count: int, resume_stopped_nodes: bool,
+                               provider_config: Dict) -> Dict[str, Any]:
     """Creates instances.
 
     Returns dict mapping instance id to ec2.Instance object for the created
@@ -137,12 +194,14 @@ def create_or_resume_instances(region: str, cluster_name: str,
     all_created_nodes = {}
     # Try to reuse previously stopped nodes with compatible configs
     if resume_stopped_nodes:
-        all_created_nodes = resume_instances(region, cluster_name, tags, count)
+        all_created_nodes = resume_instances(region, cluster_name, tags, count,
+                                             provider_config)
 
     remaining_count = count - len(all_created_nodes)
     if remaining_count > 0:
         created_nodes_dict = create_instances(region, cluster_name, node_config,
-                                              tags, remaining_count)
+                                              tags, remaining_count,
+                                              provider_config)
         all_created_nodes.update(created_nodes_dict)
     return all_created_nodes
 

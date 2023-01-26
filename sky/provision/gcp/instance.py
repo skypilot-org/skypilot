@@ -24,28 +24,26 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
 
 
 def create_or_resume_instances(region: str, cluster_name: str,
-                               node_config: Dict[str, Any],
-                               tags: Dict[str, str], count: int,
-                               resume_stopped_nodes: bool) -> Dict[str, Any]:
+                               node_config: Dict[str, Any], tags: Dict[str,
+                                                                       str],
+                               count: int, resume_stopped_nodes: bool,
+                               provider_config: Dict) -> Dict[str, Any]:
     """Creates instances.
 
     Returns dict mapping instance id to ec2.Instance object for the created
     instances.
     """
-    # sort tags by key to support deterministic unit test stubbing
-    tags = dict(sorted(copy.deepcopy(tags).items()))
-
-    all_created_nodes = {}
-    # Try to reuse previously stopped nodes with compatible configs
-    if resume_stopped_nodes:
-        all_created_nodes = resume_instances(region, cluster_name, tags, count)
-
-    remaining_count = count - len(all_created_nodes)
-    if remaining_count > 0:
-        created_nodes_dict = create_instances(region, cluster_name, node_config,
-                                              tags, remaining_count)
-        all_created_nodes.update(created_nodes_dict)
-    return all_created_nodes
+    tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
+    if tpu_vms:
+        tpu_instance.create_or_resume_instances(region, cluster_name,
+                                                node_config, tags, count,
+                                                resume_stopped_nodes,
+                                                provider_config)
+    else:
+        general_instance.create_or_resume_instances(region, cluster_name,
+                                                    node_config, tags, count,
+                                                    resume_stopped_nodes,
+                                                    provider_config)
 
 
 def stop_instances(region: str, cluster_name: str,
