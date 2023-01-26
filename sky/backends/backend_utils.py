@@ -1973,7 +1973,7 @@ def _update_cluster_status_no_lock(
             else:
                 ux_utils.console_newline()
                 operation_str = 'autodowning' if record[
-                    'down'] else 'autostopping'
+                    'to_down'] else 'autostopping'
                 logger.info(
                     f'Cluster {cluster_name!r} is {operation_str}, it will remain '
                     'in INIT state until the autostop is finished.')
