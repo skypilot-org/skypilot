@@ -3071,12 +3071,11 @@ class CloudVmRayBackend(backends.Backend):
                                                       code,
                                                       require_outputs=True,
                                                       stream_logs=stream_logs)
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to check autostop',
-                                           stderr=stderr,
-                                           stream_logs=stream_logs)
-        return common_utils.decode_payload(stdout)
+        
+        if returncode == 0:
+            return common_utils.decode_payload(stdout)
+        logger.debug(f'Failed to check if cluster is autostopping: {stderr}')
+        return False
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
