@@ -3071,7 +3071,7 @@ class CloudVmRayBackend(backends.Backend):
                                                       code,
                                                       require_outputs=True,
                                                       stream_logs=stream_logs)
-        
+
         if returncode == 0:
             return common_utils.decode_payload(stdout)
         logger.debug(f'Failed to check if cluster is autostopping: {stderr}')
