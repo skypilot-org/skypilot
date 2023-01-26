@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional, Any
 
+import copy
 import logging
 import time
 
@@ -107,25 +108,25 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
                      count: int, provider_config: Dict) -> Dict[str, Any]:
     project_id = provider_config['project_id']
 
-    compute = config.construct_compute_clients_from_provider_config(
+    compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
-    # for GCP, 'TERMINATED'
+    # In GCP, 'TERMINATED' is equivalent to 'STOPPED' state in AWS.
     instances = list_instances(region,
                                cluster_name,
                                project_id=provider_config['project_id'],
                                status_filter=['TERMINATED'],
-                               compute_client=compute)
+                               compute_client=compute_client)
     instances = instances[:count]
 
     for inst in instances:
-        compute.instances().start(
+        compute_client.instances().start(
             project=project_id,
             zone=inst['availability_zone'],
             instance=inst['name'],
         ).execute()
 
     # set labels and wait
-    batch_update_instance_labels(compute, instances, project_id, tags)
+    batch_update_instance_labels(compute_client, instances, project_id, tags)
     return instances
 
 
@@ -157,15 +158,15 @@ def create_or_resume_instances(region: str, cluster_name: str,
 def stop_instances(region: str, cluster_name: str,
                    provider_config: Optional[Dict]):
     project_id = provider_config['project_id']
-    compute = config.construct_compute_clients_from_provider_config(
+    compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
     instances = list_instances(region,
                                cluster_name,
                                project_id=provider_config['project_id'],
                                status_filter=['RUNNING'],
-                               compute_client=compute)
+                               compute_client=compute_client)
     for inst in instances:
-        _operation = compute.instances().stop(
+        _operation = compute_client.instances().stop(
             project=project_id,
             zone=inst['availability_zone'],
             instance=inst['name'],
@@ -175,16 +176,16 @@ def stop_instances(region: str, cluster_name: str,
 def terminate_instances(region: str, cluster_name: str,
                         provider_config: Optional[Dict]):
     project_id = provider_config['project_id']
-    compute = config.construct_compute_clients_from_provider_config(
+    compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
     instances = list_instances(region,
                                cluster_name,
                                project_id=provider_config['project_id'],
                                status_filter=[],
-                               compute_client=compute)
+                               compute_client=compute_client)
 
     for inst in instances:
-        _operation = compute.instances().delete(
+        _operation = compute_client.instances().delete(
             project=project_id,
             zone=inst['availability_zone'],
             instance=inst['name'],

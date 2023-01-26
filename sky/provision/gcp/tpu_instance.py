@@ -1,5 +1,6 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
+import copy
 import logging
 import time
 
@@ -37,15 +38,16 @@ def _wait_for_operation(
 
 
 def list_instances(region: str, cluster_name: str, project_id: str,
-                   status_filter: List[str], compute_client) -> list:
-    zones = _get_zones_from_regions(region, project_id, compute_client)
+                   status_filter: List[str], compute_client,
+                   tpu_client) -> list:
+    zones = utils.get_zones_from_regions(region, project_id, compute_client)
     instances = []
     # NOTE: we add 'availability_zone' as an attribute of the nodes, as
     # we need the attribute to
     for availability_zone in zones:
         path = f'projects/{project_id}/locations/{availability_zone}'
         try:
-            response = compute_client.projects().locations().nodes().list(
+            response = tpu_client.projects().locations().nodes().list(
                 parent=path).execute()
         except errors.HttpError as e:
             # SKY: Catch HttpError when accessing unauthorized region.
@@ -94,27 +96,29 @@ def batch_update_instance_labels(tpu_client, instances: List[Dict],
 def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
                      count: int, provider_config: Dict) -> Dict[str, Any]:
     project_id = provider_config['project_id']
-    tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
 
-    compute = config.construct_compute_clients_from_provider_config(
+    compute_client = config.construct_compute_client_from_provider_config(
+        provider_config)
+    tpu_client = config.construct_tpu_client_from_provider_config(
         provider_config)
     # for GCP, 'TERMINATED'
     instances = list_instances(region,
                                cluster_name,
                                project_id=provider_config['project_id'],
                                status_filter=['TERMINATED'],
-                               compute_client=compute)
+                               compute_client=compute_client,
+                               tpu_client=tpu_client)
     instances = instances[:count]
 
     for inst in instances:
-        compute.instances().start(
+        tpu_client.instances().start(
             project=project_id,
             zone=inst['availability_zone'],
             instance=inst['name'],
         ).execute()
 
     # set labels and wait
-    batch_update_instance_labels(compute, instances, project_id, tags)
+    batch_update_instance_labels(tpu_client, instances, project_id, tags)
     return instances
 
 
@@ -145,37 +149,33 @@ def create_or_resume_instances(region: str, cluster_name: str,
 
 def stop_instances(region: str, cluster_name: str,
                    provider_config: Optional[Dict]):
-    project_id = provider_config['project_id']
-    tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
-    compute = config.construct_compute_clients_from_provider_config(
+    compute_client = config.construct_compute_client_from_provider_config(
+        provider_config)
+    tpu_client = config.construct_tpu_client_from_provider_config(
         provider_config)
     instances = list_instances(region,
                                cluster_name,
                                project_id=provider_config['project_id'],
                                status_filter=['RUNNING'],
-                               compute_client=compute)
-    if tpu_vms:
-        for inst in instances:
-            _operation = compute.projects().locations().nodes().stop(
-                name=inst['name']).execute()
-    else:
-        for inst in instances:
-            _operation = compute.instances().stop(
-                project=project_id,
-                zone=inst['availability_zone'],
-                instance=inst['name'],
-            ).execute()
+                               compute_client=compute_client,
+                               tpu_client=tpu_client)
+    for inst in instances:
+        _operation = tpu_client.projects().locations().nodes().stop(
+            name=inst['name']).execute()
 
 
 def terminate_instances(region: str, cluster_name: str,
                         provider_config: Optional[Dict]):
-    compute = config.construct_compute_clients_from_provider_config(
+    compute_client = config.construct_compute_client_from_provider_config(
+        provider_config)
+    tpu_client = config.construct_tpu_client_from_provider_config(
         provider_config)
     instances = list_instances(region,
                                cluster_name,
                                project_id=provider_config['project_id'],
                                status_filter=[],
-                               compute_client=compute)
+                               compute_client=compute_client,
+                               tpu_client=tpu_client)
     for inst in instances:
-        _operation = compute.projects().locations().nodes().delete(
+        _operation = tpu_client.projects().locations().nodes().delete(
             name=inst['name']).execute()

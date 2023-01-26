@@ -167,12 +167,14 @@ def construct_clients_from_provider_config(provider_config):
     return _create_crm(creds), _create_iam(creds), _create_compute(creds), tpu
 
 
-def construct_compute_clients_from_provider_config(provider_config):
+def construct_compute_client_from_provider_config(provider_config):
     creds = _get_gcp_credentials(provider_config)
-    if provider_config.get(HAS_TPU_PROVIDER_FIELD, False):
-        return _create_tpu(creds)
-    else:
-        return _create_compute(creds)
+    return _create_compute(creds)
+
+
+def construct_tpu_client_from_provider_config(provider_config):
+    creds = _get_gcp_credentials(provider_config)
+    return _create_tpu(creds)
 
 
 def bootstrap_gcp(config):
