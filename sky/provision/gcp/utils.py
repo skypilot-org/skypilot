@@ -67,7 +67,7 @@ def get_zones_from_regions(region: str, project_id: str,
     return sorted([zone['name'] for zone in response.get('items', [])])
 
 
-def generate_node_name(labels: dict, node_suffix: str) -> str:
+def generate_node_name(cluster_name: str, node_suffix: str) -> str:
     """Generate node name from labels and suffix.
 
     This is required so that the correct resource can be selected
@@ -76,7 +76,7 @@ def generate_node_name(labels: dict, node_suffix: str) -> str:
     The suffix is expected to be one of 'compute' or 'tpu'
     (as in ``GCPNodeType``).
     """
-    name_label = labels[TAG_RAY_NODE_NAME]
+    name_label = cluster_name
     if len(name_label) > INSTANCE_NAME_MAX_LEN - INSTANCE_NAME_UUID_LEN - 1:
         raise ValueError(
             f'Instance name ({name_label}) too long ({len(name_label)})')

@@ -44,9 +44,9 @@ node_config:
   {%- endif %}
   scheduling:
   {%- if use_spot %}
-    - preemptible: true
+    preemptible: true
   {%- endif %}
-    - onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
+    onHostMaintenance: TERMINATE  # Required for GPU-attached VMs.
 {%- endif %}
 
 # Format: `REMOTE_PATH : LOCAL_PATH`

@@ -14,12 +14,16 @@ def _construct_label_filter_expr(label_filters: dict) -> str:
     exprs = [
         f'(labels.{key} = {value})' for key, value in label_filters.items()
     ]
-    return f'({" AND ".join(exprs)})'
+    if len(exprs) > 1:
+        return f'({" AND ".join(exprs)})'
+    return exprs[0]
 
 
 def _construct_status_filter_expr(status_filter: list) -> str:
     exprs = [f'(status = {status})' for status in status_filter]
-    return f'({" OR ".join(exprs)})'
+    if len(exprs) > 1:
+        return f'({" OR ".join(exprs)})'
+    return exprs[0]
 
 
 def _convert_resources_to_urls(configuration_dict: Dict[str,
@@ -90,7 +94,7 @@ def list_instances(region: str, cluster_name: str, project_id: str,
                    status_filter: List[str], compute_client) -> list:
     filter_expr = f'(labels.{utils.TAG_RAY_CLUSTER_NAME} = {cluster_name})'
     if status_filter:
-        filter_expr += 'AND ' + _construct_status_filter_expr(status_filter)
+        filter_expr += ' AND ' + _construct_status_filter_expr(status_filter)
     zones = utils.get_zones_from_regions(region, project_id, compute_client)
 
     instances = []
@@ -183,7 +187,7 @@ def create_instances(region: str, cluster_name: str,
                                              availability_zone)
     # removing TPU-specific default key set in config.py
     node_config.pop('networkConfig', None)
-    name = utils.generate_node_name(labels, 'compute')
+    name = utils.generate_node_name(cluster_name, 'compute')
 
     labels = dict(node_config.get('labels', {}), **labels)
 

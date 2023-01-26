@@ -63,3 +63,11 @@ def terminate_instances(region: str, cluster_name: str,
     else:
         general_instance.terminate_instances(region, cluster_name,
                                              provider_config)
+
+
+def wait_instances(region: str, cluster_name: str, state: str):
+    raise NotImplementedError
+
+
+def get_instance_ips(region: str, cluster_name: str, public_ips: bool):
+    raise NotImplementedError

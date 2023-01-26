@@ -114,7 +114,7 @@ def create_instances(region: str, cluster_name: str,
     node_config = node_config.copy()
     # removing Compute-specific default key set in config.py
     config.pop('networkInterfaces', None)
-    name = utils.generate_node_name(labels, 'tpu')
+    name = utils.generate_node_name(cluster_name, 'tpu')
 
     labels = dict(node_config.get('labels', {}), **labels)
 
