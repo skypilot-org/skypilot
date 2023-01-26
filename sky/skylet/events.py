@@ -128,6 +128,7 @@ class AutostopEvent(SkyletEvent):
     def _stop_cluster(self, autostop_config):
         if (autostop_config.backend ==
                 cloud_vm_ray_backend.CloudVmRayBackend.NAME):
+            autostop_lib.set_is_autostopping()
             self._replace_yaml_for_stopping(self._ray_yaml_path,
                                             autostop_config.down)
 
