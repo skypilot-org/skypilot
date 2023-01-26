@@ -17,4 +17,4 @@
 >                     if ready:
 >                         ray.get(ready)
 >                     else:
->                         await asyncio.sleep(0)
+>                         await asyncio.sleep(self.JOB_MONITOR_LOOP_PERIOD_S)
