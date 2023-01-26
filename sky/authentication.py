@@ -175,12 +175,13 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(
                 f'{yellow}Certain GCP APIs are disabled for the GCP project '
                 f'{project_id}.{reset}')
-            logger.error(f'{yellow}Enable them by running:{reset} '
-                         f'{bright}sky check{reset}')
             logger.error('Details:')
             logger.error(f'{dim}{match.group(1)}{reset}\n'
                          f'{dim}    {match.group(2)}{reset}\n'
                          f'{dim}{match.group(3)}{reset}')
+            logger.error(
+                f'{yellow}To fix, enable these APIs by running:{reset} '
+                f'{bright}sky check{reset}')
             sys.exit(1)
         else:
             raise
