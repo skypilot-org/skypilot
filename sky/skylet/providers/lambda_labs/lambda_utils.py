@@ -18,30 +18,38 @@ class Metadata:
     def __init__(self, path_prefix: str, cluster_name: str) -> None:
         # TODO(ewzeng): Metadata file is not thread safe. This is fine for
         # now since SkyPilot uses a per-cluster lock for ray-related
-        # operations, but this should be improved in the future.
+        # operations. In the future, add a filelock around __getitem__
+        # and __setitem__.
         self.path = os.path.expanduser(f'{path_prefix}-{cluster_name}')
-        self._metadata = {}
         # In case parent directory does not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        if os.path.exists(self.path):
-            with open(self.path, 'r') as f:
-                self._metadata = json.load(f)
 
     def __getitem__(self, instance_id: str) -> Dict[str, Any]:
-        return self._metadata.get(instance_id)
+        assert os.path.exists(self.path), 'Metadata file not found'
+        with open(self.path, 'r') as f:
+            metadata = json.load(f)
+        return metadata.get(instance_id)
 
     def __setitem__(self, instance_id: str, value: Dict[str, Any]) -> None:
+        # Read from metadata file
+        if os.path.exists(self.path):
+            with open(self.path, 'r') as f:
+                metadata = json.load(f)
+        else:
+            metadata = {}
+        # Update metadata
         if value is None:
-            if instance_id in self._metadata:
-                self._metadata.pop(instance_id) # del entry
-            if (len(self._metadata) == 0 and
-                    os.path.exists(self.path)):
-                os.remove(self.path)
+            if instance_id in metadata:
+                metadata.pop(instance_id) # del entry
+            if len(metadata) == 0:
+                if os.path.exists(self.path):
+                    os.remove(self.path)
                 return
         else:
-            self._metadata[instance_id] = value
+            metadata[instance_id] = value
+        # Write to metadata file
         with open(self.path, 'w') as f:
-            json.dump(self._metadata, f)
+            json.dump(metadata, f)
 
 
 def raise_lambda_error(response: requests.Response) -> None:

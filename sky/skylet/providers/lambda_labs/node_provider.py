@@ -71,7 +71,7 @@ class LambdaNodeProvider(NodeProvider):
                 head_node_config.update(head_config["node_config"])
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
-            vms = self.lambda_client.list_instances()
+            vms = self._list_instances_in_cluster()
             for node in vms:
                 self.metadata[node['id']] = {'tags':
                     {
@@ -82,6 +82,14 @@ class LambdaNodeProvider(NodeProvider):
                         TAG_RAY_NODE_NAME: f'ray-{cluster_name}-head',
                         TAG_RAY_LAUNCH_CONFIG: launch_hash,
                     }}
+
+    def _list_instances_in_cluster(self) -> Dict[str, Any]:
+        """List running instances in cluster."""
+        vms = self.lambda_client.list_instances()
+        return [
+            node for node in vms
+            if node['name'] == self.cluster_name
+        ]
 
     @synchronized
     def _get_filtered_nodes(self,
@@ -95,11 +103,7 @@ class LambdaNodeProvider(NodeProvider):
                     return False
             return True
 
-        vms = self.lambda_client.list_instances()
-        vms = [
-            node for node in vms
-            if node['name'] == self.cluster_name
-        ]
+        vms = self._list_instances_in_cluster()
         nodes = [self._extract_metadata(vm) for vm in filter(match_tags, vms)]
         self.cached_nodes = {node['id']: node for node in nodes}
         return self.cached_nodes

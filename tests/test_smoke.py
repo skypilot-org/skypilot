@@ -35,7 +35,7 @@ _smoke_test_hash = hashlib.md5(
 # id.
 test_id = str(uuid.uuid4())[-2:]
 
-LAMBDA_TYPE = '--cloud lambda --gpus A100 --instance-type gpu_1x_a100_sxm4'
+LAMBDA_TYPE = '--cloud lambda --gpus A100'
 
 storage_setup_commands = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
@@ -596,6 +596,7 @@ def test_file_mounts(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO(ewzeng): merge this with 'test_file_mounts' when multi-node is supported.
 @pytest.mark.lambda_labs
 def test_lambda_file_mounts():
     name = _get_cluster_name()
@@ -691,6 +692,7 @@ def test_cli_logs(generic_cloud: str):
     run_one_test(test)
 
 
+# TODO(ewzeng): merge this with 'test_cli_logs' when multi-node is supported.
 @pytest.mark.lambda_labs
 def test_lambda_logs():
     name = _get_cluster_name()

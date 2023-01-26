@@ -59,9 +59,9 @@ def pytest_addoption(parser):
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
     for cloud in all_clouds_in_smoke_tests:
-        cloud = cloud_to_pytest_keyword[cloud]
-        config.addinivalue_line('markers',
-                                f'{cloud}: mark test as {cloud} specific')
+        cloud_keyword = cloud_to_pytest_keyword[cloud]
+        config.addinivalue_line(
+            'markers', f'{cloud_keyword}: mark test as {cloud} specific')
 
 
 def _get_cloud_to_run(config) -> List[str]:
@@ -89,8 +89,9 @@ def pytest_collection_modifyitems(config, items):
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_marks['slow'])
         for cloud in all_clouds_in_smoke_tests:
-            if (cloud_to_pytest_keyword[cloud] in item.keywords and
-                    cloud not in cloud_to_run):
+            cloud_keyword = cloud_to_pytest_keyword[cloud]
+            if (f'no_{cloud_keyword}' in items.keywords or
+                (cloud_keyword in item.keywords and cloud not in cloud_to_run)):
                 item.add_marker(skip_marks[cloud])
 
         if (not 'managed_spot'
@@ -98,16 +99,13 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_marks['managed_spot'])
 
     # We run Lambda Labs tests serially because Lambda Labs rate limits its
-    # launch API to one launch every 10 seconds. We also skip generic tests
-    # marked with @pytest.mark.no_lambda_labs
+    # launch API to one launch every 10 seconds.
     serial_mark = pytest.mark.xdist_group(name='serial_lambda_labs')
     # Handle generic tests
     if _generic_cloud(config) == 'lambda':
         for item in items:
-            if not _is_generic_test(item):
+            if not _is_generic_test(item) or 'no_lambda_labs' in item.keywords:
                 continue
-            elif 'no_lambda_labs' in item.keywords:
-                item.add_marker(skip_marks['lambda'])
             else:
                 item.add_marker(serial_mark)
                 # Adding the serial mark does not update the item.nodeid,
