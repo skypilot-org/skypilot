@@ -1,7 +1,7 @@
 """Lambda Labs."""
 import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -15,6 +15,10 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
+
+# Currently, none of clouds.CloudImplementationFeatures are implemented
+# for Lambda Labs
+_LAMBDA_IMPLEMENTATION_FEATURES: Set[clouds.CloudImplementationFeatures] = set()
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -235,6 +239,7 @@ class Lambda(clouds.Cloud):
             accelerator, acc_count, region, zone, 'lambda')
 
     @classmethod
-    def support(cls, requested_features: List[str]) -> bool:
-        # Lambda Labs does not support autostop
-        return not 'autostop' in requested_features
+    def supports(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]
+    ) -> bool:
+        return requested_features.issubset(_LAMBDA_IMPLEMENTATION_FEATURES)

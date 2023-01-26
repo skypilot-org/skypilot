@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -541,8 +541,9 @@ class AWS(clouds.Cloud):
             accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
-    def support(cls, requested_features: List[str]) -> bool:
-        # Currently, only 'autostop' can be in requested_features.
-        # AWS supports autostop.
-        del requested_features  # unused
+    def supports(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]
+    ) -> bool:
+        # All clouds.CloudImplementationFeatures implemented
+        del requested_features
         return True

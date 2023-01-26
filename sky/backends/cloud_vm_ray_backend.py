@@ -574,7 +574,8 @@ class RetryingVmProvisioner(object):
         HEAD_FAILED = 2
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
-                 optimize_target: OptimizeTarget, requested_features: List[str],
+                 optimize_target: OptimizeTarget,
+                 requested_features: Set[clouds.CloudImplementationFeatures],
                  local_wheel_path: pathlib.Path, wheel_hash: str):
         self._blocked_resources = set()
 
@@ -1679,7 +1680,7 @@ class RetryingVmProvisioner(object):
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
-                if not to_provision.cloud.support(self._requested_features):
+                if not to_provision.cloud.supports(self._requested_features):
                     self._blocked_resources.add(
                         resources_lib.Resources(cloud=to_provision.cloud))
                     raise exceptions.ResourcesUnavailableError(
@@ -2001,7 +2002,7 @@ class CloudVmRayBackend(backends.Backend):
 
         self._dag = None
         self._optimize_target = None
-        self._requested_features = []
+        self._requested_features = set()
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of

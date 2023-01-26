@@ -1,13 +1,24 @@
 """Interfaces: clouds, regions, and zones."""
+import enum
 import collections
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Type
+from typing import Dict, Iterator, List, Optional, Set, Tuple, Type
 
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
+
+
+class CloudImplementationFeatures(enum.Enum):
+    """Features that might not be implemented for all clouds.
+
+    Used by Cloud.supports()
+    """
+    STOP = 'stop'
+    AUTOSTOP = 'autostop'
+    MULTI_NODE = 'multi-node'
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -298,13 +309,12 @@ class Cloud:
         return False
 
     @classmethod
-    def support(cls, requested_features: List[str]) -> bool:
-        """Returns whether requested features are supported.
+    def supports(cls,
+                 requested_features: Set[CloudImplementationFeatures]) -> bool:
+        """Returns whether all of the requested features are supported.
 
         For instance, Lambda Labs does not support autostop, so
-        Lambda.support(['autostop']) returns False.
-
-        Possible requested features: autostop
+        Lambda.support({CloudImplementationFeatures.AUTOSTOP}) returns False.
         """
         raise NotImplementedError
 

@@ -916,12 +916,6 @@ def _fill_in_launchable_resources(
                 clouds.GCP.check_accelerator_attachable_to_host(
                     resources.instance_type, resources.accelerators,
                     resources.zone)
-            if (isinstance(resources.cloud, clouds.Lambda) and
-                    task.num_nodes > 1):
-                # Lambda Labs does not support num nodes > 1.
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        'Lambda Labs does not support --num-nodes > 1.')
             # If the user has specified a GCP zone and the zone does not support
             # the host-accelerator combination, then an error will be raised by
             # the above check_accelerator_attachable_to_host() call.
@@ -944,11 +938,6 @@ def _fill_in_launchable_resources(
             if len(clouds_list) >= 2:
                 clouds_list = [
                     c for c in clouds_list if not isinstance(c, clouds.Local)
-                ]
-            # Lambda Labs does not support num nodes > 1.
-            if task.num_nodes > 1:
-                clouds_list = [
-                    c for c in clouds_list if not isinstance(c, clouds.Lambda)
                 ]
             all_fuzzy_candidates = set()
             for cloud in clouds_list:

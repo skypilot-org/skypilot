@@ -1,7 +1,7 @@
 """Local/On-premise."""
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 
@@ -173,6 +173,8 @@ class Local(clouds.Cloud):
         return region, zone
 
     @classmethod
-    def support(cls, requested_features: List[str]) -> bool:
-        del requested_features  # unused
+    def supports(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]
+    ) -> bool:
+        del requested_features
         return True

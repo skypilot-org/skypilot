@@ -23,6 +23,7 @@ import colorama
 
 import sky
 from sky import backends
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import optimizer
@@ -180,7 +181,10 @@ def _execute(
     stages = stages if stages is not None else list(Stage)
 
     # Requested features that some clouds support and others don't.
-    requested_features = []
+    requested_features = set()
+
+    if task.num_nodes and task.num_nodes > 1:
+        requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -204,7 +208,8 @@ def _execute(
             stages.remove(Stage.DOWN)
 
             if not down:
-                requested_features.append('autostop')
+                requested_features.add(
+                    clouds.CloudImplementationFeatures.AUTOSTOP)
 
     elif idle_minutes_to_autostop is not None:
         # TODO(zhwu): Autostop is not supported for non-CloudVmRayBackend.
