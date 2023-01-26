@@ -765,7 +765,7 @@ def storage_delete(name: str) -> None:
 def storage_create(name: Optional[str] = None,
                    source: Optional[str] = None,
                    stores: Tuple[str] = None):
-    """"Create a storage.
+    """"Create a storage object.
 
     """
     storage = data.Storage(name, source)
