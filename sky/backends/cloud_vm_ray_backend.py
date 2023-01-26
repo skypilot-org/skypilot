@@ -2940,12 +2940,12 @@ class CloudVmRayBackend(backends.Backend):
         # (i.e., prev_status is None), as the cleanup has already been done
         # if the cluster is removed from the status table.
         if post_teardown_cleanup:
-            return self.post_teardown_cleanup(handle, terminate, purge)
+            self.post_teardown_cleanup(handle, terminate, purge)
 
     def post_teardown_cleanup(self,
                               handle: ResourceHandle,
                               terminate: bool,
-                              purge: bool = False) -> bool:
+                              purge: bool = False) -> None:
         """Cleanup local configs/caches and delete TPUs after teardown.
 
         This method will handle the following cleanup steps:
@@ -2953,6 +2953,9 @@ class CloudVmRayBackend(backends.Backend):
         * Removing ssh configs for the cluster;
         * Updating the local state of the cluster;
         * Removing the terminated cluster's scripts and ray yaml files.
+
+        Raises:
+            RuntimeError: If it fails to delete the TPU.
         """
         log_path = os.path.join(os.path.expanduser(self.log_dir),
                                 'teardown.log')
@@ -2976,13 +2979,12 @@ class CloudVmRayBackend(backends.Backend):
                         _TEARDOWN_PURGE_WARNING.format(
                             reason='stopping/terminating TPU'))
                 else:
-                    logger.error(
+                    raise RuntimeError(
                         _TEARDOWN_FAILURE_MESSAGE.format(
                             extra_reason='It is caused by TPU failure.',
                             cluster_name=handle.cluster_name,
                             stdout=tpu_stdout,
                             stderr=tpu_stderr))
-                    return False
 
         # The cluster file must exist because the cluster_yaml will only
         # be removed after the cluster entry in the database is removed.
@@ -3005,7 +3007,6 @@ class CloudVmRayBackend(backends.Backend):
             # No try-except is needed since Ray will fail to teardown the
             # cluster if the cluster_yaml is missing.
             common_utils.remove_file_if_exists(handle.cluster_yaml)
-        return True
 
     def set_autostop(self,
                      handle: ResourceHandle,
