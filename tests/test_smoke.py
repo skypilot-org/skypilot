@@ -48,7 +48,8 @@ storage_setup_commands = [
 # the spot queue command will return staled table.
 _SPOT_QUEUE_WAIT = ('s=$(sky spot queue); '
                     'until [ `echo "$s" '
-                    '| grep "Please wait for the controller to be ready" '
+                    '| grep "Please wait for the controller to be ready\|'
+                    'Using the cached status" '
                     '| wc -l` -eq 0 ]; '
                     'do echo "Waiting for spot queue to be ready..."; '
                     'sleep 5; s=$(sky spot queue); done; echo "$s"; '
