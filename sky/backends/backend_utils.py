@@ -1960,21 +1960,23 @@ def _update_cluster_status_no_lock(
         # autostop field in the local cache will be reset, even though the
         # cluster will still be correctly stopped.
         backend = get_backend_from_handle(handle)
-        if isinstance(backend, backends.CloudVmRayBackend) and record['autostop'] >= 0:
+        if isinstance(backend,
+                      backends.CloudVmRayBackend) and record['autostop'] >= 0:
             if not backend.is_autostopping(handle, stream_logs=False):
                 try:
                     backend.set_autostop(handle, -1, stream_logs=False)
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                     logger.debug(f'Failed to reset autostop. Due to '
-                                f'{common_utils.format_exception(e)}')
-                global_user_state.set_cluster_autostop_value(handle.cluster_name,
-                                                            -1,
-                                                            to_down=False)
+                                 f'{common_utils.format_exception(e)}')
+                global_user_state.set_cluster_autostop_value(
+                    handle.cluster_name, -1, to_down=False)
             else:
                 ux_utils.console_newline()
-                operation_str = 'autodowning' if record['down'] else 'autostopping'
-                logger.info(f'Cluster {cluster_name!r} is {operation_str}, it will remain '
-                            'in INIT state until the autostop is finished.')
+                operation_str = 'autodowning' if record[
+                    'down'] else 'autostopping'
+                logger.info(
+                    f'Cluster {cluster_name!r} is {operation_str}, it will remain '
+                    'in INIT state until the autostop is finished.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also

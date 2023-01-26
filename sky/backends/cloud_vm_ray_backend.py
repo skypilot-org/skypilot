@@ -3063,7 +3063,9 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
-    def is_autostopping(self, handle: ResourceHandle, stream_logs: bool = True) -> bool:
+    def is_autostopping(self,
+                        handle: ResourceHandle,
+                        stream_logs: bool = True) -> bool:
         code = autostop_lib.AutostopCodeGen.is_autostopping()
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       code,

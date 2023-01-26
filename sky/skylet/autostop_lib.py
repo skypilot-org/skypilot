@@ -58,6 +58,7 @@ def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
         # Either autostop never set, or has been canceled. Reset timer.
         set_last_active_time_to_now()
 
+
 def set_is_autostopping() -> None:
     """Sets the is_autostopping flag to True."""
     logger.debug('Setting is_autostopping.')
