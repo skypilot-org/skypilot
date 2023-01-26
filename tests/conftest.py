@@ -2,32 +2,97 @@ import os
 import pytest
 import tempfile
 import textwrap
+from typing import List
 
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
 # https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 
+# By default, only run generic tests and cloud-specific tests for GCP and Azure,
+# due to the cloud credit limit for the development account.
+# To only run tests for a specific cloud (as well as generic tests), use
+# --aws, --gcp, or --azure.
+# To only run tests for managed spot (without generic tests), use --managed-spot.
+# A "generic test" tests a generic functionality (e.g., autostop) that
+# should work on any cloud we support. The cloud used for such a test
+# is controlled by `--generic-cloud` (typically you do not need to set it).
+all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure']
+default_clouds_to_run = ['gcp', 'azure']
+
 
 def pytest_addoption(parser):
+    # tests marked as `slow` will be skipped by default, use --runslow to run
     parser.addoption('--runslow',
                      action='store_true',
                      default=False,
-                     help='run slow tests')
+                     help='run slow tests.')
+    for cloud in all_clouds_in_smoke_tests:
+        parser.addoption(f'--{cloud}',
+                         action='store_true',
+                         default=False,
+                         help=f'Only run {cloud.upper()} tests.')
+    parser.addoption('--managed-spot',
+                     action='store_true',
+                     default=False,
+                     help='Only run tests for managed spot.')
+    parser.addoption(
+        '--generic-cloud',
+        type=str,
+        default='gcp',
+        choices=all_clouds_in_smoke_tests,
+        help='Cloud to use for generic tests. If the generic cloud is '
+        'not within the clouds to be run, it will be reset to the first '
+        'cloud in the list of the clouds to be run.')
 
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
+    for cloud in all_clouds_in_smoke_tests:
+        config.addinivalue_line('markers',
+                                f'{cloud}: mark test as {cloud} specific')
+
+
+def _get_cloud_to_run(config) -> List[str]:
+    cloud_to_run = []
+    for cloud in all_clouds_in_smoke_tests:
+        if config.getoption(f'--{cloud}'):
+            cloud_to_run.append(cloud)
+    if not cloud_to_run:
+        cloud_to_run = default_clouds_to_run
+    return cloud_to_run
 
 
 def pytest_collection_modifyitems(config, items):
-    if config.getoption('--runslow'):
-        # --runslow given in cli: do not skip slow tests
-        return
-    skip_slow = pytest.mark.skip(reason='need --runslow option to run')
+    skip_marks = {}
+    skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
+    skip_marks['managed_spot'] = pytest.mark.skip(
+        reason='skipped, because --managed-spot option is set')
+    for cloud in all_clouds_in_smoke_tests:
+        skip_marks[cloud] = pytest.mark.skip(
+            reason=f'tests for {cloud} is skipped, try setting --{cloud}')
+
+    cloud_to_run = _get_cloud_to_run(config)
+
     for item in items:
-        if 'slow' in item.keywords:
-            item.add_marker(skip_slow)
+        if 'slow' in item.keywords and not config.getoption('--runslow'):
+            item.add_marker(skip_marks['slow'])
+        for cloud in all_clouds_in_smoke_tests:
+            if cloud in item.keywords and cloud not in cloud_to_run:
+                item.add_marker(skip_marks[cloud])
+
+        if (not 'managed_spot'
+                in item.keywords) and config.getoption('--managed-spot'):
+            item.add_marker(skip_marks['managed_spot'])
+
+
+@pytest.fixture
+def generic_cloud(request) -> str:
+    c = request.config.getoption('--generic-cloud')
+    cloud_to_run = _get_cloud_to_run(request.config)
+    if c not in cloud_to_run:
+        c = cloud_to_run[0]
+    return c
 
 
 def pytest_sessionstart(session):

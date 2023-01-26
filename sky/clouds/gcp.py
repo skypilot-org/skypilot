@@ -280,8 +280,9 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(cls) -> str:
-        # 8 vCpus, 52 GB RAM.  First-gen general purpose.
-        return 'n1-highmem-8'
+        # General-purpose instance with 8 vCPUs and 32 GB RAM.
+        # Intel Ice Lake 8373C or Cascade Lake 6268CL
+        return 'n2-standard-8'
 
     @classmethod
     def _get_default_region(cls) -> clouds.Region:
@@ -308,8 +309,7 @@ class GCP(clouds.Cloud):
         # --no-standard-images
         # We use the debian image, as the ubuntu image has some connectivity
         # issue when first booted.
-        image_id = service_catalog.get_image_id_from_tag(
-            'skypilot:cpu-debian-10', clouds='gcp')
+        image_id = 'skypilot:cpu-debian-10'
 
         r = resources
         # Find GPU spec, if any.
@@ -353,15 +353,13 @@ class GCP(clouds.Cloud):
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
                     # CUDA driver version 470.57.02, CUDA Library 11.4
-                    image_id = service_catalog.get_image_id_from_tag(
-                        'skypilot:k80-debian-10', clouds='gcp')
+                    image_id = 'skypilot:k80-debian-10'
                 else:
                     # Though the image is called cu113, it actually has later
                     # versions of CUDA as noted below.
                     # CUDA driver version 510.47.03, CUDA Library 11.6
                     # Does not support torch==1.13.0 with cu117
-                    image_id = service_catalog.get_image_id_from_tag(
-                        'skypilot:gpu-debian-10', clouds='gcp')
+                    image_id = 'skypilot:gpu-debian-10'
 
         if resources.image_id is not None:
             if None in resources.image_id:
@@ -369,6 +367,9 @@ class GCP(clouds.Cloud):
             else:
                 assert region_name in resources.image_id, resources.image_id
                 image_id = resources.image_id[region_name]
+        if image_id.startswith('skypilot:'):
+            image_id = service_catalog.get_image_id_from_tag(image_id,
+                                                             clouds='gcp')
 
         assert image_id is not None, (image_id, r)
         resources_vars['image_id'] = image_id

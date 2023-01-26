@@ -7,7 +7,7 @@ from typing import List, Optional
 import sky
 
 
-def run(cluster: Optional[str] = None):
+def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
@@ -75,14 +75,19 @@ def run(cluster: Optional[str] = None):
         train.set_inputs('gs://cloud-tpu-test-datasets/fake_imagenet',
                          estimated_size_gigabytes=70)
         train.set_outputs('resnet-model-dir', estimated_size_gigabytes=0.1)
-        train.set_resources(sky.Resources(sky.AWS(), accelerators='V100'))
+        train.set_resources(
+            sky.Resources(sky.clouds.CLOUD_REGISTRY.from_str(cloud),
+                          accelerators='V100'))
 
     sky.launch(dag, cluster_name=cluster, retry_until_up=True)
 
 
 if __name__ == '__main__':
     cluster = None
+    cloud = None
     if len(sys.argv) > 1:
         # For smoke test passing in a cluster name.
         cluster = sys.argv[1]
-    run(cluster)
+    if len(sys.argv) > 2:
+        cloud = sys.argv[2]
+    run(cluster, cloud)

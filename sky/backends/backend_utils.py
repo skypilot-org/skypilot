@@ -371,6 +371,12 @@ class SSHConfigHelper(object):
             proxy = f'ProxyCommand {proxy_command}'
         else:
             proxy = ''
+        # StrictHostKeyChecking=no skips the host key check for the first
+        # time. UserKnownHostsFile=/dev/null and GlobalKnownHostsFile/dev/null
+        # prevent the host key from being added to the known_hosts file and
+        # always return an empty file for known hosts, making the ssh think
+        # this is a first-time connection, and thus skipping the host key
+        # check.
         codegen = textwrap.dedent(f"""\
             {autogen_comment}
             Host {host_name}
@@ -380,6 +386,8 @@ class SSHConfigHelper(object):
               IdentitiesOnly yes
               ForwardAgent yes
               StrictHostKeyChecking no
+              UserKnownHostsFile=/dev/null
+              GlobalKnownHostsFile=/dev/null
               Port 22
               {proxy}
             """.rstrip())
@@ -903,6 +911,11 @@ def write_cluster_config(
             tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
+        vpc_name = gcp_config.get_usable_vpc(config)
+
         scripts = tuple(
             fill_template(
                 template_name,
@@ -910,6 +923,7 @@ def write_cluster_config(
                     resources_vars, **{
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
+                        'vpc_name': vpc_name,
                     }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
@@ -1325,17 +1339,17 @@ def get_node_ips(cluster_yaml: str,
                     break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
-            # This could be triggered if e.g., some logging is added in
-            # skypilot_config, a module that has some code executed whenever
-            # `sky` is imported.
-            logger.warning(
-                f'Expected {n} worker IP(s); found '
-                f'{len(worker_ips)}: {worker_ips}'
-                '\nThis could happen if there is extra output from '
-                '`ray get-worker-ips`, which should be inspected below.'
-                f'\n== Output ==\n{out}'
-                f'\n== Output ends ==')
             if len(worker_ips) > n:
+                # This could be triggered if e.g., some logging is added in
+                # skypilot_config, a module that has some code executed whenever
+                # `sky` is imported.
+                logger.warning(
+                    f'Expected {n} worker IP(s); found '
+                    f'{len(worker_ips)}: {worker_ips}'
+                    '\nThis could happen if there is extra output from '
+                    '`ray get-worker-ips`, which should be inspected below.'
+                    f'\n== Output ==\n{out}'
+                    f'\n== Output ends ==')
                 logger.warning(f'\nProceeding with the last {n} '
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]
@@ -1355,8 +1369,8 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
     cluster_name = ray_config['cluster_name']
     zone = ray_config['provider']['availability_zone']
     query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
-                 f'\\(labels.ray-cluster-name={cluster_name}\\) '
-                 f'--zone={zone} --format=value\\(name\\)')
+                 f'"(labels.ray-cluster-name={cluster_name})" '
+                 f'--zone={zone} --format="value(name)"')
     returncode, stdout, stderr = log_lib.run_with_log(query_cmd,
                                                       '/dev/null',
                                                       shell=True,
@@ -1678,6 +1692,9 @@ def _query_status_gcp(
     cluster: str,
     ray_config: Dict[str, Any],
 ) -> List[global_user_state.ClusterStatus]:
+    # Note: we use ":" for filtering labels for gcloud, as the latest gcloud (v393.0)
+    # fails to filter labels with "=".
+    # Reference: https://cloud.google.com/sdk/gcloud/reference/topic/filters
     launch_hashes = _ray_launch_hash(cluster, ray_config)
     assert launch_hashes is not None
     hash_filter_str = ' '.join(launch_hashes)
@@ -1879,6 +1896,7 @@ def _update_cluster_status_no_lock(
         record['status'] = global_user_state.ClusterStatus.UP
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
+                                                requested_resources=None,
                                                 ready=True,
                                                 is_launch=False)
         return record
@@ -1958,6 +1976,7 @@ def _update_cluster_status_no_lock(
         # Adding a new status UNHEALTHY for abnormal status can be a choice.
         global_user_state.add_or_update_cluster(cluster_name,
                                                 handle,
+                                                requested_resources=None,
                                                 ready=False,
                                                 is_launch=False)
         return global_user_state.get_cluster_from_name(cluster_name)
@@ -2403,10 +2422,14 @@ def check_cluster_name_is_valid(cluster_name: str,
 def check_cluster_name_not_reserved(
         cluster_name: Optional[str],
         operation_str: Optional[str] = None) -> None:
-    """Errors out if cluster name is reserved by sky.
+    """Errors out if the cluster is a reserved cluster (spot controller).
 
-    If the cluster name is reserved, return the error message. Otherwise,
-    return None.
+    Raises:
+      sky.exceptions.NotSupportedError: if the cluster name is reserved, raise
+        with an error message explaining 'operation_str' is not allowed.
+
+    Returns:
+      None, if the cluster name is not reserved.
     """
     if cluster_name in SKY_RESERVED_CLUSTER_NAMES:
         msg = (f'Cluster {cluster_name!r} is reserved for the '
@@ -2414,7 +2437,7 @@ def check_cluster_name_not_reserved(
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(msg)
+            raise exceptions.NotSupportedError(msg)
 
 
 # Handle ctrl-c
