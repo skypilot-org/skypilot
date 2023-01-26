@@ -338,9 +338,9 @@ def test_aws_image_id_dict_region():
         'aws_image_id_dict_region',
         [
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --region us-east-1 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --region us-west-1 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
             f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
@@ -348,11 +348,11 @@ def test_aws_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-west-1',  # Ensure the region is correct.
+            f'sky status --all | grep {name} | grep us-west-2',  # Ensure the region is correct.
             # Ensure exec works.
-            f'sky exec {name} --region us-west-1 examples/per_region_images.yaml',
+            f'sky exec {name} --region us-west-2 examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --cloud aws --region us-west-1 "ls ~"',
+            f'sky exec {name} --cloud aws --region us-west-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -404,9 +404,9 @@ def test_aws_image_id_dict_zone():
         'aws_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --zone us-east-2b examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --zone us-east-1b examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --zone us-west-1a examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --zone us-west-2a examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
             f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
@@ -415,11 +415,11 @@ def test_aws_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-west-1a',  # Ensure the zone is correct.
+            f'sky status --all | grep {name} | grep us-west-2a',  # Ensure the zone is correct.
             # Ensure exec works.
-            f'sky exec {name} --zone us-west-1a examples/per_region_images.yaml',
+            f'sky exec {name} --zone us-west-2a examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
-            f'sky exec {name} --cloud aws --region us-west-1 "ls ~"',
+            f'sky exec {name} --cloud aws --region us-west-2 "ls ~"',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
@@ -472,7 +472,7 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} --region us-west-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
@@ -607,7 +607,7 @@ def test_aws_storage_mounts():
         file_path = f.name
         test_commands = [
             *storage_setup_commands,
-            f'sky launch -y -c {name}-aws --cloud aws {file_path}',
+            f'sky launch -y -c {name} --cloud aws {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             f'aws s3 ls {storage_name}/hello.txt',
         ]
@@ -1135,7 +1135,7 @@ def test_spot_failed_setup(generic_cloud: str):
             f'sky spot launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup.yaml',
             'sleep 200',
             # Make sure the job failed quickly.
-            f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED"',
+            f'{_SPOT_QUEUE_WAIT} | grep {name} | head -n1 | grep "FAILED_SETUP"',
         ],
         f'sky spot cancel -y -n {name}',
         # Increase timeout since sky spot queue -r can be blocked by other spot tests.
@@ -1247,7 +1247,7 @@ def test_spot_recovery_multi_node_aws():
              '--output text)'),
             'sleep 50',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
-            'sleep 420',
+            'sleep 500',
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],

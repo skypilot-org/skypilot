@@ -911,6 +911,11 @@ def write_cluster_config(
             tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
+        vpc_name = gcp_config.get_usable_vpc(config)
+
         scripts = tuple(
             fill_template(
                 template_name,
@@ -918,6 +923,7 @@ def write_cluster_config(
                     resources_vars, **{
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
+                        'vpc_name': vpc_name,
                     }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent

@@ -127,7 +127,7 @@ class SpotStatus(enum.Enum):
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
         return [
-            cls.SUCCEEDED, cls.FAILED, cls.FAILED_NO_RESOURCE,
+            cls.SUCCEEDED, cls.FAILED, cls.FAILED_SETUP, cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER, cls.CANCELLED
         ]
 
@@ -264,8 +264,9 @@ def set_failed(job_id: int,
         WHERE job_id=(?) AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
-    if failure_type == SpotStatus.FAILED:
-        logger.info('Job failed due to user code.')
+    if failure_type in [SpotStatus.FAILED, SpotStatus.FAILED_SETUP]:
+        logger.info(
+            f'Job failed due to user code (status: {failure_type.value}).')
     elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
         logger.info('Job failed due to failing to find available resources '
                     'after retries.')
