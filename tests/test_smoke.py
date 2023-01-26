@@ -523,7 +523,7 @@ def test_aws_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulereEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',
@@ -552,7 +552,7 @@ def test_gcp_stale_job_manual_restart():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 3 --status',
             # Ensure the skylet updated the stale job status.
-            f'sleep {events.JobUpdateEvent.EVENT_INTERVAL_SECONDS}',
+            f'sleep {events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep FAILED',
         ],
         f'sky down -y {name}',

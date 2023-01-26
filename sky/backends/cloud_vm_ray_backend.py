@@ -358,6 +358,7 @@ class RayCodeGen:
                       file=sys.stderr,
                       flush=True)
                 job_lib.set_job_started({self.job_id!r})
+                job_lib.scheduler.schedule_step()
                 """)
         ]
 

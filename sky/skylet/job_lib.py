@@ -134,6 +134,14 @@ class JobStatus(enum.Enum):
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
+# Only update status of the jobs after this many seconds of job submission,
+# to avoid race condition with `ray job` to make sure it job has been
+# correctly updated.
+# TODO(zhwu): This number should be tuned based on heuristics.
+_SUBMITTED_GAP_SECONDS = 60
+
+_PRE_RESOURCE_STATUSES = [JobStatus.PENDING, JobStatus.SETTING_UP]
+
 class JobScheduler:
     """Base class for job scheduler"""
 
@@ -163,11 +171,11 @@ class JobScheduler:
         job_owner = getpass.getuser()
         jobs = list(self._get_jobs())
         if len(jobs) > 0:
-            update_status(job_owner)
+            update_status(job_owner, _SUBMITTED_GAP_SECONDS)
         for job_id, run_cmd, submit, _ in jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = get_status_no_lock(job_id)
-                if status != JobStatus.PENDING:
+                if not status in _PRE_RESOURCE_STATUSES :
                     # Job doesn't exist or is running/cancelled
                     self.remove_job_no_lock(job_id)
                     continue
