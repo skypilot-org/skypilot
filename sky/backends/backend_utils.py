@@ -1339,17 +1339,17 @@ def get_node_ips(cluster_yaml: str,
                     break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
-            # This could be triggered if e.g., some logging is added in
-            # skypilot_config, a module that has some code executed whenever
-            # `sky` is imported.
-            logger.warning(
-                f'Expected {n} worker IP(s); found '
-                f'{len(worker_ips)}: {worker_ips}'
-                '\nThis could happen if there is extra output from '
-                '`ray get-worker-ips`, which should be inspected below.'
-                f'\n== Output ==\n{out}'
-                f'\n== Output ends ==')
             if len(worker_ips) > n:
+                # This could be triggered if e.g., some logging is added in
+                # skypilot_config, a module that has some code executed whenever
+                # `sky` is imported.
+                logger.warning(
+                    f'Expected {n} worker IP(s); found '
+                    f'{len(worker_ips)}: {worker_ips}'
+                    '\nThis could happen if there is extra output from '
+                    '`ray get-worker-ips`, which should be inspected below.'
+                    f'\n== Output ==\n{out}'
+                    f'\n== Output ends ==')
                 logger.warning(f'\nProceeding with the last {n} '
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]
