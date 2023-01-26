@@ -1,119 +1,67 @@
-from typing import List, Optional, Dict
+from typing import Optional, Dict, Any
+
+import copy
 import logging
 
-from googleapiclient import errors
-
-from sky.provision.gcp import config
+from sky.provision.gcp import config, general_instance, tpu_instance
 
 logger = logging.getLogger(__name__)
-# Tag uniquely identifying all nodes of a cluster
-TAG_RAY_CLUSTER_NAME = "ray-cluster-name"
 
 # Data transfer within the same region but different availability zone costs $0.01/GB:
 # https://cloud.google.com/vpc/network-pricing
+# Lifecycle: https://cloud.google.com/compute/docs/instances/instance-life-cycle
 
 
-def _get_zones_from_regions(region: str, project_id: str,
-                            compute_client) -> List[str]:
-    response = compute_client.zones().list(
-        project=project_id, filter=f'name eq "^{region}-.*"').execute()
-    return [zone['name'] for zone in response.get('items', [])]
+def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
+                     count: int, provider_config: Dict) -> Dict[str, Any]:
+    tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
+    if tpu_vms:
+        return tpu_instance.resume_instances(region, cluster_name, tags, count,
+                                             provider_config)
+    else:
+        return general_instance.resume_instances(region, cluster_name, tags,
+                                                 count, provider_config)
 
 
-def _construct_label_filter_expr(label_filters: dict) -> str:
-    exprs = [
-        f'(labels.{key} = {value})' for key, value in label_filters.items()
-    ]
-    return f'({" AND ".join(exprs)})'
+def create_or_resume_instances(region: str, cluster_name: str,
+                               node_config: Dict[str, Any],
+                               tags: Dict[str, str], count: int,
+                               resume_stopped_nodes: bool) -> Dict[str, Any]:
+    """Creates instances.
 
+    Returns dict mapping instance id to ec2.Instance object for the created
+    instances.
+    """
+    # sort tags by key to support deterministic unit test stubbing
+    tags = dict(sorted(copy.deepcopy(tags).items()))
 
-def _construct_status_filter_expr(status_filter: list) -> str:
-    exprs = [f'(status = {status})' for status in status_filter]
-    return f'({" OR ".join(exprs)})'
+    all_created_nodes = {}
+    # Try to reuse previously stopped nodes with compatible configs
+    if resume_stopped_nodes:
+        all_created_nodes = resume_instances(region, cluster_name, tags, count)
 
-
-def _list_instances(region: str, cluster_name: str, project_id: str,
-                    tpu_vms: bool, compute_client) -> list:
-    filter_expr = f'(labels.{TAG_RAY_CLUSTER_NAME} = {cluster_name})'
-    zones = _get_zones_from_regions(region, project_id, compute_client)
-
-    instances = []
-
-    # NOTE: we add 'availability_zone' as an attribute of the nodes, as
-    # we need the attribute to
-    for availability_zone in zones:
-        if not tpu_vms:
-            response = (compute_client.instances().list(
-                project=project_id,
-                zone=availability_zone,
-                filter=filter_expr,
-            ).execute())
-            for inst in response.get('items', []):
-                inst['availability_zone'] = availability_zone
-                instances.append(inst)
-        else:
-            path = f'projects/{project_id}/locations/{availability_zone}'
-            try:
-                response = compute_client.projects().locations().nodes().list(
-                    parent=path).execute()
-            except errors.HttpError as e:
-                # SKY: Catch HttpError when accessing unauthorized region.
-                # Return empty list instead of raising exception to not break
-                # ray down.
-                logger.warning(f'googleapiclient.errors.HttpError: {e.reason}')
-                continue
-            for node in response.get('nodes', []):
-                labels = node.get('labels')
-                if labels.get(TAG_RAY_CLUSTER_NAME, None) == cluster_name:
-                    node['availability_zone'] = availability_zone
-                    instances.append(node)
-    return instances
+    remaining_count = count - len(all_created_nodes)
+    if remaining_count > 0:
+        created_nodes_dict = create_instances(region, cluster_name, node_config,
+                                              tags, remaining_count)
+        all_created_nodes.update(created_nodes_dict)
+    return all_created_nodes
 
 
 def stop_instances(region: str, cluster_name: str,
                    provider_config: Optional[Dict]):
-    project_id = provider_config['project_id']
     tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
-    compute = config.construct_compute_clients_from_provider_config(
-        provider_config)
-    instances = _list_instances(region,
-                                cluster_name,
-                                project_id=provider_config['project_id'],
-                                tpu_vms=tpu_vms,
-                                compute_client=compute)
     if tpu_vms:
-        for inst in instances:
-            _operation = compute.projects().locations().nodes().stop(
-                name=inst['name']).execute()
+        tpu_instance.stop_instances(region, cluster_name, provider_config)
     else:
-        for inst in instances:
-            _operation = compute.instances().stop(
-                project=project_id,
-                zone=inst['availability_zone'],
-                instance=inst['name'],
-            ).execute()
+        general_instance.stop_instances(region, cluster_name, provider_config)
 
 
 def terminate_instances(region: str, cluster_name: str,
                         provider_config: Optional[Dict]):
-    project_id = provider_config['project_id']
     tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
-
-    compute = config.construct_compute_clients_from_provider_config(
-        provider_config)
-    instances = _list_instances(region,
-                                cluster_name,
-                                project_id=provider_config['project_id'],
-                                tpu_vms=tpu_vms,
-                                compute_client=compute)
     if tpu_vms:
-        for inst in instances:
-            _operation = compute.projects().locations().nodes().delete(
-                name=inst['name']).execute()
+        tpu_instance.terminate_instances(region, cluster_name, provider_config)
     else:
-        for inst in instances:
-            _operation = compute.instances().delete(
-                project=project_id,
-                zone=inst['availability_zone'],
-                instance=inst['name'],
-            ).execute()
+        general_instance.terminate_instances(region, cluster_name,
+                                             provider_config)
