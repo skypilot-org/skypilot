@@ -23,5 +23,5 @@ run: |
   conda env list
   for i in {1..360}; do
     echo "$timestamp $i"
-    sleep 1
+    sleep 2
   done

@@ -287,9 +287,10 @@ class RayCodeGen:
                     sys.exit(1)
                 """)
             ]
-        self._code += [
-            f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
-        ]
+        else:
+            self._code += [
+                f'job_lib.set_status({job_id!r}, job_lib.JobStatus.PENDING)',
+            ]
         if spot_task is not None:
             # Add the spot job to spot queue table.
             resources_str = backend_utils.get_task_resources_str(spot_task)
@@ -2452,8 +2453,10 @@ class CloudVmRayBackend(backends.Backend):
                 f'--address=http://127.0.0.1:8265 --submission-id {ray_job_id} '
                 '--no-wait '
                 f'"{executable} -u {script_path} > {remote_log_path} 2>&1"')
-        
-            mkdir_code = f'{cd} && mkdir -p {remote_log_dir} && touch {remote_log_path} && echo START > {remote_log_path} 2>&1'
+
+            mkdir_code = (
+                f'{cd} && mkdir -p {remote_log_dir} && touch '
+                f'{remote_log_path} && echo START > {remote_log_path} 2>&1')
             code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
             job_submit_cmd = mkdir_code + ' && ' + code
 

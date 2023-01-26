@@ -134,6 +134,7 @@ class JobStatus(enum.Enum):
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
+
 # Only update status of the jobs after this many seconds of job submission,
 # to avoid race condition with `ray job` to make sure it job has been
 # correctly updated.
@@ -141,6 +142,7 @@ class JobStatus(enum.Enum):
 _SUBMITTED_GAP_SECONDS = 60
 
 _PRE_RESOURCE_STATUSES = [JobStatus.PENDING, JobStatus.SETTING_UP]
+
 
 class JobScheduler:
     """Base class for job scheduler"""
@@ -151,7 +153,7 @@ class JobScheduler:
         _CONN.commit()
         set_status(job_id, JobStatus.PENDING)
         self.schedule_step()
-    
+
     def set_scheduled(self, job_id: str):
         with filelock.FileLock(_get_lock_path(job_id)):
             self.remove_job_no_lock(job_id)
@@ -159,11 +161,10 @@ class JobScheduler:
     def remove_job_no_lock(self, job_id: str) -> None:
         _CURSOR.execute(f'DELETE FROM pending_jobs WHERE job_id={job_id!r}')
         _CONN.commit()
-    
+
     def _run_job(self, job_id: int, run_cmd: str):
-        _CURSOR.execute(
-            f'UPDATE pending_jobs SET submit={int(time.time())} WHERE job_id={job_id!r}'
-        )
+        _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())}'
+                         f'WHERE job_id={job_id!r}'))
         _CONN.commit()
         subprocess.Popen(run_cmd, shell=True, stdout=subprocess.DEVNULL)
 
@@ -175,7 +176,7 @@ class JobScheduler:
         for job_id, run_cmd, submit, _ in jobs:
             with filelock.FileLock(_get_lock_path(job_id)):
                 status = get_status_no_lock(job_id)
-                if not status in _PRE_RESOURCE_STATUSES :
+                if status not in _PRE_RESOURCE_STATUSES:
                     # Job doesn't exist or is running/cancelled
                     self.remove_job_no_lock(job_id)
                     continue
@@ -185,10 +186,13 @@ class JobScheduler:
                 self._run_job(job_id, run_cmd)
                 return
 
+
 class FIFOScheduler(JobScheduler):
     """First in first out job scheduler"""
+
     def _get_jobs(self) -> Tuple:
         return _CURSOR.execute('SELECT * FROM pending_jobs ORDER BY job_id')
+
 
 scheduler = FIFOScheduler()
 
@@ -443,6 +447,7 @@ def _get_jobs_by_ids(job_ids: List[int]) -> List[Dict[str, Any]]:
     records = _get_records_from_rows(rows)
     return records
 
+
 def _get_pending_jobs():
     rows = _CURSOR.execute(
         'SELECT job_id, created_time, submit FROM pending_jobs')
@@ -453,6 +458,7 @@ def _get_pending_jobs():
             'submit': submit
         } for job_id, created_time, submit in rows
     }
+
 
 def update_job_status(job_owner: str,
                       job_ids: List[int],
