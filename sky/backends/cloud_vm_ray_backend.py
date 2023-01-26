@@ -3063,6 +3063,19 @@ class CloudVmRayBackend(backends.Backend):
             global_user_state.set_cluster_autostop_value(
                 handle.cluster_name, idle_minutes_to_autostop, down)
 
+    def is_autostopping(self, handle: ResourceHandle, stream_logs: bool = True) -> bool:
+        code = autostop_lib.AutostopCodeGen.is_autostopping()
+        returncode, stdout, stderr = self.run_on_head(handle,
+                                                      code,
+                                                      require_outputs=True,
+                                                      stream_logs=stream_logs)
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to check autostop',
+                                           stderr=stderr,
+                                           stream_logs=stream_logs)
+        return common_utils.decode_payload(stdout)
+
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.
     @timeline.event

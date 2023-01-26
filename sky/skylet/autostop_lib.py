@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from sky import sky_logging
 from sky.skylet import configs
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -16,6 +17,7 @@ _AUTOSTOP_CONFIG_KEY = 'autostop_config'
 # user-issued commands (this module) and the Skylet process running the
 # AutostopEvent need to access that state.
 _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
+_AUTOSTOP_INDICATOR = 'autostop_indicator'
 
 
 class AutostopConfig:
@@ -56,6 +58,18 @@ def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
         # Either autostop never set, or has been canceled. Reset timer.
         set_last_active_time_to_now()
 
+def set_is_autostopping() -> None:
+    """Sets the is_autostopping flag to True."""
+    logger.debug('Setting is_autostopping.')
+    configs.set_config(_AUTOSTOP_INDICATOR, str(psutil.boot_time()))
+
+
+def get_is_autostopping_payload() -> str:
+    """Returns True if the is_autostopping flag is set."""
+    result = configs.get_config(_AUTOSTOP_INDICATOR)
+    is_autostopping = (result == str(psutil.boot_time()))
+    return common_utils.encode_payload(is_autostopping)
+
 
 def get_last_active_time() -> float:
     """Returns the last active time, or -1 if none has been set."""
@@ -86,6 +100,11 @@ class AutostopCodeGen:
             f'autostop_lib.set_autostop({idle_minutes}, {backend!r},'
             f' {down})',
         ]
+        return cls._build(code)
+
+    @classmethod
+    def is_autostopping(cls) -> str:
+        code = ['autostop_lib.get_is_autostopping_payload()']
         return cls._build(code)
 
     @classmethod
