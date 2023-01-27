@@ -183,8 +183,10 @@ def create_instances(region: str, cluster_name: str,
 
     labels = tags
 
-    node_config = _convert_resources_to_urls(node_config, project_id,
-                                             availability_zone)
+    # TODO: This seems result in errors in bulkInsert
+    # node_config = _convert_resources_to_urls(node_config, project_id,
+    #                                          availability_zone)
+
     # removing TPU-specific default key set in config.py
     node_config.pop('networkConfig', None)
     name = utils.generate_node_name(cluster_name, 'compute')
@@ -216,34 +218,25 @@ def create_instances(region: str, cluster_name: str,
     # There is also regional instance creation API.
     # https://cloud.google.com/compute/docs/instances/multiple/create-in-bulk
 
-    if count > 1:
-        # 'name' is a field for creating a single instance, we pop it here
-        #  and use a pattern instead.
-        name_pattern = node_config.pop('name') + '-' + '#' * len(str(count))
-        body = {
-            'count': count,  # this is the max count
-            'minCount': count,
-            'namePattern': name_pattern,
-            'instanceProperties': node_config,
-            'sourceInstanceTemplate': source_instance_template,
-        }
+    # 'name' is a field for creating a single instance, we pop it here
+    #  and use a pattern instead.
+    name_pattern = node_config.pop('name') + '-' + '#' * len(str(count))
+    body = {
+        'count': count,  # this is the max count
+        'minCount': count,
+        'namePattern': name_pattern,
+        'instanceProperties': node_config,
+        'sourceInstanceTemplate': source_instance_template,
+    }
 
-        operation = compute_client.instances().bulkInsert(
-            project=project_id,
-            zone=availability_zone,
-            body=body,
-        ).execute()
-    else:
-        operation = compute_client.instances().insert(
-            project=project_id,
-            zone=availability_zone,
-            sourceInstanceTemplate=source_instance_template,
-            body=node_config,
-        ).execute()
+    operation = compute_client.instances().bulkInsert(
+        project=project_id,
+        zone=availability_zone,
+        body=body,
+    ).execute()
 
     _wait_for_operation(compute_client, operation, project_id,
                         availability_zone)
-    return name
 
 
 def create_or_resume_instances(
@@ -266,11 +259,8 @@ def create_or_resume_instances(
 
     remaining_count = count - len(all_created_nodes)
     if remaining_count > 0:
-        created_nodes_dict = create_instances(region, cluster_name, node_config,
-                                              tags, remaining_count,
-                                              provider_config)
-        all_created_nodes.update(created_nodes_dict)
-    return all_created_nodes
+        create_instances(region, cluster_name, node_config, tags,
+                         remaining_count, provider_config)
 
 
 def stop_instances(region: str, cluster_name: str,
