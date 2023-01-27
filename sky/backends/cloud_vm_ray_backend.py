@@ -1407,15 +1407,25 @@ class RetryingVmProvisioner(object):
         backoff = common_utils.Backoff(initial_backoff=5,
                                        max_backoff_factor=180 // 5)
 
+        import yaml
         from sky.provision import aws
 
         provider = aws
 
+        with open(cluster_config_file) as f:
+            config = yaml.safe_load(f)
+
+        node_config = config['available_node_types']['ray.head.default']
+        num_nodes = config['max_workers']
+
         for retry_cnt in range(_MAX_RAY_UP_RETRY):
             try:
-                provider.create_or_resume_instances(region_name, cluster_name)
+                provider.create_or_resume_instances(region_name,
+                                                    cluster_name,
+                                                    node_config, {},
+                                                    count=num_nodes,
+                                                    resume_stopped_nodes=True)
                 provider.wait_instances(region_name, cluster_name, 'running')
-                # TODO: do something
                 break
             except Exception as e:
                 if retry_cnt >= _MAX_RAY_UP_RETRY - 1:
