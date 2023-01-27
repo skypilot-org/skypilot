@@ -598,62 +598,6 @@ class Resources:
                 self.accelerators, self.use_spot, self._region, self._zone)
         return hourly_cost * hours
 
-    def is_same_resources(self, other: 'Resources') -> bool:
-        """Returns whether two resources are the same.
-
-        Returns True if they are the same, False if not.
-        """
-        if (self.cloud is None) != (other.cloud is None):
-            # self and other's cloud should be both None or both not None
-            return False
-
-        if self.cloud is not None and not self.cloud.is_same_cloud(other.cloud):
-            return False
-        # self.cloud == other.cloud
-
-        if (self.region is None) != (other.region is None):
-            # self and other's region should be both None or both not None
-            return False
-
-        if self.region is not None and self.region != other.region:
-            return False
-        # self.region <= other.region
-
-        if (self.zone is None) != (other.zone is None):
-            # self and other's zone should be both None or both not None
-            return False
-
-        if self.zone is not None and self.zone != other.zone:
-            return False
-
-        if (self.image_id is None) != (other.image_id is None):
-            # self and other's image id should be both None or both not None
-            return False
-
-        if (self.image_id is not None and self.image_id != other.image_id):
-            return False
-
-        if (self._instance_type is not None and
-                self._instance_type != other.instance_type):
-            return False
-        # self._instance_type == other.instance_type
-
-        other_accelerators = other.accelerators
-        accelerators = self.accelerators
-        if accelerators != other_accelerators:
-            return False
-        # self.accelerators == other.accelerators
-
-        if self.accelerator_args != other.accelerator_args:
-            return False
-        # self.accelerator_args == other.accelerator_args
-
-        if self.use_spot != other.use_spot:
-            return False
-
-        # self == other
-        return True
-
     def less_demanding_than(self,
                             other: Union[List['Resources'], 'Resources'],
                             requested_num_nodes: int = 1) -> bool:
