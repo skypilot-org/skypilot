@@ -176,7 +176,7 @@ def test_instance_type_mismatches_cpus(monkeypatch):
                                    sky.AWS(),
                                    instance_type=instance,
                                    cpus=cpus)
-        assert 'Infeasible resource demands found' in str(e.value)
+        assert 'does not have the requested number of vCPUs' in str(e.value)
 
 
 def test_instance_type_matches_cpus(monkeypatch):
