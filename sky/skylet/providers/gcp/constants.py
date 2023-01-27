@@ -10,44 +10,24 @@ VPC_TEMPLATE = {
     "routingConfig": {"routingMode": "GLOBAL"},
 }
 # Required firewall rules for SkyPilot to work.
-# Note: there are more than one acceptable required rules.
 FIREWALL_RULES_REQUIRED = [
-    [
-        {
-            "direction": "INGRESS",
-            "allowed": [
-                {'IPProtocol': 'tcp', 'ports': ['0-65535']},
-                {'IPProtocol': 'udp', 'ports': ['0-65535']},
-                {'IPProtocol': 'icmp'}
-            ],
-            "sourceRanges": ["10.128.0.0/9"],
-        },
-        {
-            "direction": "INGRESS",
-            "allowed": [{
-                "IPProtocol": "tcp",
-                "ports": ["22"],
-            }],
-            "sourceRanges": ["0.0.0.0/0"],
-        }
-    ],
-    [
-        {
-            "direction": "INGRESS",
-            "allowed": [
-                {'IPProtocol': 'all'},
-            ],
-            "sourceRanges": ["10.128.0.0/9"],
-        },
-        {
-            "direction": "INGRESS",
-            "allowed": [{
-                "IPProtocol": "tcp",
-                "ports": ["22"],
-            }],
-            "sourceRanges": ["0.0.0.0/0"],
-        }
-    ]
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {'IPProtocol': 'tcp', 'ports': ['0-65535']},
+            {'IPProtocol': 'udp', 'ports': ['0-65535']},
+            {'IPProtocol': 'icmp'}
+        ],
+        "sourceRanges": ["10.128.0.0/9"],
+    },
+    {
+        "direction": "INGRESS",
+        "allowed": [{
+            "IPProtocol": "tcp",
+            "ports": ["22"],
+        }],
+        "sourceRanges": ["0.0.0.0/0"],
+    }
 ]
 # Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [

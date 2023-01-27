@@ -490,7 +490,7 @@ def _configure_key_pair(config, compute):
 
 def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    list_required_rules = FIREWALL_RULES_REQUIRED.copy()
+    required_rules = FIREWALL_RULES_REQUIRED.copy()
 
     operation = (
         compute.networks().
@@ -504,32 +504,47 @@ def _check_firewall_rules(vpc_name, config, compute):
         return False
     effective_rules = response["firewalls"]
 
-    def _get_refined_rule(rule):
-        KEY_TO_COMPARE = {"sourceRanges", "allowed", "direction"}
-        refined_rule = {}
-        for k in KEY_TO_COMPARE:
-            if k not in rule:
-                continue
-            if k == "allowed":
-                refined_rule[k] = sorted(rule[k], key=lambda x: x["IPProtocol"])
-            else:
-                refined_rule[k] = rule[k]
-        return refined_rule
+    def _merge_and_refine_rule(rules):
+        # Output: dict of (direction, source) -> {protocol -> ports}
+        tmp = {}
+        for rule in rules:
+            direction = rule.get("direction")
+            sources = rule.get("sourceRanges")
+            allowed = rule.get("allowed")
+            for source in sources:
+                tmp[(direction, source)] = tmp.get((direction, source), []) + allowed
+        all = {}
+        for (direction, source), allowed_list in tmp.items():
+            all[(direction, source)] = {}
+            for allowed in allowed_list:
+                ports = set()
+                for port in allowed.get('ports', set()):
+                    parse_ports = port.split('-')
+                    if len(parse_ports) == 1:
+                        ports.add(int(parse_ports[0]))
+                    else:
+                        ports.update(
+                            set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
+                all[(direction, source)][allowed["IPProtocol"]] = ports
+        return all
 
-    def _check_rules_included(rule1, rule2):
-        for rule in rule1:
-            if rule not in rule2:
+    effective_rules = _merge_and_refine_rule(effective_rules)
+    required_rules = _merge_and_refine_rule(required_rules)
+
+    for key, allowed_req in required_rules.items():
+        if key not in effective_rules:
+            return False
+        allowed_eff = effective_rules[key]
+        # Special case: "all" means allowing all traffic
+        if "all" in allowed_eff:
+            continue
+        # Check if the required ports are a subset of the effective ports
+        for protocol, ports in allowed_req.items():
+            ports_eff = allowed_eff.get(protocol, set())
+            if not ports.issubset(ports_eff):
+                print("ports", ports, "ports_eff", ports_eff)
                 return False
-        return True
-
-    # There are more than one acceptable required rules.
-    # check if the effective rules satisfy any of them.
-    effective_rules = list(map(_get_refined_rule, effective_rules))
-    for required_rules in list_required_rules:
-        required_rules = list(map(_get_refined_rule, required_rules))
-        if _check_rules_included(required_rules, effective_rules):
-            return True
-    return False
+    return True
 
 
 def get_usable_vpc(config):
