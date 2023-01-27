@@ -1,6 +1,5 @@
 from typing import Optional, Dict, Any
 
-import copy
 import logging
 
 from sky.provision.gcp import config, general_instance, tpu_instance
@@ -12,22 +11,25 @@ logger = logging.getLogger(__name__)
 # Lifecycle: https://cloud.google.com/compute/docs/instances/instance-life-cycle
 
 
-def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
-                     count: int, provider_config: Dict) -> Dict[str, Any]:
+def resume_instances(region: str,
+                     cluster_name: str,
+                     tags: Dict[str, str],
+                     provider_config: Dict,
+                     count: Optional[int] = None) -> None:
     tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
     if tpu_vms:
-        return tpu_instance.resume_instances(region, cluster_name, tags, count,
-                                             provider_config)
+        tpu_instance.resume_instances(region, cluster_name, tags,
+                                      provider_config, count)
     else:
-        return general_instance.resume_instances(region, cluster_name, tags,
-                                                 count, provider_config)
+        general_instance.resume_instances(region, cluster_name, tags,
+                                          provider_config, count)
 
 
 def create_or_resume_instances(region: str, cluster_name: str,
                                node_config: Dict[str, Any], tags: Dict[str,
                                                                        str],
                                count: int, resume_stopped_nodes: bool,
-                               provider_config: Dict) -> Dict[str, Any]:
+                               provider_config: Dict) -> None:
     """Creates instances.
 
     Returns dict mapping instance id to ec2.Instance object for the created
@@ -47,7 +49,7 @@ def create_or_resume_instances(region: str, cluster_name: str,
 
 
 def stop_instances(region: str, cluster_name: str,
-                   provider_config: Optional[Dict]):
+                   provider_config: Optional[Dict]) -> None:
     tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
     if tpu_vms:
         tpu_instance.stop_instances(region, cluster_name, provider_config)
@@ -56,7 +58,7 @@ def stop_instances(region: str, cluster_name: str,
 
 
 def terminate_instances(region: str, cluster_name: str,
-                        provider_config: Optional[Dict]):
+                        provider_config: Optional[Dict]) -> None:
     tpu_vms = provider_config.get(config.HAS_TPU_PROVIDER_FIELD, False)
     if tpu_vms:
         tpu_instance.terminate_instances(region, cluster_name, provider_config)

@@ -1,5 +1,5 @@
 """The module for AWS"""
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 import copy
 import logging
@@ -141,8 +141,10 @@ def create_instances(region: str, cluster_name: str, node_config: Dict[str,
                     f'create_instances: Attempt failed with {exc}, retrying.')
 
 
-def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
-                     count: int) -> Dict[str, Any]:
+def resume_instances(region: str,
+                     cluster_name: str,
+                     tags: Dict[str, str],
+                     count: Optional[int] = None) -> Dict[str, Any]:
     ec2 = utils.create_ec2_resource(region=region)
     filters = [
         {
@@ -161,7 +163,9 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
             'Values': [tags[TAG_RAY_USER_NODE_TYPE]],
         })
 
-    reuse_nodes = list(ec2.instances.filter(Filters=filters))[:count]
+    reuse_nodes = list(ec2.instances.filter(Filters=filters))
+    if count is not None:
+        reuse_nodes = reuse_nodes[:count]
     reuse_node_ids = [n.id for n in reuse_nodes]
     if reuse_nodes:
         for node in reuse_nodes:

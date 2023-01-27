@@ -95,8 +95,7 @@ def batch_update_instance_labels(tpu_client, instances: List[Dict],
 
 def create_instances(region: str, cluster_name: str,
                      node_config: Dict[str, Any], tags: Dict[str, str],
-                     count: int, provider_config: Dict[str,
-                                                       Any]) -> Dict[str, Any]:
+                     count: int, provider_config: Dict[str, Any]) -> None:
     compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
     tpu_client = config.construct_tpu_client_from_provider_config(
@@ -146,11 +145,13 @@ def create_instances(region: str, cluster_name: str,
 
     for opr in operations:
         _wait_for_operation(tpu_client, opr, project_id, availability_zone)
-    return name
 
 
-def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
-                     count: int, provider_config: Dict) -> Dict[str, Any]:
+def resume_instances(region: str,
+                     cluster_name: str,
+                     tags: Dict[str, str],
+                     provider_config: Dict,
+                     count: Optional[int] = None) -> None:
     project_id = provider_config['project_id']
 
     compute_client = config.construct_compute_client_from_provider_config(
@@ -164,7 +165,8 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
                                status_filter=['TERMINATED'],
                                compute_client=compute_client,
                                tpu_client=tpu_client)
-    instances = instances[:count]
+    if count is not None:
+        instances = instances[:count]
 
     for inst in instances:
         tpu_client.instances().start(
@@ -175,14 +177,13 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
 
     # set labels and wait
     batch_update_instance_labels(tpu_client, instances, project_id, tags)
-    return instances
 
 
 def create_or_resume_instances(region: str, cluster_name: str,
                                node_config: Dict[str, Any], tags: Dict[str,
                                                                        str],
                                count: int, resume_stopped_nodes: bool,
-                               provider_config: Dict) -> Dict[str, Any]:
+                               provider_config: Dict) -> None:
     """Creates instances.
 
     Returns dict mapping instance id to ec2.Instance object for the created
@@ -199,15 +200,12 @@ def create_or_resume_instances(region: str, cluster_name: str,
 
     remaining_count = count - len(all_created_nodes)
     if remaining_count > 0:
-        created_nodes_dict = create_instances(region, cluster_name, node_config,
-                                              tags, remaining_count,
-                                              provider_config)
-        all_created_nodes.update(created_nodes_dict)
-    return all_created_nodes
+        create_instances(region, cluster_name, node_config, tags,
+                         remaining_count, provider_config)
 
 
 def stop_instances(region: str, cluster_name: str,
-                   provider_config: Optional[Dict]):
+                   provider_config: Optional[Dict]) -> None:
     compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
     tpu_client = config.construct_tpu_client_from_provider_config(
@@ -224,7 +222,7 @@ def stop_instances(region: str, cluster_name: str,
 
 
 def terminate_instances(region: str, cluster_name: str,
-                        provider_config: Optional[Dict]):
+                        provider_config: Optional[Dict]) -> None:
     compute_client = config.construct_compute_client_from_provider_config(
         provider_config)
     tpu_client = config.construct_tpu_client_from_provider_config(

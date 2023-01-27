@@ -142,8 +142,11 @@ def batch_update_instance_labels(resource, instances: List[Dict],
                                       opr['availability_zone'])
 
 
-def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
-                     count: int, provider_config: Dict) -> Dict[str, Any]:
+def resume_instances(region: str,
+                     cluster_name: str,
+                     tags: Dict[str, str],
+                     provider_config: Dict,
+                     count: Optional[int] = None) -> None:
     project_id = provider_config['project_id']
 
     compute_client = config.construct_compute_client_from_provider_config(
@@ -154,7 +157,8 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
                                project_id=provider_config['project_id'],
                                status_filter=['TERMINATED'],
                                compute_client=compute_client)
-    instances = instances[:count]
+    if count is not None:
+        instances = instances[:count]
 
     for inst in instances:
         compute_client.instances().start(
@@ -165,7 +169,6 @@ def resume_instances(region: str, cluster_name: str, tags: Dict[str, str],
 
     # set labels and wait
     batch_update_instance_labels(compute_client, instances, project_id, tags)
-    return instances
 
 
 def create_instances(region: str, cluster_name: str,
