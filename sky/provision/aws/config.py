@@ -499,8 +499,6 @@ def _configure_subnets_and_groups_from_network_interfaces(
 def _resource(name, config):
     region = config['provider']['region']
     extras = config['provider'].get('aws_credentials', {})
-    cli_logger.verbose('Creating AWS resource `{}` in `{}`', cf.bold(name),
-                       cf.bold(region))
     extras.setdefault(
         'config',
         boto_config.Config(retries={'max_attempts': BOTO_MAX_RETRIES}),

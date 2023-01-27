@@ -1409,22 +1409,32 @@ class RetryingVmProvisioner(object):
 
         import yaml
         from sky.provision import aws
+        from sky.provision import utils
 
         provider = aws
 
         with open(cluster_config_file) as f:
-            config = yaml.safe_load(f)
+            original_config = yaml.safe_load(f)
 
-        node_config = config['available_node_types']['ray.head.default']
-        num_nodes = config['max_workers']
+        raw_config = {
+            'cluster_name': original_config['cluster_name'],
+            'provider': original_config['provider'],
+            'auth': original_config['auth'],
+            'node_config': original_config['available_node_types']
+                           ['ray.head.default']['node_config'],
+        }
+        raw_config['provider']['num_nodes'] = original_config['max_workers'] + 1
+
+        config = provider.bootstrap(raw_config)
 
         for retry_cnt in range(_MAX_RAY_UP_RETRY):
             try:
-                provider.create_or_resume_instances(region_name,
-                                                    cluster_name,
-                                                    node_config, {},
-                                                    count=num_nodes,
-                                                    resume_stopped_nodes=True)
+                provider.create_or_resume_instances(
+                    region_name,
+                    cluster_name,
+                    config['node_config'], {},
+                    count=config['provider']['num_nodes'],
+                    resume_stopped_nodes=True)
                 provider.wait_instances(region_name, cluster_name, 'running')
                 break
             except Exception as e:
@@ -1448,6 +1458,11 @@ class RetryingVmProvisioner(object):
         ip_dict = provider.get_instance_ips(region_name,
                                             cluster_name,
                                             public_ips=True)
+
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Waiting for SSH connection for '
+                f'[green]{cluster_name}[white] ...'):
+            utils.wait_for_ssh(list(ip_dict.values()))
         _, head_ip = list(ip_dict.items())[0]
         return self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip
 
