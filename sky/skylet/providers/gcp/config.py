@@ -13,7 +13,7 @@ from google.oauth2.credentials import Credentials as OAuthCredentials
 from googleapiclient import discovery, errors
 
 from sky.skylet.providers.gcp.node import MAX_POLLS, POLL_INTERVAL, GCPNodeType, GCPCompute
-from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE
+from sky.skylet.providers.gcp.constants import SKYPILOT_VPC_NAME, VPC_TEMPLATE, FIREWALL_RULES_TEMPLATE, FIREWALL_RULES_REQUIRED
 from ray.autoscaler._private.util import check_legacy_fields
 
 logger = logging.getLogger(__name__)
@@ -490,7 +490,7 @@ def _configure_key_pair(config, compute):
 
 def _check_firewall_rules(vpc_name, config, compute):
     """Check if the firewall rules in the VPC are sufficient."""
-    required_rules = FIREWALL_RULES_TEMPLATE.copy()
+    list_required_rules = FIREWALL_RULES_REQUIRED.copy()
 
     operation = (
         compute.networks().
@@ -516,13 +516,20 @@ def _check_firewall_rules(vpc_name, config, compute):
                 refined_rule[k] = rule[k]
         return refined_rule
 
-    required_rules = list(map(_get_refined_rule, required_rules))
-    effective_rules = list(map(_get_refined_rule, effective_rules))
+    def _check_rules_included(rule1, rule2):
+        for rule in rule1:
+            if rule not in rule2:
+                return False
+        return True
 
-    for rule in required_rules:
-        if rule not in effective_rules:
-            return False
-    return True
+    # There are more than one acceptable required rules.
+    # check if the effective rules satisfy any of them.
+    effective_rules = list(map(_get_refined_rule, effective_rules))
+    for required_rules in list_required_rules:
+        required_rules = list(map(_get_refined_rule, required_rules))
+        if _check_rules_included(required_rules, effective_rules):
+            return True
+    return False
 
 
 def get_usable_vpc(config):
