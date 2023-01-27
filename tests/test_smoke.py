@@ -220,6 +220,7 @@ def test_azure_region():
             f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
+        timeout=30 * 60,  # 30 mins
     )
     run_one_test(test)
 
