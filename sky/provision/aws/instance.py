@@ -274,7 +274,9 @@ def get_instance_ips(region: str, cluster_name: str, public_ips: bool):
         },
     ]
     instances = ec2.instances.filter(Filters=filters)
+    # TODO: use 'Name' in inst.tags
     if public_ips:
-        return [inst.public_ip_address for inst in instances]
+        ips = [(inst.id, inst.public_ip_address) for inst in instances]
     else:
-        return [inst.private_ip_address for inst in instances]
+        ips = [(inst.id, inst.private_ip_address) for inst in instances]
+    return dict(sorted(ips))

@@ -1389,11 +1389,11 @@ class RetryingVmProvisioner(object):
         """
         style = colorama.Style
 
+        cluster_name = logging_info['cluster_name']
         region_name = logging_info['region_name']
         zone_str = logging_info['zone_str']
 
         if isinstance(to_provision_cloud, clouds.Local):
-            cluster_name = logging_info['cluster_name']
             logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
                         f'{cluster_name!r}.')
         else:
@@ -1407,8 +1407,14 @@ class RetryingVmProvisioner(object):
         backoff = common_utils.Backoff(initial_backoff=5,
                                        max_backoff_factor=180 // 5)
 
+        from sky.provision import aws
+
+        provider = aws
+
         for retry_cnt in range(_MAX_RAY_UP_RETRY):
             try:
+                provider.create_or_resume_instances(region_name, cluster_name)
+                provider.wait_instances(region_name, cluster_name, 'running')
                 # TODO: do something
                 break
             except Exception as e:
@@ -1429,8 +1435,11 @@ class RetryingVmProvisioner(object):
                         f'{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
-        # TODO: get 'head_ip'
-        return (self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip)
+        ip_dict = provider.get_instance_ips(region_name,
+                                            cluster_name,
+                                            public_ips=True)
+        _, head_ip = list(ip_dict.items())[0]
+        return self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip
 
     # TODO: deprecating this method
     @timeline.event
