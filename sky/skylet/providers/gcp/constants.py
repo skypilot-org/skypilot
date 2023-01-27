@@ -16,7 +16,6 @@ FIREWALL_RULES_REQUIRED = [
         "allowed": [
             {'IPProtocol': 'tcp', 'ports': ['0-65535']},
             {'IPProtocol': 'udp', 'ports': ['0-65535']},
-            {'IPProtocol': 'icmp'}
         ],
         "sourceRanges": ["10.128.0.0/9"],
     },
