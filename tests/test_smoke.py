@@ -486,7 +486,7 @@ def test_image_no_conda():
 
 
 # ------------ Test stale job ------------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support stopping instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 def test_stale_job(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -564,7 +564,7 @@ def test_gcp_stale_job_manual_restart():
 
 
 # ---------- Check Sky's environment variables; workdir. ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -579,7 +579,7 @@ def test_env_check(generic_cloud: str):
 
 
 # ---------- file_mounts ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_file_mounts(generic_cloud: str):
     name = _get_cluster_name()
     test_commands = [
@@ -597,7 +597,7 @@ def test_file_mounts(generic_cloud: str):
 
 
 # TODO(ewzeng): merge this with 'test_file_mounts' when multi-node is supported.
-@pytest.mark.lambda_labs
+@pytest.mark.lambda_cloud
 def test_lambda_file_mounts():
     name = _get_cluster_name()
     test_commands = [
@@ -670,7 +670,7 @@ def test_gcp_storage_mounts():
 
 
 # ---------- CLI logs ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_cli_logs(generic_cloud: str):
     name = _get_cluster_name()
     timestamp = time.time()
@@ -693,7 +693,7 @@ def test_cli_logs(generic_cloud: str):
 
 
 # TODO(ewzeng): merge this with 'test_cli_logs' when multi-node is supported.
-@pytest.mark.lambda_labs
+@pytest.mark.lambda_cloud
 def test_lambda_logs():
     name = _get_cluster_name()
     timestamp = time.time()
@@ -716,7 +716,7 @@ def test_lambda_logs():
 
 
 # ---------- Job Queue. ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not have K80 gpus
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have K80 gpus
 def test_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -743,7 +743,7 @@ def test_job_queue(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.lambda_labs
+@pytest.mark.lambda_cloud
 def test_lambda_job_queue():
     name = _get_cluster_name()
     test = Test(
@@ -766,7 +766,7 @@ def test_lambda_job_queue():
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_job_queue_multinode(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -803,7 +803,7 @@ def test_job_queue_multinode(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_labs  # No Lambda Labs VM has 8 CPUs
+@pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 def test_large_job_queue(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -824,7 +824,7 @@ def test_large_job_queue(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_multi_echo(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -845,7 +845,7 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not have V100 instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 instances
 def test_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -861,7 +861,7 @@ def test_huggingface(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.lambda_labs
+@pytest.mark.lambda_cloud
 def test_lambda_huggingface(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -938,7 +938,7 @@ def test_tpu_vm_pod():
 
 
 # ---------- Simple apps. ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -955,7 +955,7 @@ def test_multi_hostname(generic_cloud: str):
 
 
 # ---------- Task: n=2 nodes with setups. ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_distributed_tf(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1019,7 +1019,7 @@ def test_azure_start_stop():
 
 
 # ---------- Testing Autostopping ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support stopping instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 def test_autostop(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1075,7 +1075,7 @@ def test_autostop(generic_cloud: str):
 
 
 # ---------- Testing Autodowning ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_autodown(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1110,7 +1110,7 @@ def test_autodown(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.lambda_labs
+@pytest.mark.lambda_cloud
 def test_lambda_autodown():
     name = _get_cluster_name()
     test = Test(
@@ -1188,7 +1188,7 @@ def test_cancel_azure():
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
@@ -1212,7 +1212,7 @@ def test_cancel_pytorch(generic_cloud: str):
 
 
 # ---------- Testing use-spot option ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = _get_cluster_name()
@@ -1230,7 +1230,7 @@ def test_use_spot(generic_cloud: str):
 
 
 # ---------- Testing managed spot ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot(generic_cloud: str):
     """Test the spot yaml."""
@@ -1256,7 +1256,7 @@ def test_spot(generic_cloud: str):
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_failed_setup(generic_cloud: str):
     """Test managed spot job with failed setup."""
@@ -1340,7 +1340,7 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):
     """Test managed spot recovery for default resources."""
@@ -1542,7 +1542,7 @@ def test_spot_cancellation_gcp():
 
 
 # ---------- Testing storage for managed spot ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_storage(generic_cloud: str):
     """Test storage with managed spot"""
@@ -1594,7 +1594,7 @@ def test_spot_tpu():
 
 
 # ---------- Testing env for spot ----------
-@pytest.mark.no_lambda_labs  # Lambda Labs does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_inline_env(generic_cloud: str):
     """Test spot env"""

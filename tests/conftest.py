@@ -21,13 +21,13 @@ all_clouds_in_smoke_tests = ['aws', 'gcp', 'azure', 'lambda']
 default_clouds_to_run = ['gcp', 'azure']
 
 # Translate cloud name to pytest keyword. We need this because
-# @pytest.mark.lambda is not allowed, so we use @pytest.mark.lambda_labs
+# @pytest.mark.lambda is not allowed, so we use @pytest.mark.lambda_cloud
 # instead.
 cloud_to_pytest_keyword = {
     'aws': 'aws',
     'gcp': 'gcp',
     'azure': 'azure',
-    'lambda': 'lambda_labs'
+    'lambda': 'lambda_cloud'
 }
 
 
@@ -98,13 +98,13 @@ def pytest_collection_modifyitems(config, items):
                 in item.keywords) and config.getoption('--managed-spot'):
             item.add_marker(skip_marks['managed_spot'])
 
-    # We run Lambda Labs tests serially because Lambda Labs rate limits its
+    # We run Lambda Cloud tests serially because Lambda Cloud rate limits its
     # launch API to one launch every 10 seconds.
-    serial_mark = pytest.mark.xdist_group(name='serial_lambda_labs')
+    serial_mark = pytest.mark.xdist_group(name='serial_lambda_cloud')
     # Handle generic tests
     if _generic_cloud(config) == 'lambda':
         for item in items:
-            if not _is_generic_test(item) or 'no_lambda_labs' in item.keywords:
+            if not _is_generic_test(item) or 'no_lambda_cloud' in item.keywords:
                 continue
             else:
                 item.add_marker(serial_mark)
@@ -112,12 +112,12 @@ def pytest_collection_modifyitems(config, items):
                 # but item.nodeid is important for pytest.xdist_group, e.g.
                 #   https://github.com/pytest-dev/pytest-xdist/blob/master/src/xdist/scheduler/loadgroup.py
                 # This is a hack to update item.nodeid
-                item._nodeid = f'{item.nodeid}@serial_lambda_labs'
-    # Handle Lambda Labs specific tests
+                item._nodeid = f'{item.nodeid}@serial_lambda_cloud'
+    # Handle Lambda Cloud specific tests
     for item in items:
-        if 'lambda_labs' in item.keywords:
+        if 'lambda_cloud' in item.keywords:
             item.add_marker(serial_mark)
-            item._nodeid = f'{item.nodeid}@serial_lambda_labs'  # See comment on item.nodeid above
+            item._nodeid = f'{item.nodeid}@serial_lambda_cloud'  # See comment on item.nodeid above
 
 
 def _is_generic_test(item) -> bool:

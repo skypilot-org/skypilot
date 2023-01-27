@@ -313,7 +313,7 @@ class Cloud:
                  requested_features: Set[CloudImplementationFeatures]) -> bool:
         """Returns whether all of the requested features are supported.
 
-        For instance, Lambda Labs does not support autostop, so
+        For instance, Lambda Cloud does not support autostop, so
         Lambda.support({CloudImplementationFeatures.AUTOSTOP}) returns False.
         """
         raise NotImplementedError

@@ -17,10 +17,10 @@ from ray.autoscaler.tags import (
     NODE_KIND_HEAD,
 )
 from ray.autoscaler._private.util import hash_launch_conf
-from sky.skylet.providers.lambda_labs import lambda_utils
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 
-TAG_PATH_PREFIX = '~/.sky/generated/lambda_labs/metadata'
+TAG_PATH_PREFIX = '~/.sky/generated/lambda_cloud/metadata'
 REMOTE_RAY_YAML = '~/ray_bootstrap_config.yaml'
 
 logger = logging.getLogger(__name__)
@@ -38,9 +38,9 @@ def synchronized(f):
 
 
 class LambdaNodeProvider(NodeProvider):
-    """Node Provider for Lambda Labs.
+    """Node Provider for Lambda Cloud.
 
-    This provider assumes Lambda Labs credentials are set.
+    This provider assumes Lambda Cloud credentials are set.
     """
 
     def __init__(self,
@@ -48,14 +48,14 @@ class LambdaNodeProvider(NodeProvider):
                  cluster_name: str) -> None:
         NodeProvider.__init__(self, provider_config, cluster_name)
         self.lock = RLock()
-        self.lambda_client = lambda_utils.LambdaLabsClient()
+        self.lambda_client = lambda_utils.LambdaCloudClient()
         self.cached_nodes = {}
         self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
 
         # If tag file does not exist on head, create it and add basic tags.
         # This is a hack to make sure that ray on head can access some
         # important tags.
-        # TODO(ewzeng): change when Lambda Labs adds tag support.
+        # TODO(ewzeng): change when Lambda Cloud adds tag support.
         ray_yaml_path = os.path.expanduser(REMOTE_RAY_YAML)
         if os.path.exists(ray_yaml_path) and not os.path.exists(
                 self.metadata.path):

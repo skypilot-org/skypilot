@@ -1,23 +1,23 @@
-"""Lambda Labs."""
+"""Lambda Cloud."""
 import json
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.skylet.providers.lambda_labs import lambda_utils
+from sky.skylet.providers.lambda_cloud import lambda_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
 
-# Minimum set of files under ~/.lambda_labs that grant Lambda Labs access.
+# Minimum set of files under ~/.lambda_cloud that grant Lambda Cloud access.
 _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
 
 # Currently, none of clouds.CloudImplementationFeatures are implemented
-# for Lambda Labs
+# for Lambda Cloud
 _LAMBDA_IMPLEMENTATION_FEATURES: Set[clouds.CloudImplementationFeatures] = set()
 
 
@@ -166,7 +166,7 @@ class Lambda(clouds.Cloud):
         fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
-            # Accelerators are part of the instance type in Lambda Labs
+            # Accelerators are part of the instance type in Lambda Cloud
             resources = resources.copy(accelerators=None)
             return ([resources], fuzzy_candidate_list)
 
@@ -206,19 +206,19 @@ class Lambda(clouds.Cloud):
 
     def check_credentials(self) -> Tuple[bool, Optional[str]]:
         try:
-            lambda_utils.LambdaLabsClient().list_instances()
-        except (AssertionError, KeyError, lambda_utils.LambdaLabsError):
-            return False, ('Failed to access Lambda Labs with credentials. '
+            lambda_utils.LambdaCloudClient().list_instances()
+        except (AssertionError, KeyError, lambda_utils.LambdaCloudError):
+            return False, ('Failed to access Lambda Cloud with credentials. '
                            'To configure credentials, go to:\n    '
                            '  https://cloud.lambdalabs.com/api-keys\n    '
                            'to generate API key and add the line\n    '
                            '  api_key = [YOUR API KEY]\n    '
-                           'to ~/.lambda_labs/lambda_keys')
+                           'to ~/.lambda_cloud/lambda_keys')
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
-            f'~/.lambda_labs/{filename}': f'~/.lambda_labs/{filename}'
+            f'~/.lambda_cloud/{filename}': f'~/.lambda_cloud/{filename}'
             for filename in _CREDENTIAL_FILES
         }
 

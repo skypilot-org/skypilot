@@ -93,7 +93,7 @@ def get_storetype_from_cloud(cloud: clouds.Cloud) -> StoreType:
             raise ValueError('Azure Blob Storage is not supported yet.')
     elif isinstance(cloud, clouds.Lambda):
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Lambda Labs does not provide cloud storage.')
+            raise ValueError('Lambda Cloud does not provide cloud storage.')
     else:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Unknown cloud type: {cloud}')

@@ -1,14 +1,14 @@
-"""Lambda Labs helper functions."""
+"""Lambda Cloud helper functions."""
 import os
 import json
 import requests
 from typing import Any, Dict
 
-CREDENTIALS_PATH = '~/.lambda_labs/lambda_keys'
+CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 
 
-class LambdaLabsError(Exception):
+class LambdaCloudError(Exception):
     pass
 
 
@@ -53,24 +53,24 @@ class Metadata:
 
 
 def raise_lambda_error(response: requests.Response) -> None:
-    """Raise LambdaLabsError if appropriate. """
+    """Raise LambdaCloudError if appropriate. """
     status_code = response.status_code
     if status_code == 200:
         return
     if status_code == 429:
         # https://docs.lambdalabs.com/cloud/rate-limiting/
-        raise LambdaLabsError('Your API requests are being rate limited.')
+        raise LambdaCloudError('Your API requests are being rate limited.')
     try:
         resp_json = response.json()
         code = resp_json['error']['code']
         message = resp_json['error']['message']
     except (KeyError, json.decoder.JSONDecodeError):
-        raise LambdaLabsError(f'Unexpected error. Status code: {status_code}')
-    raise LambdaLabsError(f'{code}: {message}')
+        raise LambdaCloudError(f'Unexpected error. Status code: {status_code}')
+    raise LambdaCloudError(f'{code}: {message}')
 
 
-class LambdaLabsClient:
-    """Wrapper functions for Lambda Labs API."""
+class LambdaCloudClient:
+    """Wrapper functions for Lambda Cloud API."""
 
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
@@ -106,7 +106,7 @@ class LambdaLabsClient:
                 aval_reg = ' '.join(available_regions)
             else:
                 aval_reg = 'None'
-            raise LambdaLabsError(('instance-operations/launch/'
+            raise LambdaCloudError(('instance-operations/launch/'
                                    'insufficient-capacity: Not enough '
                                    'capacity to fulfill launch request. '
                                    'Regions with capacity available: '

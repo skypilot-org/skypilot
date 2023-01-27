@@ -788,7 +788,7 @@ class RetryingVmProvisioner(object):
         errors = [
             s.strip()
             for s in stdout_splits + stderr_splits
-            if 'LambdaLabsError:' in s.strip()
+            if 'LambdaCloudError:' in s.strip()
         ]
         if not errors:
             logger.info('====== stdout ======')
@@ -806,7 +806,7 @@ class RetryingVmProvisioner(object):
         logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
         self._blocked_resources.add(launchable_resources.copy(zone=None))
 
-        # Sometimes, LambdaLabsError will list available regions.
+        # Sometimes, LambdaCloudError will list available regions.
         for e in errors:
             if e.find('Regions with capacity available:') != -1:
                 for r in clouds.Lambda.regions():

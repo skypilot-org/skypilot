@@ -7,7 +7,7 @@ from sky.clouds.cloud import Zone
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.gcp import GCP
-from sky.clouds.lambda_labs import Lambda
+from sky.clouds.lambda_cloud import Lambda
 from sky.clouds.local import Local
 
 __all__ = [
