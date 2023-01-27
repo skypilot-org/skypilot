@@ -168,7 +168,7 @@ def test_instance_type_mismatches_cpus(monkeypatch):
         # Actual: 8
         ('m6i.2xlarge', 4),
         # Actual: 2
-        ('c6i.xlarge', 4),
+        ('c6i.large', 4),
     ]
     for instance, cpus in bad_instance_and_cpus:
         with pytest.raises(ValueError) as e:
