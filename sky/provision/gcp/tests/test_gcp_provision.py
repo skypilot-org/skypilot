@@ -28,7 +28,7 @@ def test_provision():
     gcp_project_id = gcp_cloud.GCP.get_project_id(dryrun=False)
 
     template = jinja2.Template(TEMPLATE_FILE.read_text())
-    cluster_name = f'sky-test-provision-{uuid.uuid4().hex}'
+    cluster_name = f'sky-test-provision-{uuid.uuid4().hex[:8]}'
     region = 'us-central1'
     availability_zone = 'us-central1-a'
     instance_type = gcp_cloud.GCP.get_default_instance_type()
@@ -48,6 +48,7 @@ def test_provision():
         # calling user which should've been passed in as the
         # SKYPILOT_USER env var (see spot-controller.yaml.j2).
         user=os.environ.get('SKYPILOT_USER', getpass.getuser()),
+        gpu=None,
 
         # AWS only:
         # Temporary measure, as deleting per-cluster SGs is too slow.
@@ -93,37 +94,36 @@ def test_provision():
     # gcp.wait_instances(region, cluster_name, state='running')
     print(f'Start cluster duration = {time.time() - start:.3f}s')
 
-    return
-
-    start = time.time()
-    public_ips = gcp.get_instance_ips(region, cluster_name, public_ips=True)
-    print(f'Public IPs: {public_ips}')
-    print(f'Get instance public IPs duration = {time.time() - start:.3f}s')
-
-    start = time.time()
-    provision_utils.wait_for_ssh(public_ips)
-    print(f'Wait for SSH connection duration = {time.time() - start:.3f}s')
-
-    ca.generate_cert_file()
-    print(f'Generated certification files')
-
-    ssh_cmd_runners = command_runner.SSHCommandRunner.make_runner_list(
-        public_ips,
-        config['auth']['ssh_user'],
-        config['auth']['ssh_private_key'],
-    )
-    for runner in ssh_cmd_runners:
-        runner.run(
-            f'mkdir -p {os.path.dirname(provision_utils.SKYLET_SERVER_REMOTE_PATH)}'
-        )
-        runner.rsync(provision_utils.SKYLET_SERVER_LOCAL_PATH,
-                     provision_utils.SKYLET_SERVER_REMOTE_PATH,
-                     up=True)
-        runner.rsync(ca.CERTS_LOCAL_DIR, ca.CERTS_REMOTE_DIR, up=True)
-
     # start = time.time()
-    # aws.terminate_instances(region, cluster_name)
-    # print(f'Terminate cluster (trigger) duration = {time.time() - start:.3f}s')
+    # public_ips = gcp.get_instance_ips(region, cluster_name, public_ips=True)
+    # print(f'Public IPs: {public_ips}')
+    # print(f'Get instance public IPs duration = {time.time() - start:.3f}s')
+    #
+    # start = time.time()
+    # provision_utils.wait_for_ssh(public_ips)
+    # print(f'Wait for SSH connection duration = {time.time() - start:.3f}s')
+    #
+    # ca.generate_cert_file()
+    # print(f'Generated certification files')
+    #
+    # ssh_cmd_runners = command_runner.SSHCommandRunner.make_runner_list(
+    #     public_ips,
+    #     config['auth']['ssh_user'],
+    #     config['auth']['ssh_private_key'],
+    # )
+    # for runner in ssh_cmd_runners:
+    #     runner.run(
+    #         f'mkdir -p {os.path.dirname(provision_utils.SKYLET_SERVER_REMOTE_PATH)}'
+    #     )
+    #     runner.rsync(provision_utils.SKYLET_SERVER_LOCAL_PATH,
+    #                  provision_utils.SKYLET_SERVER_REMOTE_PATH,
+    #                  up=True)
+    #     runner.rsync(ca.CERTS_LOCAL_DIR, ca.CERTS_REMOTE_DIR, up=True)
+
+    start = time.time()
+    gcp.terminate_instances(region, cluster_name,
+                            bootstrapped_config['provider'])
+    print(f'Terminate cluster (trigger) duration = {time.time() - start:.3f}s')
 
     # start = time.time()
     # aws.wait_instances(region, cluster_name, state='terminated')
