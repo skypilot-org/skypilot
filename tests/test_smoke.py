@@ -1188,7 +1188,7 @@ def test_cancel_azure():
     run_one_test(test)
 
 
-@pytest.mark.no_lambda_labs  # TODO(ewzeng): fix nvidia-smi on Lambda Labs
+@pytest.mark.no_lambda_labs  # Lambda Labs does not support num_nodes > 1 yet
 def test_cancel_pytorch(generic_cloud: str):
     name = _get_cluster_name()
     test = Test(
