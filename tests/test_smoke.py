@@ -1116,7 +1116,7 @@ def test_lambda_autodown():
     test = Test(
         'lambda_autodown',
         [
-            f'sky launch -y -d -c {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             # Ensure autostop is set.
             f'sky status | grep {name} | grep "1m (down)"',
@@ -1126,14 +1126,14 @@ def test_lambda_autodown():
             # Ensure the cluster is terminated.
             'sleep 200',
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
-            f'sky exec {name} {LAMBDA_TYPE} examples/minimal.yaml',
+            f'sky exec {name} {LAMBDA_TYPE} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             'sleep 200',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status --refresh) && printf "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down examples/minimal.yaml',
+            f'sky launch -y -d -c {name} {LAMBDA_TYPE} --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             'sleep 200',
             # Ensure the cluster is still UP.
