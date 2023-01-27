@@ -348,12 +348,12 @@ def test_parse_cpus_from_yaml():
     spec = textwrap.dedent("""\
         resources:
             cpus: 1""")
-    _test_parse_cpus(spec, 1)
+    _test_parse_cpus(spec, '1')
 
     spec = textwrap.dedent("""\
         resources:
             cpus: 1.5""")
-    _test_parse_cpus(spec, 1.5)
+    _test_parse_cpus(spec, '1.5')
 
     spec = textwrap.dedent("""\
         resources:
