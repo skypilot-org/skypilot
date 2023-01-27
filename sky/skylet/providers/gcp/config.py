@@ -564,19 +564,30 @@ def get_usable_vpc(config):
     if usable_vpc_name is None:
         logger.info(f"Creating a default VPC network, {SKYPILOT_VPC_NAME}...")
 
-        # Create a default VPC network
         proj_id = config["provider"]["project_id"]
-        body = VPC_TEMPLATE.copy()
-        body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-        body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
-        _create_vpcnet(config, compute, body)
+        # Create a SkyPilot VPC network if it doesn't exist
+        ret = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+        if len(ret) == 0:
+            body = VPC_TEMPLATE.copy()
+            body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            body["selfLink"] = body["selfLink"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            _create_vpcnet(config, compute, body)
 
         # Create firewall rules
         for rule in FIREWALL_RULES_TEMPLATE:
+            # if the rule already exists, delete it first
+            ret = _list_firewall_rules(
+                config, compute, filter=f"(name={rule['name']})")
+            if len(ret) > 0:
+                _delete_firewall_rule(config, compute, rule["name"])
+
             body = rule.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
-            body["network"] = body["network"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
-            body["selfLink"] = body["selfLink"].format(PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            body["network"] = body["network"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
+            body["selfLink"] = body["selfLink"].format(
+                PROJ_ID=proj_id, VPC_NAME=SKYPILOT_VPC_NAME)
             _create_firewall_rule(config, compute, body)
 
         usable_vpc_name = SKYPILOT_VPC_NAME
@@ -646,6 +657,30 @@ def _create_firewall_rule(config, compute, body):
     return response
 
 
+def _delete_firewall_rule(config, compute, name):
+    operation = (
+        compute.firewalls()
+        .delete(project=config["provider"]["project_id"], firewall=name)
+        .execute()
+    )
+    response = wait_for_compute_global_operation(
+        config["provider"]["project_id"], operation, compute
+    )
+    return response
+
+
+def _list_firewall_rules(config, compute, filter=None):
+    response = (
+        compute.firewalls()
+        .list(
+            project=config["provider"]["project_id"],
+            filter=filter,
+        )
+        .execute()
+    )
+    return response["items"] if "items" in response else []
+
+
 def _create_vpcnet(config, compute, body):
     operation = (
         compute.networks()
@@ -658,11 +693,12 @@ def _create_vpcnet(config, compute, body):
     return response
 
 
-def _list_vpcnets(config, compute):
+def _list_vpcnets(config, compute, filter=None):
     response = (
         compute.networks()
         .list(
             project=config["provider"]["project_id"],
+            filter=filter,
         )
         .execute()
     )
