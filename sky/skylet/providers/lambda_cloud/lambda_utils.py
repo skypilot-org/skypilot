@@ -2,7 +2,7 @@
 import os
 import json
 import requests
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -18,8 +18,8 @@ class Metadata:
     def __init__(self, path_prefix: str, cluster_name: str) -> None:
         # TODO(ewzeng): Metadata file is not thread safe. This is fine for
         # now since SkyPilot uses a per-cluster lock for ray-related
-        # operations. In the future, add a filelock around __getitem__
-        # and __setitem__.
+        # operations. In the future, add a filelock around __getitem__,
+        # __setitem__ and refresh.
         self.path = os.path.expanduser(f'{path_prefix}-{cluster_name}')
         # In case parent directory does not exist
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
@@ -48,6 +48,21 @@ class Metadata:
         else:
             metadata[instance_id] = value
         # Write to metadata file
+        with open(self.path, 'w') as f:
+            json.dump(metadata, f)
+
+    def refresh(self, instance_ids: List[str]) -> None:
+        """Remove all tags for instances not in instance_ids."""
+        if not os.path.exists(self.path):
+            return
+        with open(self.path, 'r') as f:
+            metadata = json.load(f)
+        for instance_id in list(metadata.keys()):
+            if instance_id not in instance_ids:
+                del metadata[instance_id]
+        if len(metadata) == 0:
+            os.remove(self.path)
+            return
         with open(self.path, 'w') as f:
             json.dump(metadata, f)
 

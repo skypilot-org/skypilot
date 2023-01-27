@@ -51,6 +51,13 @@ class LambdaNodeProvider(NodeProvider):
         self.lambda_client = lambda_utils.LambdaCloudClient()
         self.cached_nodes = {}
         self.metadata = lambda_utils.Metadata(TAG_PATH_PREFIX, cluster_name)
+        vms = self._list_instances_in_cluster()
+
+        # The tag file for autodowned clusters is not autoremoved. Hence, if
+        # a previous cluster was autodowned and has the same name as the
+        # current cluster, then self.metadata might load the old tag file.
+        # We prevent this by removing any old vms in the tag file.
+        self.metadata.refresh([node['id'] for node in vms])
 
         # If tag file does not exist on head, create it and add basic tags.
         # This is a hack to make sure that ray on head can access some
@@ -71,7 +78,6 @@ class LambdaNodeProvider(NodeProvider):
                 head_node_config.update(head_config["node_config"])
             launch_hash = hash_launch_conf(head_node_config, config['auth'])
             # Populate tags
-            vms = self._list_instances_in_cluster()
             for node in vms:
                 self.metadata[node['id']] = {'tags':
                     {
