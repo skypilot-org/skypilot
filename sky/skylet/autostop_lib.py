@@ -17,6 +17,9 @@ _AUTOSTOP_CONFIG_KEY = 'autostop_config'
 # user-issued commands (this module) and the Skylet process running the
 # AutostopEvent need to access that state.
 _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
+# AutostopEvent sets this to the boot time when the autostop of the cluster
+# starts. This is used for checking whether the cluster is in the process
+# of autostopping for the current machine.
 _AUTOSTOP_INDICATOR = 'autostop_indicator'
 
 
@@ -59,14 +62,22 @@ def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
         set_last_active_time_to_now()
 
 
-def set_is_autostopping() -> None:
-    """Sets the is_autostopping flag to True."""
+def set_autostopping_indicator() -> None:
+    """Sets the boot time of the machine when autostop starts.
+
+    This function should be called when the cluster is started to autostop,
+    and the boot time of the machine will be stored in the configs database
+    as an autostop indicator.
+    It is used for checking whether the cluster is in the process of
+    autostopping. The indicator is valid only when the machine has the same
+    boot time as the one stored in the indicator.
+    """
     logger.debug('Setting is_autostopping.')
     configs.set_config(_AUTOSTOP_INDICATOR, str(psutil.boot_time()))
 
 
 def get_is_autostopping_payload() -> str:
-    """Returns True if the is_autostopping flag is set."""
+    """Returns whether the cluster is in the process of autostopping."""
     result = configs.get_config(_AUTOSTOP_INDICATOR)
     is_autostopping = (result == str(psutil.boot_time()))
     return common_utils.encode_payload(is_autostopping)
