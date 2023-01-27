@@ -1224,9 +1224,15 @@ class RetryingVmProvisioner(object):
                 'region_name': region.name,
                 'zone_str': zone_str,
             }
-            status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
-                to_provision.cloud, cluster_config_file, handle, log_abs_path,
-                stream_logs, logging_info, to_provision.use_spot)
+            if isinstance(to_provision.cloud, clouds.AWS):
+                status, stdout, stderr, head_ip = self._bulk_provision(
+                    to_provision.cloud, cluster_config_file, handle,
+                    logging_info)
+            else:
+                status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
+                    to_provision.cloud, cluster_config_file, handle,
+                    log_abs_path, stream_logs, logging_info,
+                    to_provision.use_spot)
 
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
@@ -1371,6 +1377,62 @@ class RetryingVmProvisioner(object):
             worker_ips=all_ips[1:],
             extra_setup_cmds=worker_start_ray_commands)
 
+    @timeline.event
+    def _bulk_provision(
+        self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
+        cluster_handle: 'backends.Backend.ResourceHandle', logging_info: dict
+    ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
+        """Provisions a cluster via 'ray up' and wait until fully provisioned.
+
+        Returns:
+          (GangSchedulingStatus; stdout; stderr; optional head_ip).
+        """
+        style = colorama.Style
+
+        region_name = logging_info['region_name']
+        zone_str = logging_info['zone_str']
+
+        if isinstance(to_provision_cloud, clouds.Local):
+            cluster_name = logging_info['cluster_name']
+            logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
+                        f'{cluster_name!r}.')
+        else:
+            logger.info(
+                f'{colorama.Style.BRIGHT}Launching on {to_provision_cloud} '
+                f'{region_name}{colorama.Style.RESET_ALL} ({zone_str})')
+        start = time.time()
+
+        # 5 seconds to 180 seconds. We need backoff for e.g., rate limit per
+        # minute errors.
+        backoff = common_utils.Backoff(initial_backoff=5,
+                                       max_backoff_factor=180 // 5)
+
+        for retry_cnt in range(_MAX_RAY_UP_RETRY):
+            try:
+                # TODO: do something
+                break
+            except Exception as e:
+                if retry_cnt >= _MAX_RAY_UP_RETRY - 1:
+                    return self.GangSchedulingStatus.GANG_FAILED, '', str(
+                        e), None
+                sleep = backoff.current_backoff()
+                logger.info(
+                    'Retrying launching in {:.1f} seconds.'.format(sleep))
+                time.sleep(sleep)
+
+        logger.debug(f'Cluster up takes {time.time() - start} seconds with '
+                     f'{retry_cnt} retries.')
+
+        resources = cluster_handle.launched_resources
+        if tpu_utils.is_tpu_vm_pod(resources):
+            logger.info(f'{style.BRIGHT}Setting up TPU VM Pod workers...'
+                        f'{style.RESET_ALL}')
+            self._tpu_pod_setup(cluster_config_file, cluster_handle)
+
+        # TODO: get 'head_ip'
+        return (self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip)
+
+    # TODO: deprecating this method
     @timeline.event
     def _gang_schedule_ray_up(
             self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
@@ -2942,7 +3004,8 @@ class CloudVmRayBackend(backends.Backend):
                 with backend_utils.safe_console_status(
                         f'[bold cyan]{teardown_verb} '
                         f'[green]{cluster_name}\n'
-                        f'[white] Press Ctrl+C to send the task to background.'):
+                        f'[white] Press Ctrl+C to send the task to background.'
+                ):
                     aws.wait_instances(region, cluster_name, 'terminated')
             except KeyboardInterrupt:
                 pass
