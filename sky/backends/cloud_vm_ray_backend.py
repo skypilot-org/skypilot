@@ -2929,6 +2929,28 @@ class CloudVmRayBackend(backends.Backend):
         config = common_utils.read_yaml(handle.cluster_yaml)
         cluster_name = handle.cluster_name
         use_tpu_vm = config['provider'].get('_has_tpus', False)
+
+        if isinstance(cloud, clouds.AWS):
+            from sky.provision import aws
+            region = config['provider']['region']
+            if terminate:
+                aws.terminate_instances(region, cluster_name)
+            else:
+                aws.stop_instances(region, cluster_name)
+            try:
+                teardown_verb = 'Terminating' if terminate else 'Stopping'
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]{teardown_verb} '
+                        f'[green]{cluster_name}\n'
+                        f'[white] Press Ctrl+C to send the task to background.'):
+                    aws.wait_instances(region, cluster_name, 'terminated')
+            except KeyboardInterrupt:
+                pass
+            if post_teardown_cleanup:
+                return self.post_teardown_cleanup(handle, terminate, purge)
+            else:
+                return True
+
         if terminate and isinstance(cloud, clouds.Azure):
             # Here we handle termination of Azure by ourselves instead of Ray
             # autoscaler.
