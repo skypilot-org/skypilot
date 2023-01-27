@@ -911,6 +911,11 @@ def write_cluster_config(
             tpu_name = cluster_name
 
         user_file_dir = os.path.expanduser(f'{SKY_USER_FILE_PATH}/')
+
+        from sky.skylet.providers.gcp import config as gcp_config  # pylint: disable=import-outside-toplevel
+        config = common_utils.read_yaml(os.path.expanduser(config_dict['ray']))
+        vpc_name = gcp_config.get_usable_vpc(config)
+
         scripts = tuple(
             fill_template(
                 template_name,
@@ -918,6 +923,7 @@ def write_cluster_config(
                     resources_vars, **{
                         'tpu_name': tpu_name,
                         'gcp_project_id': gcp_project_id,
+                        'vpc_name': vpc_name,
                     }),
                 # Use new names for TPU scripts so that different runs can use
                 # different TPUs.  Put in SKY_USER_FILE_PATH to be consistent
@@ -1333,17 +1339,17 @@ def get_node_ips(cluster_yaml: str,
                     break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
-            # This could be triggered if e.g., some logging is added in
-            # skypilot_config, a module that has some code executed whenever
-            # `sky` is imported.
-            logger.warning(
-                f'Expected {n} worker IP(s); found '
-                f'{len(worker_ips)}: {worker_ips}'
-                '\nThis could happen if there is extra output from '
-                '`ray get-worker-ips`, which should be inspected below.'
-                f'\n== Output ==\n{out}'
-                f'\n== Output ends ==')
             if len(worker_ips) > n:
+                # This could be triggered if e.g., some logging is added in
+                # skypilot_config, a module that has some code executed whenever
+                # `sky` is imported.
+                logger.warning(
+                    f'Expected {n} worker IP(s); found '
+                    f'{len(worker_ips)}: {worker_ips}'
+                    '\nThis could happen if there is extra output from '
+                    '`ray get-worker-ips`, which should be inspected below.'
+                    f'\n== Output ==\n{out}'
+                    f'\n== Output ends ==')
                 logger.warning(f'\nProceeding with the last {n} '
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]

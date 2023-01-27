@@ -43,6 +43,12 @@ _JOB_WAITING_STATUS_MESSAGE = ('[bold cyan]Waiting for the job to start'
 _JOB_CANCELLED_MESSAGE = ('[bold cyan]Waiting for the job status to be updated.'
                           '[/] It may take a minute.')
 
+# The maximum time to wait for the spot job status to transition to terminal
+# state, after the job finished. This is a safeguard to avoid the case where
+# the spot job status fails to be updated and keep the `sky spot logs` blocking
+# for a long time.
+_FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS = 20
+
 
 class UserSignal(enum.Enum):
     """The signal to be sent to the user."""
@@ -56,7 +62,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on the spot cluster.
 
-    It can be None, INIT, RUNNING, SUCCEEDED, FAILED or CANCELLED.
+    It can be None, INIT, RUNNING, SUCCEEDED, FAILED, FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     status = None
@@ -119,9 +125,9 @@ def update_spot_job_status(job_id: Optional[int] = None):
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
                       get_end_time: bool) -> float:
-    """Get the started/ended time of the job."""
-    code = job_lib.JobLibCodeGen.get_job_time_payload(job_id=None,
-                                                      is_end=get_end_time)
+    """Get the submitted/ended time of the job."""
+    code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
+        job_id=None, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
@@ -317,10 +323,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     # The spot_status may not be in terminal status yet, since the controllerhas
     # not updated the spot state yet. We wait for a while, until the spot state
     # is updated.
+    wait_seconds = 0
     spot_status = spot_state.get_status(job_id)
     assert spot_status is not None, job_id
-    while not spot_status.is_terminal() and follow:
+    while (not spot_status.is_terminal() and follow and
+           wait_seconds < _FINAL_SPOT_STATUS_WAIT_TIMEOUT_SECONDS):
         time.sleep(1)
+        wait_seconds += 1
         spot_status = spot_state.get_status(job_id)
         assert spot_status is not None, job_id
 
@@ -351,12 +360,12 @@ def dump_spot_job_queue() -> str:
         if end_at is None:
             end_at = time.time()
 
-        job_start_at = job['last_recovered_at'] - job['job_duration']
+        job_submitted_at = job['last_recovered_at'] - job['job_duration']
         if job['status'] == spot_state.SpotStatus.RECOVERING:
             # When job is recovering, the duration is exact job['job_duration']
             job_duration = job['job_duration']
-        elif job_start_at > 0:
-            job_duration = end_at - job_start_at
+        elif job_submitted_at > 0:
+            job_duration = end_at - job_submitted_at
         else:
             # When job_start_at <= 0, that means the last_recovered_at is not
             # set yet, i.e. the job is not started.

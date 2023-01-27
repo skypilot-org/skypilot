@@ -64,9 +64,9 @@ class SpotController:
         logger.info(f'Started monitoring spot task {self._task_name} '
                     f'(id: {self._job_id})')
         spot_state.set_starting(self._job_id)
-        start_at = self._strategy_executor.launch()
+        job_submitted_at = self._strategy_executor.launch()
 
-        spot_state.set_started(self._job_id, start_time=start_at)
+        spot_state.set_started(self._job_id, start_time=job_submitted_at)
         while True:
             time.sleep(spot_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -120,7 +120,9 @@ class SpotController:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
-                elif job_status == job_lib.JobStatus.FAILED:
+                elif job_status in [
+                        job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
+                ]:
                     # The user code has probably crashed, fail immediately.
                     end_time = spot_utils.get_job_timestamp(self._backend,
                                                             self._cluster_name,
@@ -132,10 +134,12 @@ class SpotController:
                                             None,
                                             spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
-                    spot_state.set_failed(
-                        self._job_id,
-                        failure_type=spot_state.SpotStatus.FAILED,
-                        end_time=end_time)
+                    status_to_set = spot_state.SpotStatus.FAILED
+                    if job_status == job_lib.JobStatus.FAILED_SETUP:
+                        status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                    spot_state.set_failed(self._job_id,
+                                          failure_type=status_to_set,
+                                          end_time=end_time)
                     break
                 # Although the cluster is healthy, we fail to access the
                 # job status. Try to recover the job (will not restart the
