@@ -1962,9 +1962,8 @@ def _update_cluster_status_no_lock(
                                                       stream_logs=False):
                 # Reset the autostopping as the cluster is abnormal, and may
                 # not correctly autostop. Resetting the autostop will let
-                # the user know that the autostop is not going to happen to
-                # avoid leakages from the assumption that the cluster will
-                # autostop.
+                # the user know that the autostop may not happen to avoid
+                # leakages from the assumption that the cluster will autostop.
                 try:
                     backend.set_autostop(handle, -1, stream_logs=False)
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except

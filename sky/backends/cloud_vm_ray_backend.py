@@ -3071,7 +3071,7 @@ class CloudVmRayBackend(backends.Backend):
         Returns:
             True if the cluster is definitely autostopping. It is possible
             that the cluster is still autostopping when False is returned,
-            due to errors like network transiant issues.
+            due to errors like transient network issues.
         """
         code = autostop_lib.AutostopCodeGen.is_autostopping()
         returncode, stdout, stderr = self.run_on_head(handle,

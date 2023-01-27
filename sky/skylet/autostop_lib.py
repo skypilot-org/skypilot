@@ -62,15 +62,14 @@ def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
         set_last_active_time_to_now()
 
 
-def set_autostopping_indicator() -> None:
+def set_autostopping_started() -> None:
     """Sets the boot time of the machine when autostop starts.
 
     This function should be called when the cluster is started to autostop,
     and the boot time of the machine will be stored in the configs database
-    as an autostop indicator.
-    It is used for checking whether the cluster is in the process of
-    autostopping. The indicator is valid only when the machine has the same
-    boot time as the one stored in the indicator.
+    as an autostop indicator, which is used for checking whether the cluster
+    is in the process of autostopping. The indicator is valid only when the
+    machine has the same boot time as the one stored in the indicator.
     """
     logger.debug('Setting is_autostopping.')
     configs.set_config(_AUTOSTOP_INDICATOR, str(psutil.boot_time()))
