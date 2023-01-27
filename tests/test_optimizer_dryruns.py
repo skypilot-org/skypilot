@@ -9,6 +9,15 @@ from sky import clouds
 from sky import exceptions
 
 
+def _test_parse_cpus(spec, expected_cpus):
+    with tempfile.NamedTemporaryFile('w') as f:
+        f.write(spec)
+        f.flush()
+        with sky.Dag():
+            task = sky.Task.from_yaml(f.name)
+            assert list(task.resources)[0].cpus == expected_cpus
+
+
 def _test_parse_accelerators(spec, expected_accelerators):
     with tempfile.NamedTemporaryFile('w') as f:
         f.write(spec)
@@ -90,6 +99,12 @@ def test_resources_gcp(monkeypatch):
     _test_resources_launch(monkeypatch, sky.GCP(), 'n1-standard-16')
 
 
+def test_partial_cpus(monkeypatch):
+    _test_resources_launch(monkeypatch, cpus=4)
+    _test_resources_launch(monkeypatch, cpus='4')
+    _test_resources_launch(monkeypatch, cpus='7+')
+
+
 def test_partial_k80(monkeypatch):
     _test_resources_launch(monkeypatch, accelerators='K80')
 
@@ -146,6 +161,41 @@ def test_clouds_not_enabled(monkeypatch):
         _test_resources_launch(monkeypatch,
                                sky.GCP(),
                                enabled_clouds=[sky.AWS()])
+
+
+def test_instance_type_mismatches_cpus(monkeypatch):
+    bad_instance_and_cpus = [
+        # Actual: 8
+        ('m6i.2xlarge', 4),
+        # Actual: 2
+        ('c6i.xlarge', 4),
+    ]
+    for instance, cpus in bad_instance_and_cpus:
+        with pytest.raises(ValueError) as e:
+            _test_resources_launch(monkeypatch,
+                                   sky.AWS(),
+                                   instance_type=instance,
+                                   cpus=cpus)
+        assert 'Infeasible resource demands found' in str(e.value)
+
+
+def test_instance_type_matches_cpus(monkeypatch):
+    _test_resources_launch(monkeypatch,
+                           sky.AWS(),
+                           instance_type='c6i.8xlarge',
+                           cpus=32)
+    _test_resources_launch(monkeypatch,
+                           sky.Azure(),
+                           instance_type='Standard_E8s_v5',
+                           cpus=8)
+    _test_resources_launch(monkeypatch,
+                           sky.GCP(),
+                           instance_type='n1-standard-8',
+                           cpus='7+')
+    _test_resources_launch(monkeypatch,
+                           sky.AWS(),
+                           instance_type='g4dn.2xlarge',
+                           cpus=8)
 
 
 def test_instance_type_mistmatches_accelerators(monkeypatch):
@@ -207,6 +257,13 @@ def test_infer_cloud_from_instance_type(monkeypatch):
     _test_resources(monkeypatch,
                     instance_type='Standard_NC12s_v3',
                     expected_cloud=sky.Azure())
+
+
+def test_invalid_cpus(monkeypatch):
+    for cloud in [sky.AWS(), sky.Azure(), sky.GCP(), None]:
+        with pytest.raises(ValueError) as e:
+            _test_resources(monkeypatch, cloud, cpus='invalid')
+        assert '"cpus" field should be' in str(e.value)
 
 
 def test_invalid_region(monkeypatch):
@@ -285,6 +342,23 @@ def test_valid_image(monkeypatch):
         image_id=
         'projects/deeplearning-platform-release/global/images/family/common-cpu'
     )
+
+
+def test_parse_cpus_from_yaml():
+    spec = textwrap.dedent("""\
+        resources:
+            cpus: 1""")
+    _test_parse_cpus(spec, 1)
+
+    spec = textwrap.dedent("""\
+        resources:
+            cpus: 1.5""")
+    _test_parse_cpus(spec, 1.5)
+
+    spec = textwrap.dedent("""\
+        resources:
+            cpus: '3+' """)
+    _test_parse_cpus(spec, '3+')
 
 
 def test_parse_accelerators_from_yaml():
