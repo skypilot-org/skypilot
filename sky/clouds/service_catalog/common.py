@@ -273,10 +273,25 @@ def get_vcpus_from_instance_type_impl(
 def _filter_with_cpus(df: pd.DataFrame, cpus: Optional[str]) -> pd.DataFrame:
     if cpus is None:
         return df
+
+    # The following code is redundant with the code in resources.py::_set_cpus()
+    # but we add it here for safety.
     if cpus.endswith('+'):
-        return df[df['vCPUs'] >= float(cpus[:-1])]
+        num_cpus_str = cpus[:-1]
     else:
-        return df[df['vCPUs'] == float(cpus)]
+        num_cpus_str = cpus
+    try:
+        num_cpus = float(num_cpus_str)
+    except ValueError:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                f'The "cpus" field should be either a number or '
+                f'a string "<number>+". Found: {cpus!r}') from None
+
+    if cpus.endswith('+'):
+        return df[df['vCPUs'] >= num_cpus]
+    else:
+        return df[df['vCPUs'] == num_cpus]
 
 
 def get_instance_type_for_cpus_impl(
