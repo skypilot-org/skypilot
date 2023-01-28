@@ -60,6 +60,7 @@ def get_config(key: str) -> Optional[str]:
         rows = cursor.execute('SELECT value FROM config WHERE key = ?', (key,))
         for (value,) in rows:
             return value
+        return None
 
 
 @ensure_table
