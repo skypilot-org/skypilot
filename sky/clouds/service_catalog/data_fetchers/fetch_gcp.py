@@ -6,7 +6,7 @@ and queries the GCP API to get the real-time prices of the VMs, GPUs, and TPUs.
 
 import argparse
 import os
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from googleapiclient import discovery
 import pandas as pd
@@ -17,7 +17,7 @@ import pandas as pd
 # GPU pricing: https://cloud.google.com/compute/gpus-pricing
 # TPU pricing: https://cloud.google.com/tpu/pricing
 
-GCP_METADATA_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/metadata/gcp/'  # pylint: disable=line-too-long
+GCP_METADATA_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/fix-gcp/metadata/gcp/'  # pylint: disable=line-too-long
 
 GCE_SERVICE_ID = '6F81-5844-456A'
 TPU_SERVICE_ID = 'E000-3F24-B8AA'
@@ -71,7 +71,7 @@ def get_skus(service_id: str) -> List[Dict[str, Any]]:
         # Prune SKUs that are not Compute (i.e., Storage, Network, and License).
         if sku['category']['resourceFamily'] != 'Compute':
             continue
-        # Prune PD snapshot egress and Vm state.
+        # Prune PD snapshot egress and VM state.
         if sku['category']['resourceGroup'] in ['PdSnapshotEgress', 'VmState']:
             continue
         # Prune commitment SKUs.
@@ -175,7 +175,7 @@ def get_gpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     ]
     df = pd.read_csv(GCP_METADATA_URL + 'gpus.csv')
 
-    def get_gpu_price(row: pd.Series, spot: bool) -> float:
+    def get_gpu_price(row: pd.Series, spot: bool) -> Optional[float]:
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
         gpu_price = None
         for sku in gpu_skus:
@@ -194,12 +194,24 @@ def get_gpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
             gpu_price = unit_price * row['AcceleratorCount']
             break
 
-        assert gpu_price is not None, row
-        return gpu_price
+        if gpu_price is not None:
+            return gpu_price
+
+        # Not found in the SKUs.
+        # FIXME(woosuk): Remove this once the SKUs are updated.
+        gpu = row['AcceleratorName']
+        region = row['Region']
+        if gpu == 'T4':
+            assert region in ['europe-west1', 'europe-west2', 'asia-east2'], row
+        elif gpu == 'P100':
+            assert region in ['europe-west4', 'australia-southeast1'], row
+        return None
 
     df['Price'] = df.apply(lambda row: get_gpu_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_gpu_price(row, spot=True),
                                axis=1)
+    # Drop invalid rows.
+    df = df[df['Price'].notna() & df['SpotPrice'].notna()]
     df = df.reset_index(drop=True)
     return df
 
