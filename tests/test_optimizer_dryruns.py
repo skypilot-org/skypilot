@@ -187,7 +187,7 @@ def test_instance_type_matches_cpus(monkeypatch):
     _test_resources_launch(monkeypatch,
                            sky.Azure(),
                            instance_type='Standard_E8s_v5',
-                           cpus=8)
+                           cpus='8')
     _test_resources_launch(monkeypatch,
                            sky.GCP(),
                            instance_type='n1-standard-8',
@@ -195,7 +195,7 @@ def test_instance_type_matches_cpus(monkeypatch):
     _test_resources_launch(monkeypatch,
                            sky.AWS(),
                            instance_type='g4dn.2xlarge',
-                           cpus=8)
+                           cpus=8.0)
 
 
 def test_instance_type_mistmatches_accelerators(monkeypatch):
