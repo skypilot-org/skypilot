@@ -42,7 +42,7 @@ GPU_NAMES = {
 # Refer to: https://cloud.google.com/compute/docs/gpus
 # NOTE: 16xA100 machines are only supported in certain zones.
 # See https://cloud.google.com/compute/docs/gpus/gpu-regions-zones#limitations
-GPU_COUNTS = {
+GPU_TYPES_TO_COUNTS = {
     'A100-80GB': [1, 2, 4, 8],
     'A100': [1, 2, 4, 8, 16],
     'K80': [1, 2, 4, 8],
@@ -133,7 +133,7 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
 
     # Add the AcceleratorCount column.
     gpu_df['AcceleratorCount'] = gpu_df['AcceleratorName'].apply(
-        lambda acc_name: GPU_COUNTS[acc_name])
+        lambda acc_name: GPU_TYPES_TO_COUNTS[acc_name])
     gpu_df = gpu_df.explode('AcceleratorCount', ignore_index=True)
     gpu_df['AcceleratorCount'] = gpu_df['AcceleratorCount'].astype(int)
 
