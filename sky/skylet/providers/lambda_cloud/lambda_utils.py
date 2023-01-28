@@ -174,8 +174,8 @@ class LambdaCloudClient:
         raise_lambda_error(response)
         self.ssh_key_name = name
         with open(self.credentials, 'w') as f:
-            f.write(f'api_key={self.api_key}\n')
-            f.write(f'ssh_key_name={self.ssh_key_name}\n')
+            f.write(f'api_key = {self.api_key}\n')
+            f.write(f'ssh_key_name = {self.ssh_key_name}\n')
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""

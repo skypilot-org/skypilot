@@ -121,6 +121,9 @@ class LambdaNodeProvider(NodeProvider):
             metadata['tags'] = instance_info['tags']
         ip = vm['ip']
         metadata['external_ip'] = ip
+        # TODO(ewzeng): The internal ip is hard to get, so set it to the
+        # external ip as a hack. This should be changed in the future.
+        #   https://docs.lambdalabs.com/cloud/learn-private-ip-address/
         metadata['internal_ip'] = ip
         return metadata
 

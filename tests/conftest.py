@@ -104,9 +104,8 @@ def pytest_collection_modifyitems(config, items):
     # Handle generic tests
     if _generic_cloud(config) == 'lambda':
         for item in items:
-            if not _is_generic_test(item) or 'no_lambda_cloud' in item.keywords:
-                continue
-            else:
+            if (_is_generic_test(item) and
+                    'no_lambda_cloud' not in item.keywords):
                 item.add_marker(serial_mark)
                 # Adding the serial mark does not update the item.nodeid,
                 # but item.nodeid is important for pytest.xdist_group, e.g.

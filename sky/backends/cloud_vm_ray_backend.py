@@ -1683,9 +1683,11 @@ class RetryingVmProvisioner(object):
                 if not to_provision.cloud.supports(self._requested_features):
                     self._blocked_resources.add(
                         resources_lib.Resources(cloud=to_provision.cloud))
+                    requested_features_str = ', '.join(
+                        [f.value for f in self._requested_features])
                     raise exceptions.ResourcesUnavailableError(
                         f'{to_provision.cloud} does not support: '
-                        f'{self._requested_features}.')
+                        f'{requested_features_str}.')
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
