@@ -151,7 +151,7 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     gpu_df = gpu_df[[
         'AcceleratorName',
         'AcceleratorCount',
-        'GPUInfo',
+        'GpuInfo',
         'Region',
         'AvailabilityZone',
     ]]
