@@ -508,14 +508,14 @@ def _check_firewall_rules(vpc_name, config, compute):
         # Output: dict of (direction, source) -> {protocol -> ports}
         tmp = {}
         for rule in rules:
-            direction = rule.get("direction")
-            sources = rule.get("sourceRanges")
-            allowed = rule.get("allowed")
+            direction = rule.get("direction", "")
+            sources = rule.get("sourceRanges", [])
+            allowed = rule.get("allowed", [])
             for source in sources:
                 tmp[(direction, source)] = tmp.get((direction, source), []) + allowed
-        all = {}
+        source2rules = {}
         for (direction, source), allowed_list in tmp.items():
-            all[(direction, source)] = {}
+            source2rules[(direction, source)] = {}
             for allowed in allowed_list:
                 ports = set()
                 for port in allowed.get('ports', set()):
@@ -525,8 +525,8 @@ def _check_firewall_rules(vpc_name, config, compute):
                     else:
                         ports.update(
                             set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
-                all[(direction, source)][allowed["IPProtocol"]] = ports
-        return all
+                source2rules[(direction, source)][allowed["IPProtocol"]] = ports
+        return source2rules
 
     effective_rules = _merge_and_refine_rule(effective_rules)
     required_rules = _merge_and_refine_rule(required_rules)
