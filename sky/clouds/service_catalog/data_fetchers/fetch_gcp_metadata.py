@@ -1,11 +1,7 @@
-import argparse
 import os
 from typing import List, Tuple
 
 import pandas as pd
-
-ALL_REGION_PREFIX = ''
-US_REGION_PREFIX = 'us-'
 
 # We rely on the data from https://github.com/Cyclenerd/google-cloud-pricing-cost-calculator  # pylint: disable=line-too-long
 # TODO(woosuk): use the official GCP APIs to fetch the data.
@@ -162,30 +158,13 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     return gpu_df
 
 
-def filter_with_region_prefix(
-    df: pd.DataFrame,
-    region_prefix: str,
-) -> pd.DataFrame:
-    return df[df['Region'].str.startswith(region_prefix)]
-
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--all-regions',
-        action='store_true',
-        help='Fetch all global regions, not just the U.S. ones.')
-    args = parser.parse_args()
-    region_prefix_filter = ALL_REGION_PREFIX if args.all_regions else US_REGION_PREFIX
-
     os.makedirs('metadata/gcp/', exist_ok=True)
 
     gcp_vm_df, gcp_megagpu_zones = get_vm_df()
-    gcp_vm_df = filter_with_region_prefix(gcp_vm_df, region_prefix_filter)
     gcp_vm_df.to_csv('metadata/gcp/instances.csv', index=False)
     print('GCP VM metadata saved to metadata/gcp/instances.csv')
 
     gcp_gpu_df = get_gpu_df(gcp_megagpu_zones)
-    gcp_gpu_df = filter_with_region_prefix(gcp_gpu_df, region_prefix_filter)
     gcp_gpu_df.to_csv('metadata/gcp/gpus.csv', index=False)
     print('GCP GPU metadata saved to metadata/gcp/gpus.csv')
