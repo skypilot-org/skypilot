@@ -99,8 +99,14 @@ def get_vm_df() -> Tuple[pd.DataFrame, List[str]]:
     # Double-check that all the regions and zones are valid.
     assert_zones_are_valid(vm_df['AvailabilityZone'].unique())
 
-    vm_df = vm_df[
-        ['InstanceType', 'vCPUs', 'MemoryGiB', 'Region', 'AvailabilityZone']]
+    # Reorder the columns.
+    vm_df = vm_df[[
+        'InstanceType',
+        'vCPUs',
+        'MemoryGiB',
+        'Region',
+        'AvailabilityZone',
+    ]]
     vm_df = vm_df.reset_index(drop=True)
 
     # Get the list of zones that support 16xA100.
@@ -142,8 +148,16 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     # Double-check that all the regions and zones are valid.
     assert_zones_are_valid(gpu_df['AvailabilityZone'].unique())
 
-    gpu_df = gpu_df[
-        ['AcceleratorName', 'AcceleratorCount', 'Region', 'AvailabilityZone']]
+    # Add GPUInfo column.
+    gpu_df['GPUInfo'] = ''
+    # Reorder the columns.
+    gpu_df = gpu_df[[
+        'AcceleratorName', 
+        'AcceleratorCount',
+        'GPUInfo',
+        'Region',
+        'AvailabilityZone',
+    ]]
     gpu_df = gpu_df.reset_index(drop=True)
     return gpu_df
 
