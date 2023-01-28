@@ -3,6 +3,9 @@
 This script fetches the metadata of GCP from a public GitHub repository
 and saves them as CSV files. The metadata include all the information
 except the (on-demand and spot) prices.
+
+NOTE: The TPU metadata is not fetched by this script. It is manually
+maintained by the SkyPilot developers.
 """
 import os
 from typing import List, Tuple
