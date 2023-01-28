@@ -145,7 +145,7 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     assert_zones_are_valid(gpu_df['AvailabilityZone'].unique())
 
     # Add GPUInfo column.
-    gpu_df['GPUInfo'] = ''
+    gpu_df['GpuInfo'] = ''
     # Reorder the columns.
     gpu_df = gpu_df[[
         'AcceleratorName', 
