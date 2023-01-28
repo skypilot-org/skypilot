@@ -162,10 +162,10 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
 if __name__ == '__main__':
     os.makedirs('metadata/gcp/', exist_ok=True)
 
-    gcp_vm_df, gcp_megagpu_zones = get_vm_df()
+    gcp_vm_df, gcp_a2_megagpu_16g_zones = get_vm_df()
     gcp_vm_df.to_csv('metadata/gcp/instances.csv', index=False)
     print('GCP VM metadata saved to metadata/gcp/instances.csv')
 
-    gcp_gpu_df = get_gpu_df(gcp_megagpu_zones)
+    gcp_gpu_df = get_gpu_df(gcp_a2_megagpu_16g_zones)
     gcp_gpu_df.to_csv('metadata/gcp/gpus.csv', index=False)
     print('GCP GPU metadata saved to metadata/gcp/gpus.csv')
