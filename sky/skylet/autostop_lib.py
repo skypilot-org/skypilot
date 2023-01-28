@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from sky import sky_logging
 from sky.skylet import configs
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -16,6 +17,10 @@ _AUTOSTOP_CONFIG_KEY = 'autostop_config'
 # user-issued commands (this module) and the Skylet process running the
 # AutostopEvent need to access that state.
 _AUTOSTOP_LAST_ACTIVE_TIME = 'autostop_last_active_time'
+# AutostopEvent sets this to the boot time when the autostop of the cluster
+# starts. This is used for checking whether the cluster is in the process
+# of autostopping for the current machine.
+_AUTOSTOP_INDICATOR = 'autostop_indicator'
 
 
 class AutostopConfig:
@@ -57,6 +62,26 @@ def set_autostop(idle_minutes: int, backend: Optional[str], down: bool) -> None:
         set_last_active_time_to_now()
 
 
+def set_autostopping_started() -> None:
+    """Sets the boot time of the machine when autostop starts.
+
+    This function should be called when the cluster is started to autostop,
+    and the boot time of the machine will be stored in the configs database
+    as an autostop indicator, which is used for checking whether the cluster
+    is in the process of autostopping. The indicator is valid only when the
+    machine has the same boot time as the one stored in the indicator.
+    """
+    logger.debug('Setting is_autostopping.')
+    configs.set_config(_AUTOSTOP_INDICATOR, str(psutil.boot_time()))
+
+
+def get_is_autostopping_payload() -> str:
+    """Returns whether the cluster is in the process of autostopping."""
+    result = configs.get_config(_AUTOSTOP_INDICATOR)
+    is_autostopping = (result == str(psutil.boot_time()))
+    return common_utils.encode_payload(is_autostopping)
+
+
 def get_last_active_time() -> float:
     """Returns the last active time, or -1 if none has been set."""
     result = configs.get_config(_AUTOSTOP_LAST_ACTIVE_TIME)
@@ -86,6 +111,11 @@ class AutostopCodeGen:
             f'autostop_lib.set_autostop({idle_minutes}, {backend!r},'
             f' {down})',
         ]
+        return cls._build(code)
+
+    @classmethod
+    def is_autostopping(cls) -> str:
+        code = ['print(autostop_lib.get_is_autostopping_payload())']
         return cls._build(code)
 
     @classmethod

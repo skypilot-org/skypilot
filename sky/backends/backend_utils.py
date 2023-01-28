@@ -1950,24 +1950,34 @@ def _update_cluster_status_no_lock(
     #     abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
-    # reset.
+    # reset (unless it's autostopping/autodowning.).
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
     if is_abnormal:
-        # Reset the autostop to avoid false information with best effort.
-        # Side effect: if the status is refreshed during autostopping, the
-        # autostop field in the local cache will be reset, even though the
-        # cluster will still be correctly stopped.
-        try:
-            backend = backends.CloudVmRayBackend()
-            backend.set_autostop(handle, -1, stream_logs=False)
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to reset autostop. Due to '
-                         f'{common_utils.format_exception(e)}')
-        global_user_state.set_cluster_autostop_value(handle.cluster_name,
-                                                     -1,
-                                                     to_down=False)
+        backend = get_backend_from_handle(handle)
+        if isinstance(backend,
+                      backends.CloudVmRayBackend) and record['autostop'] >= 0:
+            if not backend.is_definitely_autostopping(handle,
+                                                      stream_logs=False):
+                # Reset the autostopping as the cluster is abnormal, and may
+                # not correctly autostop. Resetting the autostop will let
+                # the user know that the autostop may not happen to avoid
+                # leakages from the assumption that the cluster will autostop.
+                try:
+                    backend.set_autostop(handle, -1, stream_logs=False)
+                except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to reset autostop. Due to '
+                                 f'{common_utils.format_exception(e)}')
+                global_user_state.set_cluster_autostop_value(
+                    handle.cluster_name, -1, to_down=False)
+            else:
+                ux_utils.console_newline()
+                operation_str = 'autodowning' if record[
+                    'to_down'] else 'autostopping'
+                logger.info(
+                    f'Cluster {cluster_name!r} is {operation_str}. Setting to '
+                    'INIT status; try refresh again in a while.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
