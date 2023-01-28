@@ -180,7 +180,18 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        """Returns the default instance type with the given number of vCPUs.
+
+        For example, if cpus='4', this method returns the default instance type
+        with 4 vCPUs.  If cpus='4+', this method returns the default instance
+        type with 4 or more vCPUs.
+
+        When cpus is None, this method will never return None.
+        This method may return None if the cloud's default instance family
+        does not have a VM with the given number of vCPUs (e.g., when cpus='7').
+        """
         raise NotImplementedError
 
     @classmethod
