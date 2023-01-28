@@ -15,7 +15,7 @@ GCP_VM_ZONES_URL = 'https://cloud.google.com/compute/docs/regions-zones'
 INVALID_REGIONS = [
     'us-east2',
     'us-east7',
-    'us-central2',
+    'us-central2',  # NOTE: us-central2-b has TPU v4.
     'europe-west5',
 ]
 
@@ -24,9 +24,6 @@ INVALID_ZONES = [
     'us-east1-a',
     'us-central1-d',
 ]
-
-# Refer to: https://github.com/skypilot-org/skypilot/issues/1006
-UNSUPPORTED_VMS = ['t2a-standard', 'f1-micro']
 
 # GPU names in GCP -> GPU names in SkyPilot.
 GPU_NAMES = {
