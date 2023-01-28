@@ -17,8 +17,7 @@ import pandas as pd
 # GPU pricing: https://cloud.google.com/compute/gpus-pricing
 # TPU pricing: https://cloud.google.com/tpu/pricing
 
-# FIXME: fix-gcp -> master
-GCP_METADATA_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/fix-gcp/metadata/gcp/'  # pylint: disable=line-too-long
+GCP_METADATA_URL = 'https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/metadata/gcp/'  # pylint: disable=line-too-long
 
 GCE_SERVICE_ID = '6F81-5844-456A'
 TPU_SERVICE_ID = 'E000-3F24-B8AA'
