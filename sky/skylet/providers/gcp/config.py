@@ -542,7 +542,6 @@ def _check_firewall_rules(vpc_name, config, compute):
         for protocol, ports in allowed_req.items():
             ports_eff = allowed_eff.get(protocol, set())
             if not ports.issubset(ports_eff):
-                print("ports", ports, "ports_eff", ports_eff)
                 return False
     return True
 
