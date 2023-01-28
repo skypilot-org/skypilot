@@ -47,6 +47,12 @@ Available fields:
       # Format: <name>:<count> (or simply <name>, short for a count of 1).
       accelerators: V100:4
 
+      # Number of vCPUs per node (optional).
+      #
+      # Format: <count> (exactly <count> vCPUs) or <count>+
+      # (at least <count> vCPUs).
+      cpus: 32
+
       # Instance type to use (optional). If 'accelerators' is specified,
       # the corresponding instance type is automatically inferred.
       instance_type: p3.8xlarge
