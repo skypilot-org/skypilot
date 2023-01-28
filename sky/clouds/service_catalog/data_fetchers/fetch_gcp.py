@@ -59,8 +59,8 @@ def get_skus(service_id: str) -> List[Dict[str, Any]]:
         if page_token == '':
             response = cb.services().skus().list(parent=service_name).execute()
         else:
-            response = cb.services().skus().list(parent=service_name,
-                                                 pageToken=page_token).execute()
+            response = cb.services().skus().list(
+                parent=service_name, pageToken=page_token).execute()
         skus += response['skus']
         page_token = response['nextPageToken']
         if not page_token:
@@ -172,7 +172,8 @@ def get_vm_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
 
 def get_gpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     gpu_skus = [
-        sku for sku in skus if sku['category']['resourceGroup'] == 'GPU']
+        sku for sku in skus if sku['category']['resourceGroup'] == 'GPU'
+    ]
     df = pd.read_csv(GCP_METADATA_URL + 'gpus.csv')
 
     def get_gpu_price(row: pd.Series, spot: bool) -> float:
@@ -196,8 +197,8 @@ def get_gpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
         return gpu_price
 
     df['Price'] = df.apply(lambda row: get_gpu_price(row, spot=False), axis=1)
-    df['SpotPrice'] = df.apply(
-        lambda row: get_gpu_price(row, spot=True), axis=1)
+    df['SpotPrice'] = df.apply(lambda row: get_gpu_price(row, spot=True),
+                               axis=1)
     df = df.reset_index(drop=True)
     return df
 
@@ -239,8 +240,8 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)
-    df['SpotPrice'] = df.apply(
-        lambda row: get_tpu_price(row, spot=True), axis=1)
+    df['SpotPrice'] = df.apply(lambda row: get_tpu_price(row, spot=True),
+                               axis=1)
     df = df.reset_index(drop=True)
     return df
 
