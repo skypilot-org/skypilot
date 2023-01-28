@@ -261,7 +261,7 @@ def wait_instances(region: str, cluster_name: str, state: str):
     waiter.wait(WaiterConfig={"Delay": 5}, Filters=filters)
 
 
-def get_instance_ips(region: str, cluster_name: str, public_ips: bool):
+def get_instance_ips(region: str, cluster_name: str):
     ec2 = utils.create_ec2_resource(region=region)
     filters = [
         {
@@ -274,9 +274,7 @@ def get_instance_ips(region: str, cluster_name: str, public_ips: bool):
         },
     ]
     instances = ec2.instances.filter(Filters=filters)
-    # TODO: use 'Name' in inst.tags
-    if public_ips:
-        ips = [(inst.id, inst.public_ip_address) for inst in instances]
-    else:
-        ips = [(inst.id, inst.private_ip_address) for inst in instances]
+    # TODO: use 'Name' in inst.tags instead of 'id'
+    ips = [(inst.id, (inst.private_ip_address, inst.public_ip_address))
+           for inst in instances]
     return dict(sorted(ips))

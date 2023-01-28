@@ -1425,17 +1425,22 @@ class RetryingVmProvisioner(object):
         }
         raw_config['provider']['num_nodes'] = original_config['max_workers'] + 1
 
-        config = provider.bootstrap(raw_config)
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Bootstrapping configurations for '
+                f'[green]{cluster_name}[white] ...'):
+            config = provider.bootstrap(raw_config)
 
         for retry_cnt in range(_MAX_RAY_UP_RETRY):
             try:
-                provider.create_or_resume_instances(
-                    region_name,
-                    cluster_name,
-                    config['node_config'], {},
-                    count=config['provider']['num_nodes'],
-                    resume_stopped_nodes=True)
-                provider.wait_instances(region_name, cluster_name, 'running')
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Starting instances for '
+                        f'[green]{cluster_name}[white] ...'):
+                    provider.create_or_resume_instances(
+                        region_name,
+                        cluster_name,
+                        config['node_config'], {},
+                        count=config['provider']['num_nodes'],
+                        resume_stopped_nodes=True)
                 break
             except Exception as e:
                 if retry_cnt >= _MAX_RAY_UP_RETRY - 1:
@@ -1446,6 +1451,11 @@ class RetryingVmProvisioner(object):
                     'Retrying launching in {:.1f} seconds.'.format(sleep))
                 time.sleep(sleep)
 
+        with backend_utils.safe_console_status(
+                f'[bold cyan]Waiting '
+                f'[green]{cluster_name}[bold cyan] to be started...'):
+            provider.wait_instances(region_name, cluster_name, 'running')
+
         logger.debug(f'Cluster up takes {time.time() - start} seconds with '
                      f'{retry_cnt} retries.')
 
@@ -1455,15 +1465,16 @@ class RetryingVmProvisioner(object):
                         f'{style.RESET_ALL}')
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
-        ip_dict = provider.get_instance_ips(region_name,
-                                            cluster_name,
-                                            public_ips=True)
-
+        ip_dict = provider.get_instance_ips(region_name, cluster_name)
+        #             logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
+        #                         f'{cluster_name!r}.')
+        ip_tuples = list(ip_dict.values())
         with backend_utils.safe_console_status(
-                f'[bold cyan]Waiting for SSH connection for '
+                f'[bold cyan]Waiting SSH connection for '
                 f'[green]{cluster_name}[white] ...'):
-            utils.wait_for_ssh(list(ip_dict.values()))
-        _, head_ip = list(ip_dict.items())[0]
+            utils.wait_for_ssh([t[1] for t in ip_tuples])
+
+        head_ip = ip_tuples[0][1]
         return self.GangSchedulingStatus.CLUSTER_READY, '', '', head_ip
 
     # TODO: deprecating this method
@@ -2311,41 +2322,55 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
-            ip_list = handle.external_ips(max_attempts=_FETCH_IP_MAX_ATTEMPTS,
-                                          use_cached_ips=False)
+            if isinstance(to_provision.cloud, clouds.AWS):
+                from sky.provision import aws as aws_provisioner
+                region = handle.launched_resources.region
+                ip_dict = aws_provisioner.get_instance_ips(region, cluster_name)
+                ip_tuples = list(ip_dict.values())
+                handle.stable_internal_external_ips = ip_tuples
+                ip_list = [t[1] for t in ip_tuples]
+            else:
+                ip_list = handle.external_ips(
+                    max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
 
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
-            # Get actual zone info and save it into handle.
-            # NOTE: querying zones is expensive, observed 1node GCP >=4s.
-            zones = config_dict['zones']
-            if zones is not None and len(zones) == 1:  # zones is None for Azure
-                # Optimization for if the provision request was for 1 zone
-                # (currently happens only for GCP since it uses per-zone
-                # provisioning), then we know the exact zone already.
-                handle.launched_resources = handle.launched_resources.copy(
-                    zone=zones[0].name)
-            elif (task.num_nodes == 1 or
-                  handle.launched_resources.zone is not None):
-                # Query zone if the cluster has 1 node, or a zone is
-                # specifically requested for a multinode cluster.  Otherwise
-                # leave the zone field to None because head and worker nodes
-                # can be launched in different zones.
-                get_zone_cmd = (
-                    handle.launched_resources.cloud.get_zone_shell_cmd())
-                if get_zone_cmd is not None:
-                    returncode, stdout, stderr = self.run_on_head(
-                        handle, get_zone_cmd, require_outputs=True)
-                    subprocess_utils.handle_returncode(returncode,
-                                                       get_zone_cmd,
-                                                       'Failed to get zone',
-                                                       stderr=stderr,
-                                                       stream_logs=stream_logs)
-                    # zone will be checked during Resources cls
-                    # initialization.
+            if isinstance(to_provision.cloud, clouds.AWS):
+                # zone is set during provisioning
+                assert handle.launched_resources.region is not None
+            else:
+                # Get actual zone info and save it into handle.
+                # NOTE: querying zones is expensive, observed 1node GCP >=4s.
+                zones = config_dict['zones']
+                if zones is not None and len(
+                        zones) == 1:  # zones is None for Azure
+                    # Optimization for if the provision request was for 1 zone
+                    # (currently happens only for GCP since it uses per-zone
+                    # provisioning), then we know the exact zone already.
                     handle.launched_resources = handle.launched_resources.copy(
-                        zone=stdout.strip())
+                        zone=zones[0].name)
+                elif (task.num_nodes == 1 or
+                      handle.launched_resources.zone is not None):
+                    # Query zone if the cluster has 1 node, or a zone is
+                    # specifically requested for a multinode cluster.  Otherwise
+                    # leave the zone field to None because head and worker nodes
+                    # can be launched in different zones.
+                    get_zone_cmd = (
+                        handle.launched_resources.cloud.get_zone_shell_cmd())
+                    if get_zone_cmd is not None:
+                        returncode, stdout, stderr = self.run_on_head(
+                            handle, get_zone_cmd, require_outputs=True)
+                        subprocess_utils.handle_returncode(
+                            returncode,
+                            get_zone_cmd,
+                            'Failed to get zone',
+                            stderr=stderr,
+                            stream_logs=stream_logs)
+                        # zone will be checked during Resources cls
+                        # initialization.
+                        handle.launched_resources = handle.launched_resources.copy(
+                            zone=stdout.strip())
 
             usage_lib.messages.usage.update_cluster_resources(
                 handle.launched_nodes, handle.launched_resources)
