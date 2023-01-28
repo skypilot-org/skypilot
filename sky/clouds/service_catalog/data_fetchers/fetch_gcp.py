@@ -179,6 +179,8 @@ def get_gpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
         gpu_price = None
         for sku in gpu_skus:
+            if row['Region'] not in sku['serviceRegions']:
+                continue
             if sku['category']['usageType'] != ondemand_or_spot:
                 continue
 
@@ -208,6 +210,15 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
     def get_tpu_price(row: pd.Series, spot: bool) -> float:
         tpu_price = None
         for sku in skus:
+            # NOTE: Because us-east1-d is a hidden zone that supports TPUs,
+            # no price information is available for it. As a workaround,
+            # we asssume that the price is the same as us-central1.
+            tpu_region = row['Region']
+            if tpu_region == 'us-east1':
+                tpu_region = 'us-central1'
+
+            if tpu_region not in sku['serviceRegions']:
+                continue
             description = sku['description']
             # NOTE: 'usageType' of preemptible TPUs are 'OnDemand'.
             if spot:
@@ -232,7 +243,8 @@ def get_tpu_df(skus: List[Dict[str, Any]]) -> pd.DataFrame:
                     continue
 
             unit_price = _get_unit_price(sku)
-            tpu_price = unit_price * row['AcceleratorCount']
+            tpu_device_price = unit_price * row['AcceleratorCount']
+            tpu_price = tpu_device_price * num_cores / 8
             break
 
         assert tpu_price is not None, row
