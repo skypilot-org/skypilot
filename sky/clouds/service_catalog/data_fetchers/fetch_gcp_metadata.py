@@ -76,12 +76,13 @@ def get_vm_df() -> Tuple[pd.DataFrame, List[str]]:
     # Drop unused columns.
     vm_df = vm_df[['NAME', 'CPUS', 'MEMORY_GB', 'ZONE']]
     # Rename the columns.
-    vm_df = vm_df.rename(columns={
-        'NAME': 'InstanceType',
-        'CPUS': 'vCPUs',
-        'MEMORY_GB': 'MemoryGiB',
-        'ZONE': 'AvailabilityZone',
-    })
+    vm_df = vm_df.rename(
+        columns={
+            'NAME': 'InstanceType',
+            'CPUS': 'vCPUs',
+            'MEMORY_GB': 'MemoryGiB',
+            'ZONE': 'AvailabilityZone',
+        })
     # Add the Region column.
     vm_df['Region'] = vm_df['AvailabilityZone'].apply(lambda zone: zone[:-2])
 
@@ -106,8 +107,8 @@ def get_vm_df() -> Tuple[pd.DataFrame, List[str]]:
     vm_df = vm_df.reset_index(drop=True)
 
     # Get the list of zones that support 16xA100.
-    a2_megagpu_16g_zones = vm_df[
-        vm_df['InstanceType'] == 'a2-megagpu-16g']['AvailabilityZone'].unique()
+    a2_megagpu_16g_df = vm_df[vm_df['InstanceType'] == 'a2-megagpu-16g']
+    a2_megagpu_16g_zones = a2_megagpu_16g_df['AvailabilityZone'].unique()
     return vm_df, a2_megagpu_16g_zones
 
 
@@ -138,8 +139,8 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
 
     # Remove 16xA100 machines from zones that do not support them.
     gpu_df = gpu_df[~((gpu_df['AcceleratorName'] == 'A100') &
-                    (gpu_df['AcceleratorCount'] == 16) &
-                    (~gpu_df['AvailabilityZone'].isin(a2_megagpu_16g_zones)))]
+                      (gpu_df['AcceleratorCount'] == 16) &
+                      (~gpu_df['AvailabilityZone'].isin(a2_megagpu_16g_zones)))]
 
     # Double-check that all the regions and zones are valid.
     assert_zones_are_valid(gpu_df['AvailabilityZone'].unique())
@@ -148,7 +149,7 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     gpu_df['GpuInfo'] = ''
     # Reorder the columns.
     gpu_df = gpu_df[[
-        'AcceleratorName', 
+        'AcceleratorName',
         'AcceleratorCount',
         'GPUInfo',
         'Region',
