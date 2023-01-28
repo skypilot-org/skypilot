@@ -140,7 +140,7 @@ def get_gpu_df(a2_megagpu_16g_zones: List[str]) -> pd.DataFrame:
     gpu_df = gpu_df.explode('AcceleratorCount', ignore_index=True)
     gpu_df['AcceleratorCount'] = gpu_df['AcceleratorCount'].astype(int)
 
-    # Remove 16xA100 machines from zones that don't support them.
+    # Remove 16xA100 machines from zones that do not support them.
     gpu_df = gpu_df[~((gpu_df['AcceleratorName'] == 'A100') &
                     (gpu_df['AcceleratorCount'] == 16) &
                     (~gpu_df['AvailabilityZone'].isin(a2_megagpu_16g_zones)))]
