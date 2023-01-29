@@ -2329,6 +2329,26 @@ class CloudVmRayBackend(backends.Backend):
                 ip_tuples = list(ip_dict.values())
                 handle.stable_internal_external_ips = ip_tuples
                 ip_list = [t[1] for t in ip_tuples]
+                # mount skylet wheels here
+                self._execute_file_mounts(
+                    handle,
+                    file_mounts={
+                        backend_utils.SKY_REMOTE_PATH + '/' + wheel_hash:
+                            str(local_wheel_path)
+                    })
+                ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                    handle.cluster_yaml)
+                runners = command_runner.SSHCommandRunner.make_runner_list(
+                    ip_list, **ssh_credentials)
+
+                setup_commands = common_utils.read_yaml(
+                    cluster_config_file)['setup_commands']
+
+                def _setup_node(runner: command_runner.SSHCommandRunner):
+                    for command in setup_commands:
+                        runner.run(command)
+
+                subprocess_utils.run_in_parallel(_setup_node, runners)
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
