@@ -2341,14 +2341,22 @@ class CloudVmRayBackend(backends.Backend):
                 runners = command_runner.SSHCommandRunner.make_runner_list(
                     ip_list, **ssh_credentials)
 
-                setup_commands = common_utils.read_yaml(
-                    cluster_config_file)['setup_commands']
+                config_from_yaml = common_utils.read_yaml(cluster_config_file)
 
                 def _setup_node(runner: command_runner.SSHCommandRunner):
-                    for command in setup_commands:
-                        runner.run(command)
+                    for cmd in config_from_yaml['setup_commands']:
+                        runner.run(cmd)
 
                 subprocess_utils.run_in_parallel(_setup_node, runners)
+
+                for cmd in config_from_yaml['head_start_ray_commands']:
+                    runners[0].run(cmd)
+
+                def _setup_ray_worker(runner: command_runner.SSHCommandRunner):
+                    for cmd in config_from_yaml['worker_start_ray_commands']:
+                        runner.run(cmd)
+
+                subprocess_utils.run_in_parallel(_setup_ray_worker, runners[1:])
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
