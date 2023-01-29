@@ -1466,8 +1466,6 @@ class RetryingVmProvisioner(object):
             self._tpu_pod_setup(cluster_config_file, cluster_handle)
 
         ip_dict = provider.get_instance_ips(region_name, cluster_name)
-        #             logger.info(f'{colorama.Style.BRIGHT}Launching on local cluster '
-        #                         f'{cluster_name!r}.')
         ip_tuples = list(ip_dict.values())
         with backend_utils.safe_console_status(
                 f'[bold cyan]Waiting SSH connection for '
@@ -2322,7 +2320,7 @@ class CloudVmRayBackend(backends.Backend):
                 tpu_create_script=config_dict.get('tpu-create-script'),
                 tpu_delete_script=config_dict.get('tpu-delete-script'))
 
-            if isinstance(to_provision.cloud, clouds.AWS):
+            if isinstance(handle.launched_resources.cloud, clouds.AWS):
                 from sky.provision import aws as aws_provisioner
                 region = handle.launched_resources.region
                 ip_dict = aws_provisioner.get_instance_ips(region, cluster_name)
@@ -2365,7 +2363,7 @@ class CloudVmRayBackend(backends.Backend):
             if 'tpu_name' in config_dict:
                 self._set_tpu_name(handle, config_dict['tpu_name'])
 
-            if isinstance(to_provision.cloud, clouds.AWS):
+            if isinstance(handle.launched_resources.cloud, clouds.AWS):
                 # zone is set during provisioning
                 assert handle.launched_resources.region is not None
             else:
