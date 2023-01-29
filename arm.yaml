@@ -1,0 +1,17 @@
+
+# resources:
+#   cloud: aws
+#   instance_type: m6g.2xlarge
+#   region: us-east-1
+  # image_id: ami-0a7eae50da6b985bb # Ubuntu 18.04
+  # image_id: ami-0888c389af05d881a # Ubuntu 20.04
+  # image_id: ami-01625be155ee390e9 # Ubuntu 22.04 
+
+resources:
+  cloud: gcp
+  instance_type: t2a-standard-8
+  image_id: projects/debian-cloud/global/images/debian-11-bullseye-arm64-v20221102
+
+
+run: |
+  echo "hello world!"
