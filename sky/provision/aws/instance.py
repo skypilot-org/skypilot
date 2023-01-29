@@ -258,6 +258,10 @@ def wait_instances(region: str, cluster_name: str, state: str):
         }
     ]
 
+    # AWS wait blocks on empty list, so we have to exit early.
+    if len(list(ec2.instances.filter(Filters=filters))) <= 0:
+        return
+
     if state == 'running':
         waiter = client.get_waiter("instance_running")
     elif state == 'stopped':
