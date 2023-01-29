@@ -247,20 +247,18 @@ def wait_instances(region: str, cluster_name: str, state: str):
             'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
             'Values': [cluster_name],
         },
+    ]
+
+    if state != 'terminated':
         # NOTE: there could be a terminated AWS cluster with the same cluster name.
         # Wait the cluster result in errors (cannot wait for 'terminated').
-        # So here we filter all states except 'terminated'.
-        {
+        # So here we exclude terminated instances.
+        filters.append({
             'Name': 'instance-state-name',
             'Values': [
                 'pending', 'running', 'shutting-down', 'stopping', 'stopped'
             ],
-        }
-    ]
-
-    # AWS wait blocks on empty list, so we have to exit early.
-    if len(list(ec2.instances.filter(Filters=filters))) <= 0:
-        return
+        })
 
     if state == 'running':
         waiter = client.get_waiter("instance_running")
