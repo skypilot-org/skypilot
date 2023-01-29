@@ -2354,6 +2354,7 @@ class CloudVmRayBackend(backends.Backend):
 
                 def _setup_ray_worker(runner: command_runner.SSHCommandRunner):
                     for cmd in config_from_yaml['worker_start_ray_commands']:
+                        cmd = cmd.replace('$RAY_HEAD_IP', ip_list[0][0])
                         runner.run(cmd)
 
                 subprocess_utils.run_in_parallel(_setup_ray_worker, runners[1:])
