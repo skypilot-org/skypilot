@@ -156,13 +156,6 @@ def resume_instances(region: str,
             'Values': [cluster_name],
         },
     ]
-    # This tag may not always be present.
-    if TAG_RAY_USER_NODE_TYPE in tags:
-        filters.append({
-            'Name': f'tag:{TAG_RAY_USER_NODE_TYPE}',
-            'Values': [tags[TAG_RAY_USER_NODE_TYPE]],
-        })
-
     reuse_nodes = list(ec2.instances.filter(Filters=filters))
     if count is not None:
         reuse_nodes = reuse_nodes[:count]
@@ -173,10 +166,12 @@ def resume_instances(region: str,
                 node.wait_until_stopped()
 
         ec2.meta.client.start_instances(InstanceIds=reuse_node_ids)
-        ec2.meta.client.create_tags(
-            Resources=reuse_node_ids,
-            Tags=_format_tags(tags),
-        )
+        if tags:
+            # empty tags will result in error in the API call
+            ec2.meta.client.create_tags(
+                Resources=reuse_node_ids,
+                Tags=_format_tags(tags),
+            )
     return {n.id: n for n in reuse_nodes}
 
 
@@ -189,6 +184,7 @@ def create_or_resume_instances(region: str, cluster_name: str,
     Returns dict mapping instance id to ec2.Instance object for the created
     instances.
     """
+    # TODO(suquark): should we also check if there are running instances?
     # sort tags by key to support deterministic unit test stubbing
     tags = dict(sorted(copy.deepcopy(tags).items()))
 
