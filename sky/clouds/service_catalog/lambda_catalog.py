@@ -62,11 +62,13 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
 def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
     if cpus is None:
         cpus = str(_DEFAULT_NUM_VCPUS)
-    # Set to gpu_1x_a100_sxm4 to be the default type; return None if vCPUs
-    # don't match (i.e. cpus != 30)
-    # TODO(ewzeng): support a default type if cpus != 30.
-    df = _df[_df['InstanceType'].str.startswith('gpu_1x_a100_sxm4')]
-    return common.get_instance_type_for_cpus_impl(df, cpus)
+    # Set to gpu_1x_a100_sxm4 to be the default instance type if match vCPU
+    # requirement.
+    df = _df[_df['InstanceType'].eq('gpu_1x_a100_sxm4')]
+    instance = common.get_instance_type_for_cpus_impl(df, cpus)
+    if not instance:
+        instance = common.get_instance_type_for_cpus_impl(_df, cpus)
+    return instance
 
 
 def get_accelerators_from_instance_type(
