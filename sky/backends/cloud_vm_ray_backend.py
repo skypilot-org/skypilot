@@ -2356,9 +2356,10 @@ class CloudVmRayBackend(backends.Backend):
                         f'[green]{cluster_name}[white] ...'):
                     provisioner_setup.start_ray(runners, ip_tuples[0][0])
 
-                # runners[0].run(
-                #     '((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);'
-                # )
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Starting Skylet for '
+                        f'[green]{cluster_name}[white] ...'):
+                    provisioner_setup.start_skylet(runners[0])
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
@@ -3095,7 +3096,10 @@ class CloudVmRayBackend(backends.Backend):
                         f'[green]{cluster_name}\n'
                         f'[white] Press Ctrl+C to send the task to background.'
                 ):
-                    aws.wait_instances(region, cluster_name, 'terminated')
+                    if terminate:
+                        aws.wait_instances(region, cluster_name, 'terminated')
+                    else:
+                        aws.wait_instances(region, cluster_name, 'stopped')
             except KeyboardInterrupt:
                 pass
             if post_teardown_cleanup:
