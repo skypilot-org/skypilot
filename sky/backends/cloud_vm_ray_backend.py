@@ -2322,6 +2322,7 @@ class CloudVmRayBackend(backends.Backend):
 
             if isinstance(handle.launched_resources.cloud, clouds.AWS):
                 from sky.provision import aws as aws_provisioner
+                from sky.provision import setup as provisioner_setup
                 region = handle.launched_resources.region
                 ip_dict = aws_provisioner.get_instance_ips(region, cluster_name)
                 ip_tuples = list(ip_dict.values())
@@ -2343,19 +2344,21 @@ class CloudVmRayBackend(backends.Backend):
 
                 def _setup_node(runner: command_runner.SSHCommandRunner):
                     for cmd in config_from_yaml['setup_commands']:
-                        runner.run(cmd)
+                        runner.run(cmd, stream_logs=False)
 
-                subprocess_utils.run_in_parallel(_setup_node, runners)
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Installing dependencies for '
+                        f'[green]{cluster_name}[white] ...'):
+                    subprocess_utils.run_in_parallel(_setup_node, runners)
 
-                for cmd in config_from_yaml['head_start_ray_commands']:
-                    runners[0].run(cmd)
+                with backend_utils.safe_console_status(
+                        f'[bold cyan]Starting Ray for '
+                        f'[green]{cluster_name}[white] ...'):
+                    provisioner_setup.start_ray(runners, ip_tuples[0][0])
 
-                def _setup_ray_worker(runner: command_runner.SSHCommandRunner):
-                    for cmd in config_from_yaml['worker_start_ray_commands']:
-                        cmd = cmd.replace('$RAY_HEAD_IP', ip_list[0][0])
-                        runner.run(cmd)
-
-                subprocess_utils.run_in_parallel(_setup_ray_worker, runners[1:])
+                # runners[0].run(
+                #     '((ps aux | grep -v nohup | grep -v grep | grep -q -- "python3 -m sky.skylet.skylet") || nohup python3 -m sky.skylet.skylet >> ~/.sky/skylet.log 2>&1 &);'
+                # )
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
