@@ -274,10 +274,10 @@ class AWS(clouds.Cloud):
         return isinstance(other, AWS)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
-        # General-purpose instance with 8 vCPUs and 32 GB RAM.
-        # Intel Ice Lake 8375C
-        return 'm6i.2xlarge'
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='aws')
 
     # TODO: factor the following three methods, as they are the same logic
     # between Azure and AWS.
@@ -334,12 +334,11 @@ class AWS(clouds.Cloud):
 
     def get_feasible_launchable_resources(self,
                                           resources: 'resources_lib.Resources'):
-        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Treat Resources(AWS, p3.2x, V100) as Resources(AWS, p3.2x).
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
@@ -350,6 +349,7 @@ class AWS(clouds.Cloud):
                     # Setting this to None as AWS doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
+                    cpus=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -357,9 +357,13 @@ class AWS(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([AWS.get_default_instance_type()]),
-                    fuzzy_candidate_list)
+            # Return a default instance type with the given number of vCPUs.
+            default_instance_type = AWS.get_default_instance_type(
+                cpus=resources.cpus)
+            if default_instance_type is None:
+                return ([], [])
+            else:
+                return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -368,6 +372,7 @@ class AWS(clouds.Cloud):
             acc,
             acc_count,
             use_spot=resources.use_spot,
+            cpus=resources.cpus,
             region=resources.region,
             zone=resources.zone,
             clouds='aws')
