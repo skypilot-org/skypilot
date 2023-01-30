@@ -1686,8 +1686,8 @@ class RetryingVmProvisioner(object):
                     requested_features_str = ', '.join(
                         [f.value for f in self._requested_features])
                     raise exceptions.ResourcesUnavailableError(
-                        f'{to_provision.cloud} does not support: '
-                        f'{requested_features_str}.')
+                        f'{to_provision.cloud} does not support all the '
+                        f'features in [{requested_features_str}].')
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,

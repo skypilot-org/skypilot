@@ -183,7 +183,7 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if task.num_nodes and task.num_nodes > 1:
+    if task.num_nodes > 1:
         requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()

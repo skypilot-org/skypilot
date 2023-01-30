@@ -222,6 +222,10 @@ class Lambda(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
 
+    def get_current_user_identity(self) -> Optional[str]:
+        # TODO(ewzeng): Implement get_current_user_identity for Lambda
+        return None
+
     def instance_type_exists(self, instance_type: str) -> bool:
         return service_catalog.instance_type_exists(instance_type, 'lambda')
 
