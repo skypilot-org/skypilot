@@ -1,7 +1,7 @@
 """Local/On-premise."""
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 
@@ -172,3 +172,10 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
+
+    @classmethod
+    def supports(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]
+    ) -> bool:
+        del requested_features
+        return True
