@@ -117,8 +117,8 @@ class Lambda(clouds.Cloud):
     @classmethod
     def get_default_instance_type(cls,
                                   cpus: Optional[str] = None) -> Optional[str]:
-        # TODO(ewzeng): Factor in cpus
-        return 'gpu_1x_a100_sxm4'
+        return service_catalog.get_default_instance_type(cpus=cpus,
+                                                         clouds='lambda')
 
     @classmethod
     def get_accelerators_from_instance_type(
@@ -165,12 +165,11 @@ class Lambda(clouds.Cloud):
                                           resources: 'resources_lib.Resources'):
         if resources.use_spot:
             return ([], [])
-        fuzzy_candidate_list: List[str] = []
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             # Accelerators are part of the instance type in Lambda Cloud
             resources = resources.copy(accelerators=None)
-            return ([resources], fuzzy_candidate_list)
+            return ([resources], [])
 
         def _make(instance_list):
             resource_list = []
@@ -181,6 +180,7 @@ class Lambda(clouds.Cloud):
                     # Setting this to None as Lambda doesn't separately bill /
                     # attach the accelerators.  Billed as part of the VM type.
                     accelerators=None,
+                    cpus=None,
                 )
                 resource_list.append(r)
             return resource_list
@@ -188,9 +188,13 @@ class Lambda(clouds.Cloud):
         # Currently, handle a filter on accelerators only.
         accelerators = resources.accelerators
         if accelerators is None:
-            # No requirements to filter, so just return a default VM type.
-            return (_make([Lambda.get_default_instance_type()]),
-                    fuzzy_candidate_list)
+            # Return a default instance type with the given number of vCPUs.
+            default_instance_type = Lambda.get_default_instance_type(
+                cpus=resources.cpus)
+            if default_instance_type is None:
+                return ([], [])
+            else:
+                return (_make([default_instance_type]), [])
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
@@ -199,6 +203,7 @@ class Lambda(clouds.Cloud):
             acc,
             acc_count,
             use_spot=resources.use_spot,
+            cpus=resources.cpus,
             region=resources.region,
             zone=resources.zone,
             clouds='lambda')

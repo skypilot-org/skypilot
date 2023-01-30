@@ -14,6 +14,9 @@ if typing.TYPE_CHECKING:
 
 _df = common.read_catalog('lambda/vms.csv')
 
+# Number of vCPUS for gpu_1x_a100_sxm4
+_DEFAULT_NUM_VCPUS = 30
+
 
 def instance_type_exists(instance_type: str) -> bool:
     return common.instance_type_exists_impl(_df, instance_type)
@@ -56,6 +59,16 @@ def get_vcpus_from_instance_type(instance_type: str) -> Optional[float]:
     return common.get_vcpus_from_instance_type_impl(_df, instance_type)
 
 
+def get_default_instance_type(cpus: Optional[str] = None) -> Optional[str]:
+    if cpus is None:
+        cpus = str(_DEFAULT_NUM_VCPUS)
+    # Set to gpu_1x_a100_sxm4 to be the default type; return None if vCPUs
+    # don't match (i.e. cpus != 30)
+    # TODO(ewzeng): support a default type if cpus != 30.
+    df = _df[_df['InstanceType'].str.startswith('gpu_1x_a100_sxm4')]
+    return common.get_instance_type_for_cpus_impl(df, cpus)
+
+
 def get_accelerators_from_instance_type(
         instance_type: str) -> Optional[Dict[str, int]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
@@ -64,6 +77,7 @@ def get_accelerators_from_instance_type(
 def get_instance_type_for_accelerator(
         acc_name: str,
         acc_count: int,
+        cpus: Optional[str] = None,
         use_spot: bool = False,
         region: Optional[str] = None,
         zone: Optional[str] = None) -> Tuple[Optional[List[str]], List[str]]:
@@ -77,6 +91,7 @@ def get_instance_type_for_accelerator(
     return common.get_instance_type_for_accelerator_impl(df=_df,
                                                          acc_name=acc_name,
                                                          acc_count=acc_count,
+                                                         cpus=cpus,
                                                          use_spot=use_spot,
                                                          region=region,
                                                          zone=zone)
