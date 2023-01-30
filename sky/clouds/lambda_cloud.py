@@ -115,7 +115,9 @@ class Lambda(clouds.Cloud):
         return isinstance(other, Lambda)
 
     @classmethod
-    def get_default_instance_type(cls) -> str:
+    def get_default_instance_type(cls,
+                                  cpus: Optional[str] = None) -> Optional[str]:
+        # TODO(ewzeng): Factor in cpus
         return 'gpu_1x_a100_sxm4'
 
     @classmethod
