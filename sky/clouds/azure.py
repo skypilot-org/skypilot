@@ -45,6 +45,7 @@ class Azure(clouds.Cloud):
     _REPR = 'Azure'
     # Azure has a 90 char limit for resource group; however, SkyPilot adds the
     # suffix `-<region name>`.
+    # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/
     _MAX_CLUSTER_NAME_LEN_LIMIT = 70
     _regions: List[clouds.Region] = []
 
