@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -406,3 +406,11 @@ class Azure(clouds.Cloud):
                     'cli command: "az account set -s <subscription_id>".'
                 ) from e
         return azure_subscription_id
+
+    @classmethod
+    def supports(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]
+    ) -> bool:
+        # All clouds.CloudImplementationFeatures implemented
+        del requested_features
+        return True

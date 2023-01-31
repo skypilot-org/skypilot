@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -664,3 +664,11 @@ class GCP(clouds.Cloud):
             zone: Optional[str] = None) -> None:
         service_catalog.check_accelerator_attachable_to_host(
             instance_type, accelerators, zone, 'gcp')
+
+    @classmethod
+    def supports(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]
+    ) -> bool:
+        # All clouds.CloudImplementationFeatures implemented
+        del requested_features
+        return True

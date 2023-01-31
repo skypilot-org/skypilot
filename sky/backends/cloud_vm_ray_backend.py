@@ -114,6 +114,7 @@ def _get_cluster_config_template(cloud):
         clouds.AWS: 'aws-ray.yml.j2',
         clouds.Azure: 'azure-ray.yml.j2',
         clouds.GCP: 'gcp-ray.yml.j2',
+        clouds.Lambda: 'lambda-ray.yml.j2',
         clouds.Local: 'local-ray.yml.j2',
     }
     return cloud_to_template[type(cloud)]
@@ -574,12 +575,14 @@ class RetryingVmProvisioner(object):
 
     def __init__(self, log_dir: str, dag: 'dag.Dag',
                  optimize_target: OptimizeTarget,
+                 requested_features: Set[clouds.CloudImplementationFeatures],
                  local_wheel_path: pathlib.Path, wheel_hash: str):
         self._blocked_resources = set()
 
         self.log_dir = os.path.expanduser(log_dir)
         self._dag = dag
         self._optimize_target = optimize_target
+        self._requested_features = requested_features
         self._local_wheel_path = local_wheel_path
         self._wheel_hash = wheel_hash
 
@@ -775,6 +778,42 @@ class RetryingVmProvisioner(object):
         else:
             self._blocked_resources.add(launchable_resources.copy(zone=None))
 
+    def _update_blocklist_on_lambda_error(
+            self, launchable_resources: 'resources_lib.Resources', region,
+            zones, stdout, stderr):
+        del zones  # Unused.
+        style = colorama.Style
+        stdout_splits = stdout.split('\n')
+        stderr_splits = stderr.split('\n')
+        errors = [
+            s.strip()
+            for s in stdout_splits + stderr_splits
+            if 'LambdaCloudError:' in s.strip()
+        ]
+        if not errors:
+            logger.info('====== stdout ======')
+            for s in stdout_splits:
+                print(s)
+            logger.info('====== stderr ======')
+            for s in stderr_splits:
+                print(s)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Errors occurred during provision; '
+                                   'check logs above.')
+
+        logger.warning(f'Got error(s) in {region.name}:')
+        messages = '\n\t'.join(errors)
+        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
+        self._blocked_resources.add(launchable_resources.copy(zone=None))
+
+        # Sometimes, LambdaCloudError will list available regions.
+        for e in errors:
+            if e.find('Regions with capacity available:') != -1:
+                for r in clouds.Lambda.regions():
+                    if e.find(r.name) == -1:
+                        self._blocked_resources.add(
+                            launchable_resources.copy(region=r.name, zone=None))
+
     def _update_blocklist_on_local_error(
             self, launchable_resources: 'resources_lib.Resources', region,
             zones, stdout, stderr):
@@ -834,6 +873,7 @@ class RetryingVmProvisioner(object):
             clouds.AWS: self._update_blocklist_on_aws_error,
             clouds.Azure: self._update_blocklist_on_azure_error,
             clouds.GCP: self._update_blocklist_on_gcp_error,
+            clouds.Lambda: self._update_blocklist_on_lambda_error,
             clouds.Local: self._update_blocklist_on_local_error,
         }
         cloud = launchable_resources.cloud
@@ -887,6 +927,9 @@ class RetryingVmProvisioner(object):
                         zones = config['provider']['availability_zone']
                     elif cloud.is_same_cloud(clouds.Azure()):
                         region = config['provider']['location']
+                        zones = None
+                    elif cloud.is_same_cloud(clouds.Lambda()):
+                        region = config['provider']['region']
                         zones = None
                     elif cloud.is_same_cloud(clouds.Local()):
                         local_regions = clouds.Local.regions()
@@ -1636,6 +1679,15 @@ class RetryingVmProvisioner(object):
                     cloud_user = None
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
+                # Skip if to_provision.cloud does not support requested features
+                if not to_provision.cloud.supports(self._requested_features):
+                    self._blocked_resources.add(
+                        resources_lib.Resources(cloud=to_provision.cloud))
+                    requested_features_str = ', '.join(
+                        [f.value for f in self._requested_features])
+                    raise exceptions.ResourcesUnavailableError(
+                        f'{to_provision.cloud} does not support all the '
+                        f'features in [{requested_features_str}].')
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1952,6 +2004,7 @@ class CloudVmRayBackend(backends.Backend):
 
         self._dag = None
         self._optimize_target = None
+        self._requested_features = set()
 
         # Command for running the setup script. It is only set when the
         # setup needs to be run outside the self._setup() and as part of
@@ -1964,6 +2017,8 @@ class CloudVmRayBackend(backends.Backend):
         self._dag = kwargs.pop('dag', self._dag)
         self._optimize_target = kwargs.pop(
             'optimize_target', self._optimize_target) or OptimizeTarget.COST
+        self._requested_features = kwargs.pop('requested_features',
+                                              self._requested_features)
         assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(self, handle: ResourceHandle,
@@ -2087,10 +2142,9 @@ class CloudVmRayBackend(backends.Backend):
                 # in if retry_until_up is set, which will kick off new "rounds"
                 # of optimization infinitely.
                 try:
-                    provisioner = RetryingVmProvisioner(self.log_dir, self._dag,
-                                                        self._optimize_target,
-                                                        local_wheel_path,
-                                                        wheel_hash)
+                    provisioner = RetryingVmProvisioner(
+                        self.log_dir, self._dag, self._optimize_target,
+                        self._requested_features, local_wheel_path, wheel_hash)
                     config_dict = provisioner.provision_with_retries(
                         task, to_provision_config, dryrun, stream_logs)
                     break

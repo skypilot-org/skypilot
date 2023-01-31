@@ -44,6 +44,7 @@ from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -951,6 +952,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_gcp_authentication(config)
     elif isinstance(cloud, clouds.Azure):
         config = auth.setup_azure_authentication(config)
+    elif isinstance(cloud, clouds.Lambda):
+        config = auth.setup_lambda_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1802,10 +1805,29 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
+def _query_status_lambda(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'booting': global_user_state.ClusterStatus.INIT,
+        'active': global_user_state.ClusterStatus.UP,
+        'unhealthy': global_user_state.ClusterStatus.INIT,
+        'terminated': None,
+    }
+    # TODO(ewzeng): filter by hash_filter_string to be safe
+    vms = lambda_utils.LambdaCloudClient().list_instances()
+    for node in vms:
+        if node['name'] == cluster:
+            return [status_map[node['status']]]
+    return []
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
+    'Lambda': _query_status_lambda,
 }
 
 

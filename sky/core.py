@@ -4,6 +4,7 @@ import getpass
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+from sky import clouds
 from sky import dag
 from sky import task
 from sky import backends
@@ -309,6 +310,12 @@ def stop(cluster_name: str, purge: bool = False) -> None:
             f'Stopping cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
 
+    # Check cloud supports stopping instances
+    cloud = handle.launched_resources.cloud
+    if not cloud.supports({clouds.CloudImplementationFeatures.STOP}):
+        raise exceptions.NotSupportedError(
+            (f'{cloud} does not support stopping instances.'))
+
     backend = backend_utils.get_backend_from_handle(handle)
     if (isinstance(backend, backends.CloudVmRayBackend) and
             handle.launched_resources.use_spot):
@@ -426,6 +433,13 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with TPU VM Pod '
             'is not supported.')
+
+    # Check autostop is implemented for cloud
+    cloud = handle.launched_resources.cloud
+    if not down and idle_minutes >= 0:
+        if not cloud.supports({clouds.CloudImplementationFeatures.AUTOSTOP}):
+            raise exceptions.NotSupportedError(
+                (f'autostop not implemented for {cloud}.'))
 
     backend = backend_utils.get_backend_from_handle(handle)
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
