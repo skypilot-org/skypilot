@@ -506,7 +506,7 @@ def _check_firewall_rules(vpc_name, config, compute):
     effective_rules = response["firewalls"]
 
     def _merge_and_refine_rule(rules):
-        # Example of source2rules:
+        # Example of source2rules: Dict[(direction, sourceRanges) -> Dict(protocol -> Set[ports])]
         #   {("INGRESS", "0.0.0.0/0"): {"tcp": {80, 443}, "udp": {53}}}
         source2rules : Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list : Dict[Tuple[str, str], List[Dict[str, str]]] = {}
