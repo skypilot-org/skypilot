@@ -1,13 +1,11 @@
 """Lambda Cloud."""
 import json
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
-from sky import exceptions
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -18,10 +16,6 @@ _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
 
-# Currently, none of clouds.CloudImplementationFeatures are implemented
-# for Lambda Cloud
-_LAMBDA_IMPLEMENTATION_FEATURES: Set[clouds.CloudImplementationFeatures] = set()
-
 
 @clouds.CLOUD_REGISTRY.register
 class Lambda(clouds.Cloud):
@@ -30,6 +24,11 @@ class Lambda(clouds.Cloud):
     _REPR = 'Lambda'
     # Lamdba has a 64 char limit for cluster name.
     _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+    # Currently, none of clouds.CloudImplementationFeatures are implemented
+    # for Lambda Cloud.
+    # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
+    # MULTI_NODE: Multi-node is not supported by the implementation yet.
+    _CLOUD_IMPLEMENTATION_FEATURES = set()
 
     _regions: List[clouds.Region] = []
 
@@ -253,14 +252,3 @@ class Lambda(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'lambda')
-
-    @classmethod
-    def check_features_are_supported(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]):
-        if not requested_features.issubset(_LAMBDA_IMPLEMENTATION_FEATURES):
-            requested_features_str = ', '.join(
-                [f.value for f in requested_features])
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(
-                    'does not support all the '
-                    f'features in [{requested_features_str}].')

@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -547,9 +547,3 @@ class AWS(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'aws')
-
-    @classmethod
-    def check_features_are_supported(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]):
-        # All clouds.CloudImplementationFeatures implemented
-        return

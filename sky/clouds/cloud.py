@@ -70,6 +70,12 @@ class Cloud:
 
     _MAX_CLUSTER_NAME_LEN_LIMIT: Optional[int] = None
 
+    # All features implemented by this cloud. Used by
+    # Cloud.check_features_are_supported()
+    # None means all features are supported.
+    _CLOUD_IMPLEMENTATION_FEATURES: Optional[
+        Set[CloudImplementationFeatures]] = None
+
     #### Regions/Zones ####
 
     @classmethod
@@ -336,7 +342,15 @@ class Cloud:
             exceptions.NotSupportedError: If the cloud does not support all the
             requested features.
         """
-        raise NotImplementedError
+        if cls._CLOUD_IMPLEMENTATION_FEATURES is None:
+            return
+        unsupported_features = (requested_features -
+                                cls._CLOUD_IMPLEMENTATION_FEATURES)
+        if unsupported_features:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    f'Cloud {cls} does not support the following '
+                    f'features: {unsupported_features}')
 
     @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str):
