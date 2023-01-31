@@ -23,7 +23,7 @@ class Lambda(clouds.Cloud):
 
     _REPR = 'Lambda'
     # Lamdba has a 64 char limit for cluster name.
-    # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance
+    # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 64
     # Currently, none of clouds.CloudImplementationFeatures are implemented
     # for Lambda Cloud.
