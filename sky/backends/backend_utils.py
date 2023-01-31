@@ -1409,8 +1409,9 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
             # May be a leaked preempted resource, or terminated by user in the
             # console, or still in the process of being created.
             ux_utils.console_newline()
-            logger.warning(f'TPU VM {tpu_id} is not in READY state. '
-                           'Skipping IP query...')
+            logger.warning(f'TPU VM {tpu_id} is in {tpuvm_json["state"]} '
+                           'state. Skipping IP query... '
+                           'Hint: make sure it is not leaked.')
             continue
 
         if not get_internal_ips:
