@@ -11,6 +11,7 @@ VPC_TEMPLATE = {
 }
 # Required firewall rules for SkyPilot to work.
 FIREWALL_RULES_REQUIRED = [
+    # Allow internal connections between GCP VMs for Ray multi-node cluster.
     {
         "direction": "INGRESS",
         "allowed": [
@@ -19,6 +20,7 @@ FIREWALL_RULES_REQUIRED = [
         ],
         "sourceRanges": ["10.128.0.0/9"],
     },
+    # Allow ssh connection from anywhere.
     {
         "direction": "INGRESS",
         "allowed": [{

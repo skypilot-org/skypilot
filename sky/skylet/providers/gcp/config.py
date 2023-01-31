@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from functools import partial
+from typing import Dict, List, Set, Tuple
 
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import serialization
@@ -505,43 +506,54 @@ def _check_firewall_rules(vpc_name, config, compute):
     effective_rules = response["firewalls"]
 
     def _merge_and_refine_rule(rules):
-        # Output: dict of (direction, source) -> {protocol -> ports}
-        tmp = {}
+        # Example of source2rules:
+        #   {("INGRESS", "0.0.0.0/0"): {"tcp": {80, 443}, "udp": {53}}}
+        source2rules : Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
+        source2allowed_list : Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
             direction = rule.get("direction", "")
             sources = rule.get("sourceRanges", [])
             allowed = rule.get("allowed", [])
             for source in sources:
-                tmp[(direction, source)] = tmp.get((direction, source), []) + allowed
-        source2rules = {}
-        for (direction, source), allowed_list in tmp.items():
-            source2rules[(direction, source)] = {}
+                key = (direction, source)
+                source2allowed_list[key] = source2allowed_list.get(key, []) + allowed
+        for direction_source, allowed_list in source2allowed_list.items():
+            source2rules[direction_source] = {}
             for allowed in allowed_list:
-                ports = set()
-                for port in allowed.get('ports', set()):
-                    parse_ports = port.split('-')
-                    if len(parse_ports) == 1:
-                        ports.add(int(parse_ports[0]))
-                    else:
-                        ports.update(
-                            set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
-                source2rules[(direction, source)][allowed["IPProtocol"]] = ports
+                # Example of port_list: ["20", "50-60"]
+                # If list is empty, it means all ports
+                port_list = allowed.get("ports", [])
+                port_set = set()
+                if port_list == []:
+                    port_set.update(set(range(1, 65536)))
+                else:
+                    for port_range in port_list:
+                        parse_ports = port_range.split('-')
+                        if len(parse_ports) == 1:
+                            port_set.add(int(parse_ports[0]))
+                        else:
+                            assert (
+                                len(parse_ports) == 2
+                            ), "Failed to parse the port range: {}".format(port_range)
+                            port_set.update(
+                                set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
+                source2rules[direction_source][allowed["IPProtocol"]] = port_set
         return source2rules
 
     effective_rules = _merge_and_refine_rule(effective_rules)
     required_rules = _merge_and_refine_rule(required_rules)
 
-    for key, allowed_req in required_rules.items():
-        if key not in effective_rules:
+    for direction_source, allowed_req in required_rules.items():
+        if direction_source not in effective_rules:
             return False
-        allowed_eff = effective_rules[key]
+        allowed_eff = effective_rules[direction_source]
         # Special case: "all" means allowing all traffic
         if "all" in allowed_eff:
             continue
         # Check if the required ports are a subset of the effective ports
-        for protocol, ports in allowed_req.items():
+        for protocol, ports_req in allowed_req.items():
             ports_eff = allowed_eff.get(protocol, set())
-            if not ports.issubset(ports_eff):
+            if not ports_req.issubset(ports_eff):
                 return False
     return True
 
@@ -580,8 +592,8 @@ def get_usable_vpc(config):
 
         proj_id = config["provider"]["project_id"]
         # Create a SkyPilot VPC network if it doesn't exist
-        ret = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
-        if len(ret) == 0:
+        vpc_list = _list_vpcnets(config, compute, filter=f"name={SKYPILOT_VPC_NAME}")
+        if len(vpc_list) == 0:
             body = VPC_TEMPLATE.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
             body["selfLink"] = body["selfLink"].format(
@@ -591,10 +603,11 @@ def get_usable_vpc(config):
         # Create firewall rules
         for rule in FIREWALL_RULES_TEMPLATE:
             # if the rule already exists, delete it first
-            ret = _list_firewall_rules(
-                config, compute, filter=f"(name={rule['name']})")
-            if len(ret) > 0:
-                _delete_firewall_rule(config, compute, rule["name"])
+            rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
+            rule_list = _list_firewall_rules(
+                config, compute, filter=f"(name={rule_name})")
+            if len(rule_list) > 0:
+                _delete_firewall_rule(config, compute, rule_name)
 
             body = rule.copy()
             body["name"] = body["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
