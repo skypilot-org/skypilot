@@ -1673,8 +1673,7 @@ class RetryingVmProvisioner(object):
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
-                backend_utils.check_cluster_name_is_valid(
-                    cluster_name, to_provision.cloud)
+                to_provision.cloud.check_cluster_name_is_valid(cluster_name)
                 if dryrun:
                     cloud_user = None
                 else:
@@ -3198,11 +3197,12 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_exists=True)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
-        resources = list(task.resources)[0]
-        task_cloud = resources.cloud
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        backend_utils.check_cluster_name_is_valid(cluster_name, task_cloud)
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(cluster_name)
 
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):

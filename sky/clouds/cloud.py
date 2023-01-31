@@ -1,9 +1,11 @@
 """Interfaces: clouds, regions, and zones."""
-import enum
 import collections
+import enum
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple, Type
 
+from sky import exceptions
 from sky.clouds import service_catalog
 from sky.utils import ux_utils
 
@@ -65,6 +67,8 @@ class Cloud:
     """A cloud provider."""
 
     _REPR = '<Cloud>'
+
+    _MAX_CLUSTER_NAME_LEN_LIMIT: Optional[int] = None
 
     #### Regions/Zones ####
 
@@ -328,6 +332,32 @@ class Cloud:
         Lambda.support({CloudImplementationFeatures.AUTOSTOP}) returns False.
         """
         raise NotImplementedError
+
+    @classmethod
+    def check_cluster_name_is_valid(cls, cluster_name: str):
+        """Errors out on invalid cluster names not supported by cloud providers.
+
+        Bans (including but not limited to) names that:
+        - are digits-only
+        - contain underscore (_)
+        Raises:
+            exceptions.InvalidClusterNameError: If the cluster name is invalid.
+        """
+        if cluster_name is None:
+            return
+        valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
+        if re.fullmatch(valid_regex, cluster_name) is None:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InvalidClusterNameError(
+                    f'Cluster name "{cluster_name}" is invalid; '
+                    f'ensure it is fully matched by regex: {valid_regex}')
+        if cls._MAX_CLUSTER_NAME_LEN_LIMIT is not None and len(
+                cluster_name) > cls._MAX_CLUSTER_NAME_LEN_LIMIT:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.InvalidClusterNameError(
+                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
+                    'chars; maximum length is '
+                    f'{cls._MAX_CLUSTER_NAME_LEN_LIMIT} chars.')
 
     def __repr__(self):
         return self._REPR

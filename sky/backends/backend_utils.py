@@ -90,15 +90,6 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = 'https://8.8.8.8'
 
-# GCP has a 63 char limit; however, Ray autoscaler adds many
-# characters. Through testing, this is the maximum length for the Sky cluster
-# name on GCP.  Ref:
-# https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-# NOTE: actually 37 is maximum for a single-node cluster which gets the suffix
-# '-head', but 35 for a multinode cluster because workers get the suffix
-# '-worker'. Here we do not distinguish these cases and take the lower limit.
-_MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
-
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
 DEFAULT_TASK_CPU_DEMAND = 0.5
@@ -2420,33 +2411,6 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_is_valid(cluster_name: str,
-                                cloud: Optional[clouds.Cloud] = None) -> None:
-    """Errors out on invalid cluster names not supported by cloud providers.
-
-    Bans (including but not limited to) names that:
-    - are digits-only
-    - contain underscore (_)
-    """
-    if cluster_name is None:
-        return
-    valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
-    if re.fullmatch(valid_regex, cluster_name) is None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.InvalidClusterNameError(
-                f'Cluster name "{cluster_name}" is invalid; '
-                f'ensure it is fully matched by regex: {valid_regex}')
-    if isinstance(cloud, clouds.GCP):
-        # GCP has too restrictive of a length limit. Don't check for other
-        # clouds.
-        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    f'chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP} '
-                    'chars.')
 
 
 def check_cluster_name_not_reserved(

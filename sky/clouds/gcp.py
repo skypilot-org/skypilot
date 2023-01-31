@@ -85,6 +85,17 @@ class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
     _REPR = 'GCP'
+
+    # GCP has a 63 char limit; however, Ray autoscaler adds many
+    # characters. Through testing, this is the maximum length for the Sky
+    # cluster name on GCP.  Ref:
+    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+    # NOTE: actually 37 is maximum for a single-node cluster which gets the
+    # suffix '-head', but 35 for a multinode cluster because workers get the
+    # suffix '-worker'. Here we do not distinguish these cases and take the
+    # lower limit.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 35
+
     _regions: List[clouds.Region] = []
     _zones: List[clouds.Zone] = []
 

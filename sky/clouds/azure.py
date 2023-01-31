@@ -43,6 +43,9 @@ class Azure(clouds.Cloud):
     """Azure."""
 
     _REPR = 'Azure'
+    # Azure has a 90 char limit for resource group; however, SkyPilot adds the
+    # suffix `-<region name>`.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 70
     _regions: List[clouds.Region] = []
 
     def instance_type_to_hourly_cost(self,

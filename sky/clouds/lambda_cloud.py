@@ -26,6 +26,9 @@ class Lambda(clouds.Cloud):
     """Lambda Labs GPU Cloud."""
 
     _REPR = 'Lambda'
+    # Lamdba has a 64 char limit for cluster name.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+
     _regions: List[clouds.Region] = []
 
     @classmethod

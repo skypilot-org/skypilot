@@ -47,6 +47,9 @@ class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
     _REPR = 'AWS'
+
+    _MAX_CLUSTER_NAME_LEN_LIMIT = None
+
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '

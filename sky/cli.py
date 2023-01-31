@@ -3077,7 +3077,7 @@ def spot_launch(
     if name is None:
         name = backend_utils.generate_cluster_name()
     else:
-        backend_utils.check_cluster_name_is_valid(name)
+        clouds.Cloud.check_cluster_name_is_valid(name)
 
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint,
