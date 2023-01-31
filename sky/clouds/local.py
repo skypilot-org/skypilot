@@ -36,11 +36,22 @@ class Local(clouds.Cloud):
     """
     _DEFAULT_INSTANCE_TYPE = 'on-prem'
     LOCAL_REGION = clouds.Region('Local')
-    _CLOUD_IMPLEMENTATION_FEATURES = {
-        clouds.CloudImplementationFeatures.STOP,
-        clouds.CloudImplementationFeatures.AUTOSTOP
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP:
+            ('Local cloud does not support stopping instances.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            ('Local cloud does not support stopping instances.')
     }
     _regions: List[clouds.Region] = [LOCAL_REGION]
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    @classmethod
+    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+        return None
 
     @classmethod
     def regions(cls):

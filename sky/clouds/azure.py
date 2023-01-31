@@ -47,7 +47,17 @@ class Azure(clouds.Cloud):
     # suffix `-<region name>`.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 70
+
     _regions: List[clouds.Region] = []
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_len_limit(cls) -> int:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,

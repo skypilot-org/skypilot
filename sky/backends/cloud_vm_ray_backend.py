@@ -1699,7 +1699,7 @@ class RetryingVmProvisioner(object):
                 # InvalidClusterNameError: cluster name is invalid,
                 # NotSupportedError: cloud does not support requested features,
                 # CloudUserIdentityError: cloud user identity is invalid.
-                # The exceptions above should not be applicable to the whole
+                # The exceptions above should be applicable to the whole
                 # cloud, so we do add the cloud to the blocked resources.
                 logger.warning(common_utils.format_exception(e))
                 self._blocked_resources.add(

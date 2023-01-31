@@ -7,6 +7,7 @@ from typing import Dict, Iterator, List, Optional, Set, Tuple, Type
 
 from sky import exceptions
 from sky.clouds import service_catalog
+from sky.utils import log_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -16,7 +17,7 @@ if typing.TYPE_CHECKING:
 class CloudImplementationFeatures(enum.Enum):
     """Features that might not be implemented for all clouds.
 
-    Used by Cloud.check_features_are_supported()
+    Used by Cloud.check_features_are_supported().
     """
     STOP = 'stop'
     AUTOSTOP = 'autostop'
@@ -68,13 +69,30 @@ class Cloud:
 
     _REPR = '<Cloud>'
 
-    _MAX_CLUSTER_NAME_LEN_LIMIT: Optional[int] = None
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[CloudImplementationFeatures, str]:
+        """The features not supported by the cloud implementation.
 
-    # All features implemented by this cloud. Used by
-    # Cloud.check_features_are_supported()
-    # None means all features are supported.
-    _CLOUD_IMPLEMENTATION_FEATURES: Optional[
-        Set[CloudImplementationFeatures]] = None
+        This method is used by check_features_are_supported() to check if the
+        cloud implementation supports all the requested features.
+
+        Returns:
+            A dict of {feature: reason} for the features not supported by the
+            cloud implementation.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+        """Returns the maximum length limit of a cluster name.
+
+        This method is used by check_cluster_name() to check if the cluster
+        name is too long.
+
+        None means no limit.
+        """
+        raise NotImplementedError
 
     #### Regions/Zones ####
 
@@ -331,28 +349,31 @@ class Cloud:
 
     @classmethod
     def check_features_are_supported(
-            cls, requested_features: Set[CloudImplementationFeatures]):
+            cls, requested_features: Set[CloudImplementationFeatures]) -> None:
         """Errors out if the cloud does not support all requested features.
 
         For instance, Lambda Cloud does not support autostop, so
-        Lambda.support({CloudImplementationFeatures.AUTOSTOP}) raises the
-        exception.
+        Lambda.check_features_are_supported({
+            CloudImplementationFeatures.AUTOSTOP
+        }) raises the exception.
 
         Raises:
             exceptions.NotSupportedError: If the cloud does not support all the
             requested features.
         """
-        if cls._CLOUD_IMPLEMENTATION_FEATURES is None:
-            return
-        unsupported_features = (requested_features -
-                                cls._CLOUD_IMPLEMENTATION_FEATURES)
+        unsupported_features2reason = cls._cloud_unsupported_features()
+        unsupported_features = set(unsupported_features2reason.keys())
+        unsupported_features = requested_features.intersection(
+            unsupported_features)
         if unsupported_features:
-            unsupported_features_str = ', '.join(
-                [f.name for f in unsupported_features])
+            table = log_utils.create_table(['Feature', 'Reason'])
+            for feature in unsupported_features:
+                table.add_row(
+                    [feature.value, unsupported_features2reason[feature]])
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
-                    f'Cloud {cls._REPR} does not support the following '
-                    f'features: {unsupported_features_str}')
+                    f'The following features are not supported by {cls._REPR}:'
+                    '\n\t' + table.get_string().replace('\n', '\n\t'))
 
     @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str):
@@ -361,24 +382,28 @@ class Cloud:
         Bans (including but not limited to) names that:
         - are digits-only
         - contain underscore (_)
+
         Raises:
             exceptions.InvalidClusterNameError: If the cluster name is invalid.
         """
         if cluster_name is None:
             return
+        max_cluster_name_len_limit = cls._max_cluster_name_len_limit()
         valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
                     f'Cluster name "{cluster_name}" is invalid; '
-                    f'ensure it is fully matched by regex: {valid_regex}')
-        if cls._MAX_CLUSTER_NAME_LEN_LIMIT is not None and len(
-                cluster_name) > cls._MAX_CLUSTER_NAME_LEN_LIMIT:
+                    'ensure it is fully matched by regex (e.g., '
+                    'only contains lower letters, numbers and dash): '
+                    f'{valid_regex}')
+        if max_cluster_name_len_limit is not None and len(
+                cluster_name) > max_cluster_name_len_limit:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
                     f'Cluster name {cluster_name!r} has {len(cluster_name)} '
                     'chars; maximum length is '
-                    f'{cls._MAX_CLUSTER_NAME_LEN_LIMIT} chars.')
+                    f'{max_cluster_name_len_limit} chars.')
 
     def __repr__(self):
         return self._REPR

@@ -29,9 +29,22 @@ class Lambda(clouds.Cloud):
     # for Lambda Cloud.
     # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
     # MULTI_NODE: Multi-node is not supported by the implementation yet.
-    _CLOUD_IMPLEMENTATION_FEATURES = set()
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the implementation yet.',
+    }
 
     _regions: List[clouds.Region] = []
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    @classmethod
+    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:

@@ -99,6 +99,15 @@ class GCP(clouds.Cloud):
     _regions: List[clouds.Region] = []
     _zones: List[clouds.Zone] = []
 
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
+
     #### Regions/Zones ####
 
     @classmethod

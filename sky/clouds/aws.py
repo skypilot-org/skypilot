@@ -66,6 +66,15 @@ class AWS(clouds.Cloud):
     )
 
     @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
+
+    @classmethod
     def _sso_credentials_help_str(cls, expired: bool = False) -> str:
         help_str = 'Run the following commands (must use aws v2 CLI):'
         if not expired:
