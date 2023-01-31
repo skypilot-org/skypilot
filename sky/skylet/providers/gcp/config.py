@@ -506,8 +506,40 @@ def _check_firewall_rules(vpc_name, config, compute):
     effective_rules = response["firewalls"]
 
     def _merge_and_refine_rule(rules):
-        # Example of source2rules: Dict[(direction, sourceRanges) -> Dict(protocol -> Set[ports])]
-        #   {("INGRESS", "0.0.0.0/0"): {"tcp": {80, 443}, "udp": {53}}}
+        """Returns the reformatted rules from the firewall rules
+
+        The function translates firewall rules fetched from the cloud provider
+        to a format for simple comparison.
+
+        Example of firewall rules from the cloud:
+        [
+            {
+                ...
+                "direction": "INGRESS",
+                "allowed": [
+                    {"IPProtocol": "tcp", "ports": ['80', '443']},
+                    {"IPProtocol": "udp", "ports": ['53']},
+                ],
+                "sourceRanges": ["10.128.0.0/9"],
+            },
+            {
+                ...
+                "direction": "INGRESS",
+                "allowed": [{
+                    "IPProtocol": "tcp",
+                    "ports": ["22"],
+                }],
+                "sourceRanges": ["0.0.0.0/0"],
+            },
+        ]
+
+        Returns:
+            source2rules: Dict[(direction, sourceRanges) -> Dict(protocol -> Set[ports])]
+                Example {
+                    ("INGRESS", "10.128.0.0/9"): {"tcp": {80, 443}, "udp": {53}},
+                    ("INGRESS", "0.0.0.0/0"): {"tcp": {22}},
+                }
+        """
         source2rules : Dict[Tuple[str, str], Dict[str, Set[int]]] = {}
         source2allowed_list : Dict[Tuple[str, str], List[Dict[str, str]]] = {}
         for rule in rules:
