@@ -347,10 +347,12 @@ class Cloud:
         unsupported_features = (requested_features -
                                 cls._CLOUD_IMPLEMENTATION_FEATURES)
         if unsupported_features:
+            unsupported_features_str = ', '.join(
+                [f.name for f in unsupported_features])
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.NotSupportedError(
-                    f'Cloud {cls} does not support the following '
-                    f'features: {unsupported_features}')
+                    f'Cloud {cls._REPR} does not support the following '
+                    f'features: {unsupported_features_str}')
 
     @classmethod
     def check_cluster_name_is_valid(cls, cluster_name: str):
