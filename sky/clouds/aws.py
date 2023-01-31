@@ -49,11 +49,11 @@ class AWS(clouds.Cloud):
     _REPR = 'AWS'
 
     # AWS has a limit of the tag value length to 256 characters.
-    # By testing, the actual limit is 256 - 10 = 246 characters,
-    # due to the maximum length of DescribeInstances API filter
-    # value.
+    # By testing, the actual limit is 256 - 12 = 244 characters
+    # (ray adds additional `ray-` and `-worker`), due to the
+    # maximum length of DescribeInstances API filter value.
     # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 246
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 244
 
     _regions: List[clouds.Region] = []
 
@@ -72,7 +72,7 @@ class AWS(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+    def _max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod

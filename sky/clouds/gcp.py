@@ -105,7 +105,7 @@ class GCP(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+    def _max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####

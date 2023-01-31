@@ -22,6 +22,7 @@ class Lambda(clouds.Cloud):
     """Lambda Labs GPU Cloud."""
 
     _REPR = 'Lambda'
+
     # Lamdba has a 64 char limit for cluster name.
     # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
     _MAX_CLUSTER_NAME_LEN_LIMIT = 64
@@ -32,7 +33,7 @@ class Lambda(clouds.Cloud):
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
         clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
-        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the implementation yet.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
     }
 
     _regions: List[clouds.Region] = []
@@ -43,7 +44,7 @@ class Lambda(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+    def _max_cluster_name_length(cls) -> Optional[int]:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod

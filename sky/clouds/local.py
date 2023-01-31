@@ -50,7 +50,7 @@ class Local(clouds.Cloud):
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
-    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+    def _max_cluster_name_length(cls) -> Optional[int]:
         return None
 
     @classmethod

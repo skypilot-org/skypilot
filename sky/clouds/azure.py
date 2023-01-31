@@ -44,9 +44,11 @@ class Azure(clouds.Cloud):
 
     _REPR = 'Azure'
     # Azure has a 90 char limit for resource group; however, SkyPilot adds the
-    # suffix `-<region name>`.
+    # suffix `-<region name>`. Azure also has a 64 char limit for VM names, and
+    # ray adds addtional `ray-`, `-worker`, and `-<9 chars hash>` for the VM
+    # names, so the limit is 64 - 4 - 7 - 10 = 43.
     # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 70
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
 
     _regions: List[clouds.Region] = []
 
@@ -56,7 +58,7 @@ class Azure(clouds.Cloud):
         return dict()
 
     @classmethod
-    def _max_cluster_name_len_limit(cls) -> int:
+    def _max_cluster_name_length(cls) -> int:
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_to_hourly_cost(self,

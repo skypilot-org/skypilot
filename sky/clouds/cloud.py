@@ -84,11 +84,11 @@ class Cloud:
         raise NotImplementedError
 
     @classmethod
-    def _max_cluster_name_len_limit(cls) -> Optional[int]:
+    def _max_cluster_name_length(cls) -> Optional[int]:
         """Returns the maximum length limit of a cluster name.
 
-        This method is used by check_cluster_name() to check if the cluster
-        name is too long.
+        This method is used by check_cluster_name_is_valid() to check if the
+        cluster name is too long.
 
         None means no limit.
         """
@@ -376,7 +376,7 @@ class Cloud:
                     '\n\t' + table.get_string().replace('\n', '\n\t'))
 
     @classmethod
-    def check_cluster_name_is_valid(cls, cluster_name: str):
+    def check_cluster_name_is_valid(cls, cluster_name: str) -> None:
         """Errors out on invalid cluster names not supported by cloud providers.
 
         Bans (including but not limited to) names that:
@@ -388,7 +388,7 @@ class Cloud:
         """
         if cluster_name is None:
             return
-        max_cluster_name_len_limit = cls._max_cluster_name_len_limit()
+        max_cluster_name_len_limit = cls._max_cluster_name_length()
         valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
