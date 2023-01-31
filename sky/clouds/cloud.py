@@ -18,6 +18,10 @@ class CloudImplementationFeatures(enum.Enum):
     """Features that might not be implemented for all clouds.
 
     Used by Cloud.check_features_are_supported().
+
+    Note: If any new feature is added, please check and update
+    _cloud_unsupported_features in all clouds to make sure the
+    check_features_are_supported() works as expected.
     """
     STOP = 'stop'
     AUTOSTOP = 'autostop'
