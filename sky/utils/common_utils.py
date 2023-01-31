@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional
 import uuid
 import yaml
 
+import colorama
+
 from sky import sky_logging
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
@@ -325,9 +327,11 @@ def format_exception(e: Exception, use_bracket: bool = False) -> str:
     Returns:
         A string that represents the exception.
     """
+    BRIGHT = colorama.Style.BRIGHT
+    RESET = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'[{class_fullname(e.__class__)}]: {e}'
-    return f'{class_fullname(e.__class__)}: {e}'
+        return f'{BRIGHT}[{class_fullname(e.__class__)}]:{RESET} {e}'
+    return f'{BRIGHT}{class_fullname(e.__class__)}:{RESET} {e}'
 
 
 def remove_color(s: str):

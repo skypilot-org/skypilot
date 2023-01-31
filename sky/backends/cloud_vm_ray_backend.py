@@ -1719,9 +1719,7 @@ class RetryingVmProvisioner(object):
             else:
                 # Provisioning succeeded.
                 break
-            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                           f'{to_provision}. Trying other launchable resources '
-                           f'(if any).{style.RESET_ALL}')
+
             if to_provision.zone is None:
                 region_or_zone_str = str(to_provision.region)
             else:
