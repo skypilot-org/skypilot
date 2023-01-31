@@ -113,6 +113,13 @@ class Azure(clouds.Cloud):
             'image_sku': '2004-gen2',
             'image_version': '21.11.04'
         }
+        # ARM64
+        image_config = {
+            'image_publisher': 'canonical',
+            'image_offer': '0001-com-ubuntu-server-jammy',
+            'image_sku': '22_04-lts-arm64',
+            'image_version': '22.04.202301100'
+        }
 
         # ubuntu-2004 v21.10.21 and v21.11.04 do not work on K80
         # due to an NVIDIA driver issue.
