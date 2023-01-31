@@ -102,8 +102,6 @@ def create_table(cursor, conn):
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'cluster_hash',
                                  'TEXT DEFAULT null')
 
-    db_utils.add_column_to_table(cursor, conn, 'cluster_history', 'status',
-                                 'TEXT DEFAULT null')
     conn.commit()
 
 
@@ -128,19 +126,12 @@ class ClusterStatus(enum.Enum):
     # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
 
-    # Stopped.  This means a `sky down` call has previously succeeded.
-    TERMINATED = 'TERMINATED'
 
-    def colored_str(self):
-        color = _STATUS_TO_COLOR[self]
-        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
-
-
-_STATUS_TO_COLOR = {
-    ClusterStatus.INIT: colorama.Fore.BLUE,
-    ClusterStatus.UP: colorama.Fore.GREEN,
-    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
-    ClusterStatus.TERMINATED: colorama.Fore.RED,
+STATUS_TO_COLOR = {
+    ClusterStatus.INIT.value: colorama.Fore.BLUE,
+    ClusterStatus.UP.value: colorama.Fore.GREEN,
+    ClusterStatus.STOPPED.value: colorama.Fore.YELLOW,
+    'TERMINATED': colorama.Fore.BLACK,  # sky down
 }
 
 
@@ -331,7 +322,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
     if terminate:
         _DB.cursor.execute('DELETE FROM clusters WHERE name=(?)',
                            (cluster_name,))
-        set_cluster_history_status(cluster_hash, ClusterStatus.TERMINATED)
     else:
         handle = get_handle_from_cluster_name(cluster_name)
         if handle is None:
@@ -346,7 +336,6 @@ def remove_cluster(cluster_name: str, terminate: bool) -> float:
                 ClusterStatus.STOPPED.value,
                 cluster_name,
             ))
-        set_cluster_history_status(cluster_hash, ClusterStatus.STOPPED)
     _DB.conn.commit()
 
 
@@ -378,17 +367,16 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def set_cluster_history_status(cluster_hash: str, status: ClusterStatus):
-    _DB.cursor.execute(
-        'UPDATE cluster_history SET status=(?) WHERE cluster_hash=(?)', (
-            status.value,
-            cluster_hash,
-        ))
-    count = _DB.cursor.rowcount
-    _DB.conn.commit()
-    assert count <= 1, count
-    if count == 0:
-        raise ValueError(f'Cluster {cluster_hash} not found.')
+def get_cluster_history_status(cluster_hash: str):
+
+    rows = _DB.cursor.execute(
+        'SELECT clusters.status FROM cluster_history '
+        'INNER JOIN clusters '
+        'ON cluster_history.cluster_hash=clusters.cluster_hash '
+        'WHERE cluster_history.cluster_hash=(?)', (cluster_hash,))
+    for (status,) in rows:
+        return status
+    return 'TERMINATED'
 
 
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
@@ -577,12 +565,16 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
     for row in rows:
         # TODO: use namedtuple instead of dict
 
-        (cluster_hash, name, num_nodes, _, launched_resources, usage_intervals,
-         status) = row[:7]
+        (
+            cluster_hash,
+            name,
+            num_nodes,
+            _,
+            launched_resources,
+            usage_intervals,
+        ) = row[:6]
 
         # backwards compatibility for null status in cluster_history
-        if not status:
-            status = 'TERMINATED'
 
         record = {
             'name': name,
@@ -592,7 +584,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
-            'status': ClusterStatus[status],
+            'status': get_cluster_history_status(cluster_hash),
         }
 
         records.append(record)
