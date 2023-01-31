@@ -1679,14 +1679,9 @@ class RetryingVmProvisioner(object):
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
-                if not to_provision.cloud.supports(self._requested_features):
-                    self._blocked_resources.add(
-                        resources_lib.Resources(cloud=to_provision.cloud))
-                    requested_features_str = ', '.join(
-                        [f.value for f in self._requested_features])
-                    raise exceptions.ResourcesUnavailableError(
-                        f'{to_provision.cloud} does not support all the '
-                        f'features in [{requested_features_str}].')
+                to_provision.cloud.check_features_are_supported(
+                    self._requested_features)
+
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1698,6 +1693,17 @@ class RetryingVmProvisioner(object):
                     cluster_exists=cluster_exists)
                 if dryrun:
                     return
+            except (exceptions.InvalidClusterNameError,
+                    exceptions.NotSupportedError,
+                    exceptions.CloudUserIdentityError) as e:
+                # InvalidClusterNameError: cluster name is invalid,
+                # NotSupportedError: cloud does not support requested features,
+                # CloudUserIdentityError: cloud user identity is invalid.
+                # The exceptions above should not be applicable to the whole cloud,
+                # so we do add the cloud to the blocked resources.
+                logger.warning(common_utils.format_exception(e))
+                self._blocked_resources.add(
+                    resources_lib.Resources(cloud=to_provision.cloud))
             except exceptions.ResourcesUnavailableError as e:
                 if e.no_failover:
                     raise e
@@ -1709,10 +1715,6 @@ class RetryingVmProvisioner(object):
                         'optimize_target=sky.OptimizeTarget.COST)')
                     raise e
 
-                logger.warning(common_utils.format_exception(e))
-            except (exceptions.CloudUserIdentityError,
-                    exceptions.InvalidClusterNameError) as e:
-                # Let failover below handle this (i.e., block this cloud).
                 logger.warning(common_utils.format_exception(e))
             else:
                 # Provisioning succeeded.

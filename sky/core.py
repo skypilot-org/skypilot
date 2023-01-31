@@ -312,9 +312,8 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
     # Check cloud supports stopping instances
     cloud = handle.launched_resources.cloud
-    if not cloud.supports({clouds.CloudImplementationFeatures.STOP}):
-        raise exceptions.NotSupportedError(
-            (f'{cloud} does not support stopping instances.'))
+    cloud.check_features_are_supported(
+        {clouds.CloudImplementationFeatures.STOP})
 
     backend = backend_utils.get_backend_from_handle(handle)
     if (isinstance(backend, backends.CloudVmRayBackend) and
@@ -437,9 +436,8 @@ def autostop(
     # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
     if not down and idle_minutes >= 0:
-        if not cloud.supports({clouds.CloudImplementationFeatures.AUTOSTOP}):
-            raise exceptions.NotSupportedError(
-                (f'autostop not implemented for {cloud}.'))
+        cloud.check_features_are_supported(
+            {clouds.CloudImplementationFeatures.AUTOSTOP})
 
     backend = backend_utils.get_backend_from_handle(handle)
     usage_lib.record_cluster_name_for_current_operation(cluster_name)

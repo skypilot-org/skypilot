@@ -16,7 +16,7 @@ if typing.TYPE_CHECKING:
 class CloudImplementationFeatures(enum.Enum):
     """Features that might not be implemented for all clouds.
 
-    Used by Cloud.supports()
+    Used by Cloud.check_features_are_supported()
     """
     STOP = 'stop'
     AUTOSTOP = 'autostop'
@@ -324,12 +324,16 @@ class Cloud:
         return False
 
     @classmethod
-    def supports(cls,
-                 requested_features: Set[CloudImplementationFeatures]) -> bool:
-        """Returns whether all of the requested features are supported.
+    def check_features_are_supported(
+            cls, requested_features: Set[CloudImplementationFeatures]):
+        """Raises an exception if the cloud does not support all the requested features.
 
         For instance, Lambda Cloud does not support autostop, so
-        Lambda.support({CloudImplementationFeatures.AUTOSTOP}) returns False.
+        Lambda.support({CloudImplementationFeatures.AUTOSTOP}) raises the exception.
+
+        Raises:
+            exceptions.NotSupportedError: If the cloud does not support all the requested
+            features.
         """
         raise NotImplementedError
 

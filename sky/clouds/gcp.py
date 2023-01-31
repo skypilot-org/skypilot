@@ -677,9 +677,7 @@ class GCP(clouds.Cloud):
             instance_type, accelerators, zone, 'gcp')
 
     @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
+    def check_features_are_supported(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]):
         # All clouds.CloudImplementationFeatures implemented
-        del requested_features
-        return True
+        return

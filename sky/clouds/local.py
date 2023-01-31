@@ -174,7 +174,7 @@ class Local(clouds.Cloud):
         return region, zone
 
     @classmethod
-    def supports(
+    def check_features_are_supported(
             cls, requested_features: Set[clouds.CloudImplementationFeatures]
     ) -> bool:
         del requested_features

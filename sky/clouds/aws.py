@@ -549,9 +549,7 @@ class AWS(clouds.Cloud):
             accelerator, acc_count, region, zone, 'aws')
 
     @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
+    def check_features_are_supported(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]):
         # All clouds.CloudImplementationFeatures implemented
-        del requested_features
-        return True
+        return

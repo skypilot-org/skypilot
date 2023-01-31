@@ -4,8 +4,10 @@ import typing
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from sky import clouds
+from sky import exceptions
 from sky.clouds import service_catalog
 from sky.skylet.providers.lambda_cloud import lambda_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -253,7 +255,12 @@ class Lambda(clouds.Cloud):
             accelerator, acc_count, region, zone, 'lambda')
 
     @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
-        return requested_features.issubset(_LAMBDA_IMPLEMENTATION_FEATURES)
+    def check_features_are_supported(
+            cls, requested_features: Set[clouds.CloudImplementationFeatures]):
+        if not requested_features.issubset(_LAMBDA_IMPLEMENTATION_FEATURES):
+            requested_features_str = ', '.join(
+                [f.value for f in requested_features])
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(
+                    'does not support all the '
+                    f'features in [{requested_features_str}].')
