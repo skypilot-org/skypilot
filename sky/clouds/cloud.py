@@ -326,14 +326,15 @@ class Cloud:
     @classmethod
     def check_features_are_supported(
             cls, requested_features: Set[CloudImplementationFeatures]):
-        """Raises an exception if the cloud does not support all the requested features.
+        """Errors out if the cloud does not support all requested features.
 
         For instance, Lambda Cloud does not support autostop, so
-        Lambda.support({CloudImplementationFeatures.AUTOSTOP}) raises the exception.
+        Lambda.support({CloudImplementationFeatures.AUTOSTOP}) raises the
+        exception.
 
         Raises:
-            exceptions.NotSupportedError: If the cloud does not support all the requested
-            features.
+            exceptions.NotSupportedError: If the cloud does not support all the
+            requested features.
         """
         raise NotImplementedError
 
