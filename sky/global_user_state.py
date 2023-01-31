@@ -264,7 +264,7 @@ def add_or_update_cluster(cluster_name: str,
     _DB.cursor.execute(
         'INSERT or REPLACE INTO cluster_history'
         '(cluster_hash, name, num_nodes, requested_resources, '
-        'launched_resources, usage_intervals, status) '
+        'launched_resources, usage_intervals) '
         'VALUES ('
         # hash
         '?, '
@@ -277,8 +277,6 @@ def add_or_update_cluster(cluster_name: str,
         # number of nodes
         '?, '
         # usage intervals
-        '?, '
-        # status
         '?)',
         (
             # hash
@@ -293,8 +291,6 @@ def add_or_update_cluster(cluster_name: str,
             pickle.dumps(cluster_handle.launched_resources),
             # usage intervals
             pickle.dumps(usage_intervals),
-            # status,
-            status.value,
         ))
 
     _DB.conn.commit()
