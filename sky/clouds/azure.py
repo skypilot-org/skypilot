@@ -3,7 +3,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -43,7 +43,23 @@ class Azure(clouds.Cloud):
     """Azure."""
 
     _REPR = 'Azure'
+    # Azure has a 90 char limit for resource group; however, SkyPilot adds the
+    # suffix `-<region name>`. Azure also has a 64 char limit for VM names, and
+    # ray adds addtional `ray-`, `-worker`, and `-<9 chars hash>` for the VM
+    # names, so the limit is 64 - 4 - 7 - 10 = 43.
+    # Reference: https://azure.github.io/PSRule.Rules.Azure/en/rules/Azure.ResourceGroup.Name/ # pylint: disable=line-too-long
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 42
+
     _regions: List[clouds.Region] = []
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> int:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
@@ -406,11 +422,3 @@ class Azure(clouds.Cloud):
                     'cli command: "az account set -s <subscription_id>".'
                 ) from e
         return azure_subscription_id
-
-    @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
-        # All clouds.CloudImplementationFeatures implemented
-        del requested_features
-        return True

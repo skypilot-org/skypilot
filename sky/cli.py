@@ -3077,7 +3077,10 @@ def spot_launch(
     if name is None:
         name = backend_utils.generate_cluster_name()
     else:
-        backend_utils.check_cluster_name_is_valid(name)
+        # This does the basic regex check for the cluster name, while the name
+        # length check will be done by the controller when it starts
+        # provisioning the cluster.
+        clouds.Cloud.check_cluster_name_is_valid(name)
 
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint,

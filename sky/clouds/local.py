@@ -1,7 +1,7 @@
 """Local/On-premise."""
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 
@@ -36,7 +36,22 @@ class Local(clouds.Cloud):
     """
     _DEFAULT_INSTANCE_TYPE = 'on-prem'
     LOCAL_REGION = clouds.Region('Local')
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP:
+            ('Local cloud does not support stopping instances.'),
+        clouds.CloudImplementationFeatures.AUTOSTOP:
+            ('Local cloud does not support stopping instances.')
+    }
     _regions: List[clouds.Region] = [LOCAL_REGION]
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return None
 
     @classmethod
     def regions(cls):
@@ -172,10 +187,3 @@ class Local(clouds.Cloud):
             raise ValueError(f'Region {region!r} does not match the Local'
                              ' cloud region {Local.LOCAL_REGION.name!r}.')
         return region, zone
-
-    @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
-        del requested_features
-        return True

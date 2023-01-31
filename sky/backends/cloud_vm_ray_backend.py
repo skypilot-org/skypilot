@@ -1277,12 +1277,7 @@ class RetryingVmProvisioner(object):
                 # The stdout/stderr of ray up is not useful here, since
                 # head node is successfully provisioned.
                 definitely_no_nodes_launched = self._update_blocklist_on_error(
-                    to_provision,
-                    region,
-                    # Ignored and block region:
-                    zones=None,
-                    stdout=None,
-                    stderr=None)
+                    to_provision, region, zones=zones, stdout=None, stderr=None)
                 # GANG_FAILED means head is up, workers failed.
                 assert definitely_no_nodes_launched is False, (
                     definitely_no_nodes_launched)
@@ -1673,21 +1668,15 @@ class RetryingVmProvisioner(object):
             try:
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
-                backend_utils.check_cluster_name_is_valid(
-                    cluster_name, to_provision.cloud)
+                to_provision.cloud.check_cluster_name_is_valid(cluster_name)
                 if dryrun:
                     cloud_user = None
                 else:
                     cloud_user = to_provision.cloud.get_current_user_identity()
                 # Skip if to_provision.cloud does not support requested features
-                if not to_provision.cloud.supports(self._requested_features):
-                    self._blocked_resources.add(
-                        resources_lib.Resources(cloud=to_provision.cloud))
-                    requested_features_str = ', '.join(
-                        [f.value for f in self._requested_features])
-                    raise exceptions.ResourcesUnavailableError(
-                        f'{to_provision.cloud} does not support all the '
-                        f'features in [{requested_features_str}].')
+                to_provision.cloud.check_features_are_supported(
+                    self._requested_features)
+
                 config_dict = self._retry_region_zones(
                     to_provision,
                     num_nodes,
@@ -1699,6 +1688,17 @@ class RetryingVmProvisioner(object):
                     cluster_exists=cluster_exists)
                 if dryrun:
                     return
+            except (exceptions.InvalidClusterNameError,
+                    exceptions.NotSupportedError,
+                    exceptions.CloudUserIdentityError) as e:
+                # InvalidClusterNameError: cluster name is invalid,
+                # NotSupportedError: cloud does not support requested features,
+                # CloudUserIdentityError: cloud user identity is invalid.
+                # The exceptions above should be applicable to the whole
+                # cloud, so we do add the cloud to the blocked resources.
+                logger.warning(common_utils.format_exception(e))
+                self._blocked_resources.add(
+                    resources_lib.Resources(cloud=to_provision.cloud))
             except exceptions.ResourcesUnavailableError as e:
                 if e.no_failover:
                     raise e
@@ -1711,16 +1711,10 @@ class RetryingVmProvisioner(object):
                     raise e
 
                 logger.warning(common_utils.format_exception(e))
-            except (exceptions.CloudUserIdentityError,
-                    exceptions.InvalidClusterNameError) as e:
-                # Let failover below handle this (i.e., block this cloud).
-                logger.warning(common_utils.format_exception(e))
             else:
                 # Provisioning succeeded.
                 break
-            logger.warning(f'\n{style.BRIGHT}Provision failed for {num_nodes}x '
-                           f'{to_provision}. Trying other launchable resources '
-                           f'(if any).{style.RESET_ALL}')
+
             if to_provision.zone is None:
                 region_or_zone_str = str(to_provision.region)
             else:
@@ -3198,11 +3192,12 @@ class CloudVmRayBackend(backends.Backend):
                 cluster_exists=True)
         usage_lib.messages.usage.set_new_cluster()
         assert len(task.resources) == 1, task.resources
-        resources = list(task.resources)[0]
-        task_cloud = resources.cloud
         # Use the task_cloud, because the cloud in `to_provision` can be changed
         # later during the retry.
-        backend_utils.check_cluster_name_is_valid(cluster_name, task_cloud)
+        resources = list(task.resources)[0]
+        task_cloud = (resources.cloud
+                      if resources.cloud is not None else clouds.Cloud)
+        task_cloud.check_cluster_name_is_valid(cluster_name)
 
         cloud = to_provision.cloud
         if isinstance(cloud, clouds.Local):

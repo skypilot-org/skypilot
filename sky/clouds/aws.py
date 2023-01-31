@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -47,6 +47,14 @@ class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
     _REPR = 'AWS'
+
+    # AWS has a limit of the tag value length to 256 characters.
+    # By testing, the actual limit is 256 - 12 = 244 characters
+    # (ray adds additional `ray-` and `-worker`), due to the
+    # maximum length of DescribeInstances API filter value.
+    # Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/Using_Tags.html # pylint: disable=line-too-long
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 244
+
     _regions: List[clouds.Region] = []
 
     _INDENT_PREFIX = '    '
@@ -57,6 +65,15 @@ class AWS(clouds.Cloud):
         f'\n{_INDENT_PREFIX}For more info: '
         'https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-quickstart.html'  # pylint: disable=line-too-long
     )
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def _sso_credentials_help_str(cls, expired: bool = False) -> str:
@@ -544,11 +561,3 @@ class AWS(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'aws')
-
-    @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
-        # All clouds.CloudImplementationFeatures implemented
-        del requested_features
-        return True

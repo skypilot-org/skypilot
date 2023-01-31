@@ -1,7 +1,7 @@
 """Lambda Cloud."""
 import json
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -16,17 +16,36 @@ _CREDENTIAL_FILES = [
     'lambda_keys',
 ]
 
-# Currently, none of clouds.CloudImplementationFeatures are implemented
-# for Lambda Cloud
-_LAMBDA_IMPLEMENTATION_FEATURES: Set[clouds.CloudImplementationFeatures] = set()
-
 
 @clouds.CLOUD_REGISTRY.register
 class Lambda(clouds.Cloud):
     """Lambda Labs GPU Cloud."""
 
     _REPR = 'Lambda'
+
+    # Lamdba has a 64 char limit for cluster name.
+    # Reference: https://cloud.lambdalabs.com/api/v1/docs#operation/launchInstance # pylint: disable=line-too-long
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 64
+    # Currently, none of clouds.CloudImplementationFeatures are implemented
+    # for Lambda Cloud.
+    # STOP/AUTOSTOP: The Lambda cloud provider does not support stopping VMs.
+    # MULTI_NODE: Multi-node is not supported by the implementation yet.
+    _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.STOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.AUTOSTOP: 'Lambda cloud does not support stopping VMs.',
+        clouds.CloudImplementationFeatures.MULTI_NODE: 'Multi-node is not supported by the Lambda Cloud implementation yet.',
+    }
+
     _regions: List[clouds.Region] = []
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return cls._CLOUD_UNSUPPORTED_FEATURES
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
     def regions(cls) -> List[clouds.Region]:
@@ -248,9 +267,3 @@ class Lambda(clouds.Cloud):
                                       zone: Optional[str] = None) -> bool:
         return service_catalog.accelerator_in_region_or_zone(
             accelerator, acc_count, region, zone, 'lambda')
-
-    @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
-        return requested_features.issubset(_LAMBDA_IMPLEMENTATION_FEATURES)

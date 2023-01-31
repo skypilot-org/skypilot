@@ -4,7 +4,7 @@ import os
 import subprocess
 import time
 import typing
-from typing import Dict, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from sky import clouds
 from sky import exceptions
@@ -85,8 +85,28 @@ class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
     _REPR = 'GCP'
+
+    # GCP has a 63 char limit; however, Ray autoscaler adds many
+    # characters. Through testing, this is the maximum length for the Sky
+    # cluster name on GCP.  Ref:
+    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
+    # NOTE: actually 37 is maximum for a single-node cluster which gets the
+    # suffix '-head', but 35 for a multinode cluster because workers get the
+    # suffix '-worker'. Here we do not distinguish these cases and take the
+    # lower limit.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 35
+
     _regions: List[clouds.Region] = []
     _zones: List[clouds.Zone] = []
+
+    @classmethod
+    def _cloud_unsupported_features(
+            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return dict()
+
+    @classmethod
+    def _max_cluster_name_length(cls) -> Optional[int]:
+        return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     #### Regions/Zones ####
 
@@ -664,11 +684,3 @@ class GCP(clouds.Cloud):
             zone: Optional[str] = None) -> None:
         service_catalog.check_accelerator_attachable_to_host(
             instance_type, accelerators, zone, 'gcp')
-
-    @classmethod
-    def supports(
-            cls, requested_features: Set[clouds.CloudImplementationFeatures]
-    ) -> bool:
-        # All clouds.CloudImplementationFeatures implemented
-        del requested_features
-        return True
