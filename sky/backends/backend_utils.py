@@ -1407,10 +1407,10 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
             # May be a leaked preempted resource, or terminated by user in the
-            # console.
+            # console, or still in the process of being created.
             ux_utils.console_newline()
             logger.warning(f'TPU VM {tpu_id} is not in READY state. '
-                           'Skipping...')
+                           'Skipping IP query...')
             continue
 
         if not get_internal_ips:
