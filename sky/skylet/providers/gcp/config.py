@@ -534,10 +534,12 @@ def _check_firewall_rules(vpc_name, config, compute):
                         else:
                             assert (
                                 len(parse_ports) == 2
-                            ), "Failed to parse the port range: {}".format(port_range)
+                            ), f"Failed to parse the port range: {port_range}"
                             port_set.update(
                                 set(range(int(parse_ports[0]), int(parse_ports[1]) + 1)))
-                source2rules[direction_source][allowed["IPProtocol"]] = port_set
+                if allowed["IPProtocol"] not in source2rules[direction_source]:
+                    source2rules[direction_source][allowed["IPProtocol"]] = set()
+                source2rules[direction_source][allowed["IPProtocol"]].update(port_set)
         return source2rules
 
     effective_rules = _merge_and_refine_rule(effective_rules)
