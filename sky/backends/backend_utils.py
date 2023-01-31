@@ -2410,9 +2410,7 @@ def check_cluster_name_is_valid(cluster_name: str,
     """
     if cluster_name is None:
         return
-    # GCP errors return this exact regex.  An informal description is at:
-    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-    valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
+    valid_regex = '[a-z]([-a-z0-9]*[a-z0-9])?'
     if re.fullmatch(valid_regex, cluster_name) is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.InvalidClusterNameError(
