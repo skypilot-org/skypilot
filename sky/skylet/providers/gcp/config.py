@@ -602,7 +602,8 @@ def get_usable_vpc(config):
 
         # Create firewall rules
         for rule in FIREWALL_RULES_TEMPLATE:
-            # if the rule already exists, delete it first
+            # Query firewall rule by its name (unique in a project).
+            # If the rule already exists, delete it first.
             rule_name = rule["name"].format(VPC_NAME=SKYPILOT_VPC_NAME)
             rule_list = _list_firewall_rules(
                 config, compute, filter=f"(name={rule_name})")
