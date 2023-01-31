@@ -327,11 +327,11 @@ def format_exception(e: Exception, use_bracket: bool = False) -> str:
     Returns:
         A string that represents the exception.
     """
-    BRIGHT = colorama.Style.BRIGHT
-    RESET = colorama.Style.RESET_ALL
+    bright = colorama.Style.BRIGHT
+    reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{BRIGHT}[{class_fullname(e.__class__)}]:{RESET} {e}'
-    return f'{BRIGHT}{class_fullname(e.__class__)}:{RESET} {e}'
+        return f'{bright}[{class_fullname(e.__class__)}]:{reset} {e}'
+    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
 
 
 def remove_color(s: str):
