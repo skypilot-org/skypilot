@@ -1,5 +1,30 @@
 from typing import List
+import hashlib
+
 from sky.utils import command_runner, subprocess_utils
+
+
+def setup_dependencies(setup_commands: List[str],
+                       ssh_runners: List[command_runner.SSHCommandRunner]):
+    # TODO(suquark): log to files
+    # compute the digest
+    digests = []
+    for cmd in setup_commands:
+        digests.append(hashlib.sha256(cmd.encode()).digest())
+    hasher = hashlib.sha256()
+    for d in digests:
+        hasher.update(d)
+    digest = hasher.hexdigest()
+    path = '~/.sky/.setup_cmd_hash'
+    prefix_cmd = (f'[[ "{digest}" == "$(cat {path} 2>/dev/null)" ]] && '
+                  f'echo skip installing dependencies && exit 0\n')
+    setup_commands.append(f'echo -n "{digest}" > {path}')
+
+    def _setup_node(runner: command_runner.SSHCommandRunner):
+        for cmd in setup_commands:
+            runner.run(prefix_cmd + cmd, stream_logs=False)
+
+    subprocess_utils.run_in_parallel(_setup_node, ssh_runners)
 
 
 def start_ray(ssh_runners: List[command_runner.SSHCommandRunner],

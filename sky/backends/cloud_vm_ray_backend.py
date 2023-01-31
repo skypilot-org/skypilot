@@ -2342,14 +2342,11 @@ class CloudVmRayBackend(backends.Backend):
 
                 config_from_yaml = common_utils.read_yaml(cluster_config_file)
 
-                def _setup_node(runner: command_runner.SSHCommandRunner):
-                    for cmd in config_from_yaml['setup_commands']:
-                        runner.run(cmd, stream_logs=False)
-
                 with backend_utils.safe_console_status(
                         f'[bold cyan]Installing dependencies for '
                         f'[green]{cluster_name}[white] ...'):
-                    subprocess_utils.run_in_parallel(_setup_node, runners)
+                    provisioner_setup.setup_dependencies(
+                        config_from_yaml['setup_commands'], runners)
 
                 with backend_utils.safe_console_status(
                         f'[bold cyan]Starting Ray for '
