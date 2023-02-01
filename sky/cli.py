@@ -115,6 +115,17 @@ def _get_glob_clusters(clusters: List[str]) -> List[str]:
     return list(set(glob_clusters))
 
 
+def _get_glob_clusters_from_history(clusters: List[str]) -> List[str]:
+    """Returns a list of clusters that match the glob pattern."""
+    glob_clusters = []
+    for cluster in clusters:
+        glob_cluster = global_user_state.get_glob_cluster_history_names(cluster)
+        if len(glob_cluster) == 0:
+            click.echo(f'Cluster {cluster} not found in history.')
+        glob_clusters.extend(glob_cluster)
+    return list(set(glob_clusters))
+
+
 def _get_glob_storages(storages: List[str]) -> List[str]:
     """Returns a list of storages that match the glob pattern."""
     glob_storages = []
@@ -1467,8 +1478,13 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.argument('clusters',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_cluster_name))
 @usage_lib.entrypoint
-def cost_report(all: bool):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, clusters: List[str]):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show cost reports for each cluster.
 
@@ -1485,7 +1501,12 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     on the cloud console.
     """
 
-    cluster_records = core.cost_report()
+    if clusters:
+        clusters = _get_glob_clusters_from_history(clusters)
+    else:
+        clusters = None
+
+    cluster_records = core.cost_report(clusters)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:

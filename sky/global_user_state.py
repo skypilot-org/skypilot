@@ -353,6 +353,13 @@ def get_glob_cluster_names(cluster_name: str) -> List[str]:
     return [row[0] for row in rows]
 
 
+def get_glob_cluster_history_names(cluster_name: str) -> List[str]:
+    assert cluster_name is not None, 'cluster_name cannot be None'
+    rows = _DB.cursor.execute(
+        'SELECT name FROM cluster_history WHERE name GLOB (?)', (cluster_name,))
+    return [row[0] for row in rows]
+
+
 def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
     _DB.cursor.execute('UPDATE clusters SET status=(?) WHERE name=(?)', (
         status.value,

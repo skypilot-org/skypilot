@@ -106,7 +106,7 @@ def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
 
 
 @usage_lib.entrypoint
-def cost_report() -> List[Dict[str, Any]]:
+def cost_report(cluster_names: List[str]) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -139,7 +139,16 @@ def cost_report() -> List[Dict[str, Any]]:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
-    cluster_reports = global_user_state.get_clusters_from_history()
+    all_cluster_reports = global_user_state.get_clusters_from_history()
+
+    cluster_reports = []
+    if cluster_names is not None:
+        for cluster_name in cluster_names:
+            for report in all_cluster_reports:
+                if report['name'] == cluster_name:
+                    cluster_reports.append(report)
+    else:
+        cluster_reports = all_cluster_reports
 
     def get_total_cost(cluster_report: dict) -> float:
         duration = cluster_report['duration']
