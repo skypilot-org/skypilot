@@ -126,12 +126,20 @@ class ClusterStatus(enum.Enum):
     # Stopped.  This means a `sky stop` call has previously succeeded.
     STOPPED = 'STOPPED'
 
+    # Not used in cluster table, only cluster_history table
+    # This means a `sky down` call has previously succeeded.
+    TERMINATED = 'TERMINATED'
 
-STATUS_TO_COLOR = {
-    ClusterStatus.INIT.value: colorama.Fore.BLUE,
-    ClusterStatus.UP.value: colorama.Fore.GREEN,
-    ClusterStatus.STOPPED.value: colorama.Fore.YELLOW,
-    'TERMINATED': colorama.Fore.BLACK,  # sky down
+    def colored_str(self):
+        color = _STATUS_TO_COLOR[self]
+        return f'{color}{self.value}{colorama.Style.RESET_ALL}'
+
+
+_STATUS_TO_COLOR = {
+    ClusterStatus.INIT: colorama.Fore.BLUE,
+    ClusterStatus.UP: colorama.Fore.GREEN,
+    ClusterStatus.STOPPED: colorama.Fore.YELLOW,
+    ClusterStatus.TERMINATED: colorama.Fore.BLACK,
 }
 
 
@@ -363,18 +371,6 @@ def set_cluster_status(cluster_name: str, status: ClusterStatus) -> None:
         raise ValueError(f'Cluster {cluster_name} not found.')
 
 
-def get_cluster_history_status(cluster_hash: str):
-
-    rows = _DB.cursor.execute(
-        'SELECT clusters.status FROM cluster_history '
-        'INNER JOIN clusters '
-        'ON cluster_history.cluster_hash=clusters.cluster_hash '
-        'WHERE cluster_history.cluster_hash=(?)', (cluster_hash,))
-    for (status,) in rows:
-        return status
-    return 'TERMINATED'
-
-
 def set_cluster_autostop_value(cluster_name: str, idle_minutes: int,
                                to_down: bool) -> None:
     _DB.cursor.execute(
@@ -554,8 +550,17 @@ def get_clusters() -> List[Dict[str, Any]]:
 
 
 def get_clusters_from_history() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('SELECT * from cluster_history').fetchall()
+    rows = _DB.cursor.execute('SELECT * from cluster_history')
 
+    rows = _DB.cursor.execute(
+        'SELECT ch.cluster_hash, ch.name, ch.num_nodes, '
+        'ch.launched_resources, ch.usage_intervals, clusters.status  '
+        'FROM cluster_history ch '
+        'LEFT OUTER JOIN clusters '
+        'ON ch.cluster_hash=clusters.cluster_hash ').fetchall()
+
+    # '(cluster_hash, name, num_nodes, requested_resources, '
+    #         'launched_resources, usage_intervals) '
     records = []
 
     for row in rows:
@@ -565,12 +570,13 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             cluster_hash,
             name,
             num_nodes,
-            _,
             launched_resources,
             usage_intervals,
+            status,
         ) = row[:6]
 
-        # backwards compatibility for null status in cluster_history
+        if status is None:
+            status = 'TERMINATED'
 
         record = {
             'name': name,
@@ -580,7 +586,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
             'usage_intervals': pickle.loads(usage_intervals),
-            'status': get_cluster_history_status(cluster_hash),
+            'status': ClusterStatus[status],
         }
 
         records.append(record)
