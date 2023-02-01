@@ -161,9 +161,16 @@ class StrategyExecutor:
                            detach_run=True,
                            _is_launched_by_spot_controller=True)
                 logger.info('Spot cluster launched.')
-            except exceptions.InvalidClusterNameError as e:
-                # The cluster name is too long.
-                raise exceptions.ResourcesUnavailableError(str(e)) from e
+            except exceptions.ResourcesUnavailableError as e:
+                if len(e.failover_reasons) == 1:
+                    failover_type = list(e.failover_reasons.keys())[0]
+                    if not isinstance(failover_type,
+                                    exceptions.ResourcesUnavailableError):
+                        raise
+                logger.info('Failed to launch the spot cluster with error: '
+                            f'{common_utils.format_exception(e)})')
+                retry_launch = True
+                exception = e
             except Exception as e:  # pylint: disable=broad-except
                 # If the launch fails, it will be recovered by the following
                 # code.

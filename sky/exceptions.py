@@ -1,5 +1,6 @@
 """Exceptions."""
 import enum
+from typing import Dict, Optional, Type
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
@@ -10,9 +11,18 @@ RSYNC_FILE_NOT_FOUND_CODE = 23
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable."""
 
-    def __init__(self, *args: object, no_failover: bool = False) -> None:
+    def __init__(
+            self,
+            *args: object,
+            no_failover: bool = False,
+            failover_reasons: Optional[Dict[Type[Exception],
+                                            str]] = None) -> None:
         super().__init__(*args)
         self.no_failover = no_failover
+        # Mapping from exception type to reason for failover.
+        if failover_reasons is None:
+            failover_reasons = dict()
+        self.failover_reasons: Dict[Type[Exception], str] = failover_reasons
 
 
 class ResourcesMismatchError(Exception):

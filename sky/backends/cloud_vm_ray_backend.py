@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Union, Set
+from typing import Dict, List, Optional, Tuple, Type, Union, Set
 
 import colorama
 import filelock
@@ -1662,6 +1662,8 @@ class RetryingVmProvisioner(object):
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
+        failover_reasons: Dict[Type[Exception], str] = dict()
+
         style = colorama.Style
         # Retrying launchable resources.
         while True:
@@ -1699,7 +1701,9 @@ class RetryingVmProvisioner(object):
                 logger.warning(common_utils.format_exception(e))
                 self._blocked_resources.add(
                     resources_lib.Resources(cloud=to_provision.cloud))
+                failover_reasons[type(e)] = str(e)
             except exceptions.ResourcesUnavailableError as e:
+                failover_reasons[type(e)] = str(e)
                 if e.no_failover:
                     raise e
                 if launchable_retries_disabled:
@@ -1741,9 +1745,14 @@ class RetryingVmProvisioner(object):
             # (otherwise will skip re-optimizing this task).
             # TODO: set all remaining tasks' best_resources to None.
             task.best_resources = None
-            self._dag = sky.optimize(self._dag,
-                                     minimize=self._optimize_target,
-                                     blocked_resources=self._blocked_resources)
+            try:
+                self._dag = sky.optimize(
+                    self._dag,
+                    minimize=self._optimize_target,
+                    blocked_resources=self._blocked_resources)
+            except exceptions.ResourcesUnavailableError as e:
+                e.failover_reasons = failover_reasons
+                raise e
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
@@ -2177,7 +2186,8 @@ class CloudVmRayBackend(backends.Backend):
                         '`--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message) from None
+                            error_message,
+                            failover_reasons=e.failover_reasons) from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']

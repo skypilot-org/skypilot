@@ -177,13 +177,26 @@ class SpotController:
         except exceptions.ResourcesUnavailableError as e:
             logger.error(f'{common_utils.class_fullname(e.__class__)}: '
                          f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
-            spot_state.set_failed(
-                self._job_id,
-                failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE)
+            failure_type = spot_state.SpotStatus.FAILED_NO_RESOURCE
+            failure_reason = str(e)
+            if len(e.failover_reasons) == 1:
+                failover_type, failure_reason = list(
+                    e.failover_reasons.items())[0]
+                if not isinstance(failover_type,
+                                  exceptions.ResourcesUnavailableError):
+                    failure_type = spot_state.SpotStatus.FAILED_CONFIG
+            spot_state.set_failed(self._job_id,
+                                  failure_type=failure_type,
+                                  failure_reason=failure_reason)
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
-            logger.error('Unexpected error occurred: '
-                         f'{common_utils.format_exception(e)}')
+            msg = ('Unexpected error occurred: '
+                   f'{common_utils.format_exception(e)}')
+            logger.error(msg)
+            spot_state.set_failed(
+                self._job_id,
+                failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason=msg)
         finally:
             self._strategy_executor.terminate_cluster()
             job_status = spot_state.get_status(self._job_id)
@@ -193,7 +206,8 @@ class SpotController:
                 logger.info(f'Previous spot job status: {job_status.value}')
                 spot_state.set_failed(
                     self._job_id,
-                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER)
+                    failure_type=spot_state.SpotStatus.FAILED_CONTROLLER,
+                    failure_reason='Unknown')
 
             # Clean up Storages with persistent=False.
             self._backend.teardown_ephemeral_storage(self._task)

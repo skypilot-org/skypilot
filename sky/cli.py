@@ -3076,11 +3076,6 @@ def spot_launch(
     """
     if name is None:
         name = backend_utils.generate_cluster_name()
-    else:
-        # This does the basic regex check for the cluster name, while the name
-        # length check will be done by the controller when it starts
-        # provisioning the cluster.
-        clouds.Cloud.check_cluster_name_is_valid(name)
 
     task = _make_task_from_entrypoint_with_overrides(
         entrypoint,
@@ -3104,6 +3099,15 @@ def spot_launch(
         prompt = f'Launching a new spot task {name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
+
+    # We try our best to validate the cluster name before we launch the task.
+    # If the cloud is not specified, this will only validate the cluster name
+    # against the regex, and the cloud-specific validation will be done by
+    # the spot controller when actually launching the spot cluster.
+    resources = list(task.resources)[0]
+    task_cloud = (resources.cloud
+                  if resources.cloud is not None else clouds.Cloud)
+    task_cloud.check_cluster_name_is_valid(name)
 
     sky.spot_launch(task,
                     name,
