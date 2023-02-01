@@ -252,11 +252,11 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             job_msg = ''
             if job_status.is_failed():
                 job_msg = (
-                    f'\n\tReason: {spot_state.get_failure_reason(job_id)}')
+                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}')
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
-                    f'{job_status.value}. Logs will not be shown.{job_msg}'
-                    f'{colorama.Style.RESET_ALL}')
+                    f'{job_status.value}. Logs will not be shown.'
+                    f'{colorama.Style.RESET_ALL}{job_msg}')
         task_name = spot_state.get_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
@@ -445,7 +445,7 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
                 log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
-                job['failure_reason'],
+                job['failure_reason'] if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
     status_str = ', '.join([
