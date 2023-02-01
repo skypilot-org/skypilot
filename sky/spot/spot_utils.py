@@ -430,13 +430,18 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         if not job['status'].is_terminal():
             status_counts[job['status'].value] += 1
         if show_all:
-            # STARTED
-            started = log_utils.readable_time_duration(job['start_at'])
-            values.append(started)
+            failure_reason = job['failure_reason']
+            if job['status'] in (spot_state.SpotStatus.FAILED,
+                                 spot_state.SpotStatus.FAILED_SETUP):
+                failure_reason = (
+                    'The spot job failed. To see the details, '
+                    f'run: sky logs {SPOT_CONTROLLER_NAME} {job["job_id"]}')
             values.extend([
+                # STARTED
+                log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
-                job['failure_reason'],
+                failure_reason,
             ])
         job_table.add_row(values)
     status_str = ', '.join([

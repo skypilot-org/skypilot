@@ -135,16 +135,10 @@ class SpotController:
                                             spot_job_id=self._job_id)
                     logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
                     status_to_set = spot_state.SpotStatus.FAILED
-                    failure_reason = 'User job failed.'
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         status_to_set = spot_state.SpotStatus.FAILED_SETUP
-                        failure_reason = 'User setup failed.'
-                    failure_reason += (
-                        ' To see details, run: sky logs '
-                        f'{spot_utils.SPOT_CONTROLLER_NAME} {self._job_id}')
                     spot_state.set_failed(self._job_id,
                                           failure_type=status_to_set,
-                                          failure_reason=failure_reason,
                                           end_time=end_time)
                     break
                 # Although the cluster is healthy, we fail to access the
