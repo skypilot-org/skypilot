@@ -251,6 +251,7 @@ def set_failed(job_id: int,
                end_time: Optional[float] = None):
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
+
     fields_to_set = {
         'end_at': end_time,
         'status': failure_type.value,

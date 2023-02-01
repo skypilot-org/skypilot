@@ -165,7 +165,7 @@ class StrategyExecutor:
                 if len(e.failover_reasons) == 1:
                     failover_type = list(e.failover_reasons.keys())[0]
                     if not isinstance(failover_type,
-                                    exceptions.ResourcesUnavailableError):
+                                      exceptions.ResourcesUnavailableError):
                         raise
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')
