@@ -186,8 +186,7 @@ def cost_report(timeframe: str) -> List[Dict[str, Any]]:
 
     visible_cluster_reports = []
     for cluster_report in cluster_reports:
-        if cluster_report[
-                'total_cost'] > 0:
+        if cluster_report['total_cost'] > 0:
             visible_cluster_reports.append(cluster_report)
 
     return visible_cluster_reports
