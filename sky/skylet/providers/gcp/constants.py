@@ -9,6 +9,28 @@ VPC_TEMPLATE = {
     "mtu": 1460,
     "routingConfig": {"routingMode": "GLOBAL"},
 }
+# Required firewall rules for SkyPilot to work.
+FIREWALL_RULES_REQUIRED = [
+    # Allow internal connections between GCP VMs for Ray multi-node cluster.
+    {
+        "direction": "INGRESS",
+        "allowed": [
+            {'IPProtocol': 'tcp', 'ports': ['0-65535']},
+            {'IPProtocol': 'udp', 'ports': ['0-65535']},
+        ],
+        "sourceRanges": ["10.128.0.0/9"],
+    },
+    # Allow ssh connection from anywhere.
+    {
+        "direction": "INGRESS",
+        "allowed": [{
+            "IPProtocol": "tcp",
+            "ports": ["22"],
+        }],
+        "sourceRanges": ["0.0.0.0/0"],
+    }
+]
+# Template when creating firewall rules for a new VPC.
 FIREWALL_RULES_TEMPLATE = [
     {
         "name": "{VPC_NAME}-allow-custom",
