@@ -38,6 +38,7 @@ from sky.data import storage as storage_lib
 from sky.backends import backend_utils
 from sky.backends import onprem_utils
 from sky.backends import wheel_utils
+from sky.provision import setup as provision_setup_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -1234,6 +1235,17 @@ class RetryingVmProvisioner(object):
                     log_abs_path, stream_logs, logging_info,
                     to_provision.use_spot)
 
+            def _check_and_restart_ray():
+                # move the code block here due to the indentation issue
+                from sky.provision import aws
+                ip_dict = aws.get_instance_ips(region, cluster_name)
+                ip_tuples = list(ip_dict.items())
+                ssh_credentials = backend_utils.ssh_credential_from_yaml(
+                    handle.cluster_yaml)
+                runners = command_runner.SSHCommandRunner.make_runner_list(
+                    [t[1] for t in ip_tuples], **ssh_credentials)
+                provision_setup_lib.start_ray(runners, ip_tuples[0][0], True)
+
             if status == self.GangSchedulingStatus.CLUSTER_READY:
                 if cluster_exists:
                     # Guard against the case where there's an existing cluster
@@ -1247,7 +1259,10 @@ class RetryingVmProvisioner(object):
                     # to take 9s. Only do this for existing clusters, not
                     # freshly launched ones (which should have ray runtime
                     # started).
-                    self._ensure_cluster_ray_started(handle, log_abs_path)
+                    if isinstance(to_provision.cloud, clouds.AWS):
+                        _check_and_restart_ray()
+                    else:
+                        self._ensure_cluster_ray_started(handle, log_abs_path)
 
                 cluster_name = config_dict['cluster_name']
                 config_dict['launched_resources'] = to_provision.copy(

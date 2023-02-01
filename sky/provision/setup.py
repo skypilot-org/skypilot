@@ -28,7 +28,13 @@ def setup_dependencies(setup_commands: List[str],
 
 
 def start_ray(ssh_runners: List[command_runner.SSHCommandRunner],
-              head_private_ip: str):
+              head_private_ip: str,
+              check_ray_started: bool = False):
+    if check_ray_started:
+        returncode = ssh_runners[0].run('ray status', stream_logs=False)
+        if returncode == 0:
+            return
+
     ray_prlimit = (
         'which prlimit && for id in $(pgrep -f raylet/raylet); '
         'do sudo prlimit --nofile=1048576:1048576 --pid=$id || true; done;')
