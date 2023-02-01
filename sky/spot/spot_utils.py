@@ -24,9 +24,17 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
+
+def get_controller_name(user_id: Optional[str] = None) -> str:
+    """Get the name of the controller VM."""
+    if user_id is None:
+        user_id = common_utils.get_user_hash()
+    return f'sky-spot-controller--{user_id}'
+
+
 # Add user hash so that two users don't have the same controller VM on
 # shared-account clouds such as GCP.
-SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
+SPOT_CONTROLLER_NAME = get_controller_name()
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -119,8 +127,10 @@ def update_spot_job_status(job_id: Optional[int] = None):
             # The controller job for this spot job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
-            spot_state.set_failed(job_id_,
-                                  spot_state.SpotStatus.FAILED_CONTROLLER)
+            spot_state.set_failed(
+                job_id_,
+                spot_state.SpotStatus.FAILED_CONTROLLER,
+                failure_reason='Controller process has exited abnormally.')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -241,12 +251,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         if job_status.is_terminal():
             job_msg = ''
             if job_status.is_failed():
-                job_msg = ('\nFor detailed error message, please check: '
-                           f'{colorama.Style.BRIGHT}sky logs '
-                           f'{SPOT_CONTROLLER_NAME} {job_id}'
-                           f'{colorama.Style.RESET_ALL}')
-            return (f'Job {job_id} is already in terminal state '
-                    f'{job_status.value}. Logs will not be shown.{job_msg}')
+                job_msg = (
+                    f'\n\tReason: {spot_state.get_failure_reason(job_id)}')
+            return (f'{colorama.Fore.YELLOW}'
+                    f'Job {job_id} is already in terminal state '
+                    f'{job_status.value}. Logs will not be shown.{job_msg}'
+                    f'{colorama.Style.RESET_ALL}')
         task_name = spot_state.get_task_name_by_job_id(job_id)
         cluster_name = generate_spot_cluster_name(task_name, job_id)
         backend = backends.CloudVmRayBackend()
@@ -430,18 +440,12 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
         if not job['status'].is_terminal():
             status_counts[job['status'].value] += 1
         if show_all:
-            failure_reason = job['failure_reason']
-            if job['status'] in (spot_state.SpotStatus.FAILED,
-                                 spot_state.SpotStatus.FAILED_SETUP):
-                failure_reason = (
-                    'The spot job failed. To see the details, '
-                    f'run: sky logs {SPOT_CONTROLLER_NAME} {job["job_id"]}')
             values.extend([
                 # STARTED
                 log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
-                failure_reason,
+                job['failure_reason'],
             ])
         job_table.add_row(values)
     status_str = ', '.join([

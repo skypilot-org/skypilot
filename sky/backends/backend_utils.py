@@ -815,10 +815,6 @@ def write_cluster_config(
                 'cluster_name': cluster_name,
                 'num_nodes': num_nodes,
                 'disk_size': to_provision.disk_size,
-                # If the current code is run by controller, propagate the real
-                # calling user which should've been passed in as the
-                # SKYPILOT_USER env var (see spot-controller.yaml.j2).
-                'user': os.environ.get('SKYPILOT_USER', getpass.getuser()),
 
                 # AWS only:
                 # Temporary measure, as deleting per-cluster SGs is too slow.

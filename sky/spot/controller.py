@@ -2,6 +2,7 @@
 import argparse
 import multiprocessing
 import pathlib
+import os
 import signal
 import time
 import traceback
@@ -137,8 +138,15 @@ class SpotController:
                     status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         status_to_set = spot_state.SpotStatus.FAILED_SETUP
+                    controller_name = spot_utils.get_controller_name(
+                        os.getenv(constants.CALLER_USER_ID_ENV))
+                    failure_reason = (
+                        'To see the details, run: '
+                        f'sky logs {controller_name} {self._job_id}')
+
                     spot_state.set_failed(self._job_id,
                                           failure_type=status_to_set,
+                                          failure_reason=failure_reason,
                                           end_time=end_time)
                     break
                 # Although the cluster is healthy, we fail to access the

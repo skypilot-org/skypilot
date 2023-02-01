@@ -247,7 +247,7 @@ def set_succeeded(job_id: int, end_time: float):
 
 def set_failed(job_id: int,
                failure_type: SpotStatus,
-               failure_reason: Optional[str] = None,
+               failure_reason: str,
                end_time: Optional[float] = None):
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
@@ -324,6 +324,17 @@ def get_status(job_id: int) -> Optional[SpotStatus]:
     if status is None:
         return None
     return SpotStatus(status[0])
+
+
+def get_failure_reason(job_id: int) -> Optional[str]:
+    """Get the failure reason of a job."""
+    reason = _CURSOR.execute(
+        """\
+        SELECT failure_reason FROM spot WHERE job_id=(?)""",
+        (job_id,)).fetchone()
+    if reason is None:
+        return None
+    return reason[0]
 
 
 def get_spot_jobs() -> List[Dict[str, Any]]:
