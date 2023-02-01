@@ -44,6 +44,7 @@ from sky import spot as spot_lib
 from sky.backends import onprem_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.skylet.providers.lambda_cloud import lambda_utils
 from sky.utils import common_utils
 from sky.utils import command_runner
 from sky.utils import env_options
@@ -88,15 +89,6 @@ WAIT_HEAD_NODE_IP_MAX_ATTEMPTS = 3
 # with no internet connection.
 # Refer to: https://stackoverflow.com/questions/3764291/how-can-i-see-if-theres-an-available-and-active-network-connection-in-python # pylint: disable=line-too-long
 _TEST_IP = 'https://8.8.8.8'
-
-# GCP has a 63 char limit; however, Ray autoscaler adds many
-# characters. Through testing, this is the maximum length for the Sky cluster
-# name on GCP.  Ref:
-# https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-# NOTE: actually 37 is maximum for a single-node cluster which gets the suffix
-# '-head', but 35 for a multinode cluster because workers get the suffix
-# '-worker'. Here we do not distinguish these cases and take the lower limit.
-_MAX_CLUSTER_NAME_LEN_FOR_GCP = 35
 
 # Allow each CPU thread take 2 tasks.
 # Note: This value cannot be too small, otherwise OOM issue may occur.
@@ -951,6 +943,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_gcp_authentication(config)
     elif isinstance(cloud, clouds.Azure):
         config = auth.setup_azure_authentication(config)
+    elif isinstance(cloud, clouds.Lambda):
+        config = auth.setup_lambda_authentication(config)
     else:
         assert isinstance(cloud, clouds.Local), cloud
         # Local cluster case, authentication is already filled by the user
@@ -1339,17 +1333,17 @@ def get_node_ips(cluster_yaml: str,
                     break
         if len(worker_ips) != expected_num_nodes - 1:
             n = expected_num_nodes - 1
-            # This could be triggered if e.g., some logging is added in
-            # skypilot_config, a module that has some code executed whenever
-            # `sky` is imported.
-            logger.warning(
-                f'Expected {n} worker IP(s); found '
-                f'{len(worker_ips)}: {worker_ips}'
-                '\nThis could happen if there is extra output from '
-                '`ray get-worker-ips`, which should be inspected below.'
-                f'\n== Output ==\n{out}'
-                f'\n== Output ends ==')
             if len(worker_ips) > n:
+                # This could be triggered if e.g., some logging is added in
+                # skypilot_config, a module that has some code executed whenever
+                # `sky` is imported.
+                logger.warning(
+                    f'Expected {n} worker IP(s); found '
+                    f'{len(worker_ips)}: {worker_ips}'
+                    '\nThis could happen if there is extra output from '
+                    '`ray get-worker-ips`, which should be inspected below.'
+                    f'\n== Output ==\n{out}'
+                    f'\n== Output ends ==')
                 logger.warning(f'\nProceeding with the last {n} '
                                f'detected IP(s): {worker_ips[-n:]}.')
                 worker_ips = worker_ips[-n:]
@@ -1407,10 +1401,11 @@ def _get_tpu_vm_pod_ips(ray_config: Dict[str, Any],
         tpuvm_json = json.loads(stdout)
         if tpuvm_json['state'] != 'READY':
             # May be a leaked preempted resource, or terminated by user in the
-            # console.
+            # console, or still in the process of being created.
             ux_utils.console_newline()
-            logger.warning(f'TPU VM {tpu_id} is not in READY state. '
-                           'Skipping...')
+            logger.debug(f'TPU VM {tpu_id} is in {tpuvm_json["state"]} '
+                         'state. Skipping IP query... '
+                         'Hint: make sure it is not leaked.')
             continue
 
         if not get_internal_ips:
@@ -1802,10 +1797,29 @@ def _query_status_azure(
     return _process_cli_query('Azure', cluster, query_cmd, '\t', status_map)
 
 
+def _query_status_lambda(
+        cluster: str,
+        ray_config: Dict[str, Any],  # pylint: disable=unused-argument
+) -> List[global_user_state.ClusterStatus]:
+    status_map = {
+        'booting': global_user_state.ClusterStatus.INIT,
+        'active': global_user_state.ClusterStatus.UP,
+        'unhealthy': global_user_state.ClusterStatus.INIT,
+        'terminated': None,
+    }
+    # TODO(ewzeng): filter by hash_filter_string to be safe
+    vms = lambda_utils.LambdaCloudClient().list_instances()
+    for node in vms:
+        if node['name'] == cluster:
+            return [status_map[node['status']]]
+    return []
+
+
 _QUERY_STATUS_FUNCS = {
     'AWS': _query_status_aws,
     'GCP': _query_status_gcp,
     'Azure': _query_status_azure,
+    'Lambda': _query_status_lambda,
 }
 
 
@@ -1950,24 +1964,34 @@ def _update_cluster_status_no_lock(
     #     abnormal.
     #
     # An abnormal cluster will transition to INIT and have any autostop setting
-    # reset.
+    # reset (unless it's autostopping/autodowning.).
     is_abnormal = ((0 < len(node_statuses) < handle.launched_nodes) or
                    any(status != global_user_state.ClusterStatus.STOPPED
                        for status in node_statuses))
     if is_abnormal:
-        # Reset the autostop to avoid false information with best effort.
-        # Side effect: if the status is refreshed during autostopping, the
-        # autostop field in the local cache will be reset, even though the
-        # cluster will still be correctly stopped.
-        try:
-            backend = backends.CloudVmRayBackend()
-            backend.set_autostop(handle, -1, stream_logs=False)
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            logger.debug(f'Failed to reset autostop. Due to '
-                         f'{common_utils.format_exception(e)}')
-        global_user_state.set_cluster_autostop_value(handle.cluster_name,
-                                                     -1,
-                                                     to_down=False)
+        backend = get_backend_from_handle(handle)
+        if isinstance(backend,
+                      backends.CloudVmRayBackend) and record['autostop'] >= 0:
+            if not backend.is_definitely_autostopping(handle,
+                                                      stream_logs=False):
+                # Reset the autostopping as the cluster is abnormal, and may
+                # not correctly autostop. Resetting the autostop will let
+                # the user know that the autostop may not happen to avoid
+                # leakages from the assumption that the cluster will autostop.
+                try:
+                    backend.set_autostop(handle, -1, stream_logs=False)
+                except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                    logger.debug(f'Failed to reset autostop. Due to '
+                                 f'{common_utils.format_exception(e)}')
+                global_user_state.set_cluster_autostop_value(
+                    handle.cluster_name, -1, to_down=False)
+            else:
+                ux_utils.console_newline()
+                operation_str = 'autodowning' if record[
+                    'to_down'] else 'autostopping'
+                logger.info(
+                    f'Cluster {cluster_name!r} is {operation_str}. Setting to '
+                    'INIT status; try refresh again in a while.')
 
         # If the user starts part of a STOPPED cluster, we still need a status
         # to represent the abnormal status. For spot cluster, it can also
@@ -2388,35 +2412,6 @@ def get_task_resources_str(task: 'task_lib.Task') -> str:
         resources_str = ', '.join(f'{k}:{v}' for k, v in resources_dict.items())
     resources_str = f'{task.num_nodes}x [{resources_str}]'
     return resources_str
-
-
-def check_cluster_name_is_valid(cluster_name: str,
-                                cloud: Optional[clouds.Cloud] = None) -> None:
-    """Errors out on invalid cluster names not supported by cloud providers.
-
-    Bans (including but not limited to) names that:
-    - are digits-only
-    - contain underscore (_)
-    """
-    if cluster_name is None:
-        return
-    # GCP errors return this exact regex.  An informal description is at:
-    # https://cloud.google.com/compute/docs/naming-resources#resource-name-format
-    valid_regex = '[a-z]([-a-z0-9]{0,61}[a-z0-9])?'
-    if re.fullmatch(valid_regex, cluster_name) is None:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.InvalidClusterNameError(
-                f'Cluster name "{cluster_name}" is invalid; '
-                f'ensure it is fully matched by regex: {valid_regex}')
-    if isinstance(cloud, clouds.GCP):
-        # GCP has too restrictive of a length limit. Don't check for other
-        # clouds.
-        if len(cluster_name) > _MAX_CLUSTER_NAME_LEN_FOR_GCP:
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.InvalidClusterNameError(
-                    f'Cluster name {cluster_name!r} has {len(cluster_name)} '
-                    f'chars; maximum length is {_MAX_CLUSTER_NAME_LEN_FOR_GCP} '
-                    'chars.')
 
 
 def check_cluster_name_not_reserved(

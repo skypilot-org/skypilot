@@ -25,6 +25,13 @@ def get_resources_schema():
             'zone': {
                 'type': 'string',
             },
+            'cpus': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'number',
+                }],
+            },
             'accelerators': {
                 'anyOf': [{
                     'type': 'string',
