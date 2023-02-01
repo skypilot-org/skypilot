@@ -29,7 +29,7 @@ def get_controller_name(user_id: Optional[str] = None) -> str:
     """Get the name of the controller VM."""
     if user_id is None:
         user_id = common_utils.get_user_hash()
-    return f'sky-spot-controller--{user_id}'
+    return f'sky-spot-controller-{user_id}'
 
 
 # Add user hash so that two users don't have the same controller VM on
