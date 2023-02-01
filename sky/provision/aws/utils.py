@@ -2,6 +2,7 @@ import functools
 
 import boto3
 from botocore import config
+import urllib3
 
 from ray.autoscaler._private.cli_logger import cf, cli_logger
 
@@ -110,3 +111,11 @@ def handle_boto_error(exc, msg, *args, **kwargs):
         cli_logger.verbose('{}', str(vars(exc)))
         cli_logger.panic('{}', str(exc))
     cli_logger.abort()
+
+
+def get_self_instance_id() -> str:
+    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+    http = urllib3.PoolManager()
+    r = http.request('GET',
+                     'http://169.254.169.254/latest/meta-data/instance-id')
+    return r.data.decode()
