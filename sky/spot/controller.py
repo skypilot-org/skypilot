@@ -138,11 +138,9 @@ class SpotController:
                     status_to_set = spot_state.SpotStatus.FAILED
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
                         status_to_set = spot_state.SpotStatus.FAILED_SETUP
-                    controller_name = spot_utils.get_controller_name(
-                        os.getenv(constants.CALLER_USER_ID_ENV))
                     failure_reason = (
                         'To see the details, run: '
-                        f'sky logs {controller_name} {self._job_id}')
+                        f'sky spot logs --controller {self._job_id}')
 
                     spot_state.set_failed(self._job_id,
                                           failure_type=status_to_set,
@@ -190,8 +188,7 @@ class SpotController:
             if len(e.failover_reasons) == 1:
                 failover_type, failure_reason = list(
                     e.failover_reasons.items())[0]
-                if not isinstance(failover_type,
-                                  exceptions.ResourcesUnavailableError):
+                if failover_type != exceptions.ResourcesUnavailableError:
                     failure_type = spot_state.SpotStatus.FAILED_CONFIG
             spot_state.set_failed(self._job_id,
                                   failure_type=failure_type,

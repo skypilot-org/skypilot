@@ -274,16 +274,7 @@ def set_failed(job_id: int,
         WHERE job_id=(?) AND end_at IS null""",
         (*list(fields_to_set.values()), job_id))
     _CONN.commit()
-    if failure_type in [SpotStatus.FAILED, SpotStatus.FAILED_SETUP]:
-        logger.info(
-            f'Job failed due to user code (status: {failure_type.value}).')
-    elif failure_type == SpotStatus.FAILED_NO_RESOURCE:
-        logger.info('Job failed due to failing to find available resources '
-                    'after retries.')
-    else:
-        assert failure_type == SpotStatus.FAILED_CONTROLLER, failure_type
-        logger.info('Job failed due to unexpected controller failure.')
-
+    logger.info(failure_reason)
 
 def set_cancelled(job_id: int):
     _CURSOR.execute(

@@ -3158,7 +3158,7 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
     - CANCELLED: The job was cancelled by the user.
 
     If the job failed, either due to user code or spot unavailability, the error
-    log can be found with ``sky logs sky-spot-controller-<user_hash> job_id``.
+    log can be found with ``sky spot logs --controller job_id``.
     Please find your exact spot controller name with ``sky status``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:

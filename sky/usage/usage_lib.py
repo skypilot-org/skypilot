@@ -16,7 +16,6 @@ import requests
 
 import sky
 from sky import sky_logging
-from sky.skylet import constants as skylet_constants
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
@@ -35,7 +34,7 @@ def _get_current_timestamp_ns() -> int:
 
 def _get_user_hash():
     """Returns a unique user-machine specific hash as a user id for logging."""
-    user_id = os.getenv(skylet_constants.CALLER_USER_ID_ENV)
+    user_id = os.getenv(constants.USAGE_USER_ENV)
     return common_utils.get_user_hash(default_value=user_id)
 
 
