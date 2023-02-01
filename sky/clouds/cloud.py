@@ -96,7 +96,7 @@ class Cloud:
 
         None means no limit.
         """
-        raise NotImplementedError
+        return None
 
     #### Regions/Zones ####
 
