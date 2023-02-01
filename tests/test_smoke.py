@@ -1340,6 +1340,46 @@ def test_spot_recovery_gcp():
     run_one_test(test)
 
 
+@pytest.mark.gcp
+@pytest.mark.managed_spot
+def test_on_demand_tpu_recovery_gcp():
+    """Test managed spot recovery."""
+    name = _get_cluster_name()
+    zone = 'us-central1-f'
+    query_cmd = (f'gcloud compute tpus tpu-vm list --filter='
+                 f'"(labels.ray-cluster-name:{name})" '
+                 f'--zone={zone} --format="value(name)"')
+    terminate_cmd = (f'gcloud compute tpus tpu-vm delete --zone={zone}'
+                     f' --quiet $({query_cmd})')
+    check_on_demand_cmd = ('gcloud compute tpus tpu-vm describe '
+                           f'$({query_cmd}) --zone={zone} '
+                           '--format="value(schedulingConfig.preemptible)" '
+                           '| grep -v "True"')
+    test = Test(
+        'on_demand_tpu_recovery_gcp',
+        [
+            f'sky spot launch --cloud gcp --zone {zone} -n {name} --no-use-spot tests/test_yamls/test_tpu_recovery.yaml -y -d',
+            'sleep 360',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            # Check if the TPU is on-demand.
+            check_on_demand_cmd,
+            f'RUN_ID=$(sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            # Terminate the cluster manually.
+            terminate_cmd,
+            'sleep 100',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RECOVERING"',
+            'sleep 300',
+            f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
+            # Check if the recovered TPU is on-demand.
+            check_on_demand_cmd,
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
+        ],
+        f'sky spot cancel -y -n {name}',
+        timeout=25 * 60,
+    )
+    run_one_test(test)
+
+
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
 @pytest.mark.managed_spot
 def test_spot_recovery_default_resources(generic_cloud: str):

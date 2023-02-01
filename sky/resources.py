@@ -500,11 +500,6 @@ class Resources:
     def _try_validate_spot(self) -> None:
         if self._spot_recovery is None:
             return
-        if not self._use_spot:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Cannot specify spot_recovery without use_spot set to True.'
-                )
         if self._spot_recovery not in spot.SPOT_STRATEGIES:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
