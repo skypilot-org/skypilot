@@ -1467,8 +1467,13 @@ def status(all: bool, refresh: bool, clusters: List[str]):  # pylint: disable=re
               is_flag=True,
               required=False,
               help='Show all information in full.')
+@click.option('--timeframe',
+              '-t',
+              required=False,
+              type=str,
+              help=('Timeframe for cost reports'))
 @usage_lib.entrypoint
-def cost_report(all: bool):  # pylint: disable=redefined-builtin
+def cost_report(all: bool, timeframe: str):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show cost reports for each cluster.
 
@@ -1485,7 +1490,16 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
     on the cloud console.
     """
 
-    cluster_records = core.cost_report()
+    # hour, week, month, year
+
+    if timeframe and timeframe not in ['h', 'd', 'w', 'm', 'y']:
+        click.echo(
+            f'{colorama.Fore.YELLOW}'
+            f'Timeframe {timeframe} not valid. Select from [h, d, w, m, y].'
+            f'{colorama.Style.RESET_ALL}')
+        return
+
+    cluster_records = core.cost_report(timeframe)
     nonreserved_cluster_records = []
     reserved_clusters = dict()
     for cluster_record in cluster_records:

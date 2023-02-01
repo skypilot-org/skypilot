@@ -2,6 +2,7 @@
 import colorama
 import getpass
 import sys
+import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from sky import dag
@@ -106,7 +107,7 @@ def status(cluster_names: Optional[Union[str, Sequence[str]]] = None,
 
 
 @usage_lib.entrypoint
-def cost_report() -> List[Dict[str, Any]]:
+def cost_report(timeframe: str) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Get all cluster cost reports, including those that have been downed.
 
@@ -139,12 +140,40 @@ def cost_report() -> List[Dict[str, Any]]:
         A list of dicts, with each dict containing the cost information of a
         cluster.
     """
+
+    def get_timeframe_start(timeframe):
+        minute = 60
+        hour = minute * 60
+        day = hour * 24
+        week = day * 7
+        month = week * 4.3
+        year = month * 12
+
+        if timeframe == 'h':
+            return int(time.time()) - int(hour)
+        elif timeframe == 'd':
+            return int(time.time()) - int(day)
+        elif timeframe == 'w':
+            return int(time.time()) - int(week)
+        elif timeframe == 'm':
+            return int(time.time()) - int(month)
+        elif timeframe == 'y':
+            return int(time.time()) - int(year)
+        else:
+            return None
+
     cluster_reports = global_user_state.get_clusters_from_history()
+    timeframe_start = get_timeframe_start(timeframe)
 
     def get_total_cost(cluster_report: dict) -> float:
         duration = cluster_report['duration']
         launched_nodes = cluster_report['num_nodes']
         launched_resources = cluster_report['resources']
+
+        if timeframe_start is not None:
+            cluster_hash = cluster_report['cluster_hash']
+            duration = global_user_state.get_cluster_duration(
+                cluster_hash, timeframe_start)
 
         cost = (launched_resources.get_cost(duration) * launched_nodes)
         return cost
@@ -152,7 +181,17 @@ def cost_report() -> List[Dict[str, Any]]:
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = get_total_cost(cluster_report)
 
-    return cluster_reports
+    if timeframe_start is None:
+        return cluster_reports
+
+    visible_cluster_reports = []
+    for cluster_report in cluster_reports:
+        launch_time = cluster_report['launched_at']
+        if timeframe_start and timeframe_start < launch_time and cluster_report[
+                'total_cost'] > 0:
+            visible_cluster_reports.append(cluster_report)
+
+    return visible_cluster_reports
 
 
 def _start(

@@ -425,15 +425,26 @@ def _get_cluster_launch_time(cluster_hash: str) -> Optional[Dict[str, Any]]:
     return usage_intervals[0][0]
 
 
-def _get_cluster_duration(cluster_hash: str) -> Optional[Dict[str, Any]]:
+def get_cluster_duration(
+        cluster_hash: str,
+        timeframe_start: Optional[int] = None) -> Optional[Dict[str, Any]]:
     usage_intervals = _get_cluster_usage_intervals(cluster_hash)
 
     total_duration = 0
+
     for i, (start_time, end_time) in enumerate(usage_intervals):
         # duration from latest start time to time of query
         if end_time is None:
             assert i == len(usage_intervals) - 1, i
             end_time = int(time.time())
+
+        if timeframe_start:
+            if end_time < timeframe_start:
+                # zero cost since the interval comes before timefrmae starts
+                start_time = end_time
+            elif start_time < timeframe_start:
+                # timeframe start falls between interval
+                start_time = timeframe_start
         start_time, end_time = int(start_time), int(end_time)
         total_duration += end_time - start_time
     return total_duration
@@ -557,7 +568,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
         record = {
             'name': name,
             'launched_at': _get_cluster_launch_time(cluster_hash),
-            'duration': _get_cluster_duration(cluster_hash),
+            'duration': get_cluster_duration(cluster_hash),
             'num_nodes': num_nodes,
             'resources': pickle.loads(launched_resources),
             'cluster_hash': cluster_hash,
