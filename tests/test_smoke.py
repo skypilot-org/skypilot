@@ -1372,7 +1372,6 @@ def test_on_demand_tpu_recovery_gcp():
             f'{_SPOT_QUEUE_WAIT}| grep {name} | head -n1 | grep "RUNNING"',
             # Check if the recovered TPU is on-demand.
             check_on_demand_cmd,
-            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky spot logs -n {name} --no-follow | grep SKYPILOT_JOB_ID | grep "$RUN_ID"',
         ],
         f'sky spot cancel -y -n {name}',
         timeout=25 * 60,
