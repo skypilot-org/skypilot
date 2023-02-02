@@ -1,3 +1,4 @@
+from typing import Dict
 import functools
 
 import boto3
@@ -113,9 +114,16 @@ def handle_boto_error(exc, msg, *args, **kwargs):
     cli_logger.abort()
 
 
-def get_self_instance_id() -> str:
+def get_self_instance_metadata() -> Dict[str, str]:
     # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+    prefix = 'http://169.254.169.254/latest/meta-data'
     http = urllib3.PoolManager()
-    r = http.request('GET',
-                     'http://169.254.169.254/latest/meta-data/instance-id')
-    return r.data.decode()
+    instance_id = http.request('GET', f'{prefix}/instance-id').data.decode()
+    region = http.request('GET', f'{prefix}/region').data.decode()
+    availability_zone = http.request(
+        'GET', f'{prefix}/availability-zone').data.decode()
+    return {
+        'region': region,
+        'availability_zone': availability_zone,
+        'instance_id': instance_id,
+    }

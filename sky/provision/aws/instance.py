@@ -201,18 +201,7 @@ def create_or_resume_instances(region: str, cluster_name: str,
     return all_created_nodes
 
 
-def _separate_self_and_other_instances(ec2, instances):
-    self_instance_id = utils.get_self_instance_id()
-    other_ids = []
-    for inst in instances:
-        if inst.id != self_instance_id:
-            other_ids.append(inst)
-    others = instances.filter(InstanceIds=other_ids)
-    self = ec2.Instance(self_instance_id)
-    return self, others
-
-
-def stop_instances(region: str, cluster_name: str, include_self: bool = False):
+def stop_instances(region: str, cluster_name: str):
     ec2 = utils.create_ec2_resource(region=region)
     filters = [
         {
@@ -224,18 +213,10 @@ def stop_instances(region: str, cluster_name: str, include_self: bool = False):
             'Values': [cluster_name],
         },
     ]
-    instances = ec2.instances.filter(Filters=filters)
-    if not include_self:
-        instances.stop()
-    else:
-        self, others = _separate_self_and_other_instances(ec2, instances)
-        others.stop()
-        self.stop()
+    ec2.instances.filter(Filters=filters).stop()
 
 
-def terminate_instances(region: str,
-                        cluster_name: str,
-                        include_self: bool = False):
+def terminate_instances(region: str, cluster_name: str):
     ec2 = utils.create_ec2_resource(region=region)
     filters = [
         {
@@ -249,13 +230,49 @@ def terminate_instances(region: str,
         },
     ]
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/ec2.html#EC2.Instance
+    ec2.instances.filter(Filters=filters).terminate()
+
+
+def _get_self_and_other_instances(states_filter: List[str]):
+    metadata = utils.get_self_instance_metadata()
+    region = metadata['region']
+    self_instance_id = metadata['instance_id']
+    ec2 = utils.create_ec2_resource(region=region)
+    self = ec2.Instance(self_instance_id)
+    tags = {}
+    for t in self.tags:
+        tags[t['Name']] = t['Value']
+    cluster_name = tags[TAG_RAY_CLUSTER_NAME]
+    filters = [
+        {
+            'Name': 'instance-state-name',
+            'Values': states_filter,
+        },
+        {
+            'Name': f'tag:{TAG_RAY_CLUSTER_NAME}',
+            'Values': [cluster_name],
+        },
+    ]
     instances = ec2.instances.filter(Filters=filters)
-    if not include_self:
-        instances.terminate()
-    else:
-        self, others = _separate_self_and_other_instances(ec2, instances)
-        others.terminate()
-        self.terminate()
+    other_ids = []
+    for inst in instances:
+        if inst.id != self_instance_id:
+            other_ids.append(inst)
+    others = instances.filter(InstanceIds=other_ids)
+    return self, others
+
+
+def stop_instances_with_self():
+    self, others = _get_self_and_other_instances(['pending', 'running'])
+    others.stop()
+    self.stop()
+
+
+def terminate_instances_with_self():
+    self, others = _get_self_and_other_instances(
+        ['pending', 'running', 'stopping', 'stopped'])
+    others.terminate()
+    self.terminate()
 
 
 def wait_instances(region: str, cluster_name: str, state: str):

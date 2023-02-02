@@ -1228,7 +1228,7 @@ class RetryingVmProvisioner(object):
             if isinstance(to_provision.cloud, clouds.AWS):
                 status, stdout, stderr, head_ip = self._bulk_provision(
                     to_provision.cloud, cluster_config_file, handle,
-                    logging_info)
+                    logging_info, cluster_exists)
             else:
                 status, stdout, stderr, head_ip = self._gang_schedule_ray_up(
                     to_provision.cloud, cluster_config_file, handle,
@@ -1394,8 +1394,12 @@ class RetryingVmProvisioner(object):
 
     @timeline.event
     def _bulk_provision(
-        self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
-        cluster_handle: 'backends.Backend.ResourceHandle', logging_info: dict
+        self,
+        to_provision_cloud: clouds.Cloud,
+        cluster_config_file: str,
+        cluster_handle: 'backends.Backend.ResourceHandle',
+        logging_info: dict,
+        cluster_exists: bool,
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
         """Provisions a cluster and wait until fully provisioned.
 
@@ -1439,6 +1443,8 @@ class RetryingVmProvisioner(object):
                            ['ray.head.default']['node_config'],
         }
         raw_config['provider']['num_nodes'] = original_config['max_workers'] + 1
+
+        # TODO(suquark): check cluster status with 'cluster_exists'
 
         with backend_utils.safe_console_status(
                 f'[bold cyan]Bootstrapping configurations for '

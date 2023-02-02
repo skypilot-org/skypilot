@@ -82,3 +82,6 @@ def generate_node_name(cluster_name: str, node_suffix: str) -> str:
             f'Instance name ({name_label}) too long ({len(name_label)})')
     uid = uuid.uuid4().hex[:INSTANCE_NAME_UUID_LEN]
     return f'{name_label}-{uid}-{node_suffix}'
+
+
+# https://cloud.google.com/compute/docs/metadata/querying-metadata
