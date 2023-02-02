@@ -2635,26 +2635,22 @@ def storage_delete(names: Tuple[str], all: bool):  # pylint: disable=redefined-b
 
 
 @storage.command('create', cls=_DocumentedCodeCommand)
-@click.argument('--name', '-n',
-                type=str,
-                default=None,
-                flag_value=None,
-                required=False,
-                nargs=1,
-                help='Name of the storage object')
-@click.option('--source', '-src',
-              type=str,
-              default=None,
-              flag_value=None,
-              help='File path where data is initially stored;'
-                   'Can be a local path or a cloud URI')
-@click.option('--store', '-s', "stores",
-              default=['S3'],
+@click.argument('name',
               required=False,
               type=str,
+              default=None,
+              nargs=1)
+@click.option('--source', '-src',
+              required=False,
+              type=str,
+              default=None,
+              help='File path where data is initially stored; Can be a local path or a cloud URI')
+@click.option('--store', '-s', "stores",
+              required=False,
+              type=str,
+              default=['S3'],
               multiple=True,
-              help='Specify pre-initialized stores - S3 or GCS by '
-                   'specifying them separately (-s GCS -s S3)')
+              help='Specify pre-initialized stores - S3 or GCS by specifying them separately (-s GCS -s S3)')
 @usage_lib.entrypoint
 def storage_create(name: str, source: str, stores: Tuple[str]):
     """Create a storage object.
@@ -2671,19 +2667,19 @@ def storage_create(name: str, source: str, stores: Tuple[str]):
     .. code-block:: bash
 
         # Create an empty storage object named imagenet with GCS and S3 stores
-        sky storage create -n imagenet -s GCS -s S3
+        sky storage create imagenet -s GCS -s S3
 
         # Create a storage object from bucket URL using source bucket as the backing store
         sky storage create -src S3://bucket-name
 
         # Create storage object by uploading contents from local source path to
             imagenet S3 bucket and creates new bucket if necessary
-        sky storage create -n imagenet -src /Users/skypilotUser/Project -s S3
+        sky storage create imagenet -src /Users/skypilotUser/Project -s S3
     """
     if stores is not None and len(stores) > 2:
         raise click.UsageError('GCS and S3 are the only valid stores')
 
-    click.echo('Creating storage object' + ' ' + name + ' from ' + source)
+    click.echo('Creating storage object')
     sky.storage_create(name, source, stores)
 
 

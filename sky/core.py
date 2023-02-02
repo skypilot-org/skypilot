@@ -761,12 +761,17 @@ def storage_delete(name: str) -> None:
                                     sync_on_reconstruction=False)
         store_object.delete()
 
+def add_store(storage: data.Storage,
+              storeType: storage_lib.StoreType):
+    """Top level helper function to enable adding store types
+    to a storage concurrently
+    """
+    storage.add_store(storeType)
 
 def storage_create(name: Optional[str] = None,
                    source: Optional[str] = None,
                    stores: Tuple[str] = None):
-    """"Create a storage object.
-
+    """Create a storage object.
     """
     storage = data.Storage(name, source)
 
@@ -775,9 +780,10 @@ def storage_create(name: Optional[str] = None,
     if stores is not None:
         for store in [s.upper() for s in stores]:
             if store == 'GCS':
-                store_types.add(storage_lib.StoreType.GCS)
+                store_types.append((storage, storage_lib.StoreType.GCS))
             elif store == 'S3':
-                store_types.add(storage_lib.StoreType.S3)
+                store_types.append((storage, storage_lib.StoreType.S3))
 
     with Pool(2) as p:
-        p.map(storage.add_store, store_types)
+        p.starmap(add_store, store_types)
+
