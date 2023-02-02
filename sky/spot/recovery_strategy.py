@@ -163,9 +163,12 @@ class StrategyExecutor:
                 logger.info('Spot cluster launched.')
             except exceptions.ResourcesUnavailableError as e:
                 if len(e.failover_reasons) == 1:
+                    # If there is only one failover reason, we can check if it
+                    # is a cloud error, and avoid retrying.
                     failover_type = list(e.failover_reasons.keys())[0]
-                    if not isinstance(failover_type,
-                                      exceptions.ResourcesUnavailableError):
+                    if failover_type in (exceptions.InvalidClusterNameError,
+                                         exceptions.NotSupportedError,
+                                         exceptions.CloudUserIdentityError):
                         raise
                 logger.info('Failed to launch the spot cluster with error: '
                             f'{common_utils.format_exception(e)})')

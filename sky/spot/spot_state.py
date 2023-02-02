@@ -112,7 +112,7 @@ class SpotStatus(enum.Enum):
     FAILED_SETUP = 'FAILED_SETUP'
     # FAILED_CONFIG: The job is finished with failure because of invalid
     # job configuration.
-    FAILED_CONFIG = 'FAILED_CONFIG'
+    FAILED_OTHER_REASON = 'FAILED_OTHER_REASON'
     # FAILED_NO_RESOURCE: The job is finished with failure because there is no
     # resource available in the cloud provider(s) to launch the spot cluster.
     FAILED_NO_RESOURCE = 'FAILED_NO_RESOURCE'
@@ -133,14 +133,15 @@ class SpotStatus(enum.Enum):
     @classmethod
     def terminal_statuses(cls) -> List['SpotStatus']:
         return [
-            cls.SUCCEEDED, cls.FAILED, cls.FAILED_SETUP, cls.FAILED_CONFIG,
-            cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER, cls.CANCELLED
+            cls.SUCCEEDED, cls.FAILED, cls.FAILED_SETUP,
+            cls.FAILED_OTHER_REASON, cls.FAILED_NO_RESOURCE,
+            cls.FAILED_CONTROLLER, cls.CANCELLED
         ]
 
     @classmethod
     def failure_statuses(cls) -> List['SpotStatus']:
         return [
-            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_CONFIG,
+            cls.FAILED, cls.FAILED_SETUP, cls.FAILED_OTHER_REASON,
             cls.FAILED_NO_RESOURCE, cls.FAILED_CONTROLLER
         ]
 
@@ -153,7 +154,7 @@ _SPOT_STATUS_TO_COLOR = {
     SpotStatus.RECOVERING: colorama.Fore.CYAN,
     SpotStatus.SUCCEEDED: colorama.Fore.GREEN,
     SpotStatus.FAILED: colorama.Fore.RED,
-    SpotStatus.FAILED_CONFIG: colorama.Fore.RED,
+    SpotStatus.FAILED_OTHER_REASON: colorama.Fore.RED,
     SpotStatus.FAILED_SETUP: colorama.Fore.RED,
     SpotStatus.FAILED_NO_RESOURCE: colorama.Fore.RED,
     SpotStatus.FAILED_CONTROLLER: colorama.Fore.RED,
@@ -326,6 +327,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
         (job_id,)).fetchone()
     if reason is None:
         return None
+    # reason[0] will be None if it is unfilled.
     return reason[0]
 
 

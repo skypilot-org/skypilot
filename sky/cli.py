@@ -3159,7 +3159,6 @@ def spot_queue(all: bool, refresh: bool, skip_finished: bool):
 
     If the job failed, either due to user code or spot unavailability, the error
     log can be found with ``sky spot logs --controller job_id``.
-    Please find your exact spot controller name with ``sky status``.
 
     (Tip) To fetch job statuses every 60 seconds, use ``watch``:
 
@@ -3296,7 +3295,8 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     '--controller',
     is_flag=True,
     default=False,
-    help=('Show the logs of the controller process instead of the job.'))
+    help=('Show the controller logs of this job; useful for debugging '
+          'launching/recoveries, etc.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,

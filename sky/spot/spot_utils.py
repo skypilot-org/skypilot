@@ -24,17 +24,9 @@ from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
-
-def get_controller_name(user_id: Optional[str] = None) -> str:
-    """Get the name of the controller VM."""
-    if user_id is None:
-        user_id = common_utils.get_user_hash()
-    return f'sky-spot-controller-{user_id}'
-
-
 # Add user hash so that two users don't have the same controller VM on
 # shared-account clouds such as GCP.
-SPOT_CONTROLLER_NAME = get_controller_name()
+SPOT_CONTROLLER_NAME = f'sky-spot-controller-{common_utils.get_user_hash()}'
 SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -130,7 +122,9 @@ def update_spot_job_status(job_id: Optional[int] = None):
             spot_state.set_failed(
                 job_id_,
                 spot_state.SpotStatus.FAILED_CONTROLLER,
-                failure_reason='Controller process has exited abnormally.')
+                failure_reason=
+                'Controller process has exited abnormally. For more details,'
+                f' run: sky spot logs --controller {job_id_}')
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,

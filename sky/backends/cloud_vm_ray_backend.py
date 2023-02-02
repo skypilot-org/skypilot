@@ -2527,20 +2527,21 @@ class CloudVmRayBackend(backends.Backend):
         finally:
             name = handle.cluster_name
             if name == spot_lib.SPOT_CONTROLLER_NAME:
-                logger.info(f'{fore.CYAN}Spot Job ID: '
-                            f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
-                            '\nTo cancel the job:\t\t'
-                            f'{backend_utils.BOLD}sky spot cancel {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
-                            '\nTo stream job logs:\t\t'
-                            f'{backend_utils.BOLD}sky spot logs {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
-                            f'\nTo stream controller logs:\t'
-                            f'{backend_utils.BOLD}sky logs {name} {job_id}'
-                            f'{backend_utils.RESET_BOLD}'
-                            '\nTo view all spot jobs:\t\t'
-                            f'{backend_utils.BOLD}sky spot queue'
-                            f'{backend_utils.RESET_BOLD}')
+                logger.info(
+                    f'{fore.CYAN}Spot Job ID: '
+                    f'{style.BRIGHT}{job_id}{style.RESET_ALL}'
+                    '\nTo cancel the job:\t\t'
+                    f'{backend_utils.BOLD}sky spot cancel {job_id}'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo stream job logs:\t\t'
+                    f'{backend_utils.BOLD}sky spot logs {job_id}'
+                    f'{backend_utils.RESET_BOLD}'
+                    f'\nTo stream controller logs:\t'
+                    f'{backend_utils.BOLD}sky spot logs --controller {job_id}'
+                    f'{backend_utils.RESET_BOLD}'
+                    '\nTo view all spot jobs:\t\t'
+                    f'{backend_utils.BOLD}sky spot queue'
+                    f'{backend_utils.RESET_BOLD}')
             else:
                 logger.info(f'{fore.CYAN}Job ID: '
                             f'{style.BRIGHT}{job_id}{style.RESET_ALL}'

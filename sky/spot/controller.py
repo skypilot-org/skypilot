@@ -188,7 +188,7 @@ class SpotController:
                 failover_type, failover_reason = list(
                     e.failover_reasons.items())[0]
                 if failover_type != exceptions.ResourcesUnavailableError:
-                    failure_type = spot_state.SpotStatus.FAILED_CONFIG
+                    failure_type = spot_state.SpotStatus.FAILED_OTHER_REASON
                     failure_reason = failover_reason
             spot_state.set_failed(self._job_id,
                                   failure_type=failure_type,
