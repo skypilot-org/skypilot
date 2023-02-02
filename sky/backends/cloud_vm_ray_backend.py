@@ -1238,7 +1238,7 @@ class RetryingVmProvisioner(object):
             def _check_and_restart_ray():
                 # move the code block here due to the indentation issue
                 from sky.provision import aws
-                ip_dict = aws.get_instance_ips(region, cluster_name)
+                ip_dict = aws.get_instance_ips(region.name, cluster_name)
                 ip_tuples = list(ip_dict.items())
                 ssh_credentials = backend_utils.ssh_credential_from_yaml(
                     handle.cluster_yaml)
@@ -1397,7 +1397,7 @@ class RetryingVmProvisioner(object):
         self, to_provision_cloud: clouds.Cloud, cluster_config_file: str,
         cluster_handle: 'backends.Backend.ResourceHandle', logging_info: dict
     ) -> Tuple[GangSchedulingStatus, str, str, Optional[str]]:
-        """Provisions a cluster via 'ray up' and wait until fully provisioned.
+        """Provisions a cluster and wait until fully provisioned.
 
         Returns:
           (GangSchedulingStatus; stdout; stderr; optional head_ip).
@@ -2343,6 +2343,9 @@ class CloudVmRayBackend(backends.Backend):
                 ip_tuples = list(ip_dict.values())
                 handle.stable_internal_external_ips = ip_tuples
                 ip_list = [t[1] for t in ip_tuples]
+                # TODO(suquark): skip mounting setup again when running
+                #  "sky launch" over an existing cluster.
+                #  check 'to_provision_config.cluster_exists'
                 # mount skylet wheels here
                 self._execute_file_mounts(
                     handle,
@@ -2358,20 +2361,21 @@ class CloudVmRayBackend(backends.Backend):
                 config_from_yaml = common_utils.read_yaml(cluster_config_file)
 
                 with backend_utils.safe_console_status(
-                        f'[bold cyan]Installing dependencies for '
+                        f'[bold cyan]Running setup commands for '
                         f'[green]{cluster_name}[white] ...'):
                     provisioner_setup.setup_dependencies(
                         config_from_yaml['setup_commands'], runners)
 
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Starting Ray for '
-                        f'[green]{cluster_name}[white] ...'):
-                    provisioner_setup.start_ray(runners, ip_tuples[0][0])
+                if not to_provision_config.cluster_exists:
+                    with backend_utils.safe_console_status(
+                            f'[bold cyan]Starting Ray for '
+                            f'[green]{cluster_name}[white] ...'):
+                        provisioner_setup.start_ray(runners, ip_tuples[0][0])
 
-                with backend_utils.safe_console_status(
-                        f'[bold cyan]Starting Skylet for '
-                        f'[green]{cluster_name}[white] ...'):
-                    provisioner_setup.start_skylet(runners[0])
+                    with backend_utils.safe_console_status(
+                            f'[bold cyan]Starting Skylet for '
+                            f'[green]{cluster_name}[white] ...'):
+                        provisioner_setup.start_skylet(runners[0])
             else:
                 ip_list = handle.external_ips(
                     max_attempts=_FETCH_IP_MAX_ATTEMPTS, use_cached_ips=False)
