@@ -22,7 +22,9 @@ only have access to certain clouds, use any combination of
 :code:`"[aws,azure,gcp]"` (e.g., :code:`"[aws,gcp]"`) to reduce the
 dependencies installed.
 
-You may also install SkyPilot from source.
+SkyPilot also supports a fourth cloud provider, `Lambda <https://lambdalabs.com/>`_, if you install SkyPilot from source.
+
+To install SkyPilot from source:
 
 .. code-block:: console
 
@@ -92,6 +94,20 @@ Note: if you encounter *Authorization Error (Error 400: invalid_request)* with t
 
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
+**Lambda**
+
+Create the file :code:`~/.lambda_cloud/lambda_keys`, go to `API Keys <https://cloud.lambdalabs.com/api-keys>`_ to generate a key, and then add the line
+
+.. code-block:: text
+
+  api_key = your_api_key_here
+
+to :code:`~/.lambda_cloud/lambda_keys`.
+
+.. note::
+
+  Currently, SkyPilot does not support multi-node clusters or stopping instances on Lambda Cloud.
+
 **Verifying cloud setup**
 
 After configuring the desired clouds, you can optionally run :code:`sky check` to verify that credentials are correctly set up:
@@ -108,6 +124,7 @@ This will produce a summary like:
     AWS: enabled
     GCP: enabled
     Azure: enabled
+    Lambda: enabled
 
   SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
