@@ -110,8 +110,8 @@ class SpotStatus(enum.Enum):
     # FAILED_SETUP: The job is finished with failure from the user's setup
     # script.
     FAILED_SETUP = 'FAILED_SETUP'
-    # FAILED_CONFIG: The job is finished with failure because of invalid
-    # job configuration.
+    # FAILED_OTHER_REASON: The job is finished with failure because of other
+    # reasons, such as invalid cluster name or cloud user identity error.
     FAILED_OTHER_REASON = 'FAILED_OTHER_REASON'
     # FAILED_NO_RESOURCE: The job is finished with failure because there is no
     # resource available in the cloud provider(s) to launch the spot cluster.
