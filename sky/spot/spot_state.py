@@ -276,6 +276,7 @@ def set_failed(job_id: int,
     _CONN.commit()
     logger.info(failure_reason)
 
+
 def set_cancelled(job_id: int):
     _CURSOR.execute(
         """\

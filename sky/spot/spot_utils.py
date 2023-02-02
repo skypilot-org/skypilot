@@ -252,7 +252,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             job_msg = ''
             if job_status.is_failed():
                 job_msg = (
-                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}')
+                    f'\nFailure reason: {spot_state.get_failure_reason(job_id)}'
+                )
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{job_status.value}. Logs will not be shown.'
@@ -445,7 +446,8 @@ def format_job_table(jobs: List[Dict[str, Any]], show_all: bool) -> str:
                 log_utils.readable_time_duration(job['start_at']),
                 job['cluster_resources'],
                 job['region'],
-                job['failure_reason'] if job['failure_reason'] is not None else '-',
+                job['failure_reason']
+                if job['failure_reason'] is not None else '-',
             ])
         job_table.add_row(values)
     status_str = ', '.join([
