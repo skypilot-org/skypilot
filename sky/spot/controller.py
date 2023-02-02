@@ -2,7 +2,6 @@
 import argparse
 import multiprocessing
 import pathlib
-import os
 import signal
 import time
 import traceback

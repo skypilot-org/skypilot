@@ -3296,15 +3296,17 @@ def spot_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     '--controller',
     is_flag=True,
     default=False,
-    help=('Show the logs of the controller process instead of the job.')
-)
+    help=('Show the logs of the controller process instead of the job.'))
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
-def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool, controller: bool):
+def spot_logs(name: Optional[str], job_id: Optional[int], follow: bool,
+              controller: bool):
     """Tail the log of a managed spot job."""
     try:
         if controller:
-            core.tail_logs(spot_lib.SPOT_CONTROLLER_NAME, job_id=job_id, follow=follow)
+            core.tail_logs(spot_lib.SPOT_CONTROLLER_NAME,
+                           job_id=job_id,
+                           follow=follow)
         else:
             core.spot_tail_logs(name=name, job_id=job_id, follow=follow)
     except exceptions.ClusterNotUpError:
