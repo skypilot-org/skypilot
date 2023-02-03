@@ -16,7 +16,7 @@ import tempfile
 import textwrap
 import time
 import typing
-from typing import Dict, List, Optional, Tuple, Type, Union, Set
+from typing import Dict, List, Optional, Tuple, Union, Set
 
 import colorama
 import filelock
@@ -1662,7 +1662,7 @@ class RetryingVmProvisioner(object):
         launchable_retries_disabled = (self._dag is None or
                                        self._optimize_target is None)
 
-        failover_reasons: Dict[Type[Exception], str] = dict()
+        failover_history: List[Exception] = list()
 
         style = colorama.Style
         # Retrying launchable resources.
@@ -1701,18 +1701,18 @@ class RetryingVmProvisioner(object):
                 logger.warning(common_utils.format_exception(e))
                 self._blocked_resources.add(
                     resources_lib.Resources(cloud=to_provision.cloud))
-                failover_reasons[type(e)] = str(e)
+                failover_history.append(e)
             except exceptions.ResourcesUnavailableError as e:
-                failover_reasons[type(e)] = str(e)
+                failover_history.append(e)
                 if e.no_failover:
-                    raise e
+                    raise e.with_failover_history(failover_history)
                 if launchable_retries_disabled:
                     logger.warning(
                         'DAG and optimize_target needs to be registered first '
                         'to enable cross-cloud retry. '
                         'To fix, call backend.register_info(dag=dag, '
                         'optimize_target=sky.OptimizeTarget.COST)')
-                    raise e
+                    raise e.with_failover_history(failover_history)
 
                 logger.warning(common_utils.format_exception(e))
             else:
@@ -1751,8 +1751,9 @@ class RetryingVmProvisioner(object):
                     minimize=self._optimize_target,
                     blocked_resources=self._blocked_resources)
             except exceptions.ResourcesUnavailableError as e:
-                e.failover_reasons = failover_reasons
-                raise e
+                # Optimizer failed to find a feasible resources for the task,
+                # as all resources are blocked. The failover finally gives up.
+                raise e.with_failover_history(failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
@@ -2187,7 +2188,7 @@ class CloudVmRayBackend(backends.Backend):
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
                             error_message,
-                            failover_reasons=e.failover_reasons) from None
+                            failover_history=e.failover_history) from None
             if dryrun:
                 return
             cluster_config_file = config_dict['ray']

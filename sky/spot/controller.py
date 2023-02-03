@@ -182,17 +182,26 @@ class SpotController:
         except exceptions.ResourcesUnavailableError as e:
             logger.error(f'{common_utils.class_fullname(e.__class__)}: '
                          f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
-            failure_type = spot_state.SpotStatus.FAILED_NO_RESOURCE
-            failure_reason = str(e)
-            if len(e.failover_reasons) == 1:
-                failover_type, failover_reason = list(
-                    e.failover_reasons.items())[0]
-                if failover_type != exceptions.ResourcesUnavailableError:
-                    failure_type = spot_state.SpotStatus.FAILED_OTHER_REASON
-                    failure_reason = failover_reason
-            spot_state.set_failed(self._job_id,
-                                  failure_type=failure_type,
-                                  failure_reason=failure_reason)
+            if any(
+                    isinstance(err, exceptions.ResourcesUnavailableError)
+                    for err in e.failover_history):
+                # If any of the failover fails due to resource unavailability,
+                # the spot job should be marked as FAILED_NO_RESOURCE, as the
+                # spot job may be able to launch next time.
+                spot_state.set_failed(
+                    self._job_id,
+                    failure_type=spot_state.SpotStatus.FAILED_NO_RESOURCE,
+                    failure_reason=str(e))
+            else:
+                failover_err = e.failover_history[0]
+                # Only show the first failover error, as it would be too verbose
+                # to show all the failover errors, and it is likely that the
+                # first failover error is similar to the others, e.g. the cluster
+                # name is invalid or cloud user identity is invalid, etc.
+                spot_state.set_failed(
+                    self._job_id,
+                    failure_type=spot_state.SpotStatus.FAILED_OTHER_REASON,
+                    failure_reason=str(failover_err))
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             logger.error(traceback.format_exc())
             msg = ('Unexpected error occurred: '

@@ -397,7 +397,7 @@ class Cloud:
         if re.fullmatch(valid_regex, cluster_name) is None:
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.InvalidClusterNameError(
-                    f'Cluster name "{cluster_name}" is invalid; '
+                    f'Cluster name "{cluster_name}" is invalid on {cls._REPR}; '
                     'ensure it is fully matched by regex (e.g., '
                     'only contains lower letters, numbers and dash): '
                     f'{valid_regex}')
@@ -407,7 +407,7 @@ class Cloud:
                 raise exceptions.InvalidClusterNameError(
                     f'Cluster name {cluster_name!r} has {len(cluster_name)} '
                     'chars; maximum length is '
-                    f'{max_cluster_name_len_limit} chars.')
+                    f'{max_cluster_name_len_limit} chars on {cls._REPR}.')
 
     def __repr__(self):
         return self._REPR
