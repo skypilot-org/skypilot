@@ -185,6 +185,13 @@ class SpotController:
             subprocess_utils.kill_children_processes()
             spot_state.set_cancelled(self._job_id)
         except exceptions.ResourcesUnavailableError as e:
+            # The exception will be caught when:
+            # 1. The strategy_executor fails to launch/recover the cluster
+            #    after the max number of retries when retry_until_up is not set.
+            # 2. None the failovers are caused by resource unavailability, i.e.
+            #    the job is configured incorrectly, e.g.,
+            #    InvalidClusterNameError, NotSupportedError,
+            #    CloudUserIdentityError, etc.
             logger.error(f'{common_utils.class_fullname(e.__class__)}: '
                          f'{colorama.Fore.RED}{e}{colorama.Style.RESET_ALL}')
             if any(
